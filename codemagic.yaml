@@ -23,6 +23,10 @@ workflows:
         script: |
           flutter clean
           flutter pub get
+          # SPM'i kapatıyoruz: flutter_secure_storage, google_mlkit_* ve
+          # sign_in_with_apple henüz Swift Package Manager desteklemiyor —
+          # karma SPM+CocoaPods durumu "Module not found" hatası veriyor.
+          flutter config --no-enable-swift-package-manager
           flutter build ios --config-only
       - name: Build iOS IPA
         script: |
