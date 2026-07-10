@@ -15,6 +15,7 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
+          # Buradaki profil tipini APP_STORE veya DEVELOPMENT yapabilirsin, şimdilik otomatik üretiyoruz
           app-store-connect fetch-signing-files "com.voxenai.app" --type DEVELOPMENT --create
           keychain add-certificates
           xcode-project use-profiles
@@ -22,10 +23,10 @@ workflows:
         script: |
           flutter clean
           flutter pub get
-          # Bu komut podhelper dahil tüm eksik bağımlılıkları Mac sunucusunda sıfırdan oluşturur
           flutter build ios --config-only
       - name: Build iOS IPA
         script: |
-          flutter build ios --release --no-codesign
+          # --release flagı ile Apple sertifikalarını tam uyumlu eşliyoruz
+          flutter build ipa --release
     artifacts:
-      - build/ios/iphoneos/*.app
+      - build/ios/iphoneos/*.ipa
