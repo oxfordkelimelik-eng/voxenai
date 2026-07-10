@@ -15,22 +15,21 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          # Buradaki profil tipini APP_STORE veya DEVELOPMENT yapabilirsin, şimdilik otomatik üretiyoruz
           app-store-connect fetch-signing-files "com.voxenai.app" --type DEVELOPMENT --create
           keychain add-certificates
           xcode-project use-profiles
-      - name: Initialize and Recreate Flutter iOS Environment
+      - name: Initialize and Install Pods Safely
         script: |
+          flutter config --no-enable-swift-package-manager
           flutter clean
           flutter pub get
-          # SPM'i kapatıyoruz: flutter_secure_storage, google_mlkit_* ve
-          # sign_in_with_apple henüz Swift Package Manager desteklemiyor —
-          # karma SPM+CocoaPods durumu "Module not found" hatası veriyor.
-          flutter config --no-enable-swift-package-manager
+          # Burası podhelper dosyasını fiziksel olarak sunucuda üretir:
           flutter build ios --config-only
-      - name: Build iOS IPA
+          # CocoaPods köprülerini ve kütüphane bağlarını el ile zorla tazeletiyoruz:
+          cd ios && pod install --repo-update && cd ..
+      - name: Build iOS IPA (Manual Override)
         script: |
-          # --release flagı ile Apple sertifikalarını tam uyumlu eşliyoruz
-          flutter build ipa --release
+          # Codemagic'in otomatik flaglarını ezip kendi export ayarlarımızla tertemiz derliyoruz:
+          flutter build ipa --release --export-options-plist /Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
