@@ -7,7 +7,7 @@
   <key>CFBundleExecutable</key>
   <string>App</string>
   <key>CFBundleIdentifier</key>
-  <string>io.flutter.flutter.app</string>
+  <string>com.voxenai.app</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -20,5 +20,7 @@
   <string>????</string>
   <key>CFBundleVersion</key>
   <string>1.0</string>
+  <key>MinimumOSVersion</key>
+  <string>15.5</string>
 </dict>
 </plist>
