@@ -18,10 +18,11 @@ workflows:
           app-store-connect fetch-signing-files "com.voxenai.app" --type DEVELOPMENT --create
           keychain add-certificates
           xcode-project use-profiles
-      - name: Refresh Flutter iOS Files (Kritik Adım)
+      - name: Initialize and Recreate Flutter iOS Environment
         script: |
+          flutter clean
           flutter pub get
-          # Buluttaki Mac üzerinde eksik podhelper ve altyapı dosyalarını otomatik oluşturur:
+          # Bu komut podhelper dahil tüm eksik bağımlılıkları Mac sunucusunda sıfırdan oluşturur
           flutter build ios --config-only
       - name: Build iOS IPA
         script: |
