@@ -1,22 +1,25 @@
-source 'https://github.com/CocoaPods/Specs.git'
-
 platform :ios, '15.5'
 
-# Flutter podhelper dosyasını kesin olarak yükle
+# podhelper varsa yükle, yoksa çökme (Flutter config-only adımı birazdan üretecek)
 podhelper_path = File.join(File.dirname(File.expand_path(__FILE__)), 'Flutter', 'podhelper')
-require File.expand_path(podhelper_path, __FILE__)
+if File.exist?("#{podhelper_path}.rb")
+  require File.expand_path(podhelper_path, __FILE__)
+end
 
 target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # Tüm Flutter eklentilerini (flutter_secure_storage dahil) iOS projesine diker
-  flutter_install_all_ios_pods File.dirname(File.expand_path(__FILE__))
+  if respond_to?(:flutter_install_all_ios_pods)
+    flutter_install_all_ios_pods File.dirname(File.expand_path(__FILE__))
+  end
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
+    if respond_to?(:flutter_additional_ios_build_settings)
+      flutter_additional_ios_build_settings(target)
+    end
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
     end
