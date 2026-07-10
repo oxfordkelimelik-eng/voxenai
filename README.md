@@ -427,3 +427,5 @@ Uygulama fotoğraf ve yüz/vücut verisi işlediği için gizlilik en baştan ta
 - Restore Purchases
 - Hesabımı ve Verilerimi Sil
 - Destek / İletişim
+#   v o x e n a i  
+ 
