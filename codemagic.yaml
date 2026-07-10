@@ -1,0 +1,28 @@
+workflows:
+  ios-workflow:
+    name: VoxenAI iOS Build
+    max_build_duration: 60
+    instance_type: mac_mini_co_m1
+    environment:
+      flutter: stable
+      xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+    scripts:
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "com.voxenai.app" --type DEVELOPMENT --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Flutter pub get
+        script: |
+          flutter pub get
+      - name: Build iOS IPA
+        script: |
+          flutter build ios --release --no-codesign
+    artifacts:
+      - build/ios/iphoneos/*.app
