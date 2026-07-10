@@ -1,0 +1,16 @@
+{
+  "name": "rise-up-functions",
+  "description": "Rise Up Cloud Functions — Gemini proxy + satın alma doğrulama",
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0",
+    "googleapis": "^144.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "adm-zip": "^0.5.16"
+  },
+  "private": true
+}

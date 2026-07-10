@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Her kullanıcı yalnızca kendi dokümanına erişebilir
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Paket bakiyesi ve üretim işleri: para/hak taşıyan veriler.
+      // Client yalnızca okuyabilir — yazma yalnızca Cloud Functions
+      // (Admin SDK, bu kuralları hiç görmez) üzerinden yapılır.
+      match /private/{document=**} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+    // Diğer her şey kapalı
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

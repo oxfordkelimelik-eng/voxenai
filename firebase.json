@@ -1,0 +1,43 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "rise-up-9235f",
+          "appId": "1:473057059250:android:ba53c8c675b3bb0f9544ab",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "rise-up-9235f",
+          "appId": "1:473057059250:ios:4305eff7d354417b9544ab",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "rise-up-9235f",
+          "configurations": {
+            "android": "1:473057059250:android:ba53c8c675b3bb0f9544ab",
+            "ios": "1:473057059250:ios:4305eff7d354417b9544ab"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "nodejs20"
+    }
+  ]
+}

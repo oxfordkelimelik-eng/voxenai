@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "473057059250",
+    "project_id": "rise-up-9235f",
+    "storage_bucket": "rise-up-9235f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:473057059250:android:ba53c8c675b3bb0f9544ab",
+        "android_client_info": {
+          "package_name": "com.voxenai.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "473057059250-a3q3k83f3atd8cvtght9o0det02i7gtv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAVaVRD4XQjnM5Rpy6IbkBjsjhaININXrk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "473057059250-a3q3k83f3atd8cvtght9o0det02i7gtv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,21 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Eğitim fotoğrafları: yalnızca sahibi yükleyip okuyabilir.
+    // Cloud Functions (Admin SDK) bu kuralları görmeden okur/yazar.
+    match /dating_training/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Üretim sonuçları: yalnızca Cloud Functions yazabilir (ödenmiş,
+    // sunucu tarafında üretilmiş varlıklar); sahibi okuyabilir.
+    match /dating_results/{userId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
