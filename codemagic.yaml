@@ -7,7 +7,7 @@ workflows:
       # Codemagic panelinde tanımlanan App Store Connect API anahtarının adı.
       # Teams > Integrations > Developer Portal altında anahtari TAM OLARAK
       # "codemagic" adiyla kaydedin (veya buradaki adi kendi anahtarinizla eslestirin).
-      app_store_connect: codemagic
+      app_store_connect: Voxen AI 
     environment:
       flutter: stable
       xcode: latest
