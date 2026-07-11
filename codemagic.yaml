@@ -1,42 +1,42 @@
 workflows:
   ios-workflow:
-    name: VoxenAI iOS Build
+    name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
+    integrations:
+      # Codemagic > Teams > Integrations > Developer Portal'daki anahtarin
+      # REFERANS ADI. Paneldeki adla birebir ayni olmali (bosluk/harf dahil).
+      app_store_connect: voxenai
     environment:
       flutter: stable
       xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        # Xcode projesindeki PRODUCT_BUNDLE_IDENTIFIER ile birebir aynı olmalı
+        bundle_identifier: com.voxenai.app
     triggering:
       events:
         - push
       branch_patterns:
         - pattern: main
     scripts:
-      - name: 1. Project Cleanup & Disable Automatic Signing
-        script: |
-          # 1. Eski ID'leri ve sürüm hatalarını zorla temizliyoruz
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/com.riseup.riseUp/com.voxenai.app/g' {} +
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' {} +
-          
-          # 2. EN KRİTİK SATIR: Xcode'un "Otomatik İmzalama" inadını zorla "Manuel"e çekiyoruz!
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' {} +
-      - name: 2. Initialize Flutter & Pods
+      - name: 1. Get dependencies & generate iOS config
         script: |
           flutter config --no-enable-swift-package-manager
-          flutter clean
           flutter pub get
-          flutter build ios --config-only
-          cd ios && pod install --repo-update && cd ..
-      - name: 3. Fetch App Store Certificates
+          flutter build ios --config-only --release
+      - name: 2. Install CocoaPods dependencies
         script: |
-          keychain initialize
-          # İmzalama artık Manuel olduğu için sadece App Store (Dağıtım) profilini çekmemiz yeterli
-          app-store-connect fetch-signing-files "com.voxenai.app" --type IOS_APP_STORE --create
-          keychain add-certificates
+          cd ios && pod install --repo-update
+      - name: 3. Apply code signing profiles
+        script: |
+          # ios_signing bloğunun indirdiği sertifika/profilleri anahtarlığa yükler
+          # ve ~/export_options.plist dosyasını üretir.
           xcode-project use-profiles
-      - name: 4. Build Release IPA
+      - name: 4. Build release IPA
         script: |
-          # Xcode artık Manuel modda olduğu için dışarıdan verdiğimiz sertifikayı itirazsız kabul edecek:
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
-      - build/ios/iphoneos/*.ipaa- build/ios/iphoneos/*.ipa
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
