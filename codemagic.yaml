@@ -6,37 +6,34 @@ workflows:
     environment:
       flutter: stable
       xcode: latest
+      # İŞTE SİHİRLİ DOKUNUŞ BURASI: 
+      # Codemagic bu blok sayesinde manual script'lere gerek kalmadan Xcode'u tamamen ele geçirir.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.voxenai.app
     triggering:
       events:
         - push
       branch_patterns:
         - pattern: main
     scripts:
-      - name: 1. Project Cleanup & Disable Automatic Signing
+      - name: 1. Deep Project Cleanup
         script: |
-          # 1. Eski ID'leri ve sürüm hatalarını zorla temizliyoruz
+          # Olası eski kalıntıları son kez temizliyoruz
           find ios -type f -name "project.pbxproj" -exec sed -i '' 's/com.riseup.riseUp/com.voxenai.app/g' {} +
           find ios -type f -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' {} +
-          
-          # 2. EN KRİTİK SATIR: Xcode'un "Otomatik İmzalama" inadını zorla "Manuel"e çekiyoruz!
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/ProvisioningStyle = Automatic;/ProvisioningStyle = Manual;/g' {} +
       - name: 2. Initialize Flutter & Pods
         script: |
           flutter config --no-enable-swift-package-manager
           flutter clean
           flutter pub get
-          flutter build ios --config-only
+          # Pod'ları tamamen sıfırdan kurmak için lock dosyasını uçuruyoruz:
+          rm -f ios/Podfile.lock
           cd ios && pod install --repo-update && cd ..
-      - name: 3. Fetch App Store Certificates
+      - name: 3. Build Release IPA
         script: |
-          keychain initialize
-          # İmzalama artık Manuel olduğu için sadece App Store (Dağıtım) profilini çekmemiz yeterli
-          app-store-connect fetch-signing-files "com.voxenai.app" --type IOS_APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
-      - name: 4. Build Release IPA
-        script: |
-          # Xcode artık Manuel modda olduğu için dışarıdan verdiğimiz sertifikayı itirazsız kabul edecek:
+          # ios_signing bloğu her şeyi hazırlayıp export_options.plist dosyasını yarattığı için
+          # geriye sadece standart derleme komutunu vermek kalıyor:
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
