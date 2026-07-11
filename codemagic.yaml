@@ -7,7 +7,7 @@ workflows:
       # DIKKAT: Buradaki ad, Apple'daki anahtarin adi DEGIL;
       # Codemagic > Teams > Integrations > Developer Portal altina anahtari
       # eklerken verdiginiz referans adidir. Birebir ayni olmali.
-      app_store_connect: "Voxen AI"
+      app_store_connect: "voxenai"
     environment:
       flutter: stable
       xcode: latest
