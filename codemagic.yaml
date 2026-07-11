@@ -12,11 +12,10 @@ workflows:
       branch_patterns:
         - pattern: main
     scripts:
-      - name: 1. ABSOLUTE FIX - Enforce Bundle ID & Target
+      - name: 1. Project Cleanup & ID Fix
         script: |
-          # Mac sunucusunda projenin içine girip Rise Up'tan kalan eski ID'leri zorla VoxenAI'ye çeviriyoruz:
+          # Eski Rise Up kimliklerini ve sürüm hatalarını zorla temizliyoruz
           find ios -type f -name "project.pbxproj" -exec sed -i '' 's/com.riseup.riseUp/com.voxenai.app/g' {} +
-          # Sürümü de zorla 15.5'e kitliyoruz:
           find ios -type f -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' {} +
       - name: 2. Initialize Flutter & Pods
         script: |
@@ -25,16 +24,18 @@ workflows:
           flutter pub get
           flutter build ios --config-only
           cd ios && pod install --repo-update && cd ..
-      - name: 3. Code Signing (App Store)
+      - name: 3. Fetch All Required Certificates
         script: |
           keychain initialize
-          # Tip parametresini kesin Apple formatı olan IOS_APP_STORE'a çekiyoruz
+          # 1. Xcode'un derleme (archive) aşamasında çökmemesi için Development sertifikasını çekiyoruz:
+          app-store-connect fetch-signing-files "com.voxenai.app" --type IOS_APP_DEVELOPMENT --create
+          # 2. Final .ipa çıktısının mağaza/test formatında olması için App Store sertifikasını çekiyoruz:
           app-store-connect fetch-signing-files "com.voxenai.app" --type IOS_APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles
       - name: 4. Build Release IPA
         script: |
-          # Profiller artık %100 eşleştiği için standart ve temiz bir flutter build başlatıyoruz:
+          # Flutter artık arşivi Dev ile yapıp, paketi App Store ile imzalayarak işlemi bitirecek:
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
