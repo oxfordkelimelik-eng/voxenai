@@ -27,10 +27,13 @@ workflows:
           cd ios && pod install --repo-update && cd ..
       - name: Build iOS IPA (Manual Override)
         script: |
-          # Codemagic CLI'ın resmi güncel komutu ile hem Flutter'ı derliyor hem de IPA'yı paketliyoruz:
-          xcode-project build-ipa \
-            --workspace ios/Runner.xcworkspace \
-            --scheme Runner \
-            --export-options-plist /Users/builder/export_options.plist
+          # Buluttaki otomatik değişkenlerden profil ismini ve UUID'sini yakalıyoruz
+          PROV_PROFILE_UUID=$(PROVISIONING_PROFILE_UUIDs=(${CM_PROVISIONING_PROFILES[@]}) && echo ${PROVISIONING_PROFILE_UUIDs[0]})
+          
+          # Doğrudan Flutter'ın kendi build mekanizmasına imzalama parametrelerini vererek kusursuz derliyoruz:
+          flutter build ipa --release \
+            --code-sign-style=manual \
+            --development-team=359SBFFXD9 \
+            --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
