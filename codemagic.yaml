@@ -15,7 +15,7 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          # Tipi APP_STORE yaparak hem sertifikayı hem de profili dağıtım moduna alıyoruz:
+          # App Store paketleri için sertifika ve profilleri çekiyoruz
           app-store-connect fetch-signing-files "com.voxenai.app" --type APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles
@@ -28,7 +28,13 @@ workflows:
           cd ios && pod install --repo-update && cd ..
       - name: Build iOS IPA (Manual Override)
         script: |
-          # Codemagic'in ürettiği resmi App Store export ayarlarıyla derlemeyi tetikliyoruz:
-          flutter build ipa --release --export-options-plist /Users/builder/export_options.plist
+          # 1. Xcode projesini imzalama aramaya zorlamadan ham arşiv haline getiriyoruz:
+          flutter build ios --release --no-codesign
+          
+          # 2. Arşivi Codemagic'in indirdiği resmi sertifikalarla paketleyip .ipa haline getiriyoruz:
+          xcode-project package-app \
+            --project ios/Runner.xcodeproj \
+            --scheme Runner \
+            --export-options-plist /Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
