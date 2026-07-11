@@ -3,14 +3,9 @@ workflows:
     name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      # DIKKAT: Buradaki ad, Apple'daki anahtarin adi DEGIL;
-      # Codemagic > Teams > Integrations > Developer Portal altina anahtari
-      # eklerken verdiginiz referans adidir. Birebir ayni olmali.
-      app_store_connect: "Voxen AI"
     environment:
       flutter: stable
-      xcode: latest
+      xcode:
       cocoapods: default
       ios_signing:
         distribution_type: app_store
@@ -41,3 +36,5 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+
+      - build/ios/iphoneos/*.ipa
