@@ -1,39 +1,34 @@
 workflows:
   ios-workflow:
-    name: VoxenAI iOS Build
+    name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: stable
       xcode: latest
-      # İŞTE SİHİRLİ DOKUNUŞ BURASI: 
-      # Codemagic bu blok sayesinde manual script'lere gerek kalmadan Xcode'u tamamen ele geçirir.
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.voxenai.app
+        bundle_identifier: com.riseup.riseUp # Apple Developer panelindeki tam Bundle ID'nizi buraya yazın
     triggering:
       events:
         - push
       branch_patterns:
         - pattern: main
     scripts:
-      - name: 1. Deep Project Cleanup
-        script: |
-          # Olası eski kalıntıları son kez temizliyoruz
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/com.riseup.riseUp/com.voxenai.app/g' {} +
-          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' {} +
-      - name: 2. Initialize Flutter & Pods
+      - name: 1. Initialize Flutter & Pods
         script: |
           flutter config --no-enable-swift-package-manager
           flutter clean
           flutter pub get
-          # Pod'ları tamamen sıfırdan kurmak için lock dosyasını uçuruyoruz:
-          rm -f ios/Podfile.lock
+          flutter build ios --config-only
           cd ios && pod install --repo-update && cd ..
+      - name: 2. Apply Code Signing Profiles
+        script: |
+          # KRİTİK ADIM: Üstteki ios_signing bloğunun indirdiği sertifikaları makinenin anahtarlığına yükler ve Xcode'a bağlar.
+          xcode-project use-profiles
       - name: 3. Build Release IPA
         script: |
-          # ios_signing bloğu her şeyi hazırlayıp export_options.plist dosyasını yarattığı için
-          # geriye sadece standart derleme komutunu vermek kalıyor:
+          # Sertifikalar artık sisteme enjekte edildiği için Xcode itirazsız derlemeyi tamamlar.
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
