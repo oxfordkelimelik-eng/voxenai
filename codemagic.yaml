@@ -4,10 +4,10 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     integrations:
-      # Codemagic panelinde tanımlanan App Store Connect API anahtarının adı.
-      # Teams > Integrations > Developer Portal altında anahtari TAM OLARAK
-      # "codemagic" adiyla kaydedin (veya buradaki adi kendi anahtarinizla eslestirin).
-      app_store_connect: Voxen AI 
+      # DIKKAT: Buradaki ad, Apple'daki anahtarin adi DEGIL;
+      # Codemagic > Teams > Integrations > Developer Portal altina anahtari
+      # eklerken verdiginiz referans adidir. Birebir ayni olmali.
+      app_store_connect: "Voxen AI"
     environment:
       flutter: stable
       xcode: latest
