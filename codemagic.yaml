@@ -3,6 +3,11 @@ workflows:
     name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
+    integrations:
+      # Codemagic panelinde tanımlanan App Store Connect API anahtarının adı.
+      # Teams > Integrations > Developer Portal altında anahtari TAM OLARAK
+      # "codemagic" adiyla kaydedin (veya buradaki adi kendi anahtarinizla eslestirin).
+      app_store_connect: codemagic
     environment:
       flutter: stable
       xcode: latest
