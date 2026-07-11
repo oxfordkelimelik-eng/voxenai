@@ -15,7 +15,8 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          app-store-connect fetch-signing-files "com.voxenai.app" --type DEVELOPMENT --create
+          # Tipi APP_STORE yaparak hem sertifikayı hem de profili dağıtım moduna alıyoruz:
+          app-store-connect fetch-signing-files "com.voxenai.app" --type APP_STORE --create
           keychain add-certificates
           xcode-project use-profiles
       - name: Initialize and Install Pods Safely
@@ -23,13 +24,11 @@ workflows:
           flutter config --no-enable-swift-package-manager
           flutter clean
           flutter pub get
-          # Burası podhelper dosyasını fiziksel olarak sunucuda üretir:
           flutter build ios --config-only
-          # CocoaPods köprülerini ve kütüphane bağlarını el ile zorla tazeletiyoruz:
           cd ios && pod install --repo-update && cd ..
       - name: Build iOS IPA (Manual Override)
         script: |
-          # Codemagic'in otomatik flaglarını ezip kendi export ayarlarımızla tertemiz derliyoruz:
+          # Codemagic'in ürettiği resmi App Store export ayarlarıyla derlemeyi tetikliyoruz:
           flutter build ipa --release --export-options-plist /Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
