@@ -6,29 +6,33 @@ workflows:
     environment:
       flutter: stable
       xcode: latest
+      cocoapods: default
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.riseup.riseUp # Apple Developer panelindeki tam Bundle ID'nizi buraya yazın
+        # Xcode projesindeki PRODUCT_BUNDLE_IDENTIFIER ile birebir aynı olmalı
+        bundle_identifier: com.voxenai.app
     triggering:
       events:
         - push
       branch_patterns:
         - pattern: main
     scripts:
-      - name: 1. Initialize Flutter & Pods
+      - name: 1. Get dependencies & generate iOS config
         script: |
           flutter config --no-enable-swift-package-manager
-          flutter clean
           flutter pub get
-          flutter build ios --config-only
-          cd ios && pod install --repo-update && cd ..
-      - name: 2. Apply Code Signing Profiles
+          flutter build ios --config-only --release
+      - name: 2. Install CocoaPods dependencies
         script: |
-          # KRİTİK ADIM: Üstteki ios_signing bloğunun indirdiği sertifikaları makinenin anahtarlığına yükler ve Xcode'a bağlar.
+          cd ios && pod install --repo-update
+      - name: 3. Apply code signing profiles
+        script: |
+          # ios_signing bloğunun indirdiği sertifika/profilleri anahtarlığa yükler
+          # ve ~/export_options.plist dosyasını üretir.
           xcode-project use-profiles
-      - name: 3. Build Release IPA
+      - name: 4. Build release IPA
         script: |
-          # Sertifikalar artık sisteme enjekte edildiği için Xcode itirazsız derlemeyi tamamlar.
           flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
-      - build/ios/iphoneos/*.ipa
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
