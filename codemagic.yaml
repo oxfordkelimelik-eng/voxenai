@@ -12,28 +12,29 @@ workflows:
       branch_patterns:
         - pattern: main
     scripts:
-      - name: Set up code signing
+      - name: 1. ABSOLUTE FIX - Enforce Bundle ID & Target
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "com.voxenai.app" --type APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
-      - name: Initialize and Install Pods Safely
+          # Mac sunucusunda projenin içine girip Rise Up'tan kalan eski ID'leri zorla VoxenAI'ye çeviriyoruz:
+          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/com.riseup.riseUp/com.voxenai.app/g' {} +
+          # Sürümü de zorla 15.5'e kitliyoruz:
+          find ios -type f -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 13.0/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' {} +
+      - name: 2. Initialize Flutter & Pods
         script: |
           flutter config --no-enable-swift-package-manager
           flutter clean
           flutter pub get
           flutter build ios --config-only
           cd ios && pod install --repo-update && cd ..
-      - name: Build iOS IPA (Manual Override)
+      - name: 3. Code Signing (App Store)
         script: |
-          # Buluttaki otomatik değişkenlerden profil ismini ve UUID'sini yakalıyoruz
-          PROV_PROFILE_UUID=$(PROVISIONING_PROFILE_UUIDs=(${CM_PROVISIONING_PROFILES[@]}) && echo ${PROVISIONING_PROFILE_UUIDs[0]})
-          
-          # Doğrudan Flutter'ın kendi build mekanizmasına imzalama parametrelerini vererek kusursuz derliyoruz:
-          flutter build ipa --release \
-            --code-sign-style=manual \
-            --development-team=359SBFFXD9 \
-            --export-options-plist=/Users/builder/export_options.plist
+          keychain initialize
+          # Tip parametresini kesin Apple formatı olan IOS_APP_STORE'a çekiyoruz
+          app-store-connect fetch-signing-files "com.voxenai.app" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: 4. Build Release IPA
+        script: |
+          # Profiller artık %100 eşleştiği için standart ve temiz bir flutter build başlatıyoruz:
+          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/iphoneos/*.ipa
