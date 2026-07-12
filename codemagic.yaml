@@ -5,16 +5,17 @@ workflows:
     instance_type: mac_mini_m2
     integrations:
       # Codemagic > Teams > Integrations > Developer Portal'daki anahtarin
-      # REFERANS ADI. Paneldeki adla birebir ayni olmali (bosluk/harf dahil).
+      # REFERANS ADI (paneldeki adla birebir ayni). Bu, imzalama script'lerine
+      # APP_STORE_CONNECT_* ortam degiskenlerini otomatik saglar.
       app_store_connect: voxenai
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        # Xcode projesindeki PRODUCT_BUNDLE_IDENTIFIER ile birebir aynı olmalı
-        bundle_identifier: com.voxenai.app
+      vars:
+        BUNDLE_ID: "com.voxenai.app"
+        XCODE_WORKSPACE: "ios/Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
     triggering:
       events:
         - push
@@ -29,26 +30,31 @@ workflows:
       - name: 2. Install CocoaPods dependencies
         script: |
           cd ios && pod install --repo-update
-      - name: 3. Apply code signing profiles
+      - name: 3. Set up code signing (fetch + install profiles)
         script: |
-          # ios_signing bloğunun indirdiği sertifika/profilleri anahtarlığa yükler
-          # ve ~/export_options.plist dosyasını üretir.
+          # environment.ios_signing bloğunun otomatik ön-kontrolü
+          # "No matching profiles found" hatası veriyordu. Bunun yerine
+          # Workflow Editor'ün arka planda çalıştırdığı ve bu projede
+          # başarıyla profil ÜRETEN script tabanlı akışı kullanıyoruz.
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           xcode-project use-profiles
-      - name: 4. Build unsigned app (Flutter)
+      - name: 4. Build unsigned Flutter app
         script: |
-          # Flutter'ın kendi "flutter build ipa" export mantığı, Flutter'ın
-          # dahili App.framework'üne de manuel provisioning profile atamaya
-          # çalışıp "App.framework does not support provisioning profiles"
-          # hatası veriyor. Bu yüzden imzalamayı Flutter'a değil, aşağıdaki
-          # adımda Codemagic'in kendi arşivleme/export aracına bırakıyoruz.
+          # "flutter build ipa" kendi export mantığında Flutter'ın dahili
+          # App.framework'üne provisioning profile atamaya çalışıp
+          # "App.framework does not support provisioning profiles" hatası
+          # veriyor. Bu yüzden Flutter'a sadece imzasız derleme yaptırıp
+          # arşiv+export işini Codemagic'in xcode-project aracına bırakıyoruz.
           flutter build ios --release --no-codesign
-      - name: 5. Archive & export signed IPA (Codemagic)
+      - name: 5. Archive & export signed IPA
         script: |
           xcode-project build-ipa \
-            --workspace ios/Runner.xcworkspace \
-            --scheme Runner \
-            --export-options-plist=/Users/builder/export_options.plist
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
-      - "*.ipa"
       - /tmp/xcodebuild_logs/*.log
