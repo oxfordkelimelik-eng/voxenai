@@ -26,36 +26,36 @@ workflows:
         script: |
           flutter config --no-enable-swift-package-manager
           flutter pub get
-          # Bu adim yalnizca pod install icin Generated.xcconfig uretir;
-          # imzalama Adim 3'te kuruluyor. --no-codesign olmadan Flutter burada
-          # (henuz sertifika yokken) "No valid code signing certificates" ile
-          # dusuyordu.
+          # Yalnizca pod install icin Generated.xcconfig uretir; imzalama
+          # asagida kuruluyor, o yuzden burada --no-codesign.
           flutter build ios --config-only --release --no-codesign
       - name: 2. Install CocoaPods dependencies
         script: |
           cd ios && pod install --repo-update
-      - name: 3. Set up code signing (fetch + install profiles)
+      - name: 3. Build unsigned Flutter app
+        script: |
+          # Once Dart/Flutter kodunu imzasiz derliyoruz. ONEMLI: bu komut
+          # projenin imza ayarlarini sifirladigi icin "use-profiles" MUTLAKA
+          # bundan SONRA calismali; aksi halde profil ayari siliniyordu.
+          flutter build ios --release --no-codesign
+      - name: 4. Set up code signing (fetch + install profiles)
         script: |
           # environment.ios_signing bloğunun otomatik ön-kontrolü
           # "No matching profiles found" hatası veriyordu. Bunun yerine
-          # Workflow Editor'ün arka planda çalıştırdığı ve bu projede
-          # başarıyla profil ÜRETEN script tabanlı akışı kullanıyoruz.
+          # profili gerekirse ureten script tabanli akisi kullaniyoruz.
+          # use-profiles en sonda, boylece imza ayari flutter build ile
+          # ezilmeden pbxproj'a yaziliyor.
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
           keychain add-certificates
           xcode-project use-profiles
-      - name: 4. Build unsigned Flutter app
-        script: |
-          # "flutter build ipa" kendi export mantığında Flutter'ın dahili
-          # App.framework'üne provisioning profile atamaya çalışıp
-          # "App.framework does not support provisioning profiles" hatası
-          # veriyor. Bu yüzden Flutter'a sadece imzasız derleme yaptırıp
-          # arşiv+export işini Codemagic'in xcode-project aracına bırakıyoruz.
-          flutter build ios --release --no-codesign
       - name: 5. Archive & export signed IPA
         script: |
+          # "flutter build ipa" kendi export mantiginda Flutter'in dahili
+          # App.framework'une provisioning profile atamaya calisip hata
+          # veriyordu. Bu yuzden arsiv+export'u Codemagic'in araci yapiyor.
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
