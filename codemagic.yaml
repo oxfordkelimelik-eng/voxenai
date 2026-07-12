@@ -26,7 +26,11 @@ workflows:
         script: |
           flutter config --no-enable-swift-package-manager
           flutter pub get
-          flutter build ios --config-only --release
+          # Bu adim yalnizca pod install icin Generated.xcconfig uretir;
+          # imzalama Adim 3'te kuruluyor. --no-codesign olmadan Flutter burada
+          # (henuz sertifika yokken) "No valid code signing certificates" ile
+          # dusuyordu.
+          flutter build ios --config-only --release --no-codesign
       - name: 2. Install CocoaPods dependencies
         script: |
           cd ios && pod install --repo-update
