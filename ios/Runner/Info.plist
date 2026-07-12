@@ -4,6 +4,12 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- Uygulama yalnizca standart HTTPS/TLS kullaniyor (Firebase, dio) -->
+	<!-- => ihracat sifreleme muafiyetine girer. Bu anahtar, TestFlight'ta -->
+	<!-- her yuklemede cikan "Export Compliance" sorusunu kalici atlatir. -->
+	<!-- Ozel/kendi sifreleme algoritmanizi eklerseniz bu anahtari kaldirin. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Yüz ve vücut analizin için ön/sağ/sol açılardan rehberli fotoğraf çekmek üzere kameraya erişim gerekir.</string>
 	<key>CFBundleDevelopmentRegion</key>
