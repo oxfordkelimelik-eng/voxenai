@@ -31,13 +31,17 @@ workflows:
         script: |
           flutter config --no-enable-swift-package-manager
           flutter pub get
-          flutter build ios --config-only --release --no-codesign
+          # --build-number: her Codemagic build'i benzersiz CFBundleVersion alsin
+          # ki TestFlight "build numarasi zaten var" diye reddetmesin.
+          flutter build ios --config-only --release --no-codesign \
+            --build-number="$PROJECT_BUILD_NUMBER"
       - name: 2. Install CocoaPods dependencies
         script: |
           cd ios && pod install --repo-update
       - name: 3. Build unsigned Flutter app
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign \
+            --build-number="$PROJECT_BUILD_NUMBER"
       - name: 4. Prepare keychain & App Store Connect API key
         script: |
           set -e
@@ -78,6 +82,17 @@ workflows:
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      - name: 7. Upload to TestFlight
+        script: |
+          set -e
+          # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'ta
+          # dahili teste hazir hale getirir. Ayni API anahtarini kullanir.
+          app-store-connect publish \
+            --path "$CM_BUILD_DIR/build/ios/ipa/*.ipa" \
+            --testflight \
+            --issuer-id "$ASC_ISSUER_ID" \
+            --key-id "$ASC_KEY_ID" \
+            --private-key @file:"$CM_BUILD_DIR/AuthKey.p8"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
