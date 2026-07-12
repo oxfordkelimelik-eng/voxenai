@@ -3,20 +3,24 @@ workflows:
     name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      # Codemagic > Teams > Integrations > Developer Portal'daki anahtarin
-      # REFERANS ADI (paneldeki adla birebir ayni). Bu, build'e
-      # APP_STORE_CONNECT_* ortam degiskenlerini otomatik saglar.
-      app_store_connect: voxenai
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
+      groups:
+        # Codemagic panelinde olusturmaniz gereken degisken grubu.
+        # Icinde SADECE su gizli degisken olmali:
+        #   ASC_PRIVATE_KEY = App Store Connect .p8 anahtarinin TAM icerigi
+        #   (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY----- dahil)
+        - appstore
       vars:
         BUNDLE_ID: "com.voxenai.app"
         XCODE_WORKSPACE: "ios/Runner.xcworkspace"
         XCODE_SCHEME: "Runner"
         DEVELOPMENT_TEAM: "359SBFFXD9"
+        # Bunlar gizli degil; API anahtarinin kimlik bilgileri.
+        ASC_KEY_ID: "4VDG2LU8D7"
+        ASC_ISSUER_ID: "e05cb8c9-c7c3-4830-b2f0-d821096f1528"
     triggering:
       events:
         - push
@@ -27,7 +31,6 @@ workflows:
         script: |
           flutter config --no-enable-swift-package-manager
           flutter pub get
-          # Yalnizca pod install icin Generated.xcconfig uretir; imza yok.
           flutter build ios --config-only --release --no-codesign
       - name: 2. Install CocoaPods dependencies
         script: |
@@ -38,27 +41,19 @@ workflows:
       - name: 4. Prepare keychain & App Store Connect API key
         script: |
           set -e
-          # Xcode'un otomatik imza sirasinda uretecegi sertifikayi saklamasi
-          # icin acik bir keychain hazirla.
           keychain initialize
-          # API anahtarini xcodebuild'in okuyabilecegi .p8 dosyasina yaz.
-          # %b: degisken PEM'i literal "\n" ile tutuyorsa bunlari gercek satir
-          # sonlarina cevirir (aksi halde xcodebuild "invalidPEMDocument" verir).
+          # .p8 anahtarini xcodebuild'in okuyabilecegi dosyaya yaz.
+          # %b: PEM literal "\n" ile saklaniyorsa gercek satir sonuna cevirir.
           KEY_FILE="$CM_BUILD_DIR/AuthKey.p8"
-          printf '%b\n' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$KEY_FILE"
-          # Anahtari loga sizdirmadan gecerliligini dogrula.
+          printf '%b\n' "$ASC_PRIVATE_KEY" > "$KEY_FILE"
           if ! grep -q "BEGIN PRIVATE KEY" "$KEY_FILE"; then
-            echo "HATA: APP_STORE_CONNECT_PRIVATE_KEY gecerli bir .p8 uretmedi."
-            echo "Codemagic entegrasyonunun private key'i ortama sagladigindan emin olun."
+            echo "HATA: ASC_PRIVATE_KEY bos veya gecersiz."
+            echo "Codemagic'te 'appstore' grubuna .p8 icerigini ASC_PRIVATE_KEY"
+            echo "adiyla (secure) eklediginizden emin olun."
             exit 1
           fi
       - name: 5. Archive (automatic signing via API key)
         script: |
-          # Manuel imza (use-profiles) bu projede Runner hedefine takim/profil
-          # bilgisini kalici yazamiyordu ("requires a development team").
-          # Bunun yerine TAM OTOMATIK imza kullaniyoruz: takim ve profil
-          # dogrudan App Store Connect API anahtarindan cozuluyor, framework
-          # imzalama sorunu da olusmuyor.
           set -e
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme "$XCODE_SCHEME" \
@@ -67,8 +62,8 @@ workflows:
             -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
             CODE_SIGN_STYLE=Automatic \
             archive
@@ -81,8 +76,8 @@ workflows:
             -exportOptionsPlist ios/ExportOptions.plist \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
-            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
