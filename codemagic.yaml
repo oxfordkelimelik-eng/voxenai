@@ -34,9 +34,21 @@ workflows:
           # ios_signing bloğunun indirdiği sertifika/profilleri anahtarlığa yükler
           # ve ~/export_options.plist dosyasını üretir.
           xcode-project use-profiles
-      - name: 4. Build release IPA
+      - name: 4. Build unsigned app (Flutter)
         script: |
-          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+          # Flutter'ın kendi "flutter build ipa" export mantığı, Flutter'ın
+          # dahili App.framework'üne de manuel provisioning profile atamaya
+          # çalışıp "App.framework does not support provisioning profiles"
+          # hatası veriyor. Bu yüzden imzalamayı Flutter'a değil, aşağıdaki
+          # adımda Codemagic'in kendi arşivleme/export aracına bırakıyoruz.
+          flutter build ios --release --no-codesign
+      - name: 5. Archive & export signed IPA (Codemagic)
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/Runner.xcworkspace \
+            --scheme Runner \
+            --export-options-plist=/Users/builder/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
+      - "*.ipa"
       - /tmp/xcodebuild_logs/*.log
