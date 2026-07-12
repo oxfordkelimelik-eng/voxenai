@@ -44,8 +44,22 @@ async function verifyAndroidPurchase(productId, purchaseToken) {
   return { valid, orderId: resp.data.orderId || purchaseToken };
 }
 
+// App Store Server API host'lari (verifyReceipt DEGIL — dogru host'lar bunlar).
+const APPLE_HOST_PROD = "api.storekit.itunes.apple.com";
+const APPLE_HOST_SANDBOX = "api.storekit-sandbox.itunes.apple.com";
+
+async function fetchAppleTransaction(token, transactionId, sandbox) {
+  const host = sandbox ? APPLE_HOST_SANDBOX : APPLE_HOST_PROD;
+  return fetch(`https://${host}/inApps/v1/transactions/${transactionId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 /**
  * iOS: App Store Server API ile işlemi doğrular.
+ * Once production'i dener; islem orada bulunamazsa (404) sandbox'i dener —
+ * boylece TestFlight/Sandbox satin almalari da production yayini da APPLE_ENV
+ * gibi bir ayar cevirmeye gerek kalmadan calisir.
  */
 async function verifyApplePurchase(productId, transactionId) {
   const jwt = require("jsonwebtoken");
@@ -61,11 +75,11 @@ async function verifyApplePurchase(productId, transactionId) {
     { algorithm: "ES256", header: { alg: "ES256", kid: APPLE_KEY_ID.value() } }
   );
 
-  const env = process.env.APPLE_ENV === "sandbox" ? "sandbox" : "production";
-  const url = `https://api${env === "sandbox" ? ".storekit-sandbox" : ""}.itunes.apple.com/inApps/v1/transactions/${transactionId}`;
-  const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let resp = await fetchAppleTransaction(token, transactionId, false);
+  if (resp.status === 404) {
+    // TransactionIdNotFound → diger ortamda (TestFlight ise sandbox) ara.
+    resp = await fetchAppleTransaction(token, transactionId, true);
+  }
   if (!resp.ok) {
     return { valid: false, orderId: transactionId };
   }
