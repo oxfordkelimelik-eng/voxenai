@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m2
     integrations:
       # Codemagic > Teams > Integrations > Developer Portal'daki anahtarin
-      # REFERANS ADI (paneldeki adla birebir ayni). Bu, imzalama script'lerine
+      # REFERANS ADI (paneldeki adla birebir ayni). Bu, build'e
       # APP_STORE_CONNECT_* ortam degiskenlerini otomatik saglar.
       app_store_connect: voxenai
     environment:
@@ -16,6 +16,7 @@ workflows:
         BUNDLE_ID: "com.voxenai.app"
         XCODE_WORKSPACE: "ios/Runner.xcworkspace"
         XCODE_SCHEME: "Runner"
+        DEVELOPMENT_TEAM: "359SBFFXD9"
     triggering:
       events:
         - push
@@ -26,62 +27,51 @@ workflows:
         script: |
           flutter config --no-enable-swift-package-manager
           flutter pub get
-          # Yalnizca pod install icin Generated.xcconfig uretir; imzalama
-          # asagida kuruluyor, o yuzden burada --no-codesign.
+          # Yalnizca pod install icin Generated.xcconfig uretir; imza yok.
           flutter build ios --config-only --release --no-codesign
       - name: 2. Install CocoaPods dependencies
         script: |
           cd ios && pod install --repo-update
       - name: 3. Build unsigned Flutter app
         script: |
-          # Once Dart/Flutter kodunu imzasiz derliyoruz. ONEMLI: bu komut
-          # projenin imza ayarlarini sifirladigi icin "use-profiles" MUTLAKA
-          # bundan SONRA calismali; aksi halde profil ayari siliniyordu.
           flutter build ios --release --no-codesign
-      - name: 4. Set up code signing (fetch + install profiles)
+      - name: 4. Prepare keychain & App Store Connect API key
         script: |
-          # environment.ios_signing bloğunun otomatik ön-kontrolü
-          # "No matching profiles found" hatası veriyordu. Bunun yerine
-          # profili gerekirse ureten script tabanli akisi kullaniyoruz.
-          # use-profiles en sonda, boylece imza ayari flutter build ile
-          # ezilmeden pbxproj'a yaziliyor.
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
-          xcode-project use-profiles
-      - name: 5. Archive (manual signing)
-        script: |
-          # Arsivleme, use-profiles'in Runner hedefine yazdigi manuel imzayla
-          # yapiliyor — bu asama sorunsuz calisiyor. "flutter build ipa" veya
-          # "xcode-project build-ipa" yerine dogrudan xcodebuild kullaniyoruz
-          # ki export'u ayri ve otomatik imzayla yapabilelim.
           set -e
-          ARCHIVE_PATH="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive"
+          # Xcode'un otomatik imza sirasinda uretecegi sertifikayi saklamasi
+          # icin acik bir keychain hazirla.
+          keychain initialize
+          # API anahtarini xcodebuild'in okuyabilecegi .p8 dosyasina yaz.
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$CM_BUILD_DIR/AuthKey.p8"
+      - name: 5. Archive (automatic signing via API key)
+        script: |
+          # Manuel imza (use-profiles) bu projede Runner hedefine takim/profil
+          # bilgisini kalici yazamiyordu ("requires a development team").
+          # Bunun yerine TAM OTOMATIK imza kullaniyoruz: takim ve profil
+          # dogrudan App Store Connect API anahtarindan cozuluyor, framework
+          # imzalama sorunu da olusmuyor.
+          set -e
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$ARCHIVE_PATH" \
+            -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE=Automatic \
             archive
       - name: 6. Export IPA (automatic signing via API key)
         script: |
-          # KRITIK: Manuel export, App.framework'e provisioning profile
-          # atamaya calisip hata veriyordu (acik Flutter/Xcode hatasi).
-          # Export'u OTOMATIK imzaya cevirip App Store Connect API anahtarini
-          # dogrudan xcodebuild'e veriyoruz; boylece Xcode framework imzasini
-          # kendisi dogru yonetir ve hata olusmaz.
           set -e
-          ARCHIVE_PATH="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive"
-          KEY_FILE="$CM_BUILD_DIR/AuthKey.p8"
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$KEY_FILE"
           xcodebuild -exportArchive \
-            -archivePath "$ARCHIVE_PATH" \
+            -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
             -exportPath "$CM_BUILD_DIR/build/ios/ipa" \
             -exportOptionsPlist ios/ExportOptions.plist \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$KEY_FILE" \
+            -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
     artifacts:
