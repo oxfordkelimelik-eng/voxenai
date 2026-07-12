@@ -42,7 +42,16 @@ workflows:
           # icin acik bir keychain hazirla.
           keychain initialize
           # API anahtarini xcodebuild'in okuyabilecegi .p8 dosyasina yaz.
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$CM_BUILD_DIR/AuthKey.p8"
+          # %b: degisken PEM'i literal "\n" ile tutuyorsa bunlari gercek satir
+          # sonlarina cevirir (aksi halde xcodebuild "invalidPEMDocument" verir).
+          KEY_FILE="$CM_BUILD_DIR/AuthKey.p8"
+          printf '%b\n' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$KEY_FILE"
+          # Anahtari loga sizdirmadan gecerliligini dogrula.
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_FILE"; then
+            echo "HATA: APP_STORE_CONNECT_PRIVATE_KEY gecerli bir .p8 uretmedi."
+            echo "Codemagic entegrasyonunun private key'i ortama sagladigindan emin olun."
+            exit 1
+          fi
       - name: 5. Archive (automatic signing via API key)
         script: |
           # Manuel imza (use-profiles) bu projede Runner hedefine takim/profil
