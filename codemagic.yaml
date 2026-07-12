@@ -51,14 +51,39 @@ workflows:
             --create
           keychain add-certificates
           xcode-project use-profiles
-      - name: 5. Archive & export signed IPA
+      - name: 5. Archive (manual signing)
         script: |
-          # "flutter build ipa" kendi export mantiginda Flutter'in dahili
-          # App.framework'une provisioning profile atamaya calisip hata
-          # veriyordu. Bu yuzden arsiv+export'u Codemagic'in araci yapiyor.
-          xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+          # Arsivleme, use-profiles'in Runner hedefine yazdigi manuel imzayla
+          # yapiliyor — bu asama sorunsuz calisiyor. "flutter build ipa" veya
+          # "xcode-project build-ipa" yerine dogrudan xcodebuild kullaniyoruz
+          # ki export'u ayri ve otomatik imzayla yapabilelim.
+          set -e
+          ARCHIVE_PATH="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive"
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            archive
+      - name: 6. Export IPA (automatic signing via API key)
+        script: |
+          # KRITIK: Manuel export, App.framework'e provisioning profile
+          # atamaya calisip hata veriyordu (acik Flutter/Xcode hatasi).
+          # Export'u OTOMATIK imzaya cevirip App Store Connect API anahtarini
+          # dogrudan xcodebuild'e veriyoruz; boylece Xcode framework imzasini
+          # kendisi dogru yonetir ve hata olusmaz.
+          set -e
+          ARCHIVE_PATH="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive"
+          KEY_FILE="$CM_BUILD_DIR/AuthKey.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$KEY_FILE"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$CM_BUILD_DIR/build/ios/ipa" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_FILE" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID"
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
