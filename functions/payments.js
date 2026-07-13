@@ -1,7 +1,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { google } = require("googleapis");
-const { admin, db } = require("./_shared");
+const { admin, db, bucket } = require("./_shared");
 
 const GOOGLE_SERVICE_ACCOUNT_JSON = defineSecret("GOOGLE_SERVICE_ACCOUNT_JSON");
 const APPLE_ISSUER_ID = defineSecret("APPLE_ISSUER_ID");
@@ -175,7 +175,8 @@ exports.verifyPurchase = onCall(
  * çalışsın diye Admin SDK üzerinden burada yapılır.
  */
 exports.deleteAccount = onCall(
-  { region: "europe-west1", memory: "128MiB", timeoutSeconds: 30 },
+  // Storage SDK (bucket) yuklendigi icin 128MiB yetmiyor (OOM). 256MiB.
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -188,6 +189,17 @@ exports.deleteAccount = onCall(
     }
     // Firestore'daki tüm alt koleksiyonları da temizle.
     await db.recursiveDelete(db.doc(`users/${uid}`));
+    // KVKK/GDPR: Storage'daki tüm fotoğrafları da kalıcı sil (eğitim
+    // selfie'leri + üretilen sonuçlar). recursiveDelete yalnızca Firestore'u
+    // sildiği icin bu adim olmadan fotograflar geride kaliyordu.
+    try {
+      await Promise.all([
+        bucket().deleteFiles({ prefix: `dating_training/${uid}/` }),
+        bucket().deleteFiles({ prefix: `dating_results/${uid}/` }),
+      ]);
+    } catch (e) {
+      console.error("deleteAccount storage silme hatası:", e);
+    }
     return { success: true };
   }
 );
