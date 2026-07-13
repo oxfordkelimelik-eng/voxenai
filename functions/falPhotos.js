@@ -297,9 +297,26 @@ exports.falInferenceWebhook = onRequest(
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
+    // İş bittiyse eğitim selfie'lerini sil (KVKK — aydınlatma metni "işlem
+    // sonrası kullanılmaz" diyor; biyometrik veriyi geride bırakma).
+    if (pendingStyles === 0) {
+      await deleteTrainingPhotos(uid, jobId);
+    }
+
     res.status(200).send("ok");
   }
 );
+
+// Eğitim selfie'lerini Firebase Storage'dan siler. İş sonuçlandığında
+// (başarı ya da kalıcı başarısızlık) çağrılır — biyometrik veriyi
+// gereğinden uzun tutmamak için (KVKK/GDPR).
+async function deleteTrainingPhotos(uid, jobId) {
+  try {
+    await bucket().deleteFiles({ prefix: `dating_training/${uid}/${jobId}/` });
+  } catch (e) {
+    console.error("Eğitim fotoğrafları silinemedi:", e);
+  }
+}
 
 async function markStyleFailed(uid, jobId, styleId, job) {
   const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
@@ -339,6 +356,8 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   });
+  // İş kalıcı olarak başarısız oldu — eğitim selfie'lerini de temizle.
+  await deleteTrainingPhotos(uid, jobId);
 }
 
 /**
