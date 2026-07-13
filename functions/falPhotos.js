@@ -45,8 +45,9 @@ async function uploadReferencePhotos(uid, jobId) {
   if (files.length === 0) {
     throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
   }
-  const urls = [];
-  for (const file of files) {
+  // Paralel indir+yükle — 5 selfie sırayla yüklenince toplam bekleme süresi
+  // gereksiz yere katlanıyordu.
+  return Promise.all(files.map(async (file) => {
     const [buf] = await file.download();
     const uploadResp = await fetch("https://fal.run/storage/upload", {
       method: "POST",
@@ -60,9 +61,8 @@ async function uploadReferencePhotos(uid, jobId) {
       throw new HttpsError("internal", `fal.ai storage yükleme hatası: ${uploadResp.status}`);
     }
     const { url } = await uploadResp.json();
-    urls.push(url);
-  }
-  return urls;
+    return url;
+  }));
 }
 
 /**
@@ -205,19 +205,20 @@ exports.falInferenceWebhook = onRequest(
     }
 
     const images = req.body?.payload?.images || [];
-    const photoUrls = [];
+    let photoUrls = [];
     try {
-      for (let i = 0; i < images.length; i++) {
-        const imgResp = await fetch(images[i].url);
+      // Paralel indir+yükle — seri döngü, fal saniyeler içinde üretse bile
+      // 10 görsel için gereksiz onlarca saniye eklenmesine neden oluyordu.
+      photoUrls = await Promise.all(images.map(async (img, i) => {
+        const imgResp = await fetch(img.url);
         const buf = Buffer.from(await imgResp.arrayBuffer());
         const path = `dating_results/${uid}/${jobId}/${styleId}_${i}.jpg`;
-        const file = bucket().file(path);
-        await file.save(buf, { metadata: { contentType: "image/jpeg" } });
+        await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
         // Herkese açık YAPILMAZ — storage.rules zaten yalnızca sahibine
         // izin veriyor. Client, Firebase Auth token'ıyla `gs://` yolunu
         // FirebaseStorage SDK üzerinden çözüp indirir (bkz. module_flows.dart).
-        photoUrls.push(`gs://${bucket().name}/${path}`);
-      }
+        return `gs://${bucket().name}/${path}`;
+      }));
     } catch (e) {
       console.error("Sonuç görseli kopyalama hatası:", e);
       await markStyleFailed(uid, jobId, styleId, job);
