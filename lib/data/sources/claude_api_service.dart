@@ -60,6 +60,61 @@ class ClaudeApiService {
   }
 
   // ============================================================
+  // DATING FOTOĞRAFI PUANLAMA & SEÇİM
+  // ============================================================
+  /// Verilen fotoğrafları TEK çağrıda AI'ye puanlatır (model fotoları
+  /// birbiriyle karşılaştırıp en iyisini seçebilsin diye). Her foto için
+  /// 0-100 çekicilik/dating-uygunluk skoru + kısa güçlü/zayıf yön döner.
+  /// Sonuç, skora göre AZALAN sıralı gelir (ilk = en iyi kare).
+  Future<List<PhotoScore>> scoreDatingPhotos(List<File> imageFiles) async {
+    if (imageFiles.isEmpty) {
+      throw const ValidationFailure('En az bir fotoğraf gerekli.');
+    }
+    final prompt =
+        'Sen bir dating/profil fotoğrafı uzmanısın. Sana ${imageFiles.length} '
+        'fotoğraf VERİLDİ (1. fotoğraf, 2. fotoğraf ... sırayla). Her fotoğrafı '
+        'bir dating/eşleşme uygulaması profili için DEĞERLENDİR: yüz netliği, '
+        'ışık, kompozisyon, ifade/gülümseme, arka plan, genel çekicilik ve ilk '
+        'izlenim. Kişiyi aşağılamadan, yapıcı ve dürüst ol.\n\n'
+        'YALNIZCA şu formatta geçerli bir JSON DİZİSİ döndür (başka metin yok), '
+        'giriş sırasıyla her fotoğraf için bir nesne:\n'
+        '[{"index":1,"score":0-100 arası tam sayı,'
+        '"strengths":"bu fotoğrafın güçlü yönü (Türkçe, tek cümle)",'
+        '"weaknesses":"geliştirilebilecek yönü (Türkçe, tek cümle)"}]';
+
+    final raw = await _callVision(imageFiles, prompt);
+    final list = _extractJsonArray(raw);
+    final scores = <PhotoScore>[];
+    for (var i = 0; i < imageFiles.length; i++) {
+      // Modelin sırayı koruduğunu varsayıyoruz; eksik/bozuk öğede nötr değer.
+      final item = (i < list.length && list[i] is Map)
+          ? list[i] as Map<String, dynamic>
+          : const <String, dynamic>{};
+      scores.add(PhotoScore(
+        file: imageFiles[i],
+        score: ((item['score'] as num?)?.toInt() ?? 0).clamp(0, 100),
+        strengths: (item['strengths'] as String?)?.trim() ?? '',
+        weaknesses: (item['weaknesses'] as String?)?.trim() ?? '',
+      ));
+    }
+    // En iyi kare önce gelsin (ücretsiz önizleme en iyisini göstersin).
+    scores.sort((a, b) => b.score.compareTo(a.score));
+    return scores;
+  }
+
+  /// Ham metinden ilk JSON DİZİSİNİ ([...]) ayıklayıp çözer.
+  List<dynamic> _extractJsonArray(String rawText) {
+    var jsonStr = rawText.trim();
+    final match = RegExp(r'\[[\s\S]*\]').firstMatch(jsonStr);
+    if (match != null) jsonStr = match.group(0)!;
+    final decoded = jsonDecode(jsonStr);
+    if (decoded is! List) {
+      throw const ServerFailure('AI yanıtı beklenen formatta değil.');
+    }
+    return decoded;
+  }
+
+  // ============================================================
   // VÜCUT ANALİZİ (ön + sağ + sol açı)
   // ============================================================
   Future<BodyAnalysisResult> analyzeBody(
@@ -787,4 +842,19 @@ Türkçe yanıt ver. Yanıtı kısa tut (karakter repliği 1-3 cümle + 1 geri b
         return 'image/jpeg';
     }
   }
+}
+
+/// Bir dating fotoğrafının AI puanlama sonucu.
+class PhotoScore {
+  final File file;
+  final int score; // 0-100
+  final String strengths;
+  final String weaknesses;
+
+  const PhotoScore({
+    required this.file,
+    required this.score,
+    required this.strengths,
+    required this.weaknesses,
+  });
 }

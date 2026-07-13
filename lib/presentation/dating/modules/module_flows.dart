@@ -14,7 +14,9 @@ import 'package:uuid/uuid.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
-import '../../providers/app_providers.dart' show authServiceProvider;
+import '../../../data/sources/claude_api_service.dart' show PhotoScore;
+import '../../providers/app_providers.dart'
+    show authServiceProvider, claudeApiServiceProvider;
 import '../providers/dating_providers.dart';
 import '../widgets/dating_widgets.dart';
 import '../widgets/shared_widgets.dart';
@@ -813,42 +815,85 @@ class PhotoAnalysisFlow extends ConsumerStatefulWidget {
 
 class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   final List<File> _photos = [];
-  int _stage = 0; // 0 giriş, 1 loading, 2 sonuç
+  int _stage = 0; // 0 giriş, 1 loading, 2 sonuç, 3 hata
   int _unlocked = 0; // sonuçta kilitsiz gösterilen analiz sayısı
+  // AI'den dönen gerçek puanlama sonuçları (skora göre azalan sıralı).
+  List<PhotoScore> _scores = [];
+  String? _errorMessage;
 
   Future<void> _run() async {
     if (_photos.isEmpty) return;
-    setState(() => _stage = 1);
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    // İlk sonuç her zaman ücretsiz; kalanı mevcut analiz paketi bakiyesinden
-    // (varsa) karşılandığı kadar açılır.
-    final unlocked = await _unlockWithPack(
-      ref,
-      photo: false,
-      totalCount: _photos.length,
-      photosPerUnit: 1,
-    );
-    if (!mounted) return;
     setState(() {
-      _unlocked = unlocked;
-      _stage = 2;
+      _stage = 1;
+      _errorMessage = null;
     });
+    try {
+      // GERÇEK AI puanlama (Gemini vision, sunucu anahtarıyla proxy üzerinden).
+      final scores =
+          await ref.read(claudeApiServiceProvider).scoreDatingPhotos(_photos);
+      if (!mounted) return;
+      // İlk sonuç her zaman ücretsiz; kalanı mevcut analiz paketi bakiyesinden
+      // (varsa) karşılandığı kadar açılır.
+      final unlocked = await _unlockWithPack(
+        ref,
+        photo: false,
+        totalCount: scores.length,
+        photosPerUnit: 1,
+      );
+      if (!mounted) return;
+      setState(() {
+        _scores = scores;
+        _unlocked = unlocked;
+        _stage = 2;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stage = 3;
+        _errorMessage =
+            'Analiz şu an yapılamadı. Lütfen biraz sonra tekrar dene.';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return ModuleScaffold(
       title: 'Fotoğraf Analizi & Seçimi',
-      body: _stage == 1
-          ? const AiLoadingView(steps: [
-              'Fotoğraflar değerlendiriliyor…',
-              'Çekicilik skoru hesaplanıyor…',
-              'En iyi kare seçiliyor…',
-            ])
-          : _stage == 2
-              ? _result()
-              : _intro(),
+      body: switch (_stage) {
+        1 => const AiLoadingView(steps: [
+            'Fotoğraflar değerlendiriliyor…',
+            'Çekicilik skoru hesaplanıyor…',
+            'En iyi kare seçiliyor…',
+          ]),
+        2 => _result(),
+        3 => _errorView(),
+        _ => _intro(),
+      },
+    );
+  }
+
+  Widget _errorView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: AppColors.error, size: 48),
+            const SizedBox(height: 12),
+            Text(_errorMessage ?? 'Bir şeyler ters gitti.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 15, color: AppColors.textSecondary)),
+            const SizedBox(height: 20),
+            PrimaryButton(
+                label: 'Tekrar Dene',
+                onPressed: () => setState(() => _stage = 0)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -914,7 +959,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   }
 
   Widget _result() {
-    final lockedCount = _photos.length - _unlocked;
+    final lockedCount = _scores.length - _unlocked;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -931,7 +976,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
                   fontSize: 13, color: AppColors.textSecondary)),
         ],
         const SizedBox(height: 12),
-        for (int i = 0; i < _photos.length; i++) _resultRow(i),
+        for (int i = 0; i < _scores.length; i++) _resultRow(i),
         const SizedBox(height: 8),
         if (lockedCount > 0) ...[
           PrimaryButton(
@@ -941,13 +986,14 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
           ),
           const SizedBox(height: 12),
         ],
-        _backendNote(),
       ],
     );
   }
 
   Widget _resultRow(int i) {
     final unlocked = i < _unlocked;
+    final s = _scores[i];
+    final isBest = i == 0; // liste skora göre azalan sıralı — ilk = en iyi
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
@@ -955,19 +1001,19 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-            color: i == 0 ? AppColors.gold : AppColors.borderSubtle),
+            color: isBest ? AppColors.gold : AppColors.borderSubtle),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: unlocked
-                ? Image.file(_photos[i],
-                    width: 64, height: 64, fit: BoxFit.cover)
+                ? Image.file(s.file, width: 64, height: 64, fit: BoxFit.cover)
                 : Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.file(_photos[i],
+                      Image.file(s.file,
                           width: 64, height: 64, fit: BoxFit.cover),
                       BackdropFilter(
                         filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -988,15 +1034,12 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
               children: [
                 Row(
                   children: [
-                    Text(
-                        unlocked
-                            ? 'Skor: ${[92, 84, 78, 71, 65, 60][i % 6]}'
-                            : 'Skor: ••',
+                    Text(unlocked ? 'Skor: ${s.score}' : 'Skor: ••',
                         style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w900,
                             color: AppColors.gold)),
-                    if (i == 0) ...[
+                    if (isBest) ...[
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -1015,16 +1058,19 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
-                    unlocked
-                        ? (i == 0
-                            ? 'Net yüz, iyi ışık — profil kapağı için ideal.'
-                            : 'İyi ama arka plan dağınık; kırpmayı dene.')
-                        : 'Detayları görmek için paketini aç.',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
-                        height: 1.3)),
+                if (unlocked) ...[
+                  if (s.strengths.isNotEmpty)
+                    _fbLine(Icons.add_circle_outline, AppColors.success,
+                        s.strengths),
+                  if (s.weaknesses.isNotEmpty)
+                    _fbLine(Icons.remove_circle_outline, AppColors.gold,
+                        s.weaknesses),
+                ] else
+                  const Text('Detayları görmek için paketini aç.',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                          height: 1.3)),
               ],
             ),
           ),
@@ -1032,6 +1078,24 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
       ),
     );
   }
+
+  Widget _fbLine(IconData icon, Color color, String text) => Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(text,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      height: 1.3)),
+            ),
+          ],
+        ),
+      );
 
   /// Paket satın alma akışını (paywall) açar; dönünce mevcut paket
   /// bakiyesiyle kilitli sonuçları yeniden hesaplar.
@@ -1041,7 +1105,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
     final unlocked = await _unlockWithPack(
       ref,
       photo: false,
-      totalCount: _photos.length,
+      totalCount: _scores.length,
       photosPerUnit: 1,
     );
     if (!mounted) return;
