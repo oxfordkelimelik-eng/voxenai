@@ -8,6 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/constants/app_colors.dart';
@@ -144,6 +145,38 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 5}) async {
   return x == null ? [] : [File(x.path)];
 }
 
+/// AI foto üretimi için seçilen referans selfie'lerini doğrular: her
+/// fotoğrafta TAM OLARAK bir yüz, yeterince büyük/net görünür olmalı.
+/// "Çöp girdi = çöp çıktı" — bulanık, yüzsüz veya çoklu-kişili bir referans
+/// fal.ai'ye gönderilmeden önce burada elenir. Geçemeyen dosyaların
+/// yollarını döner (boşsa hepsi geçti demektir).
+Future<List<String>> _findInvalidReferencePhotos(List<File> files) async {
+  final detector = FaceDetector(
+    options: FaceDetectorOptions(
+      performanceMode: FaceDetectorMode.accurate,
+      // Yüz, kadrajın en az %20'sini kaplamalı — uzaktan/gruplu fotoğrafları
+      // ve arka plandaki tesadüfi yüzleri eler.
+      minFaceSize: 0.2,
+    ),
+  );
+  final invalid = <String>[];
+  try {
+    for (final f in files) {
+      try {
+        final faces =
+            await detector.processImage(InputImage.fromFilePath(f.path));
+        if (faces.length != 1) invalid.add(f.path);
+      } catch (_) {
+        // Dosya okunamadı/işlenemedi — güvenli tarafta kal, geçersiz say.
+        invalid.add(f.path);
+      }
+    }
+  } finally {
+    await detector.close();
+  }
+  return invalid;
+}
+
 // ============================================================
 // 1) AI DATING FOTOĞRAFI — önce stil/mekan seç → paket → üret
 // ============================================================
@@ -160,6 +193,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   final Set<String> _styles = {};
   final List<File> _photos = [];
   String? _errorMessage;
+  bool _validatingPhotos = false; // seçilen fotoğraflarda yüz kontrolü sürüyor
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
@@ -245,12 +279,15 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       setState(() {
         _jobData = data;
         final status = data['status'] as String?;
-        if (status == 'done') {
-          _stage = _AiStage.result;
-        } else if (status == 'failed') {
+        if (status == 'failed') {
           _stage = _AiStage.error;
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
+        } else if (status == 'done' || _resultUrls.isNotEmpty) {
+          // İlk stil hazır olur olmaz sonuç ekranına geç — kalan stiller
+          // arka planda üretilirken kullanıcı beklemeden görmeye başlar
+          // (bkz. _resultStep'teki "devam ediyor" göstergesi).
+          _stage = _AiStage.result;
         }
       });
     });
@@ -598,17 +635,43 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: () async {
-              final files = await _pickImages(multi: true, limit: 5);
-              if (files.isNotEmpty) {
-                setState(() => _photos
-                  ..clear()
-                  ..addAll(files));
-              }
-            },
-            icon: const Icon(Icons.add_photo_alternate_outlined,
-                color: AppColors.gold),
-            label: Text(_photos.isEmpty ? 'Galeriden Seç' : 'Değiştir',
+            onPressed: _validatingPhotos
+                ? null
+                : () async {
+                    final files = await _pickImages(multi: true, limit: 5);
+                    if (files.isEmpty) return;
+                    setState(() => _validatingPhotos = true);
+                    final invalid = await _findInvalidReferencePhotos(files);
+                    if (!mounted) return;
+                    setState(() => _validatingPhotos = false);
+                    if (invalid.isNotEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(invalid.length == files.length
+                            ? 'Hiçbirinde net, tek bir yüz bulunamadı. Lütfen '
+                                'yalnızca kendi net yüzünün göründüğü fotoğraflar seç.'
+                            : '${invalid.length} fotoğrafta net bir yüz '
+                                'bulunamadı (bulanık, yüzsüz ya da birden '
+                                'fazla kişi). Lütfen tekrar seç.'),
+                      ));
+                      return;
+                    }
+                    setState(() => _photos
+                      ..clear()
+                      ..addAll(files));
+                  },
+            icon: _validatingPhotos
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.gold),
+                  )
+                : const Icon(Icons.add_photo_alternate_outlined,
+                    color: AppColors.gold),
+            label: Text(
+                _validatingPhotos
+                    ? 'Yüzler kontrol ediliyor…'
+                    : (_photos.isEmpty ? 'Galeriden Seç' : 'Değiştir'),
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
@@ -635,8 +698,21 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     );
   }
 
+  /// Tamamlanan stil sayısı (Firestore'daki `results.{styleId}.status`
+  /// alanı 'done' veya 'failed' olanlar — hâlâ 'pending' olanlar hariç).
+  int get _completedStyleCount {
+    final results = _jobData?['results'] as Map<String, dynamic>?;
+    if (results == null) return 0;
+    return results.values
+        .cast<Map<String, dynamic>>()
+        .where((r) => r['status'] == 'done' || r['status'] == 'failed')
+        .length;
+  }
+
   Widget _resultStep() {
     final urls = _resultUrls;
+    final stillGenerating = (_jobData?['status'] as String?) == 'generating';
+    final total = _styles.length;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -647,6 +723,24 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary)),
+          if (stillGenerating) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.gold),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                    '$_completedStyleCount/$total stil hazır — kalanlar üretiliyor…',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           GridView.count(
             shrinkWrap: true,

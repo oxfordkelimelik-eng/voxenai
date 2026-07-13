@@ -6,9 +6,16 @@ const { admin, db, bucket } = require("./_shared");
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 // Zero-shot referans-görsel düzenleme modeli — kullanıcı başına eğitim YOK.
-// 5 selfie doğrudan referans olarak verilir, ~10-20 sn içinde sonuç döner.
+// 5 selfie doğrudan referans olarak verilir, saniyeler içinde sonuç döner.
 // (Eskiden: flux-lora-fast-training + flux-lora, ~15-30 dk + ~$2/kullanıcı.)
-const EDIT_MODEL = "fal-ai/bytedance/seedream/v5/lite/edit";
+//
+// Nano Banana 2, kimlik/yüz sadakati konusunda Seedream Lite'tan belirgin
+// şekilde güçlü (kullanıcı ödeme yapıyor — maliyetten çok kalite öncelikli).
+// $0.08/görsel, ~$0.80/stil (10 foto).
+const EDIT_MODEL = "fal-ai/nano-banana-2/edit";
+// 1 = en katı, 6 = en gevşek (varsayılan 4). Kullanıcı selfie'si işleyen
+// bir uygulamada varsayılandan daha katı moderasyon tercih edildi.
+const SAFETY_TOLERANCE = "2";
 
 // Bu fonksiyonların gerçek public URL'i deploy sonrası
 // `firebase functions:list` ile öğrenilip fal.ai'ye webhook_url olarak
@@ -62,6 +69,20 @@ async function uploadReferencePhotos(uid, jobId) {
     }
     const { url } = await uploadResp.json();
     return url;
+  }));
+}
+
+/**
+ * Referans selfie'lerini (henüz silinmemişse) Storage'dan buffer olarak
+ * okur — kalite kapısının kaynak kimlik vektörünü hesaplaması için.
+ * Bulunamazsa boş liste döner (kalite kapısı bu durumda devre dışı kalır).
+ */
+async function downloadTrainingPhotoBuffers(uid, jobId) {
+  const prefix = `dating_training/${uid}/${jobId}/`;
+  const [files] = await bucket().getFiles({ prefix });
+  return Promise.all(files.map(async (file) => {
+    const [buf] = await file.download();
+    return buf;
   }));
 }
 
@@ -151,7 +172,10 @@ exports.startPhotoGeneration = onCall(
             prompt: STYLE_PROMPTS[styleId],
             image_urls: refUrls,
             num_images: 10, // DatingConfig.photosPerSet
-            image_size: "portrait_4_3",
+            aspect_ratio: "3:4", // portrait
+            resolution: "1K",
+            output_format: "jpeg", // Storage'a "image/jpeg" olarak yazıyoruz
+            safety_tolerance: SAFETY_TOLERANCE,
           },
           webhookUrl
         );
@@ -175,7 +199,9 @@ exports.startPhotoGeneration = onCall(
  * bağımlı kalmamak için) ve iş dokümanını günceller.
  */
 exports.falInferenceWebhook = onRequest(
-  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 120 },
+  // Yüz-benzerliği kalite kapısı (tfjs-wasm + face-api modelleri) belirgin
+  // ek bellek/süre istiyor — 256MiB/120s bu iş yükü için yetersizdi.
+  { region: "europe-west1", memory: "1GiB", timeoutSeconds: 180 },
   async (req, res) => {
     const uid = req.query.uid;
     const jobId = req.query.jobId;
@@ -205,13 +231,42 @@ exports.falInferenceWebhook = onRequest(
     }
 
     const images = req.body?.payload?.images || [];
-    let photoUrls = [];
+    let downloaded = [];
     try {
-      // Paralel indir+yükle — seri döngü, fal saniyeler içinde üretse bile
+      // Paralel indir — seri döngü, fal saniyeler içinde üretse bile
       // 10 görsel için gereksiz onlarca saniye eklenmesine neden oluyordu.
-      photoUrls = await Promise.all(images.map(async (img, i) => {
+      downloaded = await Promise.all(images.map(async (img, i) => {
         const imgResp = await fetch(img.url);
         const buf = Buffer.from(await imgResp.arrayBuffer());
+        return { i, buf };
+      }));
+    } catch (e) {
+      console.error("Sonuç görseli indirme hatası:", e);
+      await markStyleFailed(uid, jobId, styleId, job);
+      res.status(200).send("ok");
+      return;
+    }
+
+    // Kalite kapısı: üretilen görselleri kaynak selfie'lerle karşılaştırıp
+    // düşük yüz-benzerlikli olanları ele. Bu adım HERHANGİ bir nedenle
+    // başarısız olursa (model/altyapı sorunu) filtresiz devam edilir —
+    // ödeme akışı bu katmandaki bir hataya bağımlı değildir.
+    let toSave = downloaded;
+    try {
+      const { averageDescriptor, filterByFaceMatch } = require("./faceQuality");
+      const refBuffers = await downloadTrainingPhotoBuffers(uid, jobId);
+      const refDescriptor = await averageDescriptor(refBuffers);
+      if (refDescriptor) {
+        toSave = await filterByFaceMatch(downloaded, refDescriptor, (d) => d.buf);
+      }
+    } catch (e) {
+      console.error("Kalite kapısı hatası (filtresiz devam ediliyor):", e);
+    }
+
+    let photoUrls = [];
+    try {
+      // Yalnızca kalite kapısını geçen görselleri Storage'a yaz.
+      photoUrls = await Promise.all(toSave.map(async ({ i, buf }) => {
         const path = `dating_results/${uid}/${jobId}/${styleId}_${i}.jpg`;
         await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
         // Herkese açık YAPILMAZ — storage.rules zaten yalnızca sahibine
@@ -220,7 +275,7 @@ exports.falInferenceWebhook = onRequest(
         return `gs://${bucket().name}/${path}`;
       }));
     } catch (e) {
-      console.error("Sonuç görseli kopyalama hatası:", e);
+      console.error("Sonuç görseli kaydetme hatası:", e);
       await markStyleFailed(uid, jobId, styleId, job);
       res.status(200).send("ok");
       return;
