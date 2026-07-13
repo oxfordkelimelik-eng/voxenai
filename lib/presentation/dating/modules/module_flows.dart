@@ -165,12 +165,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
   Map<String, dynamic>? _jobData;
 
-  // Adım adım yükleme mesajları (gerçek çok-dakikalık süreç için).
+  // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
+  // sonuçlanır (eğitim aşaması yok).
   static const _uploadingSteps = ['Fotoğrafların yükleniyor…'];
-  static const _trainingSteps = [
-    'Yapay zeka yüzünü öğreniyor… (1-3 dk)',
-  ];
   static const _generatingSteps = [
+    'Yüzün referans alınıyor…',
     'Seçtiğin stiller uygulanıyor…',
     'Son kontroller…',
   ];
@@ -193,7 +192,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   }
 
   /// 5 fotoğrafı Firebase Storage'a yükler, sunucu tarafında bakiye
-  /// kontrolü + fal.ai LoRA eğitimi/üretimini başlatan `startPhotoGeneration`
+  /// kontrolü + fal.ai zero-shot üretimini başlatan `startPhotoGeneration`
   /// Cloud Function'ını çağırır, sonra iş dokümanını (genJobs/{jobId})
   /// gerçek zamanlı dinlemeye başlar.
   Future<void> _generate() async {
@@ -261,9 +260,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   List<String> get _loadingSteps {
     final status = _jobData?['status'] as String?;
     switch (status) {
-      case 'training':
-      case 'training_done':
-        return _trainingSteps;
       case 'generating':
         return _generatingSteps;
       default:

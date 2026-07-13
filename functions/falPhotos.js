@@ -5,8 +5,10 @@ const { admin, db, bucket } = require("./_shared");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-const TRAINING_MODEL = "fal-ai/flux-lora-fast-training";
-const INFERENCE_MODEL = "fal-ai/flux-lora";
+// Zero-shot referans-görsel düzenleme modeli — kullanıcı başına eğitim YOK.
+// 5 selfie doğrudan referans olarak verilir, ~10-20 sn içinde sonuç döner.
+// (Eskiden: flux-lora-fast-training + flux-lora, ~15-30 dk + ~$2/kullanıcı.)
+const EDIT_MODEL = "fal-ai/bytedance/seedream/v5/lite/edit";
 
 // Bu fonksiyonların gerçek public URL'i deploy sonrası
 // `firebase functions:list` ile öğrenilip fal.ai'ye webhook_url olarak
@@ -31,40 +33,40 @@ function styleUnitsFor(styleCount) {
 }
 
 /**
- * 5 eğitim fotoğrafını Storage'dan okuyup fal.ai'nin kabul ettiği bir ZIP
- * haline getirir, fal.ai storage'a yükler ve indirilebilir URL döner.
+ * Kullanıcının Storage'a yüklediği referans selfie'lerini okuyup fal.ai'nin
+ * kendi storage'ına yükler (fal.ai edit modelleri yalnızca herkese açık/fal
+ * tarafından erişilebilir URL kabul eder — Firebase Storage dosyalarımız
+ * özel olduğu için doğrudan gs:// veremeyiz). Dönen URL'ler edit isteğinde
+ * `image_urls` olarak referans verilir; eğitim YAPILMAZ.
  */
-async function buildTrainingZipUrl(uid, jobId) {
-  const AdmZip = require("adm-zip");
-  const zip = new AdmZip();
+async function uploadReferencePhotos(uid, jobId) {
   const prefix = `dating_training/${uid}/${jobId}/`;
   const [files] = await bucket().getFiles({ prefix });
   if (files.length === 0) {
-    throw new HttpsError("failed-precondition", "Eğitim fotoğrafları bulunamadı.");
+    throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
   }
+  const urls = [];
   for (const file of files) {
     const [buf] = await file.download();
-    zip.addFile(file.name.split("/").pop(), buf);
+    const uploadResp = await fetch("https://fal.run/storage/upload", {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${FAL_KEY.value()}`,
+        "content-type": "image/jpeg",
+      },
+      body: buf,
+    });
+    if (!uploadResp.ok) {
+      throw new HttpsError("internal", `fal.ai storage yükleme hatası: ${uploadResp.status}`);
+    }
+    const { url } = await uploadResp.json();
+    urls.push(url);
   }
-  const zipBuffer = zip.toBuffer();
-
-  const uploadResp = await fetch("https://fal.run/storage/upload", {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${FAL_KEY.value()}`,
-      "content-type": "application/zip",
-    },
-    body: zipBuffer,
-  });
-  if (!uploadResp.ok) {
-    throw new HttpsError("internal", `fal.ai storage yükleme hatası: ${uploadResp.status}`);
-  }
-  const { url } = await uploadResp.json();
-  return url;
+  return urls;
 }
 
 /**
- * fal.ai queue API'sine bir iş gönderir (training veya inference).
+ * fal.ai queue API'sine bir görsel düzenleme (edit) işi gönderir.
  */
 async function submitFalJob(model, input, webhookUrl) {
   const resp = await fetch(`${FAL_QUEUE_BASE}/${model}?fal_webhook=${encodeURIComponent(webhookUrl)}`, {
@@ -83,9 +85,10 @@ async function submitFalJob(model, input, webhookUrl) {
 }
 
 /**
- * Adım 1: kullanıcı 5 eğitim fotoğrafını Storage'a yükledikten SONRA bu
- * fonksiyonu çağırır. Sunucu tarafında bakiye kontrolü + düşme yapılır
- * (client asla bunu atlayamaz), sonra fal.ai LoRA eğitimi başlatılır.
+ * Kullanıcı 5 referans selfie'sini Storage'a yükledikten SONRA bu fonksiyonu
+ * çağırır. Sunucu tarafında bakiye kontrolü + düşme yapılır (client asla
+ * bunu atlayamaz), sonra her seçilen stil için doğrudan fal.ai referans-
+ * görsel düzenleme isteği (EDIT_MODEL) gönderilir — eğitim aşaması YOK.
  *
  * data: { styles: string[], jobId: string }
  * dönüş: { jobId: string }
@@ -126,8 +129,6 @@ exports.startPhotoGeneration = onCall(
         styles,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        falTrainingRequestId: null,
-        falLoraUrl: null,
         pendingStyles: styles.length,
         results: {},
         errorMessage: null,
@@ -136,85 +137,19 @@ exports.startPhotoGeneration = onCall(
     });
 
     try {
-      const zipUrl = await buildTrainingZipUrl(uid, jobId);
-      const webhookUrl = `${FUNCTIONS_BASE}/falTrainingWebhook?uid=${uid}&jobId=${jobId}`;
-      const falJob = await submitFalJob(
-        TRAINING_MODEL,
-        { images_data_url: zipUrl, steps: 1000 },
-        webhookUrl
-      );
+      const refUrls = await uploadReferencePhotos(uid, jobId);
       await jobRef.set({
-        status: "training",
-        falTrainingRequestId: falJob.request_id,
+        status: "generating",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
-    } catch (e) {
-      console.error("startPhotoGeneration hata:", e);
-      await refundAndFail(uid, jobId, unitsNeeded, "Eğitim başlatılamadı.");
-      throw e instanceof HttpsError ? e : new HttpsError("internal", "Üretim başlatılamadı.");
-    }
 
-    return { jobId };
-  }
-);
-
-/**
- * fal.ai eğitim işi tamamlanınca (webhook) çağrılır. Beklenen istek
- * gövdesi fal.ai queue webhook formatı: { status, payload, request_id }.
- */
-exports.falTrainingWebhook = onRequest(
-  { secrets: [FAL_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
-  async (req, res) => {
-    const uid = req.query.uid;
-    const jobId = req.query.jobId;
-    if (!uid || !jobId) {
-      res.status(400).send("uid/jobId eksik");
-      return;
-    }
-    const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
-    const jobSnap = await jobRef.get();
-    if (!jobSnap.exists) {
-      res.status(404).send("job bulunamadı");
-      return;
-    }
-    const job = jobSnap.data();
-
-    // Anti-spoofing: fal.ai webhook'larında HMAC imzası yok — bu yüzden
-    // yalnızca bizim daha önce kaydettiğimiz request_id ile eşleşen
-    // çağrıları kabul ediyoruz.
-    const requestId = req.body?.request_id;
-    if (!requestId || requestId !== job.falTrainingRequestId) {
-      res.status(403).send("request_id uyuşmuyor");
-      return;
-    }
-
-    if (req.body?.status !== "OK" && req.body?.status !== "COMPLETED") {
-      await refundAndFail(uid, jobId, job.packUnitsCharged, "Eğitim başarısız oldu.");
-      res.status(200).send("ok");
-      return;
-    }
-
-    const loraUrl = req.body?.payload?.diffusers_lora_file?.url;
-    if (!loraUrl) {
-      await refundAndFail(uid, jobId, job.packUnitsCharged, "Eğitim çıktısı geçersiz.");
-      res.status(200).send("ok");
-      return;
-    }
-
-    await jobRef.set({
-      status: "generating",
-      falLoraUrl: loraUrl,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    try {
-      for (const styleId of job.styles) {
+      for (const styleId of styles) {
         const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}`;
         const falJob = await submitFalJob(
-          INFERENCE_MODEL,
+          EDIT_MODEL,
           {
             prompt: STYLE_PROMPTS[styleId],
-            loras: [{ path: loraUrl }],
+            image_urls: refUrls,
             num_images: 10, // DatingConfig.photosPerSet
             image_size: "portrait_4_3",
           },
@@ -225,11 +160,12 @@ exports.falTrainingWebhook = onRequest(
         }, { merge: true });
       }
     } catch (e) {
-      console.error("Inference gönderim hatası:", e);
-      await refundAndFail(uid, jobId, job.packUnitsCharged, "Üretim başlatılamadı.");
+      console.error("startPhotoGeneration hata:", e);
+      await refundAndFail(uid, jobId, unitsNeeded, "Üretim başlatılamadı.");
+      throw e instanceof HttpsError ? e : new HttpsError("internal", "Üretim başlatılamadı.");
     }
 
-    res.status(200).send("ok");
+    return { jobId };
   }
 );
 
@@ -362,18 +298,20 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
 
 /**
  * fal.ai webhook teslimatı güvenilmez olabilir (ağ sorunu, soğuk başlangıç
- * vb.) — bu zamanlanmış fonksiyon, uzun süredir 'training'/'generating'
- * durumunda takılı kalan işleri bulup başarısız sayar ve iade eder. Gerçek
- * bir "durumu fal.ai'den tekrar sorgula" adımı, fal.ai'nin status_url'i
- * job dokümanına eklendikten sonra genişletilebilir.
+ * vb.) — bu zamanlanmış fonksiyon, uzun süredir 'generating' durumunda
+ * takılı kalan işleri bulup başarısız sayar ve iade eder. Zero-shot edit
+ * modeli saniyeler içinde sonuçlanır (eski LoRA eğitimindeki gibi dakikalar
+ * sürmez), bu yüzden eşik kısa tutuldu. Gerçek bir "durumu fal.ai'den
+ * tekrar sorgula" adımı, fal.ai'nin status_url'i job dokümanına
+ * eklendikten sonra genişletilebilir.
  */
 exports.cleanupStuckGenJobs = onSchedule(
-  { schedule: "every 10 minutes", region: "europe-west1", timeoutSeconds: 120 },
+  { schedule: "every 5 minutes", region: "europe-west1", timeoutSeconds: 120 },
   async () => {
-    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 15 * 60 * 1000);
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 5 * 60 * 1000);
     const stuck = await db
       .collectionGroup("genJobs")
-      .where("status", "in", ["uploading", "training", "generating"])
+      .where("status", "in", ["uploading", "generating"])
       .where("updatedAt", "<", cutoff)
       .get();
 
