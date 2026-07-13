@@ -98,25 +98,31 @@ async function averageDescriptor(buffers) {
 }
 
 /**
- * [{ buf, ... }] listesini kaynak kimlik vektörüyle karşılaştırıp yalnızca
- * eşiği geçenleri döner. Hiçbir öğe eşiği geçmezse (nadir — üretim
- * gerçekten sapmışsa), boş sonuç göstermemek için TÜM listeyi olduğu gibi
- * döner (kullanıcı ödediği paketten hiç foto alamamaktansa, düşük
- * benzerlikli birkaç foto alması tercih edilir).
+ * [{ buf, ... }] listesini kaynak kimlik vektörüyle karşılaştırıp YALNIZCA
+ * eşiği geçenleri döner (geçen yoksa boş dizi). Fallback/yeniden-üretim
+ * kararı çağırana bırakılır (bkz. falInferenceWebhook) — böylece gerçek
+ * geçen sayısı bilinir ve gerekirse stil yeniden üretilebilir.
+ *
+ * referenceDescriptor düz bir sayı dizisi de olabilir (Firestore'dan okunmuş);
+ * gerekirse Float32Array'e çevrilir.
  */
 async function filterByFaceMatch(items, referenceDescriptor, getBuf) {
   const faceapi = await ensureModelsLoaded();
+  const ref = referenceDescriptor instanceof Float32Array
+    ? referenceDescriptor
+    : Float32Array.from(referenceDescriptor);
   const scored = await Promise.all(items.map(async (item) => {
     try {
       const d = await descriptorFromBuffer(getBuf(item));
       if (!d) return { item, distance: null };
-      return { item, distance: faceapi.euclideanDistance(referenceDescriptor, d) };
+      return { item, distance: faceapi.euclideanDistance(ref, d) };
     } catch {
       return { item, distance: null };
     }
   }));
-  const passed = scored.filter((s) => s.distance !== null && s.distance < FACE_MATCH_THRESHOLD);
-  return passed.length > 0 ? passed.map((s) => s.item) : items;
+  return scored
+    .filter((s) => s.distance !== null && s.distance < FACE_MATCH_THRESHOLD)
+    .map((s) => s.item);
 }
 
 module.exports = { averageDescriptor, filterByFaceMatch, FACE_MATCH_THRESHOLD };

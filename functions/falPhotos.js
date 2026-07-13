@@ -7,24 +7,24 @@ const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 // Zero-shot referans-görsel düzenleme modeli — kullanıcı başına eğitim YOK.
 // 5 selfie doğrudan referans olarak verilir, saniyeler içinde sonuç döner.
-// (Eskiden: flux-lora-fast-training + flux-lora, ~15-30 dk + ~$2/kullanıcı.)
-//
-// Nano Banana 2, kimlik/yüz sadakati konusunda Seedream Lite'tan belirgin
-// şekilde güçlü (kullanıcı ödeme yapıyor — maliyetten çok kalite öncelikli).
-// $0.08/görsel, ~$0.80/stil (10 foto).
+// Nano Banana 2, kimlik/yüz sadakati konusunda güçlü (kalite öncelikli).
 const EDIT_MODEL = "fal-ai/nano-banana-2/edit";
 // 1 = en katı, 6 = en gevşek (varsayılan 4). Kullanıcı selfie'si işleyen
 // bir uygulamada varsayılandan daha katı moderasyon tercih edildi.
 const SAFETY_TOLERANCE = "2";
 
-// Bu fonksiyonların gerçek public URL'i deploy sonrası
-// `firebase functions:list` ile öğrenilip fal.ai'ye webhook_url olarak
-// verilir. Region + proje id'sinden tahmini URL:
+const NUM_IMAGES = 10; // stil başına üretilen foto (DatingConfig.photosPerSet)
+// Kalite kapısından bu sayının altında foto geçerse stil bir kez otomatik
+// yeniden üretilir (kimlik sapması olan üretimleri kurtarmak için).
+const MIN_PASS_FOR_STYLE = 4;
+const MAX_STYLE_RETRIES = 1;
+
+// Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
 
-// PhotoStyle.id -> fal.ai prompt açıklaması. lib/core/constants/dating_constants.dart
+// PhotoStyle.id -> sahne/stil betimlemesi. lib/core/constants/dating_constants.dart
 // PhotoStyle.coreStyles ile EL İLE senkron tutulmalı.
-const STYLE_PROMPTS = {
+const STYLE_SCENES = {
   elegance: "an elegant, charismatic, well-groomed portrait, sharp studio lighting, upscale attire",
   athletic: "an athletic, dynamic, fit portrait, gym or outdoor sport setting, confident pose",
   traveller: "a world traveller portrait, scenic landmark background, adventurous casual outfit",
@@ -34,17 +34,28 @@ const STYLE_PROMPTS = {
   car: "a prestige portrait next to a luxury car, confident stance, urban background",
 };
 
+// Kimlik-koruma yönergesiyle sarılmış tam prompt. Referans görsellerdeki
+// KİŞİNİN yüz kimliğini/hatlarını koruması açıkça istenir — zero-shot edit
+// modellerinde yüz benzerliğini ölçülebilir şekilde artırır.
+function buildPrompt(styleId) {
+  const scene = STYLE_SCENES[styleId];
+  return (
+    "Generate a photorealistic photo of the SAME person shown in the reference " +
+    "images. Preserve their exact facial identity, bone structure, and unique " +
+    "features so they remain clearly recognizable. Do not change their face, " +
+    "age, or ethnicity. Scene and style: " + scene + "."
+  );
+}
+
 function styleUnitsFor(styleCount) {
-  // Bakiye "stil/set" cinsinden tutulur — bkz. DatingConfig.photosPerSet.
-  return styleCount;
+  return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
 }
 
 /**
- * Kullanıcının Storage'a yüklediği referans selfie'lerini okuyup fal.ai'nin
- * kendi storage'ına yükler (fal.ai edit modelleri yalnızca herkese açık/fal
- * tarafından erişilebilir URL kabul eder — Firebase Storage dosyalarımız
- * özel olduğu için doğrudan gs:// veremeyiz). Dönen URL'ler edit isteğinde
- * `image_urls` olarak referans verilir; eğitim YAPILMAZ.
+ * Referans selfie'lerini Storage'dan okur, fal.ai storage'ına yükler (edit
+ * modelleri yalnızca fal'ın erişebileceği URL kabul eder) VE aynı buffer'ları
+ * kalite kapısı için geri döner (ikinci indirmeye gerek kalmasın).
+ * Döner: { urls: string[], buffers: Buffer[] }
  */
 async function uploadReferencePhotos(uid, jobId) {
   const prefix = `dating_training/${uid}/${jobId}/`;
@@ -52,9 +63,7 @@ async function uploadReferencePhotos(uid, jobId) {
   if (files.length === 0) {
     throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
   }
-  // Paralel indir+yükle — 5 selfie sırayla yüklenince toplam bekleme süresi
-  // gereksiz yere katlanıyordu.
-  return Promise.all(files.map(async (file) => {
+  const results = await Promise.all(files.map(async (file) => {
     const [buf] = await file.download();
     const uploadResp = await fetch("https://fal.run/storage/upload", {
       method: "POST",
@@ -68,54 +77,57 @@ async function uploadReferencePhotos(uid, jobId) {
       throw new HttpsError("internal", `fal.ai storage yükleme hatası: ${uploadResp.status}`);
     }
     const { url } = await uploadResp.json();
-    return url;
+    return { url, buf };
   }));
-}
-
-/**
- * Referans selfie'lerini (henüz silinmemişse) Storage'dan buffer olarak
- * okur — kalite kapısının kaynak kimlik vektörünü hesaplaması için.
- * Bulunamazsa boş liste döner (kalite kapısı bu durumda devre dışı kalır).
- */
-async function downloadTrainingPhotoBuffers(uid, jobId) {
-  const prefix = `dating_training/${uid}/${jobId}/`;
-  const [files] = await bucket().getFiles({ prefix });
-  return Promise.all(files.map(async (file) => {
-    const [buf] = await file.download();
-    return buf;
-  }));
+  return { urls: results.map((r) => r.url), buffers: results.map((r) => r.buf) };
 }
 
 /**
  * fal.ai queue API'sine bir görsel düzenleme (edit) işi gönderir.
  */
-async function submitFalJob(model, input, webhookUrl) {
-  const resp = await fetch(`${FAL_QUEUE_BASE}/${model}?fal_webhook=${encodeURIComponent(webhookUrl)}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${FAL_KEY.value()}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(input),
-  });
+async function submitStyleJob(uid, jobId, styleId, imageUrls) {
+  const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}`;
+  const input = {
+    prompt: buildPrompt(styleId),
+    image_urls: imageUrls,
+    num_images: NUM_IMAGES,
+    aspect_ratio: "3:4", // portrait
+    resolution: "2K", // dating fotoğrafı — kalite öncelikli
+    output_format: "jpeg",
+    safety_tolerance: SAFETY_TOLERANCE,
+  };
+  const resp = await fetch(
+    `${FAL_QUEUE_BASE}/${EDIT_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${FAL_KEY.value()}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    }
+  );
   if (!resp.ok) {
     const txt = await resp.text();
     throw new HttpsError("internal", `fal.ai iş gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
   }
-  return await resp.json(); // { request_id, status_url, response_url, ... }
+  return await resp.json(); // { request_id, ... }
 }
 
 /**
- * Kullanıcı 5 referans selfie'sini Storage'a yükledikten SONRA bu fonksiyonu
- * çağırır. Sunucu tarafında bakiye kontrolü + düşme yapılır (client asla
- * bunu atlayamaz), sonra her seçilen stil için doğrudan fal.ai referans-
- * görsel düzenleme isteği (EDIT_MODEL) gönderilir — eğitim aşaması YOK.
+ * Kullanıcı 5 referans selfie'sini Storage'a yükledikten SONRA çağrılır.
+ * Bakiye kontrolü + düşme (client atlayamaz), referansları fal'a yükleme,
+ * kalite kapısı için kaynak kimlik vektörünü BİR KEZ hesaplama, ve her
+ * stil için edit işi gönderme. Referans selfie'ler bu noktadan sonra
+ * gerekmediği için hemen silinir (KVKK — biyometrik veriyi geride bırakma).
  *
- * data: { styles: string[], jobId: string }
- * dönüş: { jobId: string }
+ * data: { styles: string[], jobId: string } -> { jobId }
  */
 exports.startPhotoGeneration = onCall(
-  { secrets: [FAL_KEY], region: "europe-west1", memory: "512MiB", timeoutSeconds: 120 },
+  // Referans descriptor'ı burada hesaplandığı için face-api modelleri yükleniyor
+  // — 1GiB gerekiyor. (Kalite kapısı katmanı fail-safe; hata olursa filtresiz
+  // devam edilir, üretim akışı bloklanmaz.)
+  { secrets: [FAL_KEY], region: "europe-west1", memory: "1GiB", timeoutSeconds: 180 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -125,7 +137,7 @@ exports.startPhotoGeneration = onCall(
     if (!Array.isArray(styles) || styles.length === 0 || !jobId) {
       throw new HttpsError("invalid-argument", "styles ve jobId zorunlu.");
     }
-    const invalidStyle = styles.find((s) => !STYLE_PROMPTS[s]);
+    const invalidStyle = styles.find((s) => !STYLE_SCENES[s]);
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
     }
@@ -158,29 +170,34 @@ exports.startPhotoGeneration = onCall(
     });
 
     try {
-      const refUrls = await uploadReferencePhotos(uid, jobId);
+      const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
+
+      // Kalite kapısı için kaynak kimlik vektörünü BİR KEZ hesapla (fail-safe).
+      let refDescriptor = null;
+      try {
+        const { averageDescriptor } = require("./faceQuality");
+        const desc = await averageDescriptor(refBuffers);
+        if (desc) refDescriptor = Array.from(desc); // Firestore için düz dizi
+      } catch (e) {
+        console.error("Referans descriptor hesaplanamadı (kalite kapısı devre dışı):", e);
+      }
+
       await jobRef.set({
         status: "generating",
+        falRefUrls: refUrls,
+        refDescriptor, // null olabilir — o durumda kalite kapısı atlanır
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
 
+      // Referans selfie'leri artık gerekmiyor (fal kopyası + descriptor var).
+      await deleteTrainingPhotos(uid, jobId);
+
       for (const styleId of styles) {
-        const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}`;
-        const falJob = await submitFalJob(
-          EDIT_MODEL,
-          {
-            prompt: STYLE_PROMPTS[styleId],
-            image_urls: refUrls,
-            num_images: 10, // DatingConfig.photosPerSet
-            aspect_ratio: "3:4", // portrait
-            resolution: "1K",
-            output_format: "jpeg", // Storage'a "image/jpeg" olarak yazıyoruz
-            safety_tolerance: SAFETY_TOLERANCE,
-          },
-          webhookUrl
-        );
+        const falJob = await submitStyleJob(uid, jobId, styleId, refUrls);
+        // Nokta içeren anahtar yerine iç içe nesne — set(merge) bunu derin
+        // birleştirir; "results.styleId" düz alan adı olarak yorumlanmaz.
         await jobRef.set({
-          [`results.${styleId}`]: { requestId: falJob.request_id, photoUrls: [], status: "pending" },
+          results: { [styleId]: { requestId: falJob.request_id, photoUrls: [], status: "pending", retries: 0 } },
         }, { merge: true });
       }
     } catch (e) {
@@ -194,14 +211,19 @@ exports.startPhotoGeneration = onCall(
 );
 
 /**
- * fal.ai bir stilin inference işi tamamlanınca (webhook) çağrılır. Çıktıyı
- * indirip Firebase Storage'a kalıcı olarak kopyalar (fal.ai CDN URL ömrüne
- * bağımlı kalmamak için) ve iş dokümanını günceller.
+ * fal.ai bir stilin işi tamamlanınca (webhook) çağrılır. Çıktıyı indirir,
+ * kalite kapısından geçirir, geçenleri Storage'a yazar ve iş dokümanını
+ * (atomik + idempotent) günceller. Kimlik benzerliği düşükse stili bir kez
+ * otomatik yeniden üretir.
  */
 exports.falInferenceWebhook = onRequest(
-  // Yüz-benzerliği kalite kapısı (tfjs-wasm + face-api modelleri) belirgin
-  // ek bellek/süre istiyor — 256MiB/120s bu iş yükü için yetersizdi.
-  { region: "europe-west1", memory: "1GiB", timeoutSeconds: 180 },
+  {
+    secrets: [FAL_KEY], // otomatik yeniden üretim fal'a yeni iş gönderiyor
+    region: "europe-west1",
+    memory: "1GiB", // tfjs-wasm + face-api modelleri
+    timeoutSeconds: 180,
+    minInstances: 1, // soğuk başlangıçta model yeniden yüklemesini önle
+  },
   async (req, res) => {
     const uid = req.query.uid;
     const jobId = req.query.jobId;
@@ -217,24 +239,32 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
     const job = jobSnap.data();
-    const expected = job.results?.[styleId]?.requestId;
+    const styleResult = job.results?.[styleId];
+
+    // request_id doğrulaması (anti-spoofing).
     const requestId = req.body?.request_id;
-    if (!requestId || requestId !== expected) {
+    if (!requestId || requestId !== styleResult?.requestId) {
       res.status(403).send("request_id uyuşmuyor");
       return;
     }
 
+    // Idempotency: fal webhook'u aynı çağrıyı birden çok kez gönderebilir.
+    // Bu stil zaten sonuçlandıysa hiçbir şey yapma.
+    if (styleResult.status === "done" || styleResult.status === "failed") {
+      res.status(200).send("zaten işlendi");
+      return;
+    }
+
     if (req.body?.status !== "OK" && req.body?.status !== "COMPLETED") {
-      await markStyleFailed(uid, jobId, styleId, job);
+      await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
     }
 
+    // Çıktıları paralel indir.
     const images = req.body?.payload?.images || [];
     let downloaded = [];
     try {
-      // Paralel indir — seri döngü, fal saniyeler içinde üretse bile
-      // 10 görsel için gereksiz onlarca saniye eklenmesine neden oluyordu.
       downloaded = await Promise.all(images.map(async (img, i) => {
         const imgResp = await fetch(img.url);
         const buf = Buffer.from(await imgResp.arrayBuffer());
@@ -242,66 +272,127 @@ exports.falInferenceWebhook = onRequest(
       }));
     } catch (e) {
       console.error("Sonuç görseli indirme hatası:", e);
-      await markStyleFailed(uid, jobId, styleId, job);
+      await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
     }
 
-    // Kalite kapısı: üretilen görselleri kaynak selfie'lerle karşılaştırıp
-    // düşük yüz-benzerlikli olanları ele. Bu adım HERHANGİ bir nedenle
-    // başarısız olursa (model/altyapı sorunu) filtresiz devam edilir —
-    // ödeme akışı bu katmandaki bir hataya bağımlı değildir.
-    let toSave = downloaded;
+    // Kalite kapısı: önbellekteki kaynak kimlik vektörüyle karşılaştır
+    // (referansları YENİDEN indirip embed ETMEZ — bir kez startPhotoGeneration'da
+    // hesaplandı). Herhangi bir hata olursa filtresiz devam (fail-safe).
+    let passed = downloaded;
     try {
-      const { averageDescriptor, filterByFaceMatch } = require("./faceQuality");
-      const refBuffers = await downloadTrainingPhotoBuffers(uid, jobId);
-      const refDescriptor = await averageDescriptor(refBuffers);
-      if (refDescriptor) {
-        toSave = await filterByFaceMatch(downloaded, refDescriptor, (d) => d.buf);
+      if (job.refDescriptor) {
+        const { filterByFaceMatch } = require("./faceQuality");
+        passed = await filterByFaceMatch(downloaded, job.refDescriptor, (d) => d.buf);
       }
     } catch (e) {
       console.error("Kalite kapısı hatası (filtresiz devam ediliyor):", e);
+      passed = downloaded;
     }
 
+    // Otomatik yeniden üretim: çok az foto kimlik eşiğini geçtiyse ve henüz
+    // yeniden üretim hakkı varsa, bu stili yeni bir edit işiyle tekrar dene.
+    const retries = styleResult.retries || 0;
+    if (
+      job.refDescriptor &&
+      passed.length < MIN_PASS_FOR_STYLE &&
+      retries < MAX_STYLE_RETRIES &&
+      Array.isArray(job.falRefUrls) &&
+      job.falRefUrls.length > 0
+    ) {
+      try {
+        const falJob = await submitStyleJob(uid, jobId, styleId, job.falRefUrls);
+        await jobRef.set({
+          results: {
+            [styleId]: {
+              requestId: falJob.request_id,
+              photoUrls: [],
+              status: "pending",
+              retries: retries + 1,
+            },
+          },
+        }, { merge: true });
+        res.status(200).send("yeniden üretiliyor");
+        return;
+      } catch (e) {
+        // Yeniden üretim başlatılamadı — eldeki sonuçlarla devam et.
+        console.error("Otomatik yeniden üretim başlatılamadı:", e);
+      }
+    }
+
+    // Son karar: geçen varsa onları, hiç geçen yoksa (nadir) boş sonuç
+    // göstermemek için tümünü kaydet.
+    const toSave = passed.length > 0 ? passed : downloaded;
     let photoUrls = [];
     try {
-      // Yalnızca kalite kapısını geçen görselleri Storage'a yaz.
       photoUrls = await Promise.all(toSave.map(async ({ i, buf }) => {
         const path = `dating_results/${uid}/${jobId}/${styleId}_${i}.jpg`;
         await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
-        // Herkese açık YAPILMAZ — storage.rules zaten yalnızca sahibine
-        // izin veriyor. Client, Firebase Auth token'ıyla `gs://` yolunu
-        // FirebaseStorage SDK üzerinden çözüp indirir (bkz. module_flows.dart).
         return `gs://${bucket().name}/${path}`;
       }));
     } catch (e) {
       console.error("Sonuç görseli kaydetme hatası:", e);
-      await markStyleFailed(uid, jobId, styleId, job);
+      await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
     }
 
-    const pendingStyles = Math.max(0, (job.pendingStyles || 1) - 1);
-    await jobRef.set({
-      [`results.${styleId}`]: { requestId, photoUrls, status: "done" },
-      pendingStyles,
-      status: pendingStyles === 0 ? "done" : "generating",
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    // İş bittiyse eğitim selfie'lerini sil (KVKK — aydınlatma metni "işlem
-    // sonrası kullanılmaz" diyor; biyometrik veriyi geride bırakma).
-    if (pendingStyles === 0) {
-      await deleteTrainingPhotos(uid, jobId);
-    }
-
+    await finalizeStyle(uid, jobId, styleId, { photoUrls });
     res.status(200).send("ok");
   }
 );
 
-// Eğitim selfie'lerini Firebase Storage'dan siler. İş sonuçlandığında
-// (başarı ya da kalıcı başarısızlık) çağrılır — biyometrik veriyi
-// gereğinden uzun tutmamak için (KVKK/GDPR).
+/**
+ * Bir stilin sonucunu ATOMİK ve IDEMPOTENT şekilde işler:
+ *  - Stil zaten 'done'/'failed' ise hiçbir şey yapmaz (çift-teslimat koruması).
+ *  - pendingStyles'ı transaction içinde azaltır (yarış koşulu yok).
+ *  - Son stil de bittiğinde: herhangi bir stil başarısızsa TÜM paketi iade
+ *    edip işi 'failed' yapar; aksi halde 'done'.
+ */
+async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = false }) {
+  const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
+  const walletRef = db.doc(`users/${uid}/private/wallet`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    if (!snap.exists) return;
+    const j = snap.data();
+    const cur = j.results?.[styleId]?.status;
+    if (cur === "done" || cur === "failed") return; // idempotent no-op
+
+    const newPending = Math.max(0, (j.pendingStyles ?? (j.styles?.length || 1)) - 1);
+    // İç içe nesne — set(merge) derin birleştirir; requestId/retries korunur.
+    const update = {
+      results: { [styleId]: { status: failed ? "failed" : "done", photoUrls } },
+      pendingStyles: newPending,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (newPending === 0) {
+      const results = j.results || {};
+      const anyFailed = failed || Object.keys(results).some(
+        (k) => k !== styleId && results[k]?.status === "failed"
+      );
+      if (anyFailed) {
+        // Mevcut politika: herhangi bir stil başarısızsa tüm paketi iade et.
+        const walletSnap = await tx.get(walletRef);
+        const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
+        tx.set(walletRef, {
+          photoBalance: (wallet.photoBalance || 0) + (j.packUnitsCharged || 0),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        update.status = "failed";
+        update.errorMessage = "Bazı stiller üretilemedi.";
+      } else {
+        update.status = "done";
+      }
+    }
+    tx.set(jobRef, update, { merge: true });
+  });
+}
+
+// Referans selfie'lerini Firebase Storage'dan siler (KVKK). Zaten silinmişse
+// no-op. startPhotoGeneration üretim başlar başlamaz çağırır.
 async function deleteTrainingPhotos(uid, jobId) {
   try {
     await bucket().deleteFiles({ prefix: `dating_training/${uid}/${jobId}/` });
@@ -310,23 +401,10 @@ async function deleteTrainingPhotos(uid, jobId) {
   }
 }
 
-async function markStyleFailed(uid, jobId, styleId, job) {
-  const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
-  const pendingStyles = Math.max(0, (job.pendingStyles || 1) - 1);
-  await jobRef.set({
-    [`results.${styleId}`]: { requestId: job.results?.[styleId]?.requestId, photoUrls: [], status: "failed" },
-    pendingStyles,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
-  if (pendingStyles === 0) {
-    await refundAndFail(uid, jobId, job.packUnitsCharged, "Bazı stiller üretilemedi.");
-  }
-}
-
 /**
- * Başarısız/zaman aşımına uğrayan bir işi 'failed' işaretler ve düşülen
- * paket bakiyesini iade eder — kullanıcı başarısız üretim için ödeme
- * kaybetmesin diye.
+ * Bir işi tamamen 'failed' işaretler ve düşülen paket bakiyesini iade eder.
+ * startPhotoGeneration'ın erken (stil gönderiminden önceki) hatalarında ve
+ * takılı-iş temizliğinde kullanılır.
  */
 async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
   const walletRef = db.doc(`users/${uid}/private/wallet`);
@@ -334,7 +412,7 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
   await db.runTransaction(async (tx) => {
     const jobSnap = await tx.get(jobRef);
     if (!jobSnap.exists || jobSnap.data().status === "failed" || jobSnap.data().status === "done") {
-      return; // zaten sonuçlanmış — tekrar iade etme
+      return; // zaten sonuçlanmış
     }
     const walletSnap = await tx.get(walletRef);
     const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
@@ -348,18 +426,12 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   });
-  // İş kalıcı olarak başarısız oldu — eğitim selfie'lerini de temizle.
   await deleteTrainingPhotos(uid, jobId);
 }
 
 /**
- * fal.ai webhook teslimatı güvenilmez olabilir (ağ sorunu, soğuk başlangıç
- * vb.) — bu zamanlanmış fonksiyon, uzun süredir 'generating' durumunda
- * takılı kalan işleri bulup başarısız sayar ve iade eder. Zero-shot edit
- * modeli saniyeler içinde sonuçlanır (eski LoRA eğitimindeki gibi dakikalar
- * sürmez), bu yüzden eşik kısa tutuldu. Gerçek bir "durumu fal.ai'den
- * tekrar sorgula" adımı, fal.ai'nin status_url'i job dokümanına
- * eklendikten sonra genişletilebilir.
+ * Webhook teslimatı güvenilmez olabilir — uzun süredir 'uploading'/'generating'
+ * takılı kalan işleri başarısız sayıp iade eder.
  */
 exports.cleanupStuckGenJobs = onSchedule(
   { schedule: "every 5 minutes", region: "europe-west1", timeoutSeconds: 120 },
