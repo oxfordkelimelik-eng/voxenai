@@ -142,7 +142,7 @@ class _SurveyScreenState extends ConsumerState<SurveyScreen> {
                         shaderCallback: (b) =>
                             AppColors.goldGradient.createShader(b),
                         child: const Text(
-                          'RISE UP',
+                          'VOXEN AI',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w900,

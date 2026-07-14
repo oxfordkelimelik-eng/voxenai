@@ -85,7 +85,7 @@ class SettingsScreen extends ConsumerWidget {
                 icon: user?.isPro == true
                     ? Icons.workspace_premium_rounded
                     : Icons.lock_outline_rounded,
-                title: user?.isPro == true ? 'Rise Up PRO' : 'Ücretsiz Plan',
+                title: user?.isPro == true ? 'Voxen AI PRO' : 'Ücretsiz Plan',
                 subtitle: user?.isPro == true
                     ? 'Tüm özelliklere erişiyorsunuz'
                     : 'Pro\'ya geç ve tüm özellikleri aç',
@@ -115,7 +115,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsTile(
                 icon: Icons.info_outline_rounded,
                 title: 'Versiyon',
-                subtitle: 'Rise Up v1.0.0',
+                subtitle: 'Voxen AI v1.0.0',
                 trailingIcon: null,
               ),
               _SettingsTile(

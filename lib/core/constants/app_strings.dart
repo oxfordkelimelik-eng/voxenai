@@ -1,9 +1,9 @@
-/// Rise Up — Uygulama Sabitleri
+/// Voxen AI — Uygulama Sabitleri
 class AppStrings {
   AppStrings._();
 
   // === Uygulama ===
-  static const String appName = 'RISE UP';
+  static const String appName = 'VOXEN AI';
   static const String tagline = 'Potansiyelini İnşa Et';
 
   // === Onboarding ===

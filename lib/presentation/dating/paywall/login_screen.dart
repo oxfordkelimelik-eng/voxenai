@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/router/dating_routes.dart';
+import '../../providers/app_providers.dart' show authServiceProvider;
 import '../providers/dating_providers.dart';
 
 /// Giriş ekranı (Bölüm 3 & 5). Yalnızca abonelik anında tetiklenir.
@@ -41,9 +42,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _busy = true);
     final ent = ref.read(entitlementProvider.notifier);
 
-    // TODO(üretim): Gerçek Apple/Google SDK girişi burada çağrılır.
-    await Future.delayed(const Duration(milliseconds: 800));
-    await ent.signIn(provider);
+    // Gerçek Apple/Google (Firebase Auth) girişi. signIn içeride
+    // linkWithApple/linkWithGoogle çağırır; başarısız/iptal olursa
+    // signInProvider null kalir.
+    try {
+      await ent.signIn(provider);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Giriş tamamlanamadı. Lütfen tekrar dene.'),
+      ));
+      return;
+    }
+
+    // Girişin GERÇEKTEN başarılı olup olmadığını Firebase Auth durumundan
+    // dogrula — kullanici iptal ederse ya da yapilandirma eksikse buraya
+    // dusup hub'a yonlendirmemeliyiz.
+    final signedIn = ref.read(authServiceProvider).currentUser != null &&
+        !ref.read(authServiceProvider).isAnonymous;
+    if (!signedIn) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Giriş tamamlanamadı. Lütfen tekrar dene.'),
+      ));
+      return;
+    }
 
     // Abonelik yok; giriş yalnızca satın alımları cihazlar arası saklamak
     // içindir. Geri yükleme istendiyse önceki paket bakiyeleri kontrol edilir.

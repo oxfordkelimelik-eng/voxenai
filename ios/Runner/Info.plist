@@ -15,7 +15,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Rise Up</string>
+	<string>Voxen AI</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -73,6 +73,20 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- Google Sign-In geri cagrisi icin ZORUNLU URL scheme. Deger,
+	     GoogleService-Info.plist'teki REVERSED_CLIENT_ID ile birebir ayni.
+	     Bu olmadan Google giris akisi geri donemez ("giris tamamlanamadi"). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.473057059250-mia3vm05de9ht4ebb7ks6cpjcutfvcqn</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

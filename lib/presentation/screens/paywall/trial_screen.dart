@@ -167,7 +167,7 @@ class _TrialScreenState extends ConsumerState<TrialScreen> {
           ).animate(delay: 200.ms).fadeIn().slideY(begin: 0.15, end: 0),
           const SizedBox(height: 10),
           const Text(
-            '3 günlük ücretsiz deneme sona erdi.\nRise Up Pro ile gelişmeye devam et.',
+            '3 günlük ücretsiz deneme sona erdi.\nVoxen AI Pro ile gelişmeye devam et.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
@@ -191,7 +191,7 @@ class _TrialScreenState extends ConsumerState<TrialScreen> {
           ).animate(delay: 200.ms).fadeIn().slideY(begin: 0.15, end: 0),
           const SizedBox(height: 10),
           Text(
-            'Rise Up Pro denemen başladı!\nTüm özelliklere $daysRemaining gün daha ücretsiz eriş.',
+            'Voxen AI Pro denemen başladı!\nTüm özelliklere $daysRemaining gün daha ücretsiz eriş.',
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 14,

@@ -114,12 +114,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
             const SizedBox(height: 24),
 
-            // RISE UP metni
+            // VOXEN AI metni
             ShaderMask(
                   shaderCallback: (bounds) =>
                       AppColors.goldGradient.createShader(bounds),
                   child: const Text(
-                    'RISE UP',
+                    'VOXEN AI',
                     style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.w900,

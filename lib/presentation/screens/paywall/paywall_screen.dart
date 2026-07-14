@@ -50,7 +50,7 @@ class PaywallScreen extends ConsumerWidget {
                       shaderCallback: (b) =>
                           AppColors.goldGradient.createShader(b),
                       child: const Text(
-                        '👑 RISE UP PRO',
+                        '👑 VOXEN AI PRO',
                         style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.w900,

@@ -356,7 +356,7 @@ class _DashboardTab extends ConsumerWidget {
                       fontSize: 14, color: AppColors.textSecondary)),
               ShaderMask(
                 shaderCallback: (b) => AppColors.goldGradient.createShader(b),
-                child: const Text('RISE UP',
+                child: const Text('VOXEN AI',
                     style: TextStyle(
                         fontSize: 28,
                         fontWeight: FontWeight.w900,

@@ -71,7 +71,7 @@ class NotificationService {
       FirebaseMessaging.onMessage.listen((RemoteMessage m) {
         final n = m.notification;
         if (n != null) {
-          _showNow(n.title ?? 'Rise Up', n.body ?? '');
+          _showNow(n.title ?? 'Voxen AI', n.body ?? '');
         }
       });
     } catch (e) {

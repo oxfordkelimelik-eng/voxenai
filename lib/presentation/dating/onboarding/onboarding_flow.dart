@@ -474,10 +474,19 @@ class _AuthOnboardingScreenState
                     const SizedBox(height: 28),
                     _consentRow(),
                     const SizedBox(height: 20),
-                    // NOT: Apple ile giriş şimdilik kaldırıldı (Apple
-                    // Developer Program kaydı henüz yapılmadı). AuthService
-                    // içindeki linkWithApple() hazır — Apple kaydı
-                    // tamamlanınca bu buton geri eklenebilir.
+                    // Apple, "Google ile giris" sunan uygulamalarda "Apple
+                    // ile giris"i de ZORUNLU tutar (App Store Review 4.8) —
+                    // bu yuzden Apple butonu ilk sirada.
+                    _AuthButton(
+                      label: 'Apple ile Giriş Yap',
+                      icon: Icons.apple,
+                      bg: Colors.white,
+                      fg: Colors.black,
+                      onTap: (_busy || !_consent)
+                          ? null
+                          : () => _signIn('apple'),
+                    ),
+                    const SizedBox(height: 12),
                     _AuthButton(
                       label: 'Google ile Giriş Yap',
                       icon: Icons.g_mobiledata_rounded,
