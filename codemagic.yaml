@@ -86,7 +86,26 @@ workflows:
             -destination 'generic/platform=iOS' \
             -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
             archive
-      - name: 6. Export IPA (automatic signing via API key)
+      - name: 6. Fix App.framework CFBundleIdentifier collision
+        script: |
+          set -e
+          # TEShIS (onceki build log'u) kesin gosterdi: Flutter'in kendi
+          # App.framework'u (CocoaPods degil, Flutter engine'i) Info.plist'inde
+          # ana uygulamayla AYNI CFBundleIdentifier'i (com.voxenai.app) tasiyor.
+          # Apple'in yeni App Store Connect ingestion dogrulamasi bunu artik
+          # "CFBundleIdentifier Collision" olarak reddediyor. App.framework
+          # calisma zamaninda bundle ID ile degil binary yoluyla yuklendigi
+          # icin bu degerin ne oldugu onemli degil, sadece BENZERSIZ olmasi
+          # gerekiyor. Export'tan ONCE yamaliyoruz ki export'un kendi otomatik
+          # yeniden-imzalama adimi yamali dosyayi dogru imzalasin.
+          FRAMEWORK_PLIST="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Frameworks/App.framework/Info.plist"
+          if [ -f "$FRAMEWORK_PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}.appframework" "$FRAMEWORK_PLIST"
+            echo "App.framework CFBundleIdentifier -> ${BUNDLE_ID}.appframework"
+          else
+            echo "UYARI: App.framework/Info.plist bulunamadi, atlaniyor: $FRAMEWORK_PLIST"
+          fi
+      - name: 7. Export IPA (automatic signing via API key)
         script: |
           set -e
           xcodebuild -exportArchive \
@@ -97,21 +116,28 @@ workflows:
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-      - name: 7. DEBUG - list all CFBundleIdentifiers in the ipa
+      - name: 8. Verify no duplicate CFBundleIdentifiers remain
         script: |
           set -e
-          # "CFBundleIdentifier Collision" hatasinin HANGI gomulu paketten
-          # geldigini kesin olarak bulmak icin ipa'yi acip her Info.plist
-          # icindeki CFBundleIdentifier'i listeliyoruz. Tahmin etmiyoruz.
+          # Dogrulama: export edilen ipa'da BUNDLE_ID'yi birden fazla Info.plist
+          # tasimiyor mu, kontrol et. Varsa build'i erken ve net bir hatayla
+          # durdur (upload'un belirsiz sunucu hatasini beklemek yerine).
           UNZIP_DIR="$CM_BUILD_DIR/build/ios/ipa_inspect"
           rm -rf "$UNZIP_DIR" && mkdir -p "$UNZIP_DIR"
           unzip -q "$CM_BUILD_DIR"/build/ios/ipa/*.ipa -d "$UNZIP_DIR"
-          echo "=== Tum Info.plist dosyalari ve CFBundleIdentifier degerleri ==="
-          find "$UNZIP_DIR/Payload" -name "Info.plist" | while read -r p; do
-            id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$p" 2>/dev/null || echo "(yok)")
-            echo "$id  <-  ${p#$UNZIP_DIR/}"
-          done
-      - name: 8. Upload to TestFlight
+          COUNT=$(find "$UNZIP_DIR/Payload" -name "Info.plist" -exec sh -c \
+            '/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1" 2>/dev/null' _ {} \; \
+            | grep -c "^${BUNDLE_ID}$" || true)
+          echo "'$BUNDLE_ID' ile eslesen Info.plist sayisi: $COUNT (beklenen: 1)"
+          if [ "$COUNT" -ne 1 ]; then
+            echo "HATA: hala $COUNT adet Info.plist ayni CFBundleIdentifier'i tasiyor."
+            find "$UNZIP_DIR/Payload" -name "Info.plist" | while read -r p; do
+              id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$p" 2>/dev/null || echo "(yok)")
+              echo "$id  <-  ${p#$UNZIP_DIR/}"
+            done
+            exit 1
+          fi
+      - name: 9. Upload to TestFlight
         script: |
           set -e
           # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'ta
