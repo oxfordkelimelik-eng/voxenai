@@ -93,18 +93,40 @@ workflows:
           # App.framework'u (CocoaPods degil, Flutter engine'i) Info.plist'inde
           # ana uygulamayla AYNI CFBundleIdentifier'i (com.voxenai.app) tasiyor.
           # Apple'in yeni App Store Connect ingestion dogrulamasi bunu artik
-          # "CFBundleIdentifier Collision" olarak reddediyor. App.framework
-          # calisma zamaninda bundle ID ile degil binary yoluyla yuklendigi
-          # icin bu degerin ne oldugu onemli degil, sadece BENZERSIZ olmasi
-          # gerekiyor. Export'tan ONCE yamaliyoruz ki export'un kendi otomatik
-          # yeniden-imzalama adimi yamali dosyayi dogru imzalasin.
-          FRAMEWORK_PLIST="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Frameworks/App.framework/Info.plist"
-          if [ -f "$FRAMEWORK_PLIST" ]; then
-            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}.appframework" "$FRAMEWORK_PLIST"
-            echo "App.framework CFBundleIdentifier -> ${BUNDLE_ID}.appframework"
-          else
-            echo "UYARI: App.framework/Info.plist bulunamadi, atlaniyor: $FRAMEWORK_PLIST"
+          # "CFBundleIdentifier Collision" olarak reddediyor.
+          #
+          # Bundle ID'yi degistirmek YETMEZ — framework'un KOD IMZASI da eski
+          # identifier'i gomulu tutar ("Invalid Code Signature Identifier"
+          # hatasi). Bu yuzden: 1) Info.plist'i yamala, 2) framework'u dagitim
+          # sertifikasiyla, --identifier ile YENIDEN imzala. Bunu export'tan
+          # ONCE, arsiv icinde yapiyoruz.
+          NEW_ID="${BUNDLE_ID}.appframework"
+          FW_DIR="$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Frameworks/App.framework"
+          FW_PLIST="$FW_DIR/Info.plist"
+          if [ ! -f "$FW_PLIST" ]; then
+            echo "HATA: App.framework/Info.plist bulunamadi: $FW_PLIST"
+            exit 1
           fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $NEW_ID" "$FW_PLIST"
+          echo "App.framework CFBundleIdentifier -> $NEW_ID"
+          # Yeniden imzalamak icin dagitim sertifikasinin SHA-1 hash'ini
+          # keychain'den al (fetch-signing-files kurdu). Hash, isimden daha
+          # guvenilir bir imza kimligi.
+          SIGN_HASH=$(security find-identity -v -p codesigning \
+            | grep "Apple Distribution" | head -1 | awk '{print $2}')
+          if [ -z "$SIGN_HASH" ]; then
+            echo "HATA: keychain'de Apple Distribution sertifikasi bulunamadi."
+            security find-identity -v -p codesigning
+            exit 1
+          fi
+          echo "Yeniden imzalama hash: $SIGN_HASH"
+          # --identifier: imza-ici tanimlayiciyi yeni bundle ID'ye esitle
+          # (aksi halde "Invalid Code Signature Identifier" hatasi). Export'un
+          # otomatik yeniden-imzalamasi bu identifier'i --preserve-metadata ile
+          # koruyacak.
+          codesign --force --sign "$SIGN_HASH" --identifier "$NEW_ID" \
+            "$FW_DIR"
+          echo "App.framework yeni identifier ile yeniden imzalandi."
       - name: 7. Export IPA (automatic signing via API key)
         script: |
           set -e
