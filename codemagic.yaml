@@ -9,9 +9,13 @@ workflows:
       cocoapods: default
       groups:
         # Codemagic panelinde olusturmaniz gereken degisken grubu.
-        # Icinde SADECE su gizli degisken olmali:
+        # Icinde su GIZLI degiskenler olmali:
         #   ASC_PRIVATE_KEY = App Store Connect .p8 anahtarinin TAM icerigi
-        #   (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY----- dahil)
+        #     (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY----- dahil)
+        #   CERTIFICATE_PRIVATE_KEY = fetch-signing-files --create'in yeni
+        #     dagitim sertifikasi URETIRKEN kullandigi RSA anahtari. Bu, ASC
+        #     anahtariyla AYNI SEY DEGIL — olmadan "Cannot save Signing
+        #     Certificates without certificate private key" hatasi alinir.
         - appstore
       vars:
         BUNDLE_ID: "com.voxenai.app"
