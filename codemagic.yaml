@@ -97,7 +97,21 @@ workflows:
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-      - name: 7. Upload to TestFlight
+      - name: 7. DEBUG - list all CFBundleIdentifiers in the ipa
+        script: |
+          set -e
+          # "CFBundleIdentifier Collision" hatasinin HANGI gomulu paketten
+          # geldigini kesin olarak bulmak icin ipa'yi acip her Info.plist
+          # icindeki CFBundleIdentifier'i listeliyoruz. Tahmin etmiyoruz.
+          UNZIP_DIR="$CM_BUILD_DIR/build/ios/ipa_inspect"
+          rm -rf "$UNZIP_DIR" && mkdir -p "$UNZIP_DIR"
+          unzip -q "$CM_BUILD_DIR"/build/ios/ipa/*.ipa -d "$UNZIP_DIR"
+          echo "=== Tum Info.plist dosyalari ve CFBundleIdentifier degerleri ==="
+          find "$UNZIP_DIR/Payload" -name "Info.plist" | while read -r p; do
+            id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$p" 2>/dev/null || echo "(yok)")
+            echo "$id  <-  ${p#$UNZIP_DIR/}"
+          done
+      - name: 8. Upload to TestFlight
         script: |
           set -e
           # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'ta
