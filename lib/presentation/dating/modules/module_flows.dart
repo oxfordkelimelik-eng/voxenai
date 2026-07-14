@@ -627,11 +627,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final f in _photos)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(f,
-                        width: 84, height: 84, fit: BoxFit.cover),
+                for (int i = 0; i < _photos.length; i++)
+                  _RemovableThumb(
+                    file: _photos[i],
+                    onRemove: () => setState(() => _photos.removeAt(i)),
                   ),
               ],
             ),
@@ -640,26 +639,42 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             onPressed: _validatingPhotos
                 ? null
                 : () async {
-                    final files = await _pickImages(multi: true, limit: 5);
+                    // Kalan boş slot kadar yeni foto seçilebilir (toplam 5).
+                    final remaining = 5 - _photos.length;
+                    if (remaining <= 0) return;
+                    final files =
+                        await _pickImages(multi: true, limit: remaining);
                     if (files.isEmpty) return;
                     setState(() => _validatingPhotos = true);
                     final invalid = await _findInvalidReferencePhotos(files);
                     if (!mounted) return;
                     setState(() => _validatingPhotos = false);
+                    // Uygunsuzları KULLANICIYA GOSTER (kacinci foto, neden),
+                    // geçerlileri yine de ekle — hepsini birden atma.
+                    final valid =
+                        files.where((f) => !invalid.contains(f.path)).toList();
                     if (invalid.isNotEmpty) {
+                      final badIndexes = <int>[];
+                      for (int i = 0; i < files.length; i++) {
+                        if (invalid.contains(files[i].path)) {
+                          badIndexes.add(i + 1);
+                        }
+                      }
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(invalid.length == files.length
-                            ? 'Hiçbirinde net, tek bir yüz bulunamadı. Lütfen '
-                                'yalnızca kendi net yüzünün göründüğü fotoğraflar seç.'
-                            : '${invalid.length} fotoğrafta net bir yüz '
-                                'bulunamadı (bulanık, yüzsüz ya da birden '
-                                'fazla kişi). Lütfen tekrar seç.'),
+                        duration: const Duration(seconds: 5),
+                        content: Text(
+                            'Seçtiğin ${badIndexes.length} fotoğraf uygun değil '
+                            '(${badIndexes.join(', ')}. sıradaki): net, tek bir '
+                            'yüz görünmüyor (bulanık, yüzsüz ya da birden fazla '
+                            'kişi). ${valid.isEmpty ? "" : "Uygun olanlar eklendi."}'),
                       ));
-                      return;
                     }
-                    setState(() => _photos
-                      ..clear()
-                      ..addAll(files));
+                    if (valid.isEmpty) return;
+                    setState(() {
+                      for (final f in valid) {
+                        if (_photos.length < 5) _photos.add(f);
+                      }
+                    });
                   },
             icon: _validatingPhotos
                 ? const SizedBox(
@@ -816,10 +831,36 @@ class PhotoAnalysisFlow extends ConsumerStatefulWidget {
 class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   final List<File> _photos = [];
   int _stage = 0; // 0 giriş, 1 loading, 2 sonuç, 3 hata
-  int _unlocked = 0; // sonuçta kilitsiz gösterilen analiz sayısı
-  // AI'den dönen gerçek puanlama sonuçları (skora göre azalan sıralı).
+  int _unlocked = 0; // kaç sonucun kilidi açık (ilk seçilen her zaman ücretsiz)
+  bool _validating = false; // seçilen fotolarda yüz kontrolü sürüyor
+  // AI'den dönen gerçek puanlama sonuçları — KULLANICININ SEÇTİĞİ sırada.
   List<PhotoScore> _scores = [];
   String? _errorMessage;
+
+  Future<void> _pickAndValidate() async {
+    final files = await _pickImages(multi: true, limit: 6);
+    if (files.isEmpty) return;
+    setState(() => _validating = true);
+    // Analiz için her fotoğrafta EN AZ bir yüz olmalı (saçma/yüzsüz foto reddi).
+    final invalid = await _findFacelessPhotos(files);
+    if (!mounted) return;
+    setState(() => _validating = false);
+    if (invalid.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(invalid.length == files.length
+            ? 'Seçtiğin fotoğraflarda yüz bulunamadı. Analiz için yüzün '
+                'net göründüğü fotoğraflar seç.'
+            : '${invalid.length} fotoğrafta yüz bulunamadı; bunlar '
+                'analiz edilemez. Lütfen yüz içeren fotoğraflar seç.'),
+      ));
+      if (invalid.length == files.length) return;
+    }
+    setState(() {
+      _photos
+        ..clear()
+        ..addAll(files.where((f) => !invalid.contains(f.path)));
+    });
+  }
 
   Future<void> _run() async {
     if (_photos.isEmpty) return;
@@ -828,11 +869,10 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
       _errorMessage = null;
     });
     try {
-      // GERÇEK AI puanlama (Gemini vision, sunucu anahtarıyla proxy üzerinden).
       final scores =
           await ref.read(claudeApiServiceProvider).scoreDatingPhotos(_photos);
       if (!mounted) return;
-      // İlk sonuç her zaman ücretsiz; kalanı mevcut analiz paketi bakiyesinden
+      // İlk seçilen sonuç her zaman ücretsiz; kalanı analiz paketi bakiyesinden
       // (varsa) karşılandığı kadar açılır.
       final unlocked = await _unlockWithPack(
         ref,
@@ -864,7 +904,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         1 => const AiLoadingView(steps: [
             'Fotoğraflar değerlendiriliyor…',
             'Çekicilik skoru hesaplanıyor…',
-            'En iyi kare seçiliyor…',
+            'Güçlü ve zayıf yönler çıkarılıyor…',
           ]),
         2 => _result(),
         3 => _errorView(),
@@ -909,7 +949,9 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 6),
-          const Text('Her fotoğrafı puanlar, güçlü/zayıf yönlerini söyleriz.',
+          const Text(
+              'Her fotoğrafı puanlar; güçlü/zayıf yönlerini ve nasıl daha iyi '
+              'olacağını söyleriz. İlk fotoğrafın analizi ücretsiz.',
               style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           const SizedBox(height: 16),
           const PhotoQualityGuide(),
@@ -919,28 +961,29 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final f in _photos)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(f,
-                        width: 84, height: 84, fit: BoxFit.cover),
+                for (int i = 0; i < _photos.length; i++)
+                  _RemovableThumb(
+                    file: _photos[i],
+                    onRemove: () => setState(() => _photos.removeAt(i)),
                   ),
               ],
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: () async {
-              final files = await _pickImages(multi: true, limit: 6);
-              if (files.isNotEmpty) {
-                setState(() => _photos
-                  ..clear()
-                  ..addAll(files));
-              }
-            },
-            icon: const Icon(Icons.add_photo_alternate_outlined,
-                color: AppColors.gold),
-            label: const Text('Galeriden Seç',
-                style: TextStyle(color: AppColors.gold)),
+            onPressed: _validating ? null : _pickAndValidate,
+            icon: _validating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.gold))
+                : const Icon(Icons.add_photo_alternate_outlined,
+                    color: AppColors.gold),
+            label: Text(
+                _validating
+                    ? 'Yüzler kontrol ediliyor…'
+                    : (_photos.isEmpty ? 'Galeriden Seç' : 'Değiştir'),
+                style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -951,7 +994,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
           const SizedBox(height: 20),
           PrimaryButton(
             label: 'Analiz Et',
-            onPressed: _photos.isEmpty ? null : _run,
+            onPressed: (_photos.isEmpty || _validating) ? null : _run,
           ),
         ],
       ),
@@ -968,138 +1011,117 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
                 fontSize: 20,
                 fontWeight: FontWeight.w900,
                 color: AppColors.textPrimary)),
-        if (lockedCount > 0) ...[
-          const SizedBox(height: 4),
-          Text(
-              'Kalan $lockedCount sonuç kilitli. Paket alarak hepsini gör.',
-              style: const TextStyle(
-                  fontSize: 13, color: AppColors.textSecondary)),
-        ],
-        const SizedBox(height: 12),
-        for (int i = 0; i < _scores.length; i++) _resultRow(i),
+        const SizedBox(height: 4),
+        Text(
+            lockedCount > 0
+                ? 'İlk fotoğrafın analizi ücretsiz. Kalan $lockedCount fotoğraf '
+                    'için paket al.'
+                : 'Her fotoğrafa dokunarak detaylı analizini gör.',
+            style: const TextStyle(
+                fontSize: 13, color: AppColors.textSecondary)),
+        const SizedBox(height: 14),
+        for (int i = 0; i < _scores.length; i++) _resultCard(i),
         const SizedBox(height: 8),
-        if (lockedCount > 0) ...[
+        if (lockedCount > 0)
           PrimaryButton(
             label:
-                'Kalan $lockedCount Sonucu Aç · ${DatingConfig.analysisSinglePriceLabel}',
-            onPressed: () => _unlockMore(lockedCount),
+                'Kalan $lockedCount Analizi Aç · ${DatingConfig.analysisSinglePriceLabel}',
+            onPressed: () => _unlockMore(),
           ),
-          const SizedBox(height: 12),
-        ],
       ],
     );
   }
 
-  Widget _resultRow(int i) {
+  Widget _resultCard(int i) {
     final unlocked = i < _unlocked;
     final s = _scores[i];
-    final isBest = i == 0; // liste skora göre azalan sıralı — ilk = en iyi
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: isBest ? AppColors.gold : AppColors.borderSubtle),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: unlocked
-                ? Image.file(s.file, width: 64, height: 64, fit: BoxFit.cover)
-                : Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.file(s.file,
-                          width: 64, height: 64, fit: BoxFit.cover),
-                      BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                            color: Colors.black.withValues(alpha: 0.35)),
+    return GestureDetector(
+      onTap: () => unlocked ? _openDetail(s) : _unlockMore(),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.borderSubtle),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: 72,
+                height: 72,
+                child: unlocked
+                    ? Image.file(s.file, fit: BoxFit.cover)
+                    : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.file(s.file, fit: BoxFit.cover),
+                          BackdropFilter(
+                            filter:
+                                ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                            child: Container(
+                                color: Colors.black.withValues(alpha: 0.4)),
+                          ),
+                          const Center(
+                              child: Icon(Icons.lock_rounded,
+                                  color: Colors.white, size: 22)),
+                        ],
                       ),
-                      const Center(
-                        child: Icon(Icons.lock_rounded,
-                            color: Colors.white, size: 20),
-                      ),
-                    ],
-                  ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(unlocked ? 'Skor: ${s.score}' : 'Skor: ••',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.gold)),
-                    if (isBest) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.gold,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text('EN İYİ',
-                            style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white)),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (unlocked) ...[
-                  if (s.strengths.isNotEmpty)
-                    _fbLine(Icons.add_circle_outline, AppColors.success,
-                        s.strengths),
-                  if (s.weaknesses.isNotEmpty)
-                    _fbLine(Icons.remove_circle_outline, AppColors.gold,
-                        s.weaknesses),
-                ] else
-                  const Text('Detayları görmek için paketini aç.',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                          height: 1.3)),
-              ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: unlocked
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Fotoğraf ${i + 1}',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textSecondary)),
+                        const SizedBox(height: 4),
+                        Text(
+                            s.summary.isNotEmpty
+                                ? s.summary
+                                : 'Detaylı analizi görmek için dokun.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                                height: 1.3)),
+                      ],
+                    )
+                  : const Text(
+                      'Bu fotoğrafın analizi kilitli. Açmak için dokun.',
+                      style: TextStyle(
+                          fontSize: 13, color: AppColors.textSecondary)),
+            ),
+            const SizedBox(width: 8),
+            if (unlocked)
+              _ScoreRing(score: s.score, size: 52)
+            else
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.textMuted),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _fbLine(IconData icon, Color color, String text) => Padding(
-        padding: const EdgeInsets.only(top: 3),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(text,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                      height: 1.3)),
-            ),
-          ],
-        ),
-      );
+  void _openDetail(PhotoScore s) {
+    final idx = _scores.indexOf(s);
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _PhotoDetailScreen(score: s, label: 'Fotoğraf ${idx + 1}'),
+    ));
+  }
 
   /// Paket satın alma akışını (paywall) açar; dönünce mevcut paket
   /// bakiyesiyle kilitli sonuçları yeniden hesaplar.
-  Future<void> _unlockMore(int needed) async {
+  Future<void> _unlockMore() async {
     await context.push(DatingRoutes.paywall);
     if (!mounted) return;
     final unlocked = await _unlockWithPack(
@@ -1110,6 +1132,252 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
     );
     if (!mounted) return;
     setState(() => _unlocked = unlocked);
+  }
+}
+
+/// Analiz için yüz kontrolü: her fotoğrafta EN AZ bir yüz olmalı. Yüz
+/// bulunamayan (saçma/yüzsüz/bulanık) fotoğrafların yollarını döner.
+Future<List<String>> _findFacelessPhotos(List<File> files) async {
+  final detector = FaceDetector(
+    options: FaceDetectorOptions(
+      performanceMode: FaceDetectorMode.accurate,
+      minFaceSize: 0.15,
+    ),
+  );
+  final faceless = <String>[];
+  try {
+    for (final f in files) {
+      try {
+        final faces =
+            await detector.processImage(InputImage.fromFilePath(f.path));
+        if (faces.isEmpty) faceless.add(f.path);
+      } catch (_) {
+        faceless.add(f.path); // okunamadı → analiz edilemez
+      }
+    }
+  } finally {
+    await detector.close();
+  }
+  return faceless;
+}
+
+/// Sağ üstünde kaldırma (çarpı) butonu olan seçilmiş fotoğraf küçük görseli.
+class _RemovableThumb extends StatelessWidget {
+  final File file;
+  final VoidCallback onRemove;
+  const _RemovableThumb({required this.file, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.file(file, width: 84, height: 84, fit: BoxFit.cover),
+        ),
+        Positioned(
+          top: -6,
+          right: -6,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1.5),
+              ),
+              child: const Icon(Icons.close_rounded,
+                  size: 15, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dairesel, animasyonlu skor göstergesi (0-100). Skora göre renk değişir.
+class _ScoreRing extends StatelessWidget {
+  final int score;
+  final double size;
+  const _ScoreRing({required this.score, this.size = 60});
+
+  Color get _color {
+    if (score >= 80) return AppColors.success;
+    if (score >= 60) return AppColors.gold;
+    if (score >= 40) return Colors.orangeAccent;
+    return AppColors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: score / 100),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, _) => Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: size,
+              height: size,
+              child: CircularProgressIndicator(
+                value: value,
+                strokeWidth: size * 0.09,
+                backgroundColor: AppColors.borderSubtle,
+                valueColor: AlwaysStoppedAnimation(_color),
+                strokeCap: StrokeCap.round,
+              ),
+            ),
+            Text('${(value * 100).round()}',
+                style: TextStyle(
+                    fontSize: size * 0.3,
+                    fontWeight: FontWeight.w900,
+                    color: _color)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tek bir fotoğrafın tam ekran detaylı analizi: üstte büyük foto, altında
+/// skor + genel değerlendirme + güçlü/zayıf/geliştirilecek bölümleri.
+class _PhotoDetailScreen extends StatelessWidget {
+  final PhotoScore score;
+  final String label;
+  const _PhotoDetailScreen({required this.score, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 18, color: AppColors.textSecondary),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(label,
+            style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          // Üstte büyük fotoğraf
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: AspectRatio(
+              aspectRatio: 3 / 4,
+              child: Image.file(score.file, fit: BoxFit.cover),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Skor + genel değerlendirme
+          Row(
+            children: [
+              _ScoreRing(score: score.score, size: 72),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Genel Değerlendirme',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textSecondary)),
+                    const SizedBox(height: 4),
+                    Text(
+                        score.summary.isNotEmpty
+                            ? score.summary
+                            : 'Bu fotoğraf dating profili için değerlendirildi.',
+                        style: const TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
+                            height: 1.35)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _detailSection('Güçlü Yönler', Icons.check_circle_rounded,
+              AppColors.success, score.strengths),
+          _detailSection('Zayıf Yönler', Icons.warning_amber_rounded,
+              Colors.orangeAccent, score.weaknesses),
+          _detailSection('Geliştirilebilecekler', Icons.lightbulb_outline_rounded,
+              AppColors.gold, score.improvements),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailSection(
+      String title, IconData icon, Color color, List<String> items) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 8),
+              Text(title,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      color: color)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          for (final item in items)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration:
+                          BoxDecoration(color: color, shape: BoxShape.circle),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(item,
+                        style: const TextStyle(
+                            fontSize: 13.5,
+                            color: AppColors.textPrimary,
+                            height: 1.4)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 

@@ -73,14 +73,19 @@ class ClaudeApiService {
     final prompt =
         'Sen bir dating/profil fotoğrafı uzmanısın. Sana ${imageFiles.length} '
         'fotoğraf VERİLDİ (1. fotoğraf, 2. fotoğraf ... sırayla). Her fotoğrafı '
-        'bir dating/eşleşme uygulaması profili için DEĞERLENDİR: yüz netliği, '
-        'ışık, kompozisyon, ifade/gülümseme, arka plan, genel çekicilik ve ilk '
-        'izlenim. Kişiyi aşağılamadan, yapıcı ve dürüst ol.\n\n'
-        'YALNIZCA şu formatta geçerli bir JSON DİZİSİ döndür (başka metin yok), '
-        'giriş sırasıyla her fotoğraf için bir nesne:\n'
-        '[{"index":1,"score":0-100 arası tam sayı,'
-        '"strengths":"bu fotoğrafın güçlü yönü (Türkçe, tek cümle)",'
-        '"weaknesses":"geliştirilebilecek yönü (Türkçe, tek cümle)"}]';
+        'bir dating/eşleşme uygulaması profili için DETAYLI değerlendir: yüz '
+        'netliği ve odak, ışık/pozlama, kompozisyon ve çerçeveleme, ifade ve '
+        'gülümseme, göz teması, poz ve duruş, kıyafet/stil, arka plan, genel '
+        'çekicilik ve ilk izlenim. Kişiyi aşağılamadan, yapıcı, somut ve '
+        'dürüst ol; genel geçer laf etme, bu fotoğrafa özgü şeyler söyle.\n\n'
+        'YALNIZCA şu formatta geçerli bir JSON DİZİSİ döndür (başka metin yok, '
+        'markdown yok), giriş sırasıyla her fotoğraf için bir nesne:\n'
+        '[{"index":1,'
+        '"score":0-100 arası tam sayı (dating profili uygunluğu),'
+        '"summary":"tek cümlelik genel değerlendirme (Türkçe)",'
+        '"strengths":["güçlü yön 1","güçlü yön 2"] (2-4 madde, Türkçe, her biri kısa ve somut),'
+        '"weaknesses":["zayıf yön 1","zayıf yön 2"] (2-4 madde, Türkçe, somut),'
+        '"improvements":["yapılabilecek somut iyileştirme 1","iyileştirme 2"] (2-4 madde, Türkçe, uygulanabilir öneriler)}]';
 
     final raw = await _callVision(imageFiles, prompt);
     final list = _extractJsonArray(raw);
@@ -93,13 +98,27 @@ class ClaudeApiService {
       scores.add(PhotoScore(
         file: imageFiles[i],
         score: ((item['score'] as num?)?.toInt() ?? 0).clamp(0, 100),
-        strengths: (item['strengths'] as String?)?.trim() ?? '',
-        weaknesses: (item['weaknesses'] as String?)?.trim() ?? '',
+        summary: (item['summary'] as String?)?.trim() ?? '',
+        strengths: _stringList(item['strengths']),
+        weaknesses: _stringList(item['weaknesses']),
+        improvements: _stringList(item['improvements']),
       ));
     }
-    // En iyi kare önce gelsin (ücretsiz önizleme en iyisini göstersin).
-    scores.sort((a, b) => b.score.compareTo(a.score));
+    // Kullanıcının SEÇTİĞİ sıra korunur (ilk seçilen = ücretsiz gösterilecek).
     return scores;
+  }
+
+  /// AI'den gelen bir alanı güvenli biçimde String listesine çevirir
+  /// (dizi, tek string ya da null gelebilir).
+  List<String> _stringList(dynamic v) {
+    if (v is List) {
+      return v
+          .map((e) => e?.toString().trim() ?? '')
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    if (v is String && v.trim().isNotEmpty) return [v.trim()];
+    return const [];
   }
 
   /// Ham metinden ilk JSON DİZİSİNİ ([...]) ayıklayıp çözer.
@@ -844,17 +863,21 @@ Türkçe yanıt ver. Yanıtı kısa tut (karakter repliği 1-3 cümle + 1 geri b
   }
 }
 
-/// Bir dating fotoğrafının AI puanlama sonucu.
+/// Bir dating fotoğrafının AI puanlama sonucu (detaylı).
 class PhotoScore {
   final File file;
   final int score; // 0-100
-  final String strengths;
-  final String weaknesses;
+  final String summary; // tek cümlelik genel değerlendirme
+  final List<String> strengths; // güçlü yönler
+  final List<String> weaknesses; // zayıf yönler
+  final List<String> improvements; // yapılabilecek somut iyileştirmeler
 
   const PhotoScore({
     required this.file,
     required this.score,
-    required this.strengths,
-    required this.weaknesses,
+    this.summary = '',
+    this.strengths = const [],
+    this.weaknesses = const [],
+    this.improvements = const [],
   });
 }
