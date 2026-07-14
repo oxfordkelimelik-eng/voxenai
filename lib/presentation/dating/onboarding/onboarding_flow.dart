@@ -422,13 +422,19 @@ class _AuthOnboardingScreenState
     if (!ref.read(entitlementProvider).consentGiven) {
       await ref.read(entitlementProvider.notifier).giveConsent();
     }
-    await ref.read(entitlementProvider.notifier).signIn(provider);
+    String? errorDetail;
+    try {
+      await ref.read(entitlementProvider.notifier).signIn(provider);
+    } catch (e) {
+      errorDetail = e.toString();
+    }
     if (!mounted) return;
     setState(() => _busy = false);
     final signedIn = ref.read(entitlementProvider).isSignedIn;
     if (!signedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Giriş tamamlanamadı. Lütfen tekrar dene.'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(errorDetail ?? 'Giriş tamamlanamadı. Lütfen tekrar dene.'),
+        duration: const Duration(seconds: 6),
       ));
       return;
     }

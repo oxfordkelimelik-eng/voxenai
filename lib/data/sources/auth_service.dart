@@ -6,6 +6,15 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:logger/logger.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
+/// Giriş sirasinda olusan, kullaniciya/log'a gosterilebilir hata. Gercek
+/// Firebase/SDK hata kodunu tasir (genel "tamamlanamadi" yerine).
+class AuthFailure implements Exception {
+  final String message;
+  const AuthFailure(this.message);
+  @override
+  String toString() => message;
+}
+
 /// Firebase kimlik doğrulama: anonim giriş (sürtünmesiz) + opsiyonel Google bağlama.
 /// Kullanıcı hiçbir şey yapmadan anonim bir kimlik alır; isterse Google ile
 /// hesabını kalıcı hale getirip cihaz değişse de verisine erişebilir.
@@ -66,9 +75,20 @@ class AuthService {
         final signed = await _auth.signInWithCredential(credential);
         return signed.user;
       }
+    } on GoogleSignInException catch (e) {
+      // Kullanici iptali sessiz gecilir; digerleri yukari firlatilir.
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        _logger.i('Google girisi kullanici tarafindan iptal edildi.');
+        return null;
+      }
+      _logger.e('Google Sign-In hatasi: ${e.code} ${e.description}');
+      throw AuthFailure('Google: ${e.code.name} ${e.description ?? ''}'.trim());
+    } on FirebaseAuthException catch (e) {
+      _logger.e('Firebase Auth (Google) hatasi: ${e.code} ${e.message}');
+      throw AuthFailure('Firebase: ${e.code}');
     } catch (e) {
-      _logger.e('Google bağlama hatası: $e');
-      return null;
+      _logger.e('Google baglama hatasi: $e');
+      throw AuthFailure(e.toString());
     }
   }
 
@@ -111,9 +131,20 @@ class AuthService {
         final signed = await _auth.signInWithCredential(credential);
         return signed.user;
       }
+    } on SignInWithAppleAuthorizationException catch (e) {
+      // Kullanici iptali sessiz gecilir; digerleri yukari firlatilir.
+      if (e.code == AuthorizationErrorCode.canceled) {
+        _logger.i('Apple girisi kullanici tarafindan iptal edildi.');
+        return null;
+      }
+      _logger.e('Apple Sign-In hatasi: ${e.code} ${e.message}');
+      throw AuthFailure('Apple: ${e.code.name} ${e.message}'.trim());
+    } on FirebaseAuthException catch (e) {
+      _logger.e('Firebase Auth (Apple) hatasi: ${e.code} ${e.message}');
+      throw AuthFailure('Firebase: ${e.code}');
     } catch (e) {
-      _logger.e('Apple bağlama hatası: $e');
-      return null;
+      _logger.e('Apple baglama hatasi: $e');
+      throw AuthFailure(e.toString());
     }
   }
 

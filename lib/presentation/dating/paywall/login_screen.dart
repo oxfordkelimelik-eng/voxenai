@@ -51,7 +51,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Giriş tamamlanamadı. Lütfen tekrar dene.'),
+        content: Text(e.toString()),
+        duration: const Duration(seconds: 6),
       ));
       return;
     }
