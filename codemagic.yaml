@@ -42,11 +42,11 @@ workflows:
         script: |
           flutter build ios --release --no-codesign \
             --build-number="$PROJECT_BUILD_NUMBER"
-      - name: 4. Prepare keychain & App Store Connect API key
+      - name: 4. Fetch stable signing files & apply
         script: |
           set -e
           keychain initialize
-          # .p8 anahtarini xcodebuild'in okuyabilecegi dosyaya yaz.
+          # .p8 anahtarini araclarin okuyabilecegi dosyaya yaz.
           # %b: PEM literal "\n" ile saklaniyorsa gercek satir sonuna cevirir.
           KEY_FILE="$CM_BUILD_DIR/AuthKey.p8"
           printf '%b\n' "$ASC_PRIVATE_KEY" > "$KEY_FILE"
@@ -56,20 +56,31 @@ workflows:
             echo "adiyla (secure) eklediginizden emin olun."
             exit 1
           fi
-      - name: 5. Archive (automatic signing via API key)
+          # KARARLI App Store dagitim sertifikasi + app-store profili cek/kur.
+          # ONEMLI: eskiden tam-otomatik imza, her uicu makinede YENI bir
+          # "Apple Development" sertifikasi uretiyordu; bunlar hesapta birikip
+          # "account already has a certificate ... private key not installed"
+          # hatasina yol aciyordu. Bu akis, tek bir kararli DAGITIM sertifikasi
+          # kullanir; gelistirme sertifikasi hic uretilmez.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create \
+            --issuer-id "$ASC_ISSUER_ID" \
+            --key-id "$ASC_KEY_ID" \
+            --private-key @file:"$KEY_FILE"
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: 5. Archive (manual, stable distribution cert)
         script: |
           set -e
+          # use-profiles Runner hedefini manuel + app-store profiliyle
+          # yapilandirdi; xcodebuild bunu okuyup arsivi dagitim sertifikasiyla
+          # imzalar. Otomatik imza/gelistirme sertifikasi URETILMEZ.
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE=Automatic \
             archive
       - name: 6. Export IPA (automatic signing via API key)
         script: |
