@@ -161,15 +161,41 @@ workflows:
           fi
       - name: 9. Upload to TestFlight
         script: |
-          set -e
-          # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'ta
-          # dahili teste hazir hale getirir. Ayni API anahtarini kullanir.
-          app-store-connect publish \
-            --path "$CM_BUILD_DIR/build/ios/ipa/*.ipa" \
-            --testflight \
-            --issuer-id "$ASC_ISSUER_ID" \
-            --key-id "$ASC_KEY_ID" \
-            --private-key @file:"$CM_BUILD_DIR/AuthKey.p8"
+          # NOT: 'set -e' YOK — publish'in cikis kodunu kendimiz yorumluyoruz.
+          # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'a koyar.
+          #
+          # Apple'in yukleme sunucusu, veri basariyla transfer edildikten sonra
+          # bazen "durumu tamamlandi olarak isaretle" adiminda GECICI bir
+          # HTTP 500 donduruyor; altool bunu gorunce cikis kodunu 1 yapiyor ama
+          # yukleme FIILEN basarili ("UPLOAD SUCCEEDED with no errors"). Bu
+          # sahte basarisizligi ele almak icin: ciktiyi yakala, "UPLOAD
+          # SUCCEEDED" varsa basarili say; yoksa 3 kez'e kadar yeniden dene.
+          upload_ipa() {
+            app-store-connect publish \
+              --path "$CM_BUILD_DIR/build/ios/ipa/*.ipa" \
+              --testflight \
+              --issuer-id "$ASC_ISSUER_ID" \
+              --key-id "$ASC_KEY_ID" \
+              --private-key @file:"$CM_BUILD_DIR/AuthKey.p8" 2>&1 | tee "$CM_BUILD_DIR/publish.log"
+            return "${PIPESTATUS[0]}"
+          }
+          for attempt in 1 2 3; do
+            echo "== TestFlight yukleme denemesi $attempt =="
+            if upload_ipa; then
+              echo "Yukleme basarili (deneme $attempt)."
+              exit 0
+            fi
+            # publish sifir-disi dondu — gercekten basarili mi (Apple 500'u) yoksa
+            # gercek hata mi? Log'daki kesin basari isaretine bak.
+            if grep -q "UPLOAD SUCCEEDED" "$CM_BUILD_DIR/publish.log"; then
+              echo "altool sifir-disi dondu ama 'UPLOAD SUCCEEDED' var (gecici Apple 500). Basarili sayiliyor."
+              exit 0
+            fi
+            echo "Yukleme deneme $attempt basarisiz; gercek hata olabilir, tekrar denenecek..."
+            sleep 30
+          done
+          echo "HATA: 3 denemenin hepsinde yukleme basarisiz oldu."
+          exit 1
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
