@@ -74,6 +74,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Google Sign-In SDK'nin baslamasi icin ZORUNLU client id. Deger,
+	     GoogleService-Info.plist'teki CLIENT_ID ile birebir ayni. Olmadan
+	     "No active configuration. Make sure GIDClientID is set" hatasi alinir. -->
+	<key>GIDClientID</key>
+	<string>473057059250-mia3vm05de9ht4ebb7ks6cpjcutfvcqn.apps.googleusercontent.com</string>
 	<!-- Google Sign-In geri cagrisi icin ZORUNLU URL scheme. Deger,
 	     GoogleService-Info.plist'teki REVERSED_CLIENT_ID ile birebir ayni.
 	     Bu olmadan Google giris akisi geri donemez ("giris tamamlanamadi"). -->
