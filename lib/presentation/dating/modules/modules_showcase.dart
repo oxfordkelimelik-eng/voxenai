@@ -185,7 +185,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
             ),
             // Kompakt otomatik slider
             SizedBox(
-              height: 132,
+              height: 168,
               child: PageView.builder(
                 controller: _pageController,
                 onPageChanged: (i) => setState(() => _page = i),
@@ -204,6 +204,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               assetPath: s.$1,
                               fallbackIcon: s.$2,
                               borderRadius: BorderRadius.zero,
+                              alignment: Alignment.topCenter,
                             ),
                           ),
                           DecoratedBox(

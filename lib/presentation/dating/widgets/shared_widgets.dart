@@ -266,6 +266,7 @@ class DatingModuleImage extends StatelessWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
+  final Alignment alignment;
   final IconData fallbackIcon;
   final BorderRadius borderRadius;
 
@@ -275,6 +276,7 @@ class DatingModuleImage extends StatelessWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.topCenter,
     this.fallbackIcon = Icons.image_outlined,
     this.borderRadius = const BorderRadius.all(Radius.circular(14)),
   });
@@ -298,7 +300,7 @@ class DatingModuleImage extends StatelessWidget {
             width: w,
             height: h,
             fit: fit,
-            alignment: Alignment.center,
+            alignment: alignment,
             errorBuilder: (_, _, _) => Container(
               width: w,
               height: h,

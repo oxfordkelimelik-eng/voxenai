@@ -250,7 +250,7 @@ class _FeatureCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
+          gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
@@ -258,87 +258,44 @@ class _FeatureCard extends StatelessWidget {
               AppColors.surface,
             ],
           ),
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.borderGold, width: 0.8),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        clipBehavior: Clip.antiAlias,
+        child: Row(
           children: [
-            Expanded(
-              flex: 5,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(18),
-                ),
-                child: SizedBox.expand(
-                  child: DatingModuleImage(
-                    assetPath: _ModuleMeta.imageFor(module.id),
-                    width: double.infinity,
-                    height: double.infinity,
-                    fallbackIcon: module.icon,
-                    borderRadius: BorderRadius.zero,
-                  ),
-                ),
+            // Portre thumb — fotoğraflarla aynı 3:4 oran, yüz üstte kalır
+            AspectRatio(
+              aspectRatio: 3 / 4,
+              child: DatingModuleImage(
+                assetPath: _ModuleMeta.imageFor(module.id),
+                fallbackIcon: module.icon,
+                borderRadius: BorderRadius.zero,
+                alignment: Alignment.topCenter,
               ),
             ),
             Expanded(
-              flex: 6,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            gradient: AppColors.goldGradient,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(module.icon,
-                              color: AppColors.textOnGold, size: 18),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (meta.badge.isNotEmpty)
-                                Text(meta.badge,
-                                    style: const TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 0.6,
-                                        color: AppColors.gold)),
-                              Text(module.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w900,
-                                      height: 1.15,
-                                      color: AppColors.textPrimary)),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: AppColors.gold,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Text('Başla',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textOnGold)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
+                    if (meta.badge.isNotEmpty)
+                      Text(meta.badge,
+                          style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.6,
+                              color: AppColors.gold)),
+                    Text(module.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                            height: 1.15,
+                            color: AppColors.textPrimary)),
+                    const SizedBox(height: 6),
                     Expanded(
                       child: Text(meta.pitch,
                           maxLines: 3,
@@ -353,13 +310,13 @@ class _FeatureCard extends StatelessWidget {
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          for (final h in meta.highlights.take(3))
+                          for (final h in meta.highlights.take(2))
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: AppColors.surfaceHighest,
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(h,
                                   style: const TextStyle(
@@ -369,6 +326,23 @@ class _FeatureCard extends StatelessWidget {
                             ),
                         ],
                       ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: AppColors.gold,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text('Başla',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textOnGold)),
+                      ),
+                    ),
                   ],
                 ),
               ),
