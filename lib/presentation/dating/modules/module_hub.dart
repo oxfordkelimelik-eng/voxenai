@@ -215,14 +215,12 @@ class _ModuleMeta {
   static const Map<String, _ModuleMeta> byId = {
     'ai_photo': _ModuleMeta(
       'EN POPÜLER',
-      'Kendi fotoğrafından, farklı stillerde stüdyo kalitesinde dating '
-          'kareleri üret.',
+      'Kendi selfie\'lerinden stile özel stüdyo kalitesinde dating fotoğrafları üret.',
       ['Studio ışık', 'Doğal stil', 'Outdoor'],
     ),
     'photo_analysis': _ModuleMeta(
       'HIZLI',
-      'Fotoğraflarını saniyeler içinde puanlar, en çok eşleşme getirecek '
-          'kareyi seçer.',
+      'Fotoğraflarını puanla, en çok eşleşme getirecek kareyi seç.',
       ['Çekicilik skoru', 'En iyi kare', 'İpuçları'],
     ),
   };
@@ -234,7 +232,7 @@ class _ModuleMeta {
       };
 }
 
-/// Ana ekrandaki iki modüle özel büyük, dolu özellik kartı.
+/// Ana ekrandaki iki modüle özel kart: üstte yatay görsel, altta açıklama.
 class _FeatureCard extends StatelessWidget {
   final DatingModule module;
   final bool hasPack;
@@ -250,23 +248,17 @@ class _FeatureCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.surfaceElevated,
-              AppColors.surface,
-            ],
-          ),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.borderGold, width: 0.8),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Portre thumb — fotoğraflarla aynı 3:4 oran, yüz üstte kalır
-            AspectRatio(
-              aspectRatio: 3 / 4,
+            // Üst: yatay kapak görseli
+            Expanded(
+              flex: 5,
               child: DatingModuleImage(
                 assetPath: _ModuleMeta.imageFor(module.id),
                 fallbackIcon: module.icon,
@@ -274,73 +266,68 @@ class _FeatureCard extends StatelessWidget {
                 alignment: Alignment.topCenter,
               ),
             ),
+            // Alt: başlık + kısa açıklama + CTA
             Expanded(
+              flex: 4,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (meta.badge.isNotEmpty)
-                      Text(meta.badge,
-                          style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.6,
-                              color: AppColors.gold)),
-                    Text(module.title,
+                    Row(
+                      children: [
+                        if (meta.badge.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.goldSurface,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(meta.badge,
+                                style: const TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                    color: AppColors.gold)),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: Text(module.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.textPrimary)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.gold,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text('Başla',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.textOnGold)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: Text(
+                        meta.pitch,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            height: 1.15,
-                            color: AppColors.textPrimary)),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: Text(meta.pitch,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              height: 1.35,
-                              color: AppColors.textSecondary)),
-                    ),
-                    if (meta.highlights.isNotEmpty)
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          for (final h in meta.highlights.take(2))
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceHighest,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(h,
-                                  style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.textSecondary)),
-                            ),
-                        ],
-                      ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: AppColors.gold,
-                          borderRadius: BorderRadius.circular(10),
+                          fontSize: 12.5,
+                          height: 1.35,
+                          color: AppColors.textSecondary,
                         ),
-                        child: const Text('Başla',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.textOnGold)),
                       ),
                     ),
                   ],

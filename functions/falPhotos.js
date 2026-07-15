@@ -58,68 +58,87 @@ function styleUnitsFor(styleCount) {
  * Döner: { urls: string[], buffers: Buffer[] }
  */
 async function uploadToFalStorage(buf, fileName) {
-  // 1) İmzasız yükleme URL'i al
-  const initResp = await fetch(
+  // Güncel fal CDN v3 initiate + PUT. Eski alpha/gcs endpoint'i sık 404/500 veriyor.
+  const endpoints = [
+    "https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
+    "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
     "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=gcs",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Key ${FAL_KEY.value()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        content_type: "image/jpeg",
-        file_name: fileName,
-      }),
+  ];
+  let lastErr = "";
+  for (const endpoint of endpoints) {
+    try {
+      const initResp = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Key ${FAL_KEY.value()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content_type: "image/jpeg",
+          file_name: fileName,
+        }),
+      });
+      if (!initResp.ok) {
+        lastErr = `${initResp.status} ${(await initResp.text()).slice(0, 100)}`;
+        continue;
+      }
+      const initJson = await initResp.json();
+      const uploadUrl = initJson.upload_url || initJson.uploadUrl;
+      const fileUrl = initJson.file_url || initJson.fileUrl || initJson.url;
+      if (!uploadUrl || !fileUrl) {
+        lastErr = "upload_url/file_url yok";
+        continue;
+      }
+      const putResp = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "image/jpeg" },
+        body: buf,
+      });
+      if (!putResp.ok) {
+        lastErr = `PUT ${putResp.status}`;
+        continue;
+      }
+      return fileUrl;
+    } catch (e) {
+      lastErr = e.message || String(e);
     }
-  );
-  if (!initResp.ok) {
-    const txt = await initResp.text();
-    throw new HttpsError(
-      "internal",
-      `fal.ai upload initiate hatası: ${initResp.status} ${txt.slice(0, 120)}`
-    );
   }
-  const initJson = await initResp.json();
-  const uploadUrl = initJson.upload_url || initJson.uploadUrl;
-  const fileUrl = initJson.file_url || initJson.fileUrl || initJson.url;
-  if (!uploadUrl || !fileUrl) {
-    throw new HttpsError("internal", "fal.ai upload URL alınamadı.");
-  }
+  throw new HttpsError("internal", `fal.ai upload başarısız: ${lastErr}`);
+}
 
-  // 2) Dosyayı imzalı URL'e yükle
-  const putResp = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "image/jpeg" },
-    body: buf,
+/** Firebase Storage imzalı okuma URL'i — fal harici URL'leri çekebilir. */
+async function signedDownloadUrl(file) {
+  const [url] = await file.getSignedUrl({
+    version: "v4",
+    action: "read",
+    expires: Date.now() + 2 * 60 * 60 * 1000, // 2 saat
   });
-  if (!putResp.ok) {
-    const txt = await putResp.text();
-    throw new HttpsError(
-      "internal",
-      `fal.ai dosya yükleme hatası: ${putResp.status} ${txt.slice(0, 80)}`
-    );
-  }
-  return fileUrl;
+  return url;
 }
 
 /**
- * Referans selfie'lerini Storage'dan okur, fal.ai storage'ına yükler (edit
- * modelleri yalnızca fal'ın erişebileceği URL kabul eder) VE aynı buffer'ları
- * kalite kapısı için geri döner (ikinci indirmeye gerek kalmasın).
- * Döner: { urls: string[], buffers: Buffer[] }
+ * Referans selfie'lerini Storage'dan okur, fal.ai CDN'e (veya imzalı GCS
+ * URL'sine) yükler. Döner: { urls: string[], buffers: Buffer[] }
  */
 async function uploadReferencePhotos(uid, jobId) {
   const prefix = `dating_training/${uid}/${jobId}/`;
   const [files] = await bucket().getFiles({ prefix });
-  // GCS klasör placeholder'larını ele (adı / ile biten boş "dosyalar").
-  const photoFiles = files.filter((f) => !f.name.endsWith("/") && f.name.includes("photo_"));
+  const photoFiles = files
+    .filter((f) => !f.name.endsWith("/") && f.name.includes("photo_"))
+    .sort((a, b) => a.name.localeCompare(b.name));
   if (photoFiles.length === 0) {
     throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
   }
   const results = await Promise.all(photoFiles.map(async (file, idx) => {
     const [buf] = await file.download();
-    const url = await uploadToFalStorage(buf, `ref_${idx}.jpg`);
+    let url;
+    try {
+      url = await uploadToFalStorage(buf, `ref_${idx}.jpg`);
+    } catch (e) {
+      // fal CDN düşerse imzalı Firebase URL ile devam et (fal dış URL kabul eder).
+      console.warn("fal upload başarısız, signed URL kullanılıyor:", e.message || e);
+      url = await signedDownloadUrl(file);
+    }
     return { url, buf };
   }));
   return { urls: results.map((r) => r.url), buffers: results.map((r) => r.buf) };
