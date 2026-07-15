@@ -20,9 +20,9 @@ class AnalysisScreen extends ConsumerStatefulWidget {
 }
 
 class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
-  // Rehberli çekimden dönen [ön, sağ, sol] listeleri.
-  List<File>? _facePhotos;
-  List<File>? _bodyPhotos;
+  // Rehberli çekimden dönen [ön, sağ, sol] listeleri; boş slot null.
+  List<File?>? _facePhotos;
+  List<File?>? _bodyPhotos;
 
   Future<void> _capture(CaptureKind kind) async {
     final result = await Navigator.of(context).push<List<File>>(
@@ -31,19 +31,37 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
     if (result == null || result.length < 3 || !mounted) return;
     setState(() {
       if (kind == CaptureKind.face) {
-        _facePhotos = result;
+        _facePhotos = List<File?>.from(result);
       } else {
-        _bodyPhotos = result;
+        _bodyPhotos = List<File?>.from(result);
       }
     });
   }
 
+  List<File>? _filledPhotos(List<File?>? photos) {
+    if (photos == null || photos.length < 3 || photos.any((f) => f == null)) {
+      return null;
+    }
+    return photos.cast<File>();
+  }
+
+  void _removePhotoAt(List<File?>? photos, int index, void Function(List<File?>?) setPhotos) {
+    setState(() {
+      final updated = List<File?>.from(photos ?? List.filled(3, null));
+      while (updated.length < 3) {
+        updated.add(null);
+      }
+      updated[index] = null;
+      setPhotos(updated.every((f) => f == null) ? null : updated);
+    });
+  }
+
   Future<void> _runFace() async {
-    await ref.read(faceAnalysisFlowProvider.notifier).run(_facePhotos);
+    await ref.read(faceAnalysisFlowProvider.notifier).run(_filledPhotos(_facePhotos));
   }
 
   Future<void> _runBody() async {
-    await ref.read(bodyAnalysisFlowProvider.notifier).run(_bodyPhotos);
+    await ref.read(bodyAnalysisFlowProvider.notifier).run(_filledPhotos(_bodyPhotos));
   }
 
   /// İkisi de tamamlanınca: Pro değilse sonuçları görmeden önce ödeme
@@ -108,6 +126,11 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
                 hasResult: faceState.value != null,
                 onCapture: () => _capture(CaptureKind.face),
                 onRemove: () => setState(() => _facePhotos = null),
+                onRemoveAt: (i) => _removePhotoAt(
+                  _facePhotos,
+                  i,
+                  (v) => _facePhotos = v,
+                ),
                 onAnalyze: _runFace,
               ),
               const SizedBox(height: 16),
@@ -123,6 +146,11 @@ class _AnalysisScreenState extends ConsumerState<AnalysisScreen> {
                 hasResult: bodyState.value != null,
                 onCapture: () => _capture(CaptureKind.body),
                 onRemove: () => setState(() => _bodyPhotos = null),
+                onRemoveAt: (i) => _removePhotoAt(
+                  _bodyPhotos,
+                  i,
+                  (v) => _bodyPhotos = v,
+                ),
                 onAnalyze: _runBody,
               ),
 
@@ -191,11 +219,12 @@ class _AnalysisCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final Color color;
-  final List<File>? photos;
+  final List<File?>? photos;
   final bool isLoading;
   final bool hasResult;
   final VoidCallback onCapture;
   final VoidCallback onRemove;
+  final ValueChanged<int> onRemoveAt;
   final VoidCallback onAnalyze;
 
   const _AnalysisCard({
@@ -208,12 +237,19 @@ class _AnalysisCard extends StatelessWidget {
     required this.hasResult,
     required this.onCapture,
     required this.onRemove,
+    required this.onRemoveAt,
     required this.onAnalyze,
   });
 
   static const _angleLabels = ['ÖN', 'SAĞ', 'SOL'];
 
-  bool get _hasPhotos => photos != null && photos!.length >= 3;
+  bool get _hasAllPhotos =>
+      photos != null &&
+      photos!.length >= 3 &&
+      photos!.take(3).every((f) => f != null);
+
+  bool get _hasAnyPhotos =>
+      photos != null && photos!.any((f) => f != null);
 
   @override
   Widget build(BuildContext context) {
@@ -281,15 +317,23 @@ class _AnalysisCard extends StatelessWidget {
           const SizedBox(height: 14),
 
           // Foto alanı: 3 açı önizleme veya rehberli çekim butonu
-          if (_hasPhotos)
+          if (_hasAnyPhotos)
             Column(
               children: [
                 Row(
                   children: List.generate(3, (i) {
+                    final file =
+                        photos != null && i < photos!.length ? photos![i] : null;
                     return Expanded(
                       child: Padding(
                         padding: EdgeInsets.only(right: i < 2 ? 8 : 0),
-                        child: _thumb(photos![i], _angleLabels[i]),
+                        child: file != null
+                            ? _thumb(
+                                file,
+                                _angleLabels[i],
+                                onRemove: () => onRemoveAt(i),
+                              )
+                            : _emptySlot(_angleLabels[i]),
                       ),
                     );
                   }),
@@ -297,14 +341,28 @@ class _AnalysisCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Icon(Icons.check_circle_rounded,
-                        color: AppColors.success, size: 16),
+                    Icon(
+                      _hasAllPhotos
+                          ? Icons.check_circle_rounded
+                          : Icons.warning_amber_rounded,
+                      color: _hasAllPhotos
+                          ? AppColors.success
+                          : AppColors.gold,
+                      size: 16,
+                    ),
                     const SizedBox(width: 6),
-                    const Text('3 açı hazır',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.success,
-                            fontWeight: FontWeight.w700)),
+                    Text(
+                      _hasAllPhotos
+                          ? '3 açı hazır'
+                          : '${photos!.whereType<File>().length}/3 açı hazır',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _hasAllPhotos
+                            ? AppColors.success
+                            : AppColors.gold,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const Spacer(),
                     GestureDetector(
                       onTap: onRemove,
@@ -337,7 +395,7 @@ class _AnalysisCard extends StatelessWidget {
                           color: Colors.white, strokeWidth: 2),
                     )
                   : Text(
-                      _hasPhotos ? '3 AÇIYI ANALİZ ET' : 'TAHMİNİ ANALİZ ÜRET',
+                      _hasAllPhotos ? '3 AÇIYI ANALİZ ET' : 'TAHMİNİ ANALİZ ÜRET',
                       style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.5,
@@ -345,7 +403,7 @@ class _AnalysisCard extends StatelessWidget {
                     ),
             ),
           ),
-          if (isLoading && _hasPhotos) ...[
+          if (isLoading && _hasAllPhotos) ...[
             const SizedBox(height: 12),
             _AnalyzingHint(color: color),
           ],
@@ -384,13 +442,71 @@ class _AnalysisCard extends StatelessWidget {
     );
   }
 
-  Widget _thumb(File file, String label) {
+  Widget _emptySlot(String label) {
     return Column(
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.file(file,
-              width: double.infinity, height: 90, fit: BoxFit.cover),
+        Container(
+          width: double.infinity,
+          height: 90,
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: AppColors.borderSubtle,
+              style: BorderStyle.solid,
+            ),
+          ),
+          child: const Icon(
+            Icons.image_not_supported_outlined,
+            color: AppColors.textMuted,
+            size: 24,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMuted,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _thumb(File file, String label, {required VoidCallback onRemove}) {
+    return Column(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(file,
+                  width: double.infinity, height: 90, fit: BoxFit.cover),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text(label,
