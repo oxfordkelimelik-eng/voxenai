@@ -13,83 +13,107 @@
     color-scheme: light dark;
     --bg: #faf7fb; --fg: #1a1420; --muted: #8a7f92; --card: #ffffff;
     --border: #ece2ee; --accent: #b0396a; --accent2: #e5a5b8;
-    --gold: #c9a24b;
+    --gold: #c9a24b; --header-bg: rgba(255,255,255,0.75);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #140f16; --fg: #ece7f0; --muted: #9a8fa4; --card: #201727;
-      --border: #352840; --accent: #e5a5b8; --accent2: #f0c3d1; }
+    :root { --bg: #0d0a0e; --fg: #ece7f0; --muted: #9a8fa4; --card: #1a1420;
+      --border: #2c2130; --accent: #e5a5b8; --accent2: #f0c3d1; --header-bg: rgba(13,10,14,0.75); }
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.65; color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; }
+    line-height: 1.65; color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased;
+    overflow-x: hidden; }
   a { color: var(--accent); }
+  img { max-width: 100%; display: block; }
   .wrap { max-width: 960px; margin: 0 auto; padding: 0 22px; }
 
-  /* Header */
-  header { padding: 22px 0; display: flex; align-items: center; justify-content: space-between; }
-  .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -0.5px; }
-  .brand span { color: var(--accent); }
-  nav a { margin-left: 20px; text-decoration: none; color: var(--muted); font-size: 0.92rem; font-weight: 600; }
+  /* Header — sticky, always single row, wraps gracefully on narrow phones */
+  header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(10px);
+    background: var(--header-bg); border-bottom: 1px solid var(--border); }
+  header .wrap { padding: 12px 22px; display: flex; align-items: center;
+    justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .brand-logo { height: 26px; width: auto; border-radius: 6px; flex-shrink: 0; }
+  nav { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  nav a { text-decoration: none; color: var(--muted); font-size: 0.88rem; font-weight: 600; white-space: nowrap; }
   nav a:hover { color: var(--fg); }
 
   /* Hero */
-  .hero { text-align: center; padding: 70px 0 60px; }
-  .hero h1 { font-size: clamp(2.1rem, 6vw, 3.4rem); line-height: 1.1; margin: 0 0 18px; letter-spacing: -1px; }
+  .hero { text-align: center; padding: 56px 0 60px; }
+  .hero-splash { width: 150px; height: 150px; object-fit: cover; margin: 0 auto 24px;
+    border-radius: 28px; box-shadow: 0 24px 60px -20px rgba(200, 40, 60, 0.45); }
+  .hero h1 { font-size: clamp(2rem, 7vw, 3.4rem); line-height: 1.12; margin: 0 0 18px; letter-spacing: -1px; }
   .hero h1 .grad { background: linear-gradient(120deg, var(--accent), var(--gold));
     -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .hero p { font-size: 1.15rem; color: var(--muted); max-width: 620px; margin: 0 auto 30px; }
+  .hero p { font-size: 1.1rem; color: var(--muted); max-width: 560px; margin: 0 auto 32px; padding: 0 8px; }
   .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff;
-    text-decoration: none; font-weight: 700; padding: 14px 28px; border-radius: 40px; font-size: 1rem;
-    box-shadow: 0 8px 24px -8px var(--accent); transition: transform .12s; }
+    text-decoration: none; font-weight: 700; padding: 14px 30px; border-radius: 40px; font-size: 1rem;
+    box-shadow: 0 10px 26px -10px var(--accent); transition: transform .15s ease; }
   .cta:hover { transform: translateY(-2px); }
-  .cta.secondary { background: transparent; color: var(--fg); box-shadow: none; border: 1px solid var(--border); margin-left: 10px; }
 
   /* Sections */
-  section { padding: 50px 0; }
-  h2.title { font-size: 1.7rem; text-align: center; margin: 0 0 8px; letter-spacing: -0.5px; }
-  .lead { text-align: center; color: var(--muted); max-width: 560px; margin: 0 auto 40px; }
+  section { padding: 56px 0; }
+  h2.title { font-size: 1.6rem; text-align: center; margin: 0 0 8px; letter-spacing: -0.5px; }
+  .lead { text-align: center; color: var(--muted); max-width: 520px; margin: 0 auto 36px; padding: 0 8px; }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
   .feature { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 26px; }
-  .feature .ic { font-size: 1.8rem; margin-bottom: 12px; }
-  .feature h3 { margin: 0 0 8px; font-size: 1.15rem; }
-  .feature p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .feature .ic { font-size: 1.7rem; margin-bottom: 12px; }
+  .feature h3 { margin: 0 0 8px; font-size: 1.1rem; }
+  .feature p { margin: 0; color: var(--muted); font-size: 0.93rem; }
 
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; counter-reset: step; }
-  .step { position: relative; padding: 26px 22px 22px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; }
-  .step::before { counter-increment: step; content: counter(step); position: absolute; top: -14px; left: 22px;
-    width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
-    background: var(--accent); color: #fff; font-weight: 900; }
-  .step h3 { margin: 8px 0 6px; font-size: 1.05rem; }
-  .step p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  /* Steps — number badge sits fully inside the card's own top padding
+     (no negative offset) so it can never collide with the section above */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; counter-reset: step; }
+  .step { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; }
+  .step .num { counter-increment: step; content: counter(step); width: 32px; height: 32px;
+    display: grid; place-items: center; border-radius: 50%; background: var(--accent);
+    color: #fff; font-weight: 900; font-size: 0.95rem; margin-bottom: 14px; }
+  .step .num::before { content: counter(step); }
+  .step h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .step p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
   /* Privacy strip */
-  .privacy { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 34px; text-align: center; }
-  .privacy h2 { margin: 0 0 10px; font-size: 1.4rem; }
-  .privacy p { color: var(--muted); max-width: 620px; margin: 0 auto 8px; }
+  .privacy { background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+    padding: 32px 26px; text-align: center; }
+  .privacy h2 { margin: 0 0 10px; font-size: 1.35rem; }
+  .privacy p { color: var(--muted); max-width: 600px; margin: 0 auto; }
+  .privacy .links { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; font-size: 0.92rem; }
 
   /* Footer */
-  footer { border-top: 1px solid var(--border); margin-top: 30px; padding: 34px 0 50px; }
-  .foot-grid { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: center; }
-  .foot-links a { color: var(--muted); text-decoration: none; margin-right: 18px; font-size: 0.92rem; }
+  footer { border-top: 1px solid var(--border); margin-top: 20px; padding: 30px 0 46px; }
+  .foot-grid { display: flex; flex-wrap: wrap; gap: 14px 22px; justify-content: space-between; align-items: center; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  .foot-links a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
   .foot-links a:hover { color: var(--fg); }
-  .copy { color: var(--muted); font-size: 0.88rem; }
+  .copy { color: var(--muted); font-size: 0.85rem; }
+
+  @media (max-width: 560px) {
+    header .wrap { padding: 10px 18px; }
+    nav { gap: 12px; }
+    nav a { font-size: 0.82rem; }
+    .hero { padding: 40px 0 44px; }
+    section { padding: 40px 0; }
+    .foot-grid { flex-direction: column; align-items: flex-start; }
+  }
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <header>
-    <div class="brand">Voxen<span> AI</span></div>
+<header>
+  <div class="wrap">
+    <img class="brand-logo" src="./assets/logo.png" alt="Voxen AI">
     <nav>
       <a href="#features">Özellikler</a>
       <a href="#how">Nasıl Çalışır</a>
       <a href="./privacy.html">Gizlilik</a>
     </nav>
-  </header>
+  </div>
+</header>
 
+<div class="wrap">
   <div class="hero">
+    <img class="hero-splash" src="./assets/splash.png" alt="Voxen AI">
     <h1>Yapay zekâ ile<br><span class="grad">en iyi fotoğrafların</span></h1>
     <p>Voxen AI, yüz yapını koruyarak saniyeler içinde profesyonel dating
        fotoğrafları üretir ve mevcut fotoğraflarını analiz edip en iyisini seçmene
@@ -129,14 +153,17 @@
   <p class="lead">Üç adımda sonuç.</p>
   <div class="steps">
     <div class="step">
+      <div class="num"></div>
       <h3>Fotoğraf Yükle</h3>
       <p>Net, yüzünün göründüğü fotoğraflarını seç.</p>
     </div>
     <div class="step">
+      <div class="num"></div>
       <h3>AI İşlesin</h3>
       <p>Yapay zekâ saniyeler içinde üretir veya analiz eder.</p>
     </div>
     <div class="step">
+      <div class="num"></div>
       <h3>Sonucu Al</h3>
       <p>En iyi karelerini indir veya analiz raporunu incele.</p>
     </div>
@@ -150,9 +177,11 @@
        senin seçtiğin işlemi gerçekleştirmek için işlenir, işlem sonrası
        kaynak görseller silinir ve dilediğin an hesabını ve tüm verilerini
        kalıcı olarak silebilirsin.</p>
-    <p style="margin-top:14px"><a href="./privacy.html">Gizlilik Politikası</a> ·
-       <a href="./data.html">Veri İşleme Aydınlatması</a> ·
-       <a href="./terms.html">Kullanım Şartları</a></p>
+    <div class="links">
+      <a href="./privacy.html">Gizlilik Politikası</a>
+      <a href="./data.html">Veri İşleme Aydınlatması</a>
+      <a href="./terms.html">Kullanım Şartları</a>
+    </div>
   </div>
 </section>
 
