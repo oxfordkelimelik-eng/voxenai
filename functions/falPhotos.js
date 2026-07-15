@@ -57,26 +57,69 @@ function styleUnitsFor(styleCount) {
  * kalite kapısı için geri döner (ikinci indirmeye gerek kalmasın).
  * Döner: { urls: string[], buffers: Buffer[] }
  */
-async function uploadReferencePhotos(uid, jobId) {
-  const prefix = `dating_training/${uid}/${jobId}/`;
-  const [files] = await bucket().getFiles({ prefix });
-  if (files.length === 0) {
-    throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
-  }
-  const results = await Promise.all(files.map(async (file) => {
-    const [buf] = await file.download();
-    const uploadResp = await fetch("https://fal.run/storage/upload", {
+async function uploadToFalStorage(buf, fileName) {
+  // 1) İmzasız yükleme URL'i al
+  const initResp = await fetch(
+    "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=gcs",
+    {
       method: "POST",
       headers: {
         Authorization: `Key ${FAL_KEY.value()}`,
-        "content-type": "image/jpeg",
+        "Content-Type": "application/json",
       },
-      body: buf,
-    });
-    if (!uploadResp.ok) {
-      throw new HttpsError("internal", `fal.ai storage yükleme hatası: ${uploadResp.status}`);
+      body: JSON.stringify({
+        content_type: "image/jpeg",
+        file_name: fileName,
+      }),
     }
-    const { url } = await uploadResp.json();
+  );
+  if (!initResp.ok) {
+    const txt = await initResp.text();
+    throw new HttpsError(
+      "internal",
+      `fal.ai upload initiate hatası: ${initResp.status} ${txt.slice(0, 120)}`
+    );
+  }
+  const initJson = await initResp.json();
+  const uploadUrl = initJson.upload_url || initJson.uploadUrl;
+  const fileUrl = initJson.file_url || initJson.fileUrl || initJson.url;
+  if (!uploadUrl || !fileUrl) {
+    throw new HttpsError("internal", "fal.ai upload URL alınamadı.");
+  }
+
+  // 2) Dosyayı imzalı URL'e yükle
+  const putResp = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "image/jpeg" },
+    body: buf,
+  });
+  if (!putResp.ok) {
+    const txt = await putResp.text();
+    throw new HttpsError(
+      "internal",
+      `fal.ai dosya yükleme hatası: ${putResp.status} ${txt.slice(0, 80)}`
+    );
+  }
+  return fileUrl;
+}
+
+/**
+ * Referans selfie'lerini Storage'dan okur, fal.ai storage'ına yükler (edit
+ * modelleri yalnızca fal'ın erişebileceği URL kabul eder) VE aynı buffer'ları
+ * kalite kapısı için geri döner (ikinci indirmeye gerek kalmasın).
+ * Döner: { urls: string[], buffers: Buffer[] }
+ */
+async function uploadReferencePhotos(uid, jobId) {
+  const prefix = `dating_training/${uid}/${jobId}/`;
+  const [files] = await bucket().getFiles({ prefix });
+  // GCS klasör placeholder'larını ele (adı / ile biten boş "dosyalar").
+  const photoFiles = files.filter((f) => !f.name.endsWith("/") && f.name.includes("photo_"));
+  if (photoFiles.length === 0) {
+    throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
+  }
+  const results = await Promise.all(photoFiles.map(async (file, idx) => {
+    const [buf] = await file.download();
+    const url = await uploadToFalStorage(buf, `ref_${idx}.jpg`);
     return { url, buf };
   }));
   return { urls: results.map((r) => r.url), buffers: results.map((r) => r.buf) };
@@ -231,7 +274,9 @@ exports.startPhotoGeneration = onCall(
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
       await refundAndFail(uid, jobId, unitsToCharge, "Üretim başlatılamadı.");
-      throw e instanceof HttpsError ? e : new HttpsError("internal", "Üretim başlatılamadı.");
+      if (e instanceof HttpsError) throw e;
+      const msg = (e && e.message) ? String(e.message).slice(0, 160) : "Üretim başlatılamadı.";
+      throw new HttpsError("internal", msg);
     }
 
     return { jobId };

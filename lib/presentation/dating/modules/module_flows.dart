@@ -266,14 +266,16 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       if (!mounted) return;
       setState(() {
         _stage = _AiStage.error;
-        _errorMessage = e.message ??
-            switch (e.code) {
-              'unauthenticated' => 'Giriş yapman gerekiyor.',
-              'failed-precondition' =>
-                'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
-                    'Tek stil ücretsiz denenebilir.',
-              _ => 'Üretim başlatılamadı. Lütfen tekrar dene.',
-            };
+        final detail = e.message?.trim();
+        _errorMessage = (detail != null && detail.isNotEmpty)
+            ? detail
+            : switch (e.code) {
+                'unauthenticated' => 'Giriş yapman gerekiyor.',
+                'failed-precondition' =>
+                  'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
+                      'Tek stil ücretsiz denenebilir.',
+                _ => 'Üretim başlatılamadı (${e.code}). Lütfen tekrar dene.',
+              };
       });
     } catch (e) {
       if (!mounted) return;

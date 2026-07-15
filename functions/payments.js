@@ -61,7 +61,27 @@ async function fetchAppleTransaction(token, transactionId, sandbox) {
  * boylece TestFlight/Sandbox satin almalari da production yayini da APPLE_ENV
  * gibi bir ayar cevirmeye gerek kalmadan calisir.
  */
-async function verifyApplePurchase(productId, transactionId) {
+async function verifyApplePurchase(productId, purchaseToken) {
+  // StoreKit 2: istemci çoğu zaman JWS (3 parçalı JWT) gönderir.
+  // App Store Server API ise transactionId ister — JWS payload'dan çıkar.
+  let transactionId = purchaseToken;
+  if (typeof purchaseToken === "string" && purchaseToken.split(".").length === 3) {
+    try {
+      const payloadB64 = purchaseToken.split(".")[1]
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+      const padded = payloadB64 + "=".repeat((4 - (payloadB64.length % 4)) % 4);
+      const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+      transactionId = payload.transactionId || payload.originalTransactionId || purchaseToken;
+      // Ürün kimliği uyuşmuyorsa yine de transactionId ile doğrula (Apple kaynağı).
+      if (payload.productId && payload.productId !== productId) {
+        console.warn(`productId uyuşmazlığı: beklenen=${productId} jws=${payload.productId}`);
+      }
+    } catch (e) {
+      console.warn("Apple JWS decode başarısız, ham token kullanılacak:", e.message);
+    }
+  }
+
   const jwt = require("jsonwebtoken");
   const token = jwt.sign(
     {
@@ -77,15 +97,14 @@ async function verifyApplePurchase(productId, transactionId) {
 
   let resp = await fetchAppleTransaction(token, transactionId, false);
   if (resp.status === 404) {
-    // TransactionIdNotFound → diger ortamda (TestFlight ise sandbox) ara.
     resp = await fetchAppleTransaction(token, transactionId, true);
   }
   if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    console.error(`Apple doğrulama başarısız: ${resp.status} ${body.slice(0, 200)}`);
     return { valid: false, orderId: transactionId };
   }
   const json = await resp.json();
-  // signedTransactionInfo bir JWS — burada yalnızca varlığını doğruluyoruz;
-  // tam imza doğrulaması app-store-server-library ile güçlendirilebilir.
   const valid = !!json.signedTransactionInfo;
   return { valid, orderId: transactionId };
 }

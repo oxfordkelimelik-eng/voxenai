@@ -1,38 +1,81 @@
-VOXEN AI — Mock / gerçek görseller için dosya rehberi
-======================================================
+VOXEN AI — Hangi dosyaya hangi fotoğraf?
+========================================
 
 Görselleri aşağıdaki yollara koy. Dosya yoksa uygulama otomatik
-gradient + ikon placeholder gösterir (çökme olmaz).
+gradient + ikon placeholder gösterir (çökmez).
 
-STİL ÖRNEK FOTOĞRAFLARI (AI Dating — stil seçim popup)
-  assets/dating/styles/{stilId}_1.jpg
-  assets/dating/styles/{stilId}_2.jpg
-  assets/dating/styles/{stilId}_3.jpg
+────────────────────────────────────────
+1) STİL ÖRNEK FOTOĞRAFLARI (AI Dating stil seçimi popup)
+────────────────────────────────────────
+Klasör: assets/dating/styles/
 
-  stilId değerleri:
-    elegance, athletic, traveller, oldmoney, nightout, beach, car
+Her stil için 3 örnek (1 = ana, 2–3 = alternatif açı/poz):
 
-  Örnek: assets/dating/styles/elegance_1.jpg
+  elegance_1.jpg   elegance_2.jpg   elegance_3.jpg
+  athletic_1.jpg   athletic_2.jpg   athletic_3.jpg
+  traveller_1.jpg  traveller_2.jpg  traveller_3.jpg
+  oldmoney_1.jpg   oldmoney_2.jpg   oldmoney_3.jpg
+  nightout_1.jpg   nightout_2.jpg   nightout_3.jpg
+  beach_1.jpg      beach_2.jpg      beach_3.jpg
+  car_1.jpg        car_2.jpg        car_3.jpg
 
-MODÜL HERO GÖRSELLERİ (vitrin / tanıtım)
-  assets/dating/modules/ai_photo_hero.jpg
-  assets/dating/modules/photo_analysis_hero.jpg
-  assets/dating/modules/hub_ai_photo.jpg
-  assets/dating/modules/hub_analysis.jpg
+Ne koymalısın?
+  • Erkek dating modeli, o stile uygun kıyafet + mekân
+  • Yüz net, 3:4 dikey portre, min ~800×1066 px
+  • Örnek: beach → plaj arka planı; oldmoney → blazer + klasik iç mekân
 
-VİTRİN SLİDER (form sonrası ödeme ekranı)
-  assets/dating/showcase/slide_1.jpg
-  assets/dating/showcase/slide_2.jpg
-  assets/dating/showcase/slide_3.jpg
+────────────────────────────────────────
+2) MODÜL HERO / HUB KARTLARI
+────────────────────────────────────────
+Klasör: assets/dating/modules/
 
-PROFİL / EŞLEŞME MOCK FOTOĞRAFLARI (onboarding, duvar)
-  assets/dating/f1.jpg … f8.jpg  (kadın)
-  assets/dating/m1.jpg … m8.jpg  (erkek)
+  ai_photo_hero.jpg         → Form sonrası vitrin / AI foto tanıtım
+  photo_analysis_hero.jpg   → Form sonrası vitrin / analiz tanıtım
+  hub_ai_photo.jpg          → Ana modüller ekranı AI Foto kartı
+  hub_analysis.jpg          → Ana modüller ekranı Analiz kartı
 
-GENEL
+Ne koymalısın?
+  • Geniş yatay veya 16:9’a yakın “ürün” görseli
+  • AI foto: stilize dating selfie / stüdyo kare
+  • Analiz: skor / karşılaştırma hissi veren kare
+
+────────────────────────────────────────
+3) VİTRİN SLİDER (form sonrası ödeme ekranı — otomatik kayar)
+────────────────────────────────────────
+Klasör: assets/dating/showcase/
+
+  slide_1.jpg  → “Stüdyo kalitesinde dating fotoğrafları”
+  slide_2.jpg  → “En iyi kareleri sen değil AI seçsin”
+  slide_3.jpg  → “Daha fazla eşleşme…”
+
+Ne koymalısın?
+  • Yatay/geniş kare; üzerine koyu gradient + yazı binüyor
+  • Yüz/konu görselin üst/orta kısmında olsun (altta yazı var)
+
+────────────────────────────────────────
+4) ONBOARDING / EŞLEŞME DUVARI MOCK
+────────────────────────────────────────
+Klasör: assets/dating/
+
+  f1.jpg … f8.jpg  → Kadın profil mock (eşleşme duvarı)
+  m1.jpg … m8.jpg  → Erkek profil mock
+
+Ne koymalısın?
+  • 3:4 portre, net yüz, dating uygulaması profili gibi
+
+────────────────────────────────────────
+5) GENEL MARKA / DEMO
+────────────────────────────────────────
   assets/images/logo.png
-  assets/images/oncesi.jpg, sonrasi.jpg
+  assets/images/oncesi.jpg
+  assets/images/sonrasi.jpg
   assets/videos/ai_photo_demo.mp4
   assets/videos/analysis_demo.mp4
 
-Öneri: 3:4 dikey portre, net yüz, iyi ışık, minimum 800×1066 px.
+────────────────────────────────────────
+ÖNERİLEN TEKNİK
+────────────────────────────────────────
+  • Format: JPG (veya PNG), sRGB
+  • Stil örnekleri: 3:4, 800×1066 veya daha yüksek
+  • Hub/hero: en az 1200 px genişlik
+  • Dosya adları birebir yukarıdaki gibi (büyük/küçük harf önemli)

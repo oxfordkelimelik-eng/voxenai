@@ -75,80 +75,64 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
 
   // === MODÜLLER ===
   Widget _modules() {
-    return CustomScrollView(
-      slivers: [
-        // Üst bar: karşılama + abonelik durumu
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 16, 4),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text('Merhaba 👋',
-                      style: TextStyle(
-                          fontSize: 15, color: AppColors.textSecondary)),
-                ),
-                Builder(builder: (_) {
-                  final pack = ref.watch(packBalanceProvider);
-                  return _PlanBadge(hasPack: pack.photo > 0 || pack.analysis > 0);
-                }),
-                const SizedBox(width: 8),
-              ],
-            ),
-          ),
-        ),
-        // Hero başlık + alt açıklama
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
-            child: Text('Profilini bir üst lige taşı',
-                style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    height: 1.15,
-                    color: AppColors.textPrimary)),
-          ),
-        ),
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 18),
-            child: Text(
-                'AI ile çekici fotoğraflar üret, en iyi karelerini seç. '
-                'İki adımda daha fazla eşleşme.',
-                style: TextStyle(
-                    fontSize: 14,
-                    height: 1.4,
-                    color: AppColors.textSecondary)),
-          ),
-        ),
-        // İki modüle özel büyük kartlar
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (_, i) {
-                final m = DatingModule.all[i];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: _FeatureCard(
-                    module: m,
-                    hasPack: _hasPack(m),
-                    onTap: () => _openModule(m),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Merhaba 👋',
+                        style: TextStyle(
+                            fontSize: 14, color: AppColors.textSecondary)),
                   ),
-                );
-              },
-              childCount: DatingModule.all.length,
-            ),
+                  Builder(builder: (_) {
+                    final pack = ref.watch(packBalanceProvider);
+                    return _PlanBadge(
+                        hasPack: pack.photo > 0 || pack.analysis > 0);
+                  }),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text('Profilini bir üst lige taşı',
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      height: 1.15,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              const Text(
+                  'AI fotoğraf üret veya fotoğraflarını analiz et.',
+                  style: TextStyle(
+                      fontSize: 13,
+                      height: 1.35,
+                      color: AppColors.textSecondary)),
+              const SizedBox(height: 14),
+              Expanded(
+                child: Column(
+                  children: [
+                    for (int i = 0; i < DatingModule.all.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 12),
+                      Expanded(
+                        child: _FeatureCard(
+                          module: DatingModule.all[i],
+                          hasPack: _hasPack(DatingModule.all[i]),
+                          onTap: () => _openModule(DatingModule.all[i]),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              const _HowItWorksStrip(),
+            ],
           ),
-        ),
-        // Alt: güven / nasıl çalışır şeridi
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 28),
-            child: _HowItWorksStrip(),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -280,144 +264,113 @@ class _FeatureCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DatingModuleImage(
-              assetPath: _ModuleMeta.imageFor(module.id),
-              height: 120,
-              width: double.infinity,
-              fallbackIcon: module.icon,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
+            Expanded(
+              flex: 5,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(18),
+                ),
+                child: SizedBox.expand(
+                  child: DatingModuleImage(
+                    assetPath: _ModuleMeta.imageFor(module.id),
+                    width: double.infinity,
+                    height: double.infinity,
+                    fallbackIcon: module.icon,
+                    borderRadius: BorderRadius.zero,
+                  ),
+                ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // İkon rozeti
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.goldGradient,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: const [
-                        BoxShadow(
-                            color: AppColors.goldGlow,
-                            blurRadius: 18,
-                            spreadRadius: 1),
-                      ],
-                    ),
-                    child: Icon(module.icon,
-                        color: AppColors.textOnGold, size: 28),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (meta.badge.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: AppColors.goldSurface,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(meta.badge,
-                                style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.8,
-                                    color: AppColors.gold)),
-                          ),
-                        const SizedBox(height: 6),
-                        Text(module.title,
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w900,
-                                height: 1.2,
-                                color: AppColors.textPrimary)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Açıklama
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-              child: Text(meta.pitch,
-                  style: const TextStyle(
-                      fontSize: 13.5,
-                      height: 1.45,
-                      color: AppColors.textSecondary)),
-            ),
-            // Highlight chip'leri
-            if (meta.highlights.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+            Expanded(
+              flex: 6,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final h in meta.highlights)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceHighest,
-                          borderRadius: BorderRadius.circular(20),
-                          border:
-                              Border.all(color: AppColors.borderSubtle),
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            gradient: AppColors.goldGradient,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(module.icon,
+                              color: AppColors.textOnGold, size: 18),
                         ),
-                        child: Text(h,
-                            style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textSecondary)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (meta.badge.isNotEmpty)
+                                Text(meta.badge,
+                                    style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.6,
+                                        color: AppColors.gold)),
+                              Text(module.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w900,
+                                      height: 1.15,
+                                      color: AppColors.textPrimary)),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: AppColors.gold,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text('Başla',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.textOnGold)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: Text(meta.pitch,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              height: 1.35,
+                              color: AppColors.textSecondary)),
+                    ),
+                    if (meta.highlights.isNotEmpty)
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          for (final h in meta.highlights.take(3))
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceHighest,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(h,
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textSecondary)),
+                            ),
+                        ],
                       ),
                   ],
                 ),
-              ),
-            // Alt bar: durum ikonu + CTA (yazı yok — sadece ikon)
-            Container(
-              padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
-              decoration: const BoxDecoration(
-                border: Border(
-                    top: BorderSide(color: AppColors.borderSubtle)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                      hasPack
-                          ? Icons.check_circle_rounded
-                          : Icons.auto_awesome_rounded,
-                      color: AppColors.gold,
-                      size: 18),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.gold,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Başla',
-                            style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.textOnGold)),
-                        SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_rounded,
-                            color: AppColors.textOnGold, size: 16),
-                      ],
-                    ),
-                  ),
-                ],
               ),
             ),
           ],
@@ -462,64 +415,41 @@ class _PlanBadge extends StatelessWidget {
   }
 }
 
-/// Ana ekranın altında güven veren "nasıl çalışır" şeridi.
+/// Ana ekranın altında kompakt "nasıl çalışır" şeridi.
 class _HowItWorksStrip extends StatelessWidget {
   const _HowItWorksStrip();
 
   @override
   Widget build(BuildContext context) {
-    Widget step(IconData icon, String label) => Expanded(
-          child: Column(
+    Widget step(IconData i, String t) => Expanded(
+          child: Row(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.goldSurface,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: AppColors.gold, size: 20),
+              Icon(i, color: AppColors.gold, size: 16),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(t,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary)),
               ),
-              const SizedBox(height: 8),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary)),
             ],
           ),
-        );
-    Widget dash() => const Padding(
-          padding: EdgeInsets.only(bottom: 22),
-          child: Icon(Icons.arrow_forward_rounded,
-              color: AppColors.textMuted, size: 16),
         );
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.borderSubtle),
       ),
-      child: Column(
+      child: Row(
         children: [
-          const Text('Nasıl çalışır?',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              step(Icons.upload_rounded, 'Fotoğrafını\nyükle'),
-              dash(),
-              step(Icons.auto_awesome, 'AI\nçalışsın'),
-              dash(),
-              step(Icons.favorite_rounded, 'Daha çok\neşleşme'),
-            ],
-          ),
+          step(Icons.upload_rounded, 'Yükle'),
+          step(Icons.auto_awesome, 'AI'),
+          step(Icons.favorite_rounded, 'Eşleşme'),
         ],
       ),
     );

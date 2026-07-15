@@ -1,19 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:logger/logger.dart';
 import '../../core/constants/dating_constants.dart';
 
 /// Dating paketleri (tek seferlik, tüketilebilir) için Google Play / App
-/// Store satın alma servisi. `BillingService` (Rise Up aboneliği,
-/// non-consumable) ile karıştırılmamalı — bu servis `buyConsumable` kullanır
-/// çünkü paketler tekrar tekrar satın alınabilir.
+/// Store satın alma servisi.
 ///
-/// Akış: buy() → mağaza satın alma akışı → purchaseStream → sunucu tarafı
-/// doğrulama (`verifyPurchase` Cloud Function, App Store/Play API ile
-/// gerçek makbuz kontrolü + Firestore wallet güncellemesi) → yalnızca
-/// doğrulama başarılı olduktan SONRA completePurchase() çağrılır (aksi
-/// halde doğrulama geçici olarak başarısız olursa makbuz kaybolabilir).
+/// Akış: buy() → mağaza → purchaseStream → sunucu doğrulama
+/// (`verifyPurchase`) → yalnızca doğrulama OK ise completePurchase().
 class DatingPurchaseService {
   final InAppPurchase _iap = InAppPurchase.instance;
   final Logger _logger = Logger();
@@ -30,10 +26,7 @@ class DatingPurchaseService {
   bool _available = false;
   List<ProductDetails> products = [];
 
-  /// Bir satın alma sunucu tarafında doğrulanıp tamamlanınca çağrılır.
   void Function(PurchaseDetails)? onPurchaseVerified;
-
-  /// Bir satın alma hata/iptal ile sonuçlanınca çağrılır.
   void Function(PurchaseDetails)? onPurchaseError;
 
   Future<void> init() async {
@@ -43,7 +36,7 @@ class DatingPurchaseService {
       return;
     }
 
-    _sub = _iap.purchaseStream.listen(
+    _sub ??= _iap.purchaseStream.listen(
       _onPurchaseUpdate,
       onError: (e) => _logger.e('Satın alma akışı hatası: $e'),
     );
@@ -70,6 +63,54 @@ class DatingPurchaseService {
     await _iap.restorePurchases();
   }
 
+  /// Ürünü satın alır ve sunucu doğrulamasını bekler.
+  /// Bir kez başarı olduktan sonra gelen hata event'leri yok sayılır
+  /// (iOS aynı satın alma için birden fazla event gönderebilir).
+  Future<bool> purchaseAndWait(String productId) async {
+    if (!_available) await init();
+    final product = productFor(productId);
+    if (product == null) {
+      _logger.e('Ürün bulunamadı: $productId');
+      return false;
+    }
+
+    final completer = Completer<bool>();
+    var succeeded = false;
+
+    void onVerified(PurchaseDetails p) {
+      if (p.productID != productId) return;
+      succeeded = true;
+      if (!completer.isCompleted) completer.complete(true);
+    }
+
+    void onError(PurchaseDetails p) {
+      if (p.productID != productId) return;
+      if (succeeded) {
+        _logger.w('Başarı sonrası hata event yok sayıldı: ${p.productID}');
+        return;
+      }
+      if (!completer.isCompleted) completer.complete(false);
+    }
+
+    final prevVerified = onPurchaseVerified;
+    final prevError = onPurchaseError;
+    onPurchaseVerified = onVerified;
+    onPurchaseError = onError;
+    try {
+      await buy(product);
+      return await completer.future.timeout(
+        const Duration(minutes: 3),
+        onTimeout: () => succeeded,
+      );
+    } catch (e) {
+      _logger.e('purchaseAndWait hata: $e');
+      return succeeded;
+    } finally {
+      onPurchaseVerified = prevVerified;
+      onPurchaseError = prevError;
+    }
+  }
+
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final p in purchases) {
       if (p.status == PurchaseStatus.purchased ||
@@ -82,8 +123,6 @@ class DatingPurchaseService {
             await _iap.completePurchase(p);
           }
         } else {
-          // Doğrulama başarısız — makbuzu TAMAMLAMIYORUZ, mağaza sonraki
-          // açılışta tekrar teslim etsin diye (geçici sunucu hatası olabilir).
           onPurchaseError?.call(p);
           _logger.e('Satın alma doğrulanamadı: ${p.productID}');
         }
@@ -102,19 +141,58 @@ class DatingPurchaseService {
     }
   }
 
-  /// `verifyPurchase` Cloud Function'ını çağırır — Apple/Google makbuzunu
-  /// sunucu tarafında doğrular ve başarılıysa Firestore wallet'ı günceller.
+  /// iOS StoreKit 2: serverVerificationData çoğu zaman JWS olur;
+  /// App Store Server API transactionId ister.
+  String _appleTransactionId(PurchaseDetails p) {
+    final id = p.purchaseID;
+    if (id != null && id.isNotEmpty && !id.contains('.')) return id;
+
+    final raw = p.verificationData.serverVerificationData;
+    final parts = raw.split('.');
+    if (parts.length >= 2) {
+      try {
+        final payload = utf8.decode(base64Url.decode(_padBase64(parts[1])));
+        final map = jsonDecode(payload) as Map<String, dynamic>;
+        final tx = map['transactionId'] as String?;
+        if (tx != null && tx.isNotEmpty) return tx;
+        final orig = map['originalTransactionId'] as String?;
+        if (orig != null && orig.isNotEmpty) return orig;
+      } catch (e) {
+        _logger.w('JWS decode başarısız: $e');
+      }
+    }
+    return id ?? raw;
+  }
+
+  static String _padBase64(String input) {
+    final rem = input.length % 4;
+    if (rem == 0) return input;
+    return input + ('=' * (4 - rem));
+  }
+
   Future<bool> _verifyOnServer(PurchaseDetails p) async {
     try {
-      final platform = p.verificationData.source; // 'google_play' | 'app_store'
+      final source = p.verificationData.source;
+      final isIos = source == 'app_store' || source.contains('app_store');
+      final token = isIos
+          ? _appleTransactionId(p)
+          : p.verificationData.serverVerificationData;
+
+      _logger.i(
+          'verifyPurchase → ${p.productID} ${isIos ? 'ios' : 'android'} '
+          'tokenLen=${token.length}');
+
       final result = await FirebaseFunctions.instanceFor(region: 'europe-west1')
           .httpsCallable('verifyPurchase')
           .call({
-        'platform': platform == 'app_store' ? 'ios' : 'android',
+        'platform': isIos ? 'ios' : 'android',
         'productId': p.productID,
-        'purchaseToken': p.verificationData.serverVerificationData,
+        'purchaseToken': token,
       });
       return result.data?['success'] == true;
+    } on FirebaseFunctionsException catch (e) {
+      _logger.e('verifyPurchase CF hata: ${e.code} ${e.message}');
+      return false;
     } catch (e) {
       _logger.e('verifyPurchase çağrısı başarısız: $e');
       return false;
@@ -123,5 +201,6 @@ class DatingPurchaseService {
 
   void dispose() {
     _sub?.cancel();
+    _sub = null;
   }
 }

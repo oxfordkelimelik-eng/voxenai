@@ -1,11 +1,8 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
-import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 
 /// Hangi paket grubunun gösterileceği.
@@ -45,62 +42,25 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           'Abonelik yok. Tek ödemeyle belirli sayıda kullanım al; bitince istersen yeniden alırsın.',
       };
 
-  Future<void> _buy(String productId, String moduleRoute) async {
+  Future<void> _buy(String productId) async {
     setState(() {
       _busy = true;
       _busyProductId = productId;
     });
     final service = ref.read(datingPurchaseServiceProvider);
-    if (!service.isAvailable) {
-      await service.init();
-    }
-    final product = service.productFor(productId);
-    if (product == null) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _busyProductId = null;
-      });
+    final ok = await service.purchaseAndWait(productId);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _busyProductId = null;
+    });
+    if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Bu paket şu anda satın alınamıyor.')));
-      return;
-    }
-
-    final completer = Completer<bool>();
-    void onVerified(PurchaseDetails p) {
-      if (p.productID == productId && !completer.isCompleted) {
-        completer.complete(true);
-      }
-    }
-
-    void onError(PurchaseDetails p) {
-      if (p.productID == productId && !completer.isCompleted) {
-        completer.complete(false);
-      }
-    }
-
-    service.onPurchaseVerified = onVerified;
-    service.onPurchaseError = onError;
-    try {
-      await service.buy(product);
-      final ok = await completer.future.timeout(
-        const Duration(minutes: 3),
-        onTimeout: () => false,
-      );
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _busyProductId = null;
-      });
-      if (ok) {
-        context.pop(true);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Satın alma tamamlanamadı. Lütfen tekrar dene.')));
-      }
-    } finally {
-      service.onPurchaseVerified = null;
-      service.onPurchaseError = null;
+          content: Text('Satın alma başarılı! Paketin hesabına eklendi.')));
+      context.pop(true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Satın alma tamamlanamadı. Lütfen tekrar dene.')));
     }
   }
 
@@ -160,10 +120,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                             DatingConfig.analysisSingleProductId,
                         onTap: _busy
                             ? null
-                            : () => _buy(
-                                  DatingConfig.analysisSingleProductId,
-                                  '${DatingRoutes.module}/photo_analysis',
-                                ),
+                            : () => _buy(DatingConfig.analysisSingleProductId),
                       ),
                       const SizedBox(height: 10),
                       _PackCard(
@@ -177,10 +134,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                             DatingConfig.analysisStandardProductId,
                         onTap: _busy
                             ? null
-                            : () => _buy(
-                                  DatingConfig.analysisStandardProductId,
-                                  '${DatingRoutes.module}/photo_analysis',
-                                ),
+                            : () =>
+                                _buy(DatingConfig.analysisStandardProductId),
                       ),
                       if (_showAiPhoto) const SizedBox(height: 22),
                     ],
@@ -197,10 +152,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                             DatingConfig.photoStandardProductId,
                         onTap: _busy
                             ? null
-                            : () => _buy(
-                                  DatingConfig.photoStandardProductId,
-                                  '${DatingRoutes.module}/ai_photo',
-                                ),
+                            : () => _buy(DatingConfig.photoStandardProductId),
                       ),
                       const SizedBox(height: 10),
                       _PackCard(
@@ -214,10 +166,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                             DatingConfig.photoPremiumProductId,
                         onTap: _busy
                             ? null
-                            : () => _buy(
-                                  DatingConfig.photoPremiumProductId,
-                                  '${DatingRoutes.module}/ai_photo',
-                                ),
+                            : () => _buy(DatingConfig.photoPremiumProductId),
                       ),
                     ],
                     const SizedBox(height: 24),
@@ -305,7 +254,6 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-/// Tek seferlik paket kartı — rozet fiyatın üstüne binmez.
 class _PackCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -357,7 +305,6 @@ class _PackCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     width: 48,

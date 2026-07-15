@@ -283,28 +283,41 @@ class DatingModuleImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: borderRadius,
-      child: Image.asset(
-        assetPath,
-        width: width,
-        height: height,
-        fit: fit,
-        errorBuilder: (_, _, _) => Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.goldSurface,
-                AppColors.surfaceElevated,
-              ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final w = (width != null && width!.isFinite)
+              ? width
+              : (constraints.maxWidth.isFinite ? constraints.maxWidth : null);
+          final h = (height != null && height!.isFinite)
+              ? height
+              : (constraints.maxHeight.isFinite
+                  ? constraints.maxHeight
+                  : null);
+          return Image.asset(
+            assetPath,
+            width: w,
+            height: h,
+            fit: fit,
+            alignment: Alignment.center,
+            errorBuilder: (_, _, _) => Container(
+              width: w,
+              height: h,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.goldSurface,
+                    AppColors.surfaceElevated,
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Icon(fallbackIcon, color: AppColors.gold, size: 36),
+              ),
             ),
-          ),
-          child: Center(
-            child: Icon(fallbackIcon, color: AppColors.gold, size: 36),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
