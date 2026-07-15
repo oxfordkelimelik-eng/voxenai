@@ -3,32 +3,170 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VOXEN AI — Yasal Belgeler</title>
+<title>Voxen AI — AI ile En İyi Fotoğrafların</title>
+<meta name="description" content="Voxen AI: Yapay zeka ile profesyonel dating fotoğrafları üret ve fotoğraflarını analiz ettir. Yüzünü koruyarak saniyeler içinde en iyi kareler.">
+<meta property="og:title" content="Voxen AI — AI ile En İyi Fotoğrafların">
+<meta property="og:description" content="Yapay zeka ile profesyonel dating fotoğrafları üret, fotoğraflarını analiz ettir.">
+<meta property="og:type" content="website">
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light dark;
+    --bg: #faf7fb; --fg: #1a1420; --muted: #8a7f92; --card: #ffffff;
+    --border: #ece2ee; --accent: #b0396a; --accent2: #e5a5b8;
+    --gold: #c9a24b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #140f16; --fg: #ece7f0; --muted: #9a8fa4; --card: #201727;
+      --border: #352840; --accent: #e5a5b8; --accent2: #f0c3d1; }
+  }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.6; color: #1a1420; background: #faf7fb; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
-  @media (prefers-color-scheme: dark) { body { color: #ece7f0; background: #181218; } .card { background: #241a26 !important; border-color: #3a2c3e !important; } a { color: #e5a5b8; } }
-  .wrap { max-width: 520px; padding: 40px 22px; width: 100%; }
-  h1 { font-size: 2rem; margin: 0 0 6px; }
-  .sub { color: #8a7f92; margin-bottom: 30px; }
-  a.card { display: block; text-decoration: none; color: inherit; background: #fff; border: 1px solid #ece2ee;
-    border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; transition: transform .1s; }
-  a.card:hover { transform: translateY(-2px); }
-  .card h2 { margin: 0 0 4px; font-size: 1.1rem; }
-  .card p { margin: 0; color: #8a7f92; font-size: 0.9rem; }
-  footer { margin-top: 30px; font-size: 0.85rem; color: #8a7f92; }
+    line-height: 1.65; color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 22px; }
+
+  /* Header */
+  header { padding: 22px 0; display: flex; align-items: center; justify-content: space-between; }
+  .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -0.5px; }
+  .brand span { color: var(--accent); }
+  nav a { margin-left: 20px; text-decoration: none; color: var(--muted); font-size: 0.92rem; font-weight: 600; }
+  nav a:hover { color: var(--fg); }
+
+  /* Hero */
+  .hero { text-align: center; padding: 70px 0 60px; }
+  .hero h1 { font-size: clamp(2.1rem, 6vw, 3.4rem); line-height: 1.1; margin: 0 0 18px; letter-spacing: -1px; }
+  .hero h1 .grad { background: linear-gradient(120deg, var(--accent), var(--gold));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { font-size: 1.15rem; color: var(--muted); max-width: 620px; margin: 0 auto 30px; }
+  .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff;
+    text-decoration: none; font-weight: 700; padding: 14px 28px; border-radius: 40px; font-size: 1rem;
+    box-shadow: 0 8px 24px -8px var(--accent); transition: transform .12s; }
+  .cta:hover { transform: translateY(-2px); }
+  .cta.secondary { background: transparent; color: var(--fg); box-shadow: none; border: 1px solid var(--border); margin-left: 10px; }
+
+  /* Sections */
+  section { padding: 50px 0; }
+  h2.title { font-size: 1.7rem; text-align: center; margin: 0 0 8px; letter-spacing: -0.5px; }
+  .lead { text-align: center; color: var(--muted); max-width: 560px; margin: 0 auto 40px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .feature { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 26px; }
+  .feature .ic { font-size: 1.8rem; margin-bottom: 12px; }
+  .feature h3 { margin: 0 0 8px; font-size: 1.15rem; }
+  .feature p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; counter-reset: step; }
+  .step { position: relative; padding: 26px 22px 22px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; }
+  .step::before { counter-increment: step; content: counter(step); position: absolute; top: -14px; left: 22px;
+    width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 900; }
+  .step h3 { margin: 8px 0 6px; font-size: 1.05rem; }
+  .step p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+  /* Privacy strip */
+  .privacy { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 34px; text-align: center; }
+  .privacy h2 { margin: 0 0 10px; font-size: 1.4rem; }
+  .privacy p { color: var(--muted); max-width: 620px; margin: 0 auto 8px; }
+
+  /* Footer */
+  footer { border-top: 1px solid var(--border); margin-top: 30px; padding: 34px 0 50px; }
+  .foot-grid { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: center; }
+  .foot-links a { color: var(--muted); text-decoration: none; margin-right: 18px; font-size: 0.92rem; }
+  .foot-links a:hover { color: var(--fg); }
+  .copy { color: var(--muted); font-size: 0.88rem; }
 </style>
 </head>
 <body>
+
 <div class="wrap">
-  <h1>VOXEN AI</h1>
-  <div class="sub">Yasal Belgeler</div>
-  <a class="card" href="./privacy.html"><h2>Gizlilik Politikası</h2><p>Verilerinizi nasıl işlediğimiz</p></a>
-  <a class="card" href="./terms.html"><h2>Kullanım Şartları</h2><p>Hizmet kullanım kuralları</p></a>
-  <a class="card" href="./data.html"><h2>Veri İşleme Aydınlatması</h2><p>KVKK aydınlatma metni</p></a>
-  <footer>İletişim: <a href="mailto:destek@voxenai.app">destek@voxenai.app</a> · © 2026 VOXEN AI</footer>
+  <header>
+    <div class="brand">Voxen<span> AI</span></div>
+    <nav>
+      <a href="#features">Özellikler</a>
+      <a href="#how">Nasıl Çalışır</a>
+      <a href="./privacy.html">Gizlilik</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>Yapay zekâ ile<br><span class="grad">en iyi fotoğrafların</span></h1>
+    <p>Voxen AI, yüz yapını koruyarak saniyeler içinde profesyonel dating
+       fotoğrafları üretir ve mevcut fotoğraflarını analiz edip en iyisini seçmene
+       yardım eder.</p>
+    <a class="cta" href="#how">Nasıl Çalışır →</a>
+  </div>
 </div>
+
+<section id="features" class="wrap">
+  <h2 class="title">Neler Yapabilirsin</h2>
+  <p class="lead">İki güçlü araç, tek uygulamada.</p>
+  <div class="grid">
+    <div class="feature">
+      <div class="ic">✨</div>
+      <h3>AI Fotoğraf Üretimi</h3>
+      <p>Birkaç selfie yükle; yapay zekâ yüz kimliğini koruyarak farklı
+         stillerde (elegance, athletic, old money, night out ve daha fazlası)
+         profesyonel kareler üretir.</p>
+    </div>
+    <div class="feature">
+      <div class="ic">📊</div>
+      <h3>Fotoğraf Analizi</h3>
+      <p>Fotoğraflarını yükle; her biri için çekicilik skoru, güçlü ve zayıf
+         yönler ve somut geliştirme önerileri al. En iyi kareni öğren.</p>
+    </div>
+    <div class="feature">
+      <div class="ic">🔒</div>
+      <h3>Gizlilik Önce</h3>
+      <p>Yüklediğin kaynak fotoğraflar işlem biter bitmez sunucularımızdan
+         otomatik silinir. Verilerin senin kontrolünde.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="wrap">
+  <h2 class="title">Nasıl Çalışır</h2>
+  <p class="lead">Üç adımda sonuç.</p>
+  <div class="steps">
+    <div class="step">
+      <h3>Fotoğraf Yükle</h3>
+      <p>Net, yüzünün göründüğü fotoğraflarını seç.</p>
+    </div>
+    <div class="step">
+      <h3>AI İşlesin</h3>
+      <p>Yapay zekâ saniyeler içinde üretir veya analiz eder.</p>
+    </div>
+    <div class="step">
+      <h3>Sonucu Al</h3>
+      <p>En iyi karelerini indir veya analiz raporunu incele.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="privacy">
+    <h2>🛡️ Verilerin Güvende</h2>
+    <p>Voxen AI, KVKK ve GDPR ilkelerine uygun çalışır. Fotoğrafların yalnızca
+       senin seçtiğin işlemi gerçekleştirmek için işlenir, işlem sonrası
+       kaynak görseller silinir ve dilediğin an hesabını ve tüm verilerini
+       kalıcı olarak silebilirsin.</p>
+    <p style="margin-top:14px"><a href="./privacy.html">Gizlilik Politikası</a> ·
+       <a href="./data.html">Veri İşleme Aydınlatması</a> ·
+       <a href="./terms.html">Kullanım Şartları</a></p>
+  </div>
+</section>
+
+<footer class="wrap">
+  <div class="foot-grid">
+    <div class="foot-links">
+      <a href="./privacy.html">Gizlilik Politikası</a>
+      <a href="./terms.html">Kullanım Şartları</a>
+      <a href="./data.html">Veri İşleme Aydınlatması</a>
+      <a href="mailto:destek@voxenai.app">İletişim</a>
+    </div>
+    <div class="copy">© 2026 Voxen AI · destek@voxenai.app</div>
+  </div>
+</footer>
+
 </body>
 </html>
