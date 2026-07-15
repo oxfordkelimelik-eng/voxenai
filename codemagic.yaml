@@ -3,6 +3,13 @@ workflows:
     name: iOS Build Workflow
     max_build_duration: 60
     instance_type: mac_mini_m2
+    # pub + CocoaPods önbelleği: her build'de bağımlılıkları sıfırdan indirmeyi azaltır.
+    # Çıktıyı değiştirmez; yalnızca indirme süresini kısaltır.
+    cache:
+      cache_paths:
+        - $FLUTTER_ROOT/.pub-cache
+        - $HOME/.pub-cache
+        - $HOME/Library/Caches/CocoaPods
     environment:
       flutter: stable
       xcode: latest
@@ -41,12 +48,9 @@ workflows:
             --build-number="$PROJECT_BUILD_NUMBER"
       - name: 2. Install CocoaPods dependencies
         script: |
-          cd ios && pod install --repo-update
-      - name: 3. Build unsigned Flutter app
-        script: |
-          flutter build ios --release --no-codesign \
-            --build-number="$PROJECT_BUILD_NUMBER"
-      - name: 4. Fetch stable signing files & apply
+          # Podfile.lock sabitken --repo-update gereksiz; yalnızca pod'ları kurar.
+          cd ios && pod install
+      - name: 3. Fetch stable signing files & apply
         script: |
           set -e
           keychain initialize
@@ -74,9 +78,12 @@ workflows:
             --private-key @file:"$KEY_FILE"
           keychain add-certificates
           xcode-project use-profiles
-      - name: 5. Archive (manual, stable distribution cert)
+      - name: 4. Archive (manual, stable distribution cert)
         script: |
           set -e
+          # Tek tam derleme burada yapilir. xcodebuild archive, Flutter'in
+          # Xcode script'lerini (Dart derleme + native link) calistirir;
+          # ayri bir "flutter build ios" adimi gereksiz tekrar derlemeydi.
           # use-profiles Runner hedefini manuel + app-store profiliyle
           # yapilandirdi; xcodebuild bunu okuyup arsivi dagitim sertifikasiyla
           # imzalar. Otomatik imza/gelistirme sertifikasi URETILMEZ.
@@ -86,7 +93,7 @@ workflows:
             -destination 'generic/platform=iOS' \
             -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
             archive
-      - name: 6. Fix App.framework CFBundleIdentifier collision
+      - name: 5. Fix App.framework CFBundleIdentifier collision
         script: |
           set -e
           # TEShIS (onceki build log'u) kesin gosterdi: Flutter'in kendi
@@ -127,7 +134,7 @@ workflows:
           codesign --force --sign "$SIGN_HASH" --identifier "$NEW_ID" \
             "$FW_DIR"
           echo "App.framework yeni identifier ile yeniden imzalandi."
-      - name: 7. Export IPA (automatic signing via API key)
+      - name: 6. Export IPA (automatic signing via API key)
         script: |
           set -e
           xcodebuild -exportArchive \
@@ -138,7 +145,7 @@ workflows:
             -authenticationKeyPath "$CM_BUILD_DIR/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-      - name: 8. Verify no duplicate CFBundleIdentifiers remain
+      - name: 7. Verify no duplicate CFBundleIdentifiers remain
         script: |
           set -e
           # Dogrulama: export edilen ipa'da BUNDLE_ID'yi birden fazla Info.plist
@@ -159,7 +166,7 @@ workflows:
             done
             exit 1
           fi
-      - name: 9. Upload to TestFlight
+      - name: 8. Upload to TestFlight
         script: |
           # NOT: 'set -e' YOK — publish'in cikis kodunu kendimiz yorumluyoruz.
           # Uretilen .ipa'yi App Store Connect'e yukler ve TestFlight'a koyar.

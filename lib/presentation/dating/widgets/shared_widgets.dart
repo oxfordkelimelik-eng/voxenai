@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
@@ -6,14 +7,12 @@ import '../providers/dating_providers.dart';
 import 'dating_widgets.dart';
 
 // ============================================================
-// AI YÜKLEME DENEYİMİ (Bölüm 6.8 — zorunlu)
-// İlerleme yüzdesi + akan durum metinleri + hata/tekrar dene.
-// Onboarding "Senin için hazırlıyoruz" ile aynı görsel dil.
+// AI YÜKLEME DENEYİMİ — profesyonel tam ekran loader
 // ============================================================
 
 class AiLoadingView extends StatefulWidget {
-  final List<String> steps; // akan durum metinleri
-  final String hint; // "genelde ~10 saniye sürer"
+  final List<String> steps;
+  final String hint;
   const AiLoadingView({
     super.key,
     required this.steps,
@@ -25,18 +24,31 @@ class AiLoadingView extends StatefulWidget {
 }
 
 class _AiLoadingViewState extends State<AiLoadingView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
+    with TickerProviderStateMixin {
+  late final AnimationController _pulse;
+  late final AnimationController _rotate;
+  late final AnimationController _progress;
   int _stepIndex = 0;
-  Timer? _timer;
+  Timer? _stepTimer;
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(
-        vsync: this, duration: const Duration(seconds: 12))
-      ..forward();
-    _timer = Timer.periodic(const Duration(milliseconds: 2200), (t) {
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+    _rotate = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat();
+    // Asimptotik ilerleme: ~%92'ye yaklaşır, %100'e tam dolmaz (bitiş ekranı
+    // parent'ta değişince loader kapanır — %100'de bozuk görünüm olmaz).
+    _progress = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 28),
+    )..forward();
+    _stepTimer = Timer.periodic(const Duration(milliseconds: 2800), (_) {
       if (!mounted) return;
       setState(() => _stepIndex = (_stepIndex + 1) % widget.steps.length);
     });
@@ -44,61 +56,254 @@ class _AiLoadingViewState extends State<AiLoadingView>
 
   @override
   void dispose() {
-    _timer?.cancel();
-    _c.dispose();
+    _stepTimer?.cancel();
+    _pulse.dispose();
+    _rotate.dispose();
+    _progress.dispose();
     super.dispose();
+  }
+
+  double get _displayProgress {
+    final t = _progress.value;
+    // easeOutCubic benzeri — sona doğru yavaşlar, tavan ~0.91
+    final eased = 1 - math.pow(1 - t, 3).toDouble();
+    return (eased * 0.91).clamp(0.0, 0.91);
   }
 
   @override
   Widget build(BuildContext context) {
+    final pct = (_displayProgress * 100).round();
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 96,
-              height: 96,
-              child: AnimatedBuilder(
-                animation: _c,
-                builder: (_, _) => Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      value: _c.value,
-                      strokeWidth: 6,
-                      backgroundColor: AppColors.surfaceElevated,
-                      valueColor:
-                          const AlwaysStoppedAnimation(AppColors.gold),
-                    ),
-                    Text('${(_c.value * 100).toInt()}%',
-                        style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textPrimary)),
-                  ],
-                ),
-              ),
+            AnimatedBuilder(
+              animation: Listenable.merge([_pulse, _rotate, _progress]),
+              builder: (_, _) {
+                final glow = 0.35 + _pulse.value * 0.25;
+                return SizedBox(
+                  width: 148,
+                  height: 148,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Dış parıltı halkası
+                      Container(
+                        width: 148,
+                        height: 148,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.gold.withValues(alpha: glow),
+                              blurRadius: 32 + _pulse.value * 12,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Dönen kesik çizgi halka
+                      Transform.rotate(
+                        angle: _rotate.value * 2 * math.pi,
+                        child: CustomPaint(
+                          size: const Size(132, 132),
+                          painter: _DashedRingPainter(
+                            color: AppColors.gold.withValues(alpha: 0.35),
+                          ),
+                        ),
+                      ),
+                      // Ana ilerleme halkası
+                      SizedBox(
+                        width: 120,
+                        height: 120,
+                        child: CircularProgressIndicator(
+                          value: _displayProgress,
+                          strokeWidth: 5,
+                          backgroundColor:
+                              AppColors.surfaceElevated.withValues(alpha: 0.9),
+                          valueColor: const AlwaysStoppedAnimation(
+                            AppColors.gold,
+                          ),
+                          strokeCap: StrokeCap.round,
+                        ),
+                      ),
+                      // Merkez: ikon + yüzde
+                      Container(
+                        width: 88,
+                        height: 88,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              AppColors.surfaceElevated,
+                              AppColors.background,
+                            ],
+                          ),
+                          border: Border.all(
+                            color: AppColors.borderGold.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.auto_awesome_rounded,
+                              color: AppColors.gold
+                                  .withValues(alpha: 0.85 + _pulse.value * 0.15),
+                              size: 22,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '$pct%',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textPrimary,
+                                height: 1,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 32),
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
+              duration: const Duration(milliseconds: 450),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
               child: Text(
                 widget.steps[_stepIndex],
                 key: ValueKey(_stepIndex),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                  height: 1.35,
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            Text(widget.hint,
-                style: const TextStyle(
-                    fontSize: 13, color: AppColors.textMuted)),
+            const SizedBox(height: 18),
+            // Adım göstergeleri
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.steps.length, (i) {
+                final active = i == _stepIndex;
+                final done = i < _stepIndex;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: active ? 22 : 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    color: done
+                        ? AppColors.gold.withValues(alpha: 0.55)
+                        : active
+                            ? AppColors.gold
+                            : AppColors.borderSubtle,
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              widget.hint,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedRingPainter extends CustomPainter {
+  final Color color;
+  const _DashedRingPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final r = size.width / 2 - 2;
+    final center = Offset(size.width / 2, size.height / 2);
+    const dash = 8.0;
+    const gap = 10.0;
+    final circumference = 2 * math.pi * r;
+    final count = (circumference / (dash + gap)).floor();
+    for (var i = 0; i < count; i++) {
+      final start = (i * (dash + gap)) / circumference * 2 * math.pi;
+      final sweep = dash / circumference * 2 * math.pi;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: r),
+        start,
+        sweep,
+        false,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRingPainter old) => old.color != color;
+}
+
+/// Modül / stil görselleri — asset yoksa şık placeholder.
+class DatingModuleImage extends StatelessWidget {
+  final String assetPath;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final IconData fallbackIcon;
+  final BorderRadius borderRadius;
+
+  const DatingModuleImage({
+    super.key,
+    required this.assetPath,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.fallbackIcon = Icons.image_outlined,
+    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Image.asset(
+        assetPath,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (_, _, _) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppColors.goldSurface,
+                AppColors.surfaceElevated,
+              ],
+            ),
+          ),
+          child: Center(
+            child: Icon(fallbackIcon, color: AppColors.gold, size: 36),
+          ),
         ),
       ),
     );
@@ -216,8 +421,8 @@ class PhotoQualityGuide extends StatelessWidget {
 
 class ModuleEmptyState extends StatelessWidget {
   final IconData icon;
-  final String howItWorks; // 1-2 cümle
-  final Widget beforeAfter; // örnek önce/sonra
+  final String howItWorks;
+  final Widget beforeAfter;
   final String ctaLabel;
   final VoidCallback onStart;
   const ModuleEmptyState({
@@ -237,7 +442,6 @@ class ModuleEmptyState extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: 8),
-          // Nasıl çalışır: yükle → analiz → sonuç
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(

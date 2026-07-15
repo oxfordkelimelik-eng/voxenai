@@ -147,16 +147,43 @@ exports.startPhotoGeneration = onCall(
     const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
 
     // Bakiye kontrolü + düşme + iş dokümanı oluşturma — tek transaction.
+    // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
+    let unitsToCharge = unitsNeeded;
+    let usedFreeTier = false;
+
     await db.runTransaction(async (tx) => {
       const walletSnap = await tx.get(walletRef);
-      const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
+      const wallet = walletSnap.data() || {
+        photoBalance: 0,
+        analysisBalance: 0,
+        freePhotoUsed: false,
+      };
+
       if ((wallet.photoBalance || 0) < unitsNeeded) {
-        throw new HttpsError("failed-precondition", "Yetersiz paket bakiyesi.");
+        if (!wallet.freePhotoUsed && styles.length === 1) {
+          unitsToCharge = 0;
+          usedFreeTier = true;
+        } else if (!wallet.freePhotoUsed && styles.length > 1) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
+          );
+        } else {
+          throw new HttpsError("failed-precondition", "Yetersiz paket bakiyesi.");
+        }
       }
-      tx.set(walletRef, {
-        photoBalance: wallet.photoBalance - unitsNeeded,
+
+      const walletUpdate = {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      };
+      if (unitsToCharge > 0) {
+        walletUpdate.photoBalance = wallet.photoBalance - unitsToCharge;
+      }
+      if (usedFreeTier) {
+        walletUpdate.freePhotoUsed = true;
+      }
+      tx.set(walletRef, walletUpdate, { merge: true });
+
       tx.set(jobRef, {
         status: "uploading",
         styles,
@@ -165,7 +192,8 @@ exports.startPhotoGeneration = onCall(
         pendingStyles: styles.length,
         results: {},
         errorMessage: null,
-        packUnitsCharged: unitsNeeded,
+        packUnitsCharged: unitsToCharge,
+        usedFreeTier,
       });
     });
 
@@ -202,7 +230,7 @@ exports.startPhotoGeneration = onCall(
       }
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
-      await refundAndFail(uid, jobId, unitsNeeded, "Üretim başlatılamadı.");
+      await refundAndFail(uid, jobId, unitsToCharge, "Üretim başlatılamadı.");
       throw e instanceof HttpsError ? e : new HttpsError("internal", "Üretim başlatılamadı.");
     }
 

@@ -95,6 +95,9 @@ flutter:
     - assets/animations/
     - assets/fonts/
     - assets/dating/
+    - assets/dating/styles/
+    - assets/dating/modules/
+    - assets/dating/showcase/
     - assets/videos/
 
   fonts:

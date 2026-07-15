@@ -4,7 +4,7 @@ class DatingRoutes {
   static const String splash = '/'; // açılış ekranı (logo)
   static const String onboarding = '/onboarding'; // funnel (girişsiz)
   static const String modules = '/modules'; // modül vitrini (girişsiz)
-  static const String paywall = '/paywall'; // abonelik
+  static const String paywall = '/paywall'; // ?mode=analysis | ai_photo
   static const String login = '/login'; // Apple + Google (abonelik anında)
   static const String hub = '/hub'; // giriş sonrası modül merkezi
   static const String settings = '/settings'; // gizlilik + hesap

@@ -205,10 +205,46 @@ class DatingSettingsScreen extends ConsumerWidget {
                   style: TextStyle(color: AppColors.textSecondary))),
           TextButton(
             onPressed: () async {
-              await ref.read(entitlementProvider.notifier).deleteAccount();
-              if (context.mounted) {
-                Navigator.pop(context);
-                context.go(DatingRoutes.onboarding);
+              Navigator.pop(context);
+              showDialog<void>(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => const PopScope(
+                  canPop: false,
+                  child: AlertDialog(
+                    backgroundColor: AppColors.surfaceElevated,
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: AppColors.gold),
+                        SizedBox(height: 18),
+                        Text(
+                          'Hesabın ve verilerin siliniyor…',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+              try {
+                await ref.read(entitlementProvider.notifier).deleteAccount();
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  context.go(DatingRoutes.onboarding);
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text(
+                        'Silme işlemi tamamlanamadı. Lütfen tekrar dene.'),
+                  ));
+                }
               }
             },
             child: const Text('Sil',

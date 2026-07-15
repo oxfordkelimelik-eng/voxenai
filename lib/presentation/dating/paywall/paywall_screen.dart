@@ -8,11 +8,20 @@ import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 
-/// Paket satın alma ekranı (abonelik YOK). Ücretsiz hak bitince modül
-/// kullanımında soft gate olarak açılır. Sol üstte X ile kapatılır (zorlama yok).
-/// Her modülün belirli sayıda kullanım içeren tek seferlik paketi vardır.
+/// Hangi paket grubunun gösterileceği.
+enum PaywallMode { all, analysis, aiPhoto }
+
+PaywallMode paywallModeFromQuery(String? mode) => switch (mode) {
+      'analysis' => PaywallMode.analysis,
+      'ai_photo' => PaywallMode.aiPhoto,
+      _ => PaywallMode.all,
+    };
+
+/// Paket satın alma ekranı (abonelik YOK). Modül bağlamına göre yalnızca
+/// ilgili paketler gösterilebilir (analysis / ai_photo query param).
 class PaywallScreen extends ConsumerStatefulWidget {
-  const PaywallScreen({super.key});
+  final PaywallMode mode;
+  const PaywallScreen({super.key, this.mode = PaywallMode.all});
   @override
   ConsumerState<PaywallScreen> createState() => _PaywallScreenState();
 }
@@ -21,8 +30,21 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _busy = false;
   String? _busyProductId;
 
-  /// Bir ürünü satın alır; sunucu tarafı doğrulama (verifyPurchase Cloud
-  /// Function) sonucunu bekler, başarılıysa [onDone] rotasına gider.
+  String get _title => switch (widget.mode) {
+        PaywallMode.analysis => 'Fotoğraf Analizi Paketi',
+        PaywallMode.aiPhoto => 'AI Dating Fotoğraf Paketi',
+        PaywallMode.all => 'Devam etmek için paket al',
+      };
+
+  String get _subtitle => switch (widget.mode) {
+        PaywallMode.analysis =>
+          'Fotoğraflarının detaylı analizini açmak için tek seferlik paket al.',
+        PaywallMode.aiPhoto =>
+          'Kalan AI fotoğraflarını açmak için tek seferlik paket al.',
+        PaywallMode.all =>
+          'Abonelik yok. Tek ödemeyle belirli sayıda kullanım al; bitince istersen yeniden alırsın.',
+      };
+
   Future<void> _buy(String productId, String moduleRoute) async {
     setState(() {
       _busy = true;
@@ -71,7 +93,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
         _busyProductId = null;
       });
       if (ok) {
-        context.go(moduleRoute);
+        context.pop(true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Satın alma tamamlanamadı. Lütfen tekrar dene.')));
@@ -81,6 +103,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       service.onPurchaseError = null;
     }
   }
+
+  bool get _showAnalysis =>
+      widget.mode == PaywallMode.all || widget.mode == PaywallMode.analysis;
+
+  bool get _showAiPhoto =>
+      widget.mode == PaywallMode.all || widget.mode == PaywallMode.aiPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +122,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
               child: IconButton(
                 icon: const Icon(Icons.close_rounded,
                     color: AppColors.textSecondary),
-                onPressed: () => context.pop(),
+                onPressed: () => context.pop(false),
               ),
             ),
             Expanded(
@@ -106,82 +134,92 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                     const Icon(Icons.workspace_premium_rounded,
                         color: AppColors.gold, size: 52),
                     const SizedBox(height: 16),
-                    const Text('Devam etmek için paket al',
+                    Text(_title,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.w900,
                             color: AppColors.textPrimary,
                             height: 1.25)),
                     const SizedBox(height: 8),
-                    const Text(
-                        'Abonelik yok. Tek ödemeyle belirli sayıda kullanım al; '
-                        'bitince istersen yeniden alırsın.',
+                    Text(_subtitle,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 14, color: AppColors.textSecondary)),
                     const SizedBox(height: 28),
-
-                    const _SectionLabel('FOTOĞRAF ANALİZİ'),
-                    const SizedBox(height: 10),
-                    _PackCard(
-                      icon: Icons.insights,
-                      title: 'Tekli Analiz',
-                      sub: '${DatingConfig.analysisSingleRuns} fotoğraf analizi',
-                      price: DatingConfig.analysisSinglePriceLabel,
-                      busy: _busyProductId ==
-                          DatingConfig.analysisSingleProductId,
-                      onTap: _busy
-                          ? null
-                          : () => _buy(DatingConfig.analysisSingleProductId,
-                              '${DatingRoutes.module}/photo_analysis'),
-                    ),
-                    const SizedBox(height: 10),
-                    _PackCard(
-                      icon: Icons.insights,
-                      title: 'Standart Analiz',
-                      sub: '${DatingConfig.analysisStandardRuns} fotoğraf analizi',
-                      price: DatingConfig.analysisStandardPriceLabel,
-                      badge: 'AVANTAJLI',
-                      busy: _busyProductId ==
-                          DatingConfig.analysisStandardProductId,
-                      onTap: _busy
-                          ? null
-                          : () => _buy(DatingConfig.analysisStandardProductId,
-                              '${DatingRoutes.module}/photo_analysis'),
-                    ),
-                    const SizedBox(height: 22),
-
-                    const _SectionLabel('AI DATING FOTOĞRAFI'),
-                    const SizedBox(height: 10),
-                    _PackCard(
-                      icon: Icons.auto_awesome,
-                      title: 'Standart Paket',
-                      sub:
-                          '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
-                      price: DatingConfig.photoStandardPriceLabel,
-                      busy:
-                          _busyProductId == DatingConfig.photoStandardProductId,
-                      onTap: _busy
-                          ? null
-                          : () => _buy(DatingConfig.photoStandardProductId,
-                              '${DatingRoutes.module}/ai_photo'),
-                    ),
-                    const SizedBox(height: 10),
-                    _PackCard(
-                      icon: Icons.auto_awesome,
-                      title: 'Premium Paket',
-                      sub:
-                          '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
-                      price: DatingConfig.photoPremiumPriceLabel,
-                      badge: 'EN İYİ DEĞER',
-                      busy:
-                          _busyProductId == DatingConfig.photoPremiumProductId,
-                      onTap: _busy
-                          ? null
-                          : () => _buy(DatingConfig.photoPremiumProductId,
-                              '${DatingRoutes.module}/ai_photo'),
-                    ),
+                    if (_showAnalysis) ...[
+                      const _SectionLabel('FOTOĞRAF ANALİZİ'),
+                      const SizedBox(height: 10),
+                      _PackCard(
+                        icon: Icons.insights,
+                        title: 'Tekli Analiz',
+                        sub:
+                            '${DatingConfig.analysisSingleRuns} fotoğraf analizi',
+                        price: DatingConfig.analysisSinglePriceLabel,
+                        busy: _busyProductId ==
+                            DatingConfig.analysisSingleProductId,
+                        onTap: _busy
+                            ? null
+                            : () => _buy(
+                                  DatingConfig.analysisSingleProductId,
+                                  '${DatingRoutes.module}/photo_analysis',
+                                ),
+                      ),
+                      const SizedBox(height: 10),
+                      _PackCard(
+                        icon: Icons.insights,
+                        title: 'Standart Analiz',
+                        sub:
+                            '${DatingConfig.analysisStandardRuns} fotoğraf analizi',
+                        price: DatingConfig.analysisStandardPriceLabel,
+                        badge: 'AVANTAJLI',
+                        busy: _busyProductId ==
+                            DatingConfig.analysisStandardProductId,
+                        onTap: _busy
+                            ? null
+                            : () => _buy(
+                                  DatingConfig.analysisStandardProductId,
+                                  '${DatingRoutes.module}/photo_analysis',
+                                ),
+                      ),
+                      if (_showAiPhoto) const SizedBox(height: 22),
+                    ],
+                    if (_showAiPhoto) ...[
+                      const _SectionLabel('AI DATING FOTOĞRAFI'),
+                      const SizedBox(height: 10),
+                      _PackCard(
+                        icon: Icons.auto_awesome,
+                        title: 'Standart Paket',
+                        sub:
+                            '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
+                        price: DatingConfig.photoStandardPriceLabel,
+                        busy: _busyProductId ==
+                            DatingConfig.photoStandardProductId,
+                        onTap: _busy
+                            ? null
+                            : () => _buy(
+                                  DatingConfig.photoStandardProductId,
+                                  '${DatingRoutes.module}/ai_photo',
+                                ),
+                      ),
+                      const SizedBox(height: 10),
+                      _PackCard(
+                        icon: Icons.auto_awesome,
+                        title: 'Premium Paket',
+                        sub:
+                            '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
+                        price: DatingConfig.photoPremiumPriceLabel,
+                        badge: 'EN İYİ DEĞER',
+                        busy: _busyProductId ==
+                            DatingConfig.photoPremiumProductId,
+                        onTap: _busy
+                            ? null
+                            : () => _buy(
+                                  DatingConfig.photoPremiumProductId,
+                                  '${DatingRoutes.module}/ai_photo',
+                                ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     _review(),
                   ],
@@ -249,7 +287,6 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   }
 }
 
-/// Bölüm başlığı (paket gruplarını ayırır).
 class _SectionLabel extends StatelessWidget {
   final String label;
   const _SectionLabel(this.label);
@@ -268,7 +305,7 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-/// Tek seferlik paket kartı.
+/// Tek seferlik paket kartı — rozet fiyatın üstüne binmez.
 class _PackCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -292,77 +329,90 @@ class _PackCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.borderGold, width: 0.8),
         ),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: AppColors.goldSurface,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: AppColors.gold, size: 24),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textPrimary)),
-                      if (badge != null) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.gold,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(badge!,
-                              style: const TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textOnGold)),
-                        ),
-                      ],
-                    ],
+            if (badge != null)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                color: AppColors.gold,
+                child: Text(
+                  badge!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                    color: AppColors.textOnGold,
                   ),
-                  const SizedBox(height: 2),
-                  Text(sub,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary)),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.goldSurface,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: AppColors.gold, size: 24),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textPrimary)),
+                        const SizedBox(height: 4),
+                        Text(sub,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                                height: 1.3)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  if (busy)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.2, color: AppColors.gold),
+                    )
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(price,
+                            style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.gold,
+                                height: 1.1)),
+                        const SizedBox(height: 2),
+                        const Icon(Icons.chevron_right_rounded,
+                            color: AppColors.textMuted, size: 22),
+                      ],
+                    ),
                 ],
               ),
             ),
-            if (busy)
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.2, color: AppColors.gold),
-              )
-            else ...[
-              Text(price,
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.gold)),
-              const SizedBox(width: 4),
-              const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.textMuted),
-            ],
           ],
         ),
       ),

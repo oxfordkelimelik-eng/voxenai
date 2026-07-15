@@ -5,6 +5,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/shared_widgets.dart';
 
 /// Giriş/abonelik sonrası ana merkez (Bölüm 6). Alt menü: Modüller / Bize
 /// Ulaşın / Ayarlar. 2 aktif modül + kredi bakiyesi.
@@ -241,6 +242,12 @@ class _ModuleMeta {
       ['Çekicilik skoru', 'En iyi kare', 'İpuçları'],
     ),
   };
+
+  static String imageFor(String moduleId) => switch (moduleId) {
+        'ai_photo' => DatingAssetPaths.hubAiPhoto,
+        'photo_analysis' => DatingAssetPaths.hubAnalysis,
+        _ => DatingAssetPaths.moduleAiPhotoHero,
+      };
 }
 
 /// Ana ekrandaki iki modüle özel büyük, dolu özellik kartı.
@@ -273,6 +280,15 @@ class _FeatureCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            DatingModuleImage(
+              assetPath: _ModuleMeta.imageFor(module.id),
+              height: 120,
+              width: double.infinity,
+              fallbackIcon: module.icon,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               child: Row(

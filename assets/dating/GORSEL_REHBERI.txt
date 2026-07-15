@@ -1,0 +1,38 @@
+VOXEN AI — Mock / gerçek görseller için dosya rehberi
+======================================================
+
+Görselleri aşağıdaki yollara koy. Dosya yoksa uygulama otomatik
+gradient + ikon placeholder gösterir (çökme olmaz).
+
+STİL ÖRNEK FOTOĞRAFLARI (AI Dating — stil seçim popup)
+  assets/dating/styles/{stilId}_1.jpg
+  assets/dating/styles/{stilId}_2.jpg
+  assets/dating/styles/{stilId}_3.jpg
+
+  stilId değerleri:
+    elegance, athletic, traveller, oldmoney, nightout, beach, car
+
+  Örnek: assets/dating/styles/elegance_1.jpg
+
+MODÜL HERO GÖRSELLERİ (vitrin / tanıtım)
+  assets/dating/modules/ai_photo_hero.jpg
+  assets/dating/modules/photo_analysis_hero.jpg
+  assets/dating/modules/hub_ai_photo.jpg
+  assets/dating/modules/hub_analysis.jpg
+
+VİTRİN SLİDER (form sonrası ödeme ekranı)
+  assets/dating/showcase/slide_1.jpg
+  assets/dating/showcase/slide_2.jpg
+  assets/dating/showcase/slide_3.jpg
+
+PROFİL / EŞLEŞME MOCK FOTOĞRAFLARI (onboarding, duvar)
+  assets/dating/f1.jpg … f8.jpg  (kadın)
+  assets/dating/m1.jpg … m8.jpg  (erkek)
+
+GENEL
+  assets/images/logo.png
+  assets/images/oncesi.jpg, sonrasi.jpg
+  assets/videos/ai_photo_demo.mp4
+  assets/videos/analysis_demo.mp4
+
+Öneri: 3:4 dikey portre, net yüz, iyi ışık, minimum 800×1066 px.

@@ -64,7 +64,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Paywall
       GoRoute(
         path: DatingRoutes.paywall,
-        builder: (c, s) => const PaywallScreen(),
+        builder: (c, s) => PaywallScreen(
+          mode: paywallModeFromQuery(s.uri.queryParameters['mode']),
+        ),
       ),
       // Giriş (abonelik anında) — ?plan=... veya ?restore=1
       GoRoute(

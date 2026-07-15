@@ -156,3 +156,26 @@ class DatingKeys {
   static const String packPhotoBalance = 'dating_pack_photo';
   static const String packAnalysisBalance = 'dating_pack_analysis';
 }
+
+/// Mock / gerçek modül görselleri için dosya yolları.
+/// Görselleri bu yollara koy; yoksa uygulama placeholder gösterir.
+class DatingAssetPaths {
+  DatingAssetPaths._();
+
+  /// Stil örnek fotoğrafları: assets/dating/styles/{styleId}_1.jpg … _3.jpg
+  static String styleSample(String styleId, int index) =>
+      'assets/dating/styles/${styleId}_$index.jpg';
+
+  static const moduleAiPhotoHero = 'assets/dating/modules/ai_photo_hero.jpg';
+  static const moduleAnalysisHero =
+      'assets/dating/modules/photo_analysis_hero.jpg';
+
+  /// Onboarding / vitrin slider görselleri
+  static const showcaseSlide1 = 'assets/dating/showcase/slide_1.jpg';
+  static const showcaseSlide2 = 'assets/dating/showcase/slide_2.jpg';
+  static const showcaseSlide3 = 'assets/dating/showcase/slide_3.jpg';
+
+  /// Modül hub kart görselleri
+  static const hubAiPhoto = 'assets/dating/modules/hub_ai_photo.jpg';
+  static const hubAnalysis = 'assets/dating/modules/hub_analysis.jpg';
+}

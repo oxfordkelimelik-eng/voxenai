@@ -8,6 +8,7 @@ import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/voxen_visuals.dart';
+import '../widgets/shared_widgets.dart';
 
 /// İlk ödeme / tanıtım ekranı (onboarding sonrası, formlardan sonraki son
 /// aşama). Kapatma tuşu YOK — kullanıcı ya hemen ücretsiz başlar ya da bir
@@ -84,14 +85,16 @@ class _ModulesShowcaseScreenState
                       onPageChanged: (i) => setState(() => _page = i),
                       children: const [
                         _IntroSlide(
+                          imagePath: DatingAssetPaths.showcaseSlide1,
                           icon: Icons.auto_awesome,
                           title: 'Stüdyo kalitesinde\ndating fotoğrafları',
                           body:
-                              'Kendi fotoğraflarını yükle; yapay zeka en çok '
-                              'eşleşme getiren stillerde yepyeni kareler '
-                              'oluştursun.',
+                              'Kendi fotoğraflarını yükle; yapay zeka seçtiğin '
+                              'stile uygun arka plan ve kompozisyonla yepyeni '
+                              'kareler oluştursun.',
                         ),
                         _IntroSlide(
+                          imagePath: DatingAssetPaths.showcaseSlide2,
                           icon: Icons.insights,
                           title: 'En iyi karelerini\nsen değil AI seçsin',
                           body:
@@ -100,6 +103,7 @@ class _ModulesShowcaseScreenState
                               'koyacağını söyler.',
                         ),
                         _IntroSlide(
+                          imagePath: DatingAssetPaths.showcaseSlide3,
                           icon: Icons.favorite_rounded,
                           title: 'Daha fazla eşleşme,\ndaha fazla sohbet',
                           body:
@@ -129,7 +133,52 @@ class _ModulesShowcaseScreenState
                     }),
                   ),
                   const SizedBox(height: 28),
-                  // Satın almak İSTEYEN için paket kartları (opsiyonel).
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: Text('MODÜLLERİMİZ',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1,
+                            color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(height: 12),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: _ModuleFeatureCard(
+                      imagePath: DatingAssetPaths.moduleAiPhotoHero,
+                      icon: Icons.auto_awesome,
+                      title: 'AI Dating Fotoğrafı',
+                      body:
+                          '5 selfie yükle, stil seç (elegance, athletic, beach…). '
+                          'AI yüzünü koruyarak seçtiğin mekân ve tarzda profesyonel '
+                          'dating fotoğrafları üretir.',
+                      bullets: [
+                        'Stile özel arka plan ve kompozisyon',
+                        'İlk fotoğraf ücretsiz önizleme',
+                        '10–50 fotoğraf tek seferlik paketler',
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: _ModuleFeatureCard(
+                      imagePath: DatingAssetPaths.moduleAnalysisHero,
+                      icon: Icons.insights,
+                      title: 'Fotoğraf Analizi & Seçimi',
+                      body:
+                          'Profil fotoğraflarını yükle; AI her kareyi puanlar, '
+                          'güçlü ve zayıf yönlerini söyler, hangisini kullanman '
+                          'gerektiğini önerir.',
+                      bullets: [
+                        'Çekicilik skoru ve detaylı geri bildirim',
+                        'İlk analiz ücretsiz',
+                        '₺99 tekli · ₺249 standart paket',
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 28),
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 24),
                     child: Text('DİLERSEN HEMEN AI FOTOĞRAF PAKETİ AL',
@@ -216,13 +265,18 @@ class _ModulesShowcaseScreenState
   }
 }
 
-/// Tanıtım slider'ının tek bir sayfası (ikon + başlık + açıklama).
+/// Tanıtım slider'ının tek bir sayfası (görsel + başlık + açıklama).
 class _IntroSlide extends StatelessWidget {
+  final String imagePath;
   final IconData icon;
   final String title;
   final String body;
-  const _IntroSlide(
-      {required this.icon, required this.title, required this.body});
+  const _IntroSlide({
+    required this.imagePath,
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -231,20 +285,14 @@ class _IntroSlide extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: 92,
-            height: 92,
-            decoration: BoxDecoration(
-              gradient: AppColors.goldGradient,
-              borderRadius: BorderRadius.circular(26),
-              boxShadow: const [
-                BoxShadow(
-                    color: AppColors.goldGlow, blurRadius: 28, spreadRadius: 2),
-              ],
-            ),
-            child: Icon(icon, color: AppColors.textOnGold, size: 46),
+          DatingModuleImage(
+            assetPath: imagePath,
+            height: 160,
+            width: double.infinity,
+            fallbackIcon: icon,
+            borderRadius: BorderRadius.circular(20),
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 20),
           Text(title,
               textAlign: TextAlign.center,
               style: const TextStyle(
@@ -257,6 +305,93 @@ class _IntroSlide extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                   fontSize: 14, height: 1.5, color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Modül tanıtım kartı — hero görsel + açıklama maddeleri.
+class _ModuleFeatureCard extends StatelessWidget {
+  final String imagePath;
+  final IconData icon;
+  final String title;
+  final String body;
+  final List<String> bullets;
+  const _ModuleFeatureCard({
+    required this.imagePath,
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.bullets,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DatingModuleImage(
+            assetPath: imagePath,
+            height: 140,
+            width: double.infinity,
+            fallbackIcon: icon,
+            borderRadius: BorderRadius.zero,
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: AppColors.gold, size: 22),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(title,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.textPrimary)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(body,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.45,
+                        color: AppColors.textSecondary)),
+                const SizedBox(height: 10),
+                for (final b in bullets)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_rounded,
+                            color: AppColors.gold, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(b,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary,
+                                  height: 1.35)),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

@@ -200,6 +200,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
   Map<String, dynamic>? _jobData;
+  int _unlocked = DatingConfig.freePreviewCount;
 
   // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
   // sonuçlanır (eğitim aşaması yok).
@@ -261,6 +262,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
       if (!mounted) return;
       _listenToJob(uid, jobId);
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stage = _AiStage.error;
+        _errorMessage = e.message ??
+            switch (e.code) {
+              'unauthenticated' => 'Giriş yapman gerekiyor.',
+              'failed-precondition' =>
+                'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
+                    'Tek stil ücretsiz denenebilir.',
+              _ => 'Üretim başlatılamadı. Lütfen tekrar dene.',
+            };
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -286,10 +300,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
         } else if (status == 'done' || _resultUrls.isNotEmpty) {
-          // İlk stil hazır olur olmaz sonuç ekranına geç — kalan stiller
-          // arka planda üretilirken kullanıcı beklemeden görmeye başlar
-          // (bkz. _resultStep'teki "devam ediyor" göstergesi).
           _stage = _AiStage.result;
+          _unlocked = _unlockedCount(
+            totalCount: _resultUrls.length,
+            packBalance: ref.read(packBalanceProvider).photo,
+            photosPerUnit: DatingConfig.photosPerSet,
+          );
         }
       });
     });
@@ -327,7 +343,125 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _styles.clear();
       _jobData = null;
       _errorMessage = null;
+      _unlocked = DatingConfig.freePreviewCount;
     });
+  }
+
+  Future<void> _unlockMorePhotos() async {
+    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
+    if (!mounted) return;
+    final unlocked = await _unlockWithPack(
+      ref,
+      photo: true,
+      totalCount: _resultUrls.length,
+      photosPerUnit: DatingConfig.photosPerSet,
+    );
+    if (!mounted) return;
+    setState(() => _unlocked = unlocked);
+  }
+
+  void _openStyleSheet(PhotoStyle style) {
+    final selected = _styles.contains(style.id);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            12,
+            20,
+            20 + MediaQuery.of(ctx).padding.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.borderSubtle,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(style.icon, color: AppColors.gold, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      style.label,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                style.description,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Bu stilde üretilecek örnek kareler',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 140,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: 3,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (_, i) => DatingModuleImage(
+                    assetPath: DatingAssetPaths.styleSample(style.id, i + 1),
+                    width: 105,
+                    height: 140,
+                    fallbackIcon: style.icon,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              PrimaryButton(
+                label: selected ? 'Seçimi Kaldır' : 'Bu Stili Seç',
+                onPressed: () {
+                  setState(() {
+                    if (selected) {
+                      _styles.remove(style.id);
+                    } else {
+                      _styles.add(style.id);
+                    }
+                  });
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -403,11 +537,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 children: [
                   for (final s in PhotoStyle.coreStyles)
                     GestureDetector(
-                      onTap: () => setState(() {
-                        _styles.contains(s.id)
-                            ? _styles.remove(s.id)
-                            : _styles.add(s.id);
-                      }),
+                      onTap: () => _openStyleSheet(s),
                       child: Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -510,7 +640,13 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 scrollDirection: Axis.horizontal,
                 itemCount: 3,
                 separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, _) => _samplePlaceholder(s.icon),
+                itemBuilder: (_, i) => DatingModuleImage(
+                  assetPath: DatingAssetPaths.styleSample(s.id, i + 1),
+                  width: 76,
+                  height: 96,
+                  fallbackIcon: s.icon,
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 14),
@@ -520,22 +656,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     );
   }
 
-  /// Örnek fotoğraf yer tutucusu — gerçek görsel eklenene kadar arkada
-  /// stil ikonu görünür.
-  Widget _samplePlaceholder(IconData icon) {
-    return Container(
-      width: 76,
-      height: 96,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.borderGold, width: 0.8),
-      ),
-      child: Center(
-        child: Icon(icon, color: AppColors.gold, size: 30),
-      ),
-    );
-  }
 
   // Adım 2: paket + foto yükle + üret
   Widget _packageStep() {
@@ -730,6 +850,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     final urls = _resultUrls;
     final stillGenerating = (_jobData?['status'] as String?) == 'generating';
     final total = _styles.length;
+    final lockedCount = urls.length - _unlocked;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -740,6 +861,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          Text(
+            lockedCount > 0
+                ? 'İlk fotoğrafın ücretsiz. Kalan $lockedCount fotoğraf için paket al.'
+                : 'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
+            style: const TextStyle(
+                fontSize: 13, color: AppColors.textSecondary),
+          ),
           if (stillGenerating) ...[
             const SizedBox(height: 6),
             Row(
@@ -766,9 +895,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
             children: [
-              for (final url in urls) _resultTile(url),
+              for (int i = 0; i < urls.length; i++)
+                _resultTile(urls[i], index: i),
             ],
           ),
+          if (lockedCount > 0) ...[
+            const SizedBox(height: 16),
+            PrimaryButton(
+              label: 'Kalan $lockedCount Fotoğrafı Aç',
+              onPressed: _unlockMorePhotos,
+            ),
+          ],
           const SizedBox(height: 16),
           Center(
             child: TextButton(
@@ -785,35 +922,60 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// `gs://bucket/path` biçimindeki bir Firebase Storage URL'ini gerçek
   /// bir indirme URL'ine çözüp gösterir (Firebase Auth token'ı ile —
   /// storage.rules yalnızca sahibine izin verir).
-  Widget _resultTile(String gsUrl) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: FutureBuilder<String>(
-        future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
-        builder: (context, snap) {
-          if (!snap.hasData) {
-            return Container(
-              color: AppColors.surface,
-              child: const Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.2, color: AppColors.gold),
+  Widget _resultTile(String gsUrl, {required int index}) {
+    final unlocked = index < _unlocked;
+    return GestureDetector(
+      onTap: unlocked ? null : _unlockMorePhotos,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 3 / 4,
+          child: FutureBuilder<String>(
+            future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
+            builder: (context, snap) {
+              if (!snap.hasData) {
+                return Container(
+                  color: AppColors.surface,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.2, color: AppColors.gold),
+                    ),
+                  ),
+                );
+              }
+              Widget image = CachedNetworkImage(
+                imageUrl: snap.data!,
+                fit: BoxFit.cover,
+                errorWidget: (_, _, _) => Container(
+                  color: AppColors.surface,
+                  child: const Icon(Icons.broken_image_outlined,
+                      color: AppColors.textMuted),
                 ),
-              ),
-            );
-          }
-          return CachedNetworkImage(
-            imageUrl: snap.data!,
-            fit: BoxFit.cover,
-            errorWidget: (_, _, _) => Container(
-              color: AppColors.surface,
-              child: const Icon(Icons.broken_image_outlined,
-                  color: AppColors.textMuted),
-            ),
-          );
-        },
+              );
+              if (!unlocked) {
+                image = Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    image,
+                    BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                      child: Container(
+                          color: Colors.black.withValues(alpha: 0.45)),
+                    ),
+                    const Center(
+                      child: Icon(Icons.lock_rounded,
+                          color: Colors.white, size: 28),
+                    ),
+                  ],
+                );
+              }
+              return image;
+            },
+          ),
+        ),
       ),
     );
   }
@@ -1024,8 +1186,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         const SizedBox(height: 8),
         if (lockedCount > 0)
           PrimaryButton(
-            label:
-                'Kalan $lockedCount Analizi Aç · ${DatingConfig.analysisSinglePriceLabel}',
+            label: 'Kalan $lockedCount Analizi Aç',
             onPressed: () => _unlockMore(),
           ),
       ],
@@ -1122,7 +1283,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   /// Paket satın alma akışını (paywall) açar; dönünce mevcut paket
   /// bakiyesiyle kilitli sonuçları yeniden hesaplar.
   Future<void> _unlockMore() async {
-    await context.push(DatingRoutes.paywall);
+    await context.push('${DatingRoutes.paywall}?mode=analysis');
     if (!mounted) return;
     final unlocked = await _unlockWithPack(
       ref,
