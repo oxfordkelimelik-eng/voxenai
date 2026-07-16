@@ -206,7 +206,7 @@ exports.startPhotoGeneration = onCall(
 
     const unitsNeeded = styleUnitsFor(styles.length);
     const walletRef = db.doc(`users/${uid}/private/wallet`);
-    const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
+    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
 
     // Bakiye kontrolü + düşme + iş dokümanı oluşturma — tek transaction.
     // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
@@ -324,7 +324,7 @@ exports.falInferenceWebhook = onRequest(
       res.status(400).send("uid/jobId/style eksik");
       return;
     }
-    const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
+    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
     const jobSnap = await jobRef.get();
     if (!jobSnap.exists) {
       res.status(404).send("job bulunamadı");
@@ -443,7 +443,7 @@ exports.falInferenceWebhook = onRequest(
  *    edip işi 'failed' yapar; aksi halde 'done'.
  */
 async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = false }) {
-  const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
   const walletRef = db.doc(`users/${uid}/private/wallet`);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(jobRef);
@@ -500,7 +500,7 @@ async function deleteTrainingPhotos(uid, jobId) {
  */
 async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
   const walletRef = db.doc(`users/${uid}/private/wallet`);
-  const jobRef = db.doc(`users/${uid}/private/genJobs/${jobId}`);
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
   await db.runTransaction(async (tx) => {
     const jobSnap = await tx.get(jobRef);
     if (!jobSnap.exists || jobSnap.data().status === "failed" || jobSnap.data().status === "done") {
@@ -536,7 +536,7 @@ exports.cleanupStuckGenJobs = onSchedule(
       .get();
 
     for (const doc of stuck.docs) {
-      const uid = doc.ref.parent.parent.parent.parent.id; // users/{uid}/private/genJobs/{jobId}
+      const uid = doc.ref.parent.parent.parent.parent.parent.id; // users/{uid}/private/genData/genJobs/{jobId}
       const job = doc.data();
       console.warn(`Takılı iş temizleniyor: ${doc.ref.path}`);
       await refundAndFail(uid, doc.id, job.packUnitsCharged || 0, "Zaman aşımı — işlem tamamlanamadı.");

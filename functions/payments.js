@@ -23,6 +23,29 @@ const PRODUCT_CREDITS = {
   dating_pack_photo50: { field: "photoBalance", amount: 5 }, // 5 "set/stil"
 };
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Geçici hataları (ağ, 401/5xx gibi mağaza tarafı anlık aksaklıklar) kısa
+ * gecikmeyle 1 kez yeniden dener. Mağazanın kesin "geçersiz" cevabı (ör.
+ * Android purchaseState !== 0, Apple 404/400) burada retry'lanmaz —
+ * yalnızca doğrulama çağrısının kendisi (network/exception) hedeflenir.
+ */
+async function withRetry(fn, { retries = 1, delayMs = 500 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await sleep(delayMs);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Android: Play Developer API ile satın alma tokenını doğrular.
  * Döner: { valid: boolean, orderId: string }
@@ -34,11 +57,11 @@ async function verifyAndroidPurchase(productId, purchaseToken) {
     scopes: ["https://www.googleapis.com/auth/androidpublisher"],
   });
   const androidpublisher = google.androidpublisher({ version: "v3", auth });
-  const resp = await androidpublisher.purchases.products.get({
+  const resp = await withRetry(() => androidpublisher.purchases.products.get({
     packageName: ANDROID_PACKAGE_NAME,
     productId,
     token: purchaseToken,
-  });
+  }));
   // purchaseState: 0 = satın alındı, 1 = iptal, 2 = beklemede
   const valid = resp.data.purchaseState === 0;
   return { valid, orderId: resp.data.orderId || purchaseToken };
@@ -95,7 +118,14 @@ async function verifyApplePurchase(productId, purchaseToken) {
     { algorithm: "ES256", header: { alg: "ES256", kid: APPLE_KEY_ID.value() } }
   );
 
+  // 401/5xx: Apple tarafı anlık bir kimlik doğrulama/altyapı aksaklığı
+  // olabilir (ör. cold-start sonrası ilk çağrı) — kesin geçersiz sonuç
+  // (400/404) değildir, bu yüzden bir kez kısa gecikmeyle yeniden denenir.
   let resp = await fetchAppleTransaction(token, transactionId, false);
+  if (resp.status === 401 || resp.status >= 500) {
+    await sleep(500);
+    resp = await fetchAppleTransaction(token, transactionId, false);
+  }
   if (resp.status === 404) {
     resp = await fetchAppleTransaction(token, transactionId, true);
   }

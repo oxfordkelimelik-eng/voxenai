@@ -112,11 +112,13 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                       color: AppColors.textSecondary)),
               const SizedBox(height: 14),
               Expanded(
-                child: Column(
+                child: ListView(
+                  padding: EdgeInsets.zero,
                   children: [
                     for (int i = 0; i < DatingModule.all.length; i++) ...[
                       if (i > 0) const SizedBox(height: 12),
-                      Expanded(
+                      SizedBox(
+                        height: 190,
                         child: _FeatureCard(
                           module: DatingModule.all[i],
                           hasPack: _hasPack(DatingModule.all[i]),
@@ -257,18 +259,17 @@ class _FeatureCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Üst: yatay kapak görseli
-            Expanded(
-              flex: 5,
+            SizedBox(
+              height: 100,
               child: DatingModuleImage(
                 assetPath: _ModuleMeta.imageFor(module.id),
                 fallbackIcon: module.icon,
                 borderRadius: BorderRadius.zero,
-                alignment: Alignment.topCenter,
+                alignment: Alignment.center,
               ),
             ),
             // Alt: başlık + kısa açıklama + CTA
             Expanded(
-              flex: 4,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                 child: Column(

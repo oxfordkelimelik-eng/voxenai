@@ -16,6 +16,12 @@ class DatingPurchaseService {
 
   StreamSubscription<List<PurchaseDetails>>? _sub;
 
+  /// Aynı satın alma (purchaseID) için sunucu doğrulamasının birden çok kez
+  /// eş zamanlı başlatılmasını engeller (mağaza aynı satın almayı birden
+  /// fazla event olarak yeniden gönderebilir — bkz. _onPurchaseUpdate).
+  final Set<String> _verifying = {};
+  final Set<String> _handled = {};
+
   static const Set<String> productIds = {
     DatingConfig.analysisSingleProductId,
     DatingConfig.analysisStandardProductId,
@@ -111,11 +117,32 @@ class DatingPurchaseService {
     }
   }
 
+  /// Bir PurchaseDetails'i tekil olarak tanımlayan anahtar (dedup için).
+  /// purchaseID bazı platformlarda/timing'lerde boş olabileceğinden
+  /// serverVerificationData'ya düşer — aynı işlem için her zaman aynıdır.
+  String _purchaseKey(PurchaseDetails p) =>
+      p.purchaseID?.isNotEmpty == true
+          ? p.purchaseID!
+          : '${p.productID}:${p.verificationData.serverVerificationData}';
+
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final p in purchases) {
       if (p.status == PurchaseStatus.purchased ||
           p.status == PurchaseStatus.restored) {
-        final verified = await _verifyOnServer(p);
+        final key = _purchaseKey(p);
+        // Mağaza aynı satın almayı birden fazla event olarak yeniden
+        // gönderebilir — zaten sonuçlanmış veya doğrulanmakta olan bir
+        // işlemi tekrar işlemeye çalışmayı engelle (çapraz "başarılı/
+        // başarısız" event'lerinin birbirini ezmesinin asıl nedeni buydu).
+        if (_handled.contains(key) || _verifying.contains(key)) continue;
+        _verifying.add(key);
+        bool verified;
+        try {
+          verified = await _verifyOnServer(p);
+        } finally {
+          _verifying.remove(key);
+        }
+        _handled.add(key);
         if (verified) {
           onPurchaseVerified?.call(p);
           _logger.i('Satın alma doğrulandı: ${p.productID}');

@@ -289,7 +289,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   void _listenToJob(String uid, String jobId) {
     _jobSub?.cancel();
     _jobSub = FirebaseFirestore.instance
-        .doc('users/$uid/private/genJobs/$jobId')
+        .doc('users/$uid/private/genData/genJobs/$jobId')
         .snapshots()
         .listen((snap) {
       final data = snap.data();
