@@ -117,13 +117,10 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                   children: [
                     for (int i = 0; i < DatingModule.all.length; i++) ...[
                       if (i > 0) const SizedBox(height: 12),
-                      SizedBox(
-                        height: 190,
-                        child: _FeatureCard(
-                          module: DatingModule.all[i],
-                          hasPack: _hasPack(DatingModule.all[i]),
-                          onTap: () => _openModule(DatingModule.all[i]),
-                        ),
+                      _FeatureCard(
+                        module: DatingModule.all[i],
+                        hasPack: _hasPack(DatingModule.all[i]),
+                        onTap: () => _openModule(DatingModule.all[i]),
                       ),
                     ],
                   ],
@@ -257,10 +254,11 @@ class _FeatureCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Üst: yatay kapak görseli
-            SizedBox(
-              height: 100,
+            // Üst: yatay kapak görseli — 16:9 kendi oranında, kırpılmadan tam sığar.
+            AspectRatio(
+              aspectRatio: 16 / 9,
               child: DatingModuleImage(
                 assetPath: _ModuleMeta.imageFor(module.id),
                 fallbackIcon: module.icon,
@@ -268,71 +266,72 @@ class _FeatureCard extends StatelessWidget {
                 alignment: Alignment.center,
               ),
             ),
-            // Alt: başlık + kısa açıklama + CTA
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (meta.badge.isNotEmpty) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.goldSurface,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(meta.badge,
-                                style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.5,
-                                    color: AppColors.gold)),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                        Expanded(
-                          child: Text(module.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textPrimary)),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: AppColors.gold,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Text('Başla',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textOnGold)),
-                        ),
-                      ],
+            // Alt: rozet + başlık + açıklama + CTA
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (meta.badge.isNotEmpty) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.goldSurface,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(meta.badge,
+                          style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                              color: AppColors.gold)),
                     ),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: Text(
-                        meta.pitch,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          height: 1.35,
-                          color: AppColors.textSecondary,
+                    const SizedBox(height: 8),
+                  ],
+                  // Başlık kendi satırında — tam genişlik, taşma yok.
+                  Text(module.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 4),
+                  // Açıklama + CTA yan yana; açıklamaya kalan alanı ver.
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          meta.pitch,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            height: 1.35,
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.gold,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text('Başla',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textOnGold)),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],

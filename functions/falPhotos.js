@@ -51,6 +51,23 @@ function styleUnitsFor(styleCount) {
   return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
 }
 
+// fal.ai sağlayıcı tarafı kalıcı hataları (bakiye bitti / hesap kilitli).
+// Bunlar geçici değildir; kullanıcıya net mesaj gösterilmeli ve paket iade
+// edilmeli — "internal" olarak gizlenmemeli.
+const FAL_SERVICE_DOWN_MSG =
+  "AI foto servisi şu anda kullanılamıyor. Lütfen daha sonra tekrar dene " +
+  "— paket hakkın iade edildi.";
+
+function isFalServiceOutage(status, body) {
+  if (status === 402 || status === 429) return true;
+  const b = (body || "").toLowerCase();
+  return status === 403 && (
+    b.includes("exhausted balance") ||
+    b.includes("user is locked") ||
+    b.includes("top up")
+  );
+}
+
 /**
  * Referans selfie'lerini Storage'dan okur, fal.ai storage'ına yükler (edit
  * modelleri yalnızca fal'ın erişebileceği URL kabul eder) VE aynı buffer'ları
@@ -106,14 +123,23 @@ async function uploadToFalStorage(buf, fileName) {
   throw new HttpsError("internal", `fal.ai upload başarısız: ${lastErr}`);
 }
 
-/** Firebase Storage imzalı okuma URL'i — fal harici URL'leri çekebilir. */
+/**
+ * Firebase Storage'dan fal.ai'ın çekebileceği herkese-açık okuma URL'i.
+ *
+ * NOT: getSignedUrl() 'iam.serviceAccounts.signBlob' izni ister; Cloud
+ * Functions'ın varsayılan compute service account'ında bu izin genelde yok
+ * (SigningError). Bunun yerine dosyaya bir download token verip Firebase'in
+ * token'lı public URL'ini üretiyoruz — bu signBlob GEREKTİRMEZ ve fal.ai
+ * tarafından erişilebilir. URL yalnızca token'ı bilene açıktır.
+ */
 async function signedDownloadUrl(file) {
-  const [url] = await file.getSignedUrl({
-    version: "v4",
-    action: "read",
-    expires: Date.now() + 2 * 60 * 60 * 1000, // 2 saat
+  const token = require("crypto").randomUUID();
+  await file.setMetadata({
+    metadata: { firebaseStorageDownloadTokens: token },
   });
-  return url;
+  const encodedPath = encodeURIComponent(file.name);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket().name}` +
+    `/o/${encodedPath}?alt=media&token=${token}`;
 }
 
 /**
@@ -171,6 +197,10 @@ async function submitStyleJob(uid, jobId, styleId, imageUrls) {
   );
   if (!resp.ok) {
     const txt = await resp.text();
+    if (isFalServiceOutage(resp.status, txt)) {
+      console.error(`fal.ai servis kesintisi (submit): ${resp.status} ${txt.slice(0, 160)}`);
+      throw new HttpsError("unavailable", FAL_SERVICE_DOWN_MSG);
+    }
     throw new HttpsError("internal", `fal.ai iş gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
   }
   return await resp.json(); // { request_id, ... }
@@ -292,7 +322,14 @@ exports.startPhotoGeneration = onCall(
       }
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
-      await refundAndFail(uid, jobId, unitsToCharge, "Üretim başlatılamadı.");
+      // Servis kesintisinde (fal bakiye/kilit) kullanıcıya net mesaj + iade.
+      const outage = e instanceof HttpsError && e.code === "unavailable";
+      await refundAndFail(
+        uid,
+        jobId,
+        unitsToCharge,
+        outage ? FAL_SERVICE_DOWN_MSG : "Üretim başlatılamadı.",
+      );
       if (e instanceof HttpsError) throw e;
       const msg = (e && e.message) ? String(e.message).slice(0, 160) : "Üretim başlatılamadı.";
       throw new HttpsError("internal", msg);
