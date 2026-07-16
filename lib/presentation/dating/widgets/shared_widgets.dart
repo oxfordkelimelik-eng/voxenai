@@ -301,6 +301,8 @@ class DatingModuleImage extends StatelessWidget {
             height: h,
             fit: fit,
             alignment: alignment,
+            filterQuality: FilterQuality.high,
+            isAntiAlias: true,
             errorBuilder: (_, _, _) => Container(
               width: w,
               height: h,

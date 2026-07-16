@@ -9,15 +9,15 @@ const FAL_QUEUE_BASE = "https://queue.fal.run";
 // 5 selfie doğrudan referans olarak verilir, saniyeler içinde sonuç döner.
 // Nano Banana 2, kimlik/yüz sadakati konusunda güçlü (kalite öncelikli).
 const EDIT_MODEL = "fal-ai/nano-banana-2/edit";
-// 1 = en katı, 6 = en gevşek (varsayılan 4). Kullanıcı selfie'si işleyen
-// bir uygulamada varsayılandan daha katı moderasyon tercih edildi.
-const SAFETY_TOLERANCE = "2";
+// 1 = en katı, 6 = en gevşek. Varsayılan 4 — "2" kullanıcı selfielerinde
+// sıkça moderasyon reddi / boş sonuç üretiyordu ("Bazı stiller üretilemedi").
+const SAFETY_TOLERANCE = "4";
 
 const NUM_IMAGES = 10; // stil başına üretilen foto (DatingConfig.photosPerSet)
 // Kalite kapısından bu sayının altında foto geçerse stil bir kez otomatik
 // yeniden üretilir (kimlik sapması olan üretimleri kurtarmak için).
-const MIN_PASS_FOR_STYLE = 4;
-const MAX_STYLE_RETRIES = 1;
+const MIN_PASS_FOR_STYLE = 2; // 4 çok katıydı — az geçen üretimleri gereksiz yere fail ediyordu
+const MAX_STYLE_RETRIES = 2;
 
 // Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
@@ -413,6 +413,10 @@ exports.falInferenceWebhook = onRequest(
         errDetail = JSON.stringify(req.body?.error || req.body?.payload || req.body).slice(0, 400);
       } catch { errDetail = String(req.body?.status); }
       console.error(`fal.ai üretim başarısız (style=${styleId}): status=${req.body?.status} ${errDetail}`);
+      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+        res.status(200).send("yeniden üretiliyor");
+        return;
+      }
       await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
@@ -423,16 +427,28 @@ exports.falInferenceWebhook = onRequest(
     if (images.length === 0) {
       console.error(`fal.ai OK döndü ama görsel yok (style=${styleId}):`,
         JSON.stringify(req.body?.payload || {}).slice(0, 300));
+      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+        res.status(200).send("yeniden üretiliyor");
+        return;
+      }
+      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      res.status(200).send("ok");
+      return;
     }
     let downloaded = [];
     try {
       downloaded = await Promise.all(images.map(async (img, i) => {
         const imgResp = await fetch(img.url);
+        if (!imgResp.ok) throw new Error(`indirilemedi: ${imgResp.status}`);
         const buf = Buffer.from(await imgResp.arrayBuffer());
         return { i, buf };
       }));
     } catch (e) {
       console.error("Sonuç görseli indirme hatası:", e);
+      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+        res.status(200).send("yeniden üretiliyor");
+        return;
+      }
       await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
@@ -454,32 +470,13 @@ exports.falInferenceWebhook = onRequest(
 
     // Otomatik yeniden üretim: çok az foto kimlik eşiğini geçtiyse ve henüz
     // yeniden üretim hakkı varsa, bu stili yeni bir edit işiyle tekrar dene.
-    const retries = styleResult.retries || 0;
     if (
       job.refDescriptor &&
       passed.length < MIN_PASS_FOR_STYLE &&
-      retries < MAX_STYLE_RETRIES &&
-      Array.isArray(job.falRefUrls) &&
-      job.falRefUrls.length > 0
+      await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)
     ) {
-      try {
-        const falJob = await submitStyleJob(uid, jobId, styleId, job.falRefUrls);
-        await jobRef.set({
-          results: {
-            [styleId]: {
-              requestId: falJob.request_id,
-              photoUrls: [],
-              status: "pending",
-              retries: retries + 1,
-            },
-          },
-        }, { merge: true });
-        res.status(200).send("yeniden üretiliyor");
-        return;
-      } catch (e) {
-        // Yeniden üretim başlatılamadı — eldeki sonuçlarla devam et.
-        console.error("Otomatik yeniden üretim başlatılamadı:", e);
-      }
+      res.status(200).send("yeniden üretiliyor");
+      return;
     }
 
     // Son karar: geçen varsa onları, hiç geçen yoksa (nadir) boş sonuç
@@ -499,21 +496,67 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
 
+    if (photoUrls.length === 0) {
+      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+        res.status(200).send("yeniden üretiliyor");
+        return;
+      }
+      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      res.status(200).send("ok");
+      return;
+    }
+
     await finalizeStyle(uid, jobId, styleId, { photoUrls });
     res.status(200).send("ok");
   }
 );
 
 /**
+ * Stil için yeniden üretim hakkı varsa yeni fal işi kuyruğa alır.
+ * Döner: true = yeniden kuyruğa alındı (finalize etme).
+ */
+async function maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef) {
+  const retries = styleResult?.retries || 0;
+  if (
+    retries >= MAX_STYLE_RETRIES ||
+    !Array.isArray(job.falRefUrls) ||
+    job.falRefUrls.length === 0
+  ) {
+    return false;
+  }
+  try {
+    const falJob = await submitStyleJob(uid, jobId, styleId, job.falRefUrls);
+    await jobRef.set({
+      results: {
+        [styleId]: {
+          requestId: falJob.request_id,
+          photoUrls: [],
+          status: "pending",
+          retries: retries + 1,
+        },
+      },
+    }, { merge: true });
+    return true;
+  } catch (e) {
+    console.error("Otomatik yeniden üretim başlatılamadı:", e);
+    return false;
+  }
+}
+
+/**
  * Bir stilin sonucunu ATOMİK ve IDEMPOTENT şekilde işler:
  *  - Stil zaten 'done'/'failed' ise hiçbir şey yapmaz (çift-teslimat koruması).
  *  - pendingStyles'ı transaction içinde azaltır (yarış koşulu yok).
- *  - Son stil de bittiğinde: herhangi bir stil başarısızsa TÜM paketi iade
- *    edip işi 'failed' yapar; aksi halde 'done'.
+ *  - Son stil de bittiğinde: EN AZ BİR stil fotoğraf ürettiyse iş 'done'
+ *    (kısmi başarı). Hiçbir stil üretmediyse paket iade + 'failed'.
  */
 async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = false }) {
   const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
   const walletRef = db.doc(`users/${uid}/private/wallet`);
+  // Boş sonuç = başarısız stil (kullanıcıya boş galeri gösterme).
+  if (!failed && (!Array.isArray(photoUrls) || photoUrls.length === 0)) {
+    failed = true;
+  }
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(jobRef);
     if (!snap.exists) return;
@@ -530,27 +573,42 @@ async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = fal
     };
 
     if (newPending === 0) {
-      const results = j.results || {};
-      const anyFailed = failed || Object.keys(results).some(
-        (k) => k !== styleId && results[k]?.status === "failed"
-      );
-      if (anyFailed) {
-        // Mevcut politika: herhangi bir stil başarısızsa tüm paketi iade et.
+      const results = { ...(j.results || {}), [styleId]: update.results[styleId] };
+      const successCount = Object.keys(results).filter((k) => {
+        const r = results[k];
+        return r?.status === "done" && Array.isArray(r.photoUrls) && r.photoUrls.length > 0;
+      }).length;
+      const failedCount = Object.keys(results).filter(
+        (k) => results[k]?.status === "failed"
+      ).length;
+
+      if (successCount > 0) {
+        // Kısmi başarı: üretilen stilleri göster. Başarısız stil birimleri iade.
+        if (failedCount > 0 && (j.packUnitsCharged || 0) > 0) {
+          const refundUnits = Math.min(failedCount, j.packUnitsCharged || 0);
+          const walletSnap = await tx.get(walletRef);
+          const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
+          tx.set(walletRef, {
+            photoBalance: (wallet.photoBalance || 0) + refundUnits,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+        update.status = "done";
+      } else {
+        // Hiç stil üretilmedi — tam iade.
         const walletSnap = await tx.get(walletRef);
         const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
         const walletUpdate = {
           photoBalance: (wallet.photoBalance || 0) + (j.packUnitsCharged || 0),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
-        // Ücretsiz hakla başlatılan iş başarısızsa ücretsiz hakkı da geri ver.
         if (j.usedFreeTier === true) {
           walletUpdate.freePhotoUsed = false;
         }
         tx.set(walletRef, walletUpdate, { merge: true });
         update.status = "failed";
-        update.errorMessage = "Bazı stiller üretilemedi.";
-      } else {
-        update.status = "done";
+        update.errorMessage =
+          "Fotoğraflar üretilemedi. Lütfen net, yüzün göründüğü fotoğraflarla tekrar dene.";
       }
     }
     tx.set(jobRef, update, { merge: true });

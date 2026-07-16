@@ -105,8 +105,17 @@ class AuthService {
         ],
         nonce: nonce,
       );
+      // identityToken null ise Firebase nonce doğrulamasını yapamaz ve
+      // "missing or invalid nonce" hatası verir. Bunu erken ve net yakala.
+      final identityToken = appleCred.identityToken;
+      if (identityToken == null || identityToken.isEmpty) {
+        _logger.e('Apple identityToken boş — nonce doğrulaması yapılamaz.');
+        throw const AuthFailure(
+            'Apple ile giriş tamamlanamadı (kimlik doğrulama belirteci alınamadı). '
+            'Lütfen tekrar dene.');
+      }
       final credential = OAuthProvider('apple.com').credential(
-        idToken: appleCred.identityToken,
+        idToken: identityToken,
         rawNonce: rawNonce,
         accessToken: appleCred.authorizationCode,
       );
@@ -141,6 +150,14 @@ class AuthService {
       throw AuthFailure('Apple: ${e.code.name} ${e.message}'.trim());
     } on FirebaseAuthException catch (e) {
       _logger.e('Firebase Auth (Apple) hatasi: ${e.code} ${e.message}');
+      // "invalid-credential" / nonce uyuşmazlığı: genelde cihaz saati bozuk
+      // ya da belirteç yeniden kullanıldı. Kullanıcıya çözüm önerisi ver.
+      final msg = (e.message ?? '').toLowerCase();
+      if (e.code == 'invalid-credential' || msg.contains('nonce')) {
+        throw const AuthFailure(
+            'Apple ile giriş doğrulanamadı. Cihaz tarih/saatinin otomatik '
+            'ayarlı olduğundan emin ol ve tekrar dene.');
+      }
       throw AuthFailure('Firebase: ${e.code}');
     } catch (e) {
       _logger.e('Apple baglama hatasi: $e');
@@ -151,7 +168,7 @@ class AuthService {
   /// Apple'ın nonce (replay-attack koruması) için rastgele bir dize üretir.
   String _generateNonce([int length = 32]) {
     const charset =
-        '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._';
     final random = Random.secure();
     return List.generate(length, (_) => charset[random.nextInt(charset.length)])
         .join();

@@ -14,9 +14,9 @@
 
 const path = require("path");
 
-// Standart face-api.js eşiği: öklid mesafesi < 0.6 ise "aynı kişi" kabul
-// edilir. (Yerel testte: aynı foto ~0.0, farklı kişiler ~0.79 çıktı.)
-const FACE_MATCH_THRESHOLD = 0.6;
+// Standart face-api.js eşiği ~0.6. Biraz gevşetildi — stil/ışık değişince
+// aynı kişi 0.55–0.65 aralığına düşebiliyor; aşırı eleme üretimi bozuyordu.
+const FACE_MATCH_THRESHOLD = 0.68;
 
 let _initPromise = null;
 let _faceapi = null;
