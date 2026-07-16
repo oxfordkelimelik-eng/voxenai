@@ -216,10 +216,12 @@ async function submitStyleJob(uid, jobId, styleId, imageUrls) {
  * data: { styles: string[], jobId: string } -> { jobId }
  */
 exports.startPhotoGeneration = onCall(
-  // Referans descriptor'ı burada hesaplandığı için face-api modelleri yükleniyor
-  // — 1GiB gerekiyor. (Kalite kapısı katmanı fail-safe; hata olursa filtresiz
-  // devam edilir, üretim akışı bloklanmaz.)
-  { secrets: [FAL_KEY], region: "europe-west1", memory: "1GiB", timeoutSeconds: 180 },
+  // Referans descriptor'ı burada hesaplandığı için face-api modelleri (tfjs-wasm
+  // + 3 model) yükleniyor. 1GiB, modeller + selfie tensörleriyle birlikte
+  // aşılıyordu (OOM → "internal"); 2GiB'ye çıkarıldı. Ayrıca selfie'ler kalite
+  // kapısında ~800px'e küçültülüyor (bkz. faceQuality.bufferToTensor). Kalite
+  // kapısı fail-safe: hata olursa filtresiz devam edilir, akış bloklanmaz.
+  { secrets: [FAL_KEY], region: "europe-west1", memory: "2GiB", timeoutSeconds: 180 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -292,25 +294,15 @@ exports.startPhotoGeneration = onCall(
     try {
       const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
-      // Kalite kapısı için kaynak kimlik vektörünü BİR KEZ hesapla (fail-safe).
-      let refDescriptor = null;
-      try {
-        const { averageDescriptor } = require("./faceQuality");
-        const desc = await averageDescriptor(refBuffers);
-        if (desc) refDescriptor = Array.from(desc); // Firestore için düz dizi
-      } catch (e) {
-        console.error("Referans descriptor hesaplanamadı (kalite kapısı devre dışı):", e);
-      }
-
+      // ÖNCE üretim işlerini fal.ai'a gönder — para bunun için ödendi, kritik
+      // adım bu. Kalite kapısı (descriptor) İKİNCİL ve fail-safe olduğundan
+      // ondan SONRA hesaplanır; böylece descriptor hesabı (ağır tfjs işlemi)
+      // beklenmedik bir hataya/OOM'a düşse bile üretim zaten başlamış olur.
       await jobRef.set({
         status: "generating",
         falRefUrls: refUrls,
-        refDescriptor, // null olabilir — o durumda kalite kapısı atlanır
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
-
-      // Referans selfie'leri artık gerekmiyor (fal kopyası + descriptor var).
-      await deleteTrainingPhotos(uid, jobId);
 
       for (const styleId of styles) {
         const falJob = await submitStyleJob(uid, jobId, styleId, refUrls);
@@ -320,6 +312,24 @@ exports.startPhotoGeneration = onCall(
           results: { [styleId]: { requestId: falJob.request_id, photoUrls: [], status: "pending", retries: 0 } },
         }, { merge: true });
       }
+
+      // Üretim başladı. Şimdi kalite kapısı için kaynak kimlik vektörünü BİR
+      // KEZ hesapla (fail-safe — hata olursa refDescriptor null kalır ve
+      // webhook kalite filtresini atlar, üretim yine de tamamlanır).
+      let refDescriptor = null;
+      try {
+        const { averageDescriptor } = require("./faceQuality");
+        const desc = await averageDescriptor(refBuffers);
+        if (desc) refDescriptor = Array.from(desc); // Firestore için düz dizi
+      } catch (e) {
+        console.error("Referans descriptor hesaplanamadı (kalite kapısı devre dışı):", e);
+      }
+      if (refDescriptor) {
+        await jobRef.set({ refDescriptor }, { merge: true });
+      }
+
+      // Referans selfie'leri artık gerekmiyor (fal kopyası + descriptor var).
+      await deleteTrainingPhotos(uid, jobId);
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
       // Servis kesintisinde (fal bakiye/kilit) kullanıcıya net mesaj + iade.
@@ -349,7 +359,7 @@ exports.falInferenceWebhook = onRequest(
   {
     secrets: [FAL_KEY], // otomatik yeniden üretim fal'a yeni iş gönderiyor
     region: "europe-west1",
-    memory: "1GiB", // tfjs-wasm + face-api modelleri
+    memory: "2GiB", // tfjs-wasm + face-api modelleri + sonuç görselleri (OOM önlemi)
     timeoutSeconds: 180,
     minInstances: 1, // soğuk başlangıçta model yeniden yüklemesini önle
   },

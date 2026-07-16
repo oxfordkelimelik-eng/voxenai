@@ -41,10 +41,17 @@ async function ensureModelsLoaded() {
   return _initPromise;
 }
 
+// Yüz tespiti için gereken maksimum kenar uzunluğu. Modern telefon fotoları
+// (ör. 4000x3000) tam çözünürlükte tensöre çevrilince bellek patlıyordu (OOM,
+// 1GiB limiti aşıyordu). ~800px yüz tespiti/tanıma için fazlasıyla yeterli ve
+// tensör boyutunu ~25x küçültür.
+const MAX_FACE_DIM = 800;
+
 function bufferToTensor(faceapi, buf) {
   const tf = require("@tensorflow/tfjs");
   const jpeg = require("jpeg-js");
-  const decoded = jpeg.decode(buf, { useTArray: true });
+  // maxMemoryUsageInMB: jpeg-js'in çok büyük görsellerde patlamasını sınırla.
+  const decoded = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 512 });
   const { width, height, data } = decoded;
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
@@ -52,7 +59,17 @@ function bufferToTensor(faceapi, buf) {
     rgb[j + 1] = data[i + 1];
     rgb[j + 2] = data[i + 2];
   }
-  return tf.tensor3d(rgb, [height, width, 3]);
+  // Tensörleri tidy içinde oluştur/küçült ki ara tensörler hemen serbest kalsın.
+  return tf.tidy(() => {
+    const full = tf.tensor3d(rgb, [height, width, 3]);
+    const longEdge = Math.max(width, height);
+    if (longEdge <= MAX_FACE_DIM) return full;
+    // Oranı koruyarak küçült — büyük tensör tidy sonunda dispose edilir.
+    const scale = MAX_FACE_DIM / longEdge;
+    const newH = Math.round(height * scale);
+    const newW = Math.round(width * scale);
+    return tf.image.resizeBilinear(full, [newH, newW]).toInt();
+  });
 }
 
 /**
