@@ -118,21 +118,34 @@ async function verifyApplePurchase(productId, purchaseToken) {
     { algorithm: "ES256", header: { alg: "ES256", kid: APPLE_KEY_ID.value() } }
   );
 
-  // 401/5xx: Apple tarafı anlık bir kimlik doğrulama/altyapı aksaklığı
-  // olabilir (ör. cold-start sonrası ilk çağrı) — kesin geçersiz sonuç
-  // (400/404) değildir, bu yüzden bir kez kısa gecikmeyle yeniden denenir.
+  // Production'ı dene; 5xx'te bir kez retry et (anlık aksaklık). Production
+  // OK değilse (401/404 dahil) SANDBOX'ı da dene: TestFlight/Sandbox satın
+  // almaları production host'ta 404 YERİNE 401 de dönebiliyor — bu yüzden
+  // yalnızca 404'te değil, her başarısız production yanıtında sandbox'a düşülür.
   let resp = await fetchAppleTransaction(token, transactionId, false);
-  if (resp.status === 401 || resp.status >= 500) {
+  if (resp.status >= 500) {
     await sleep(500);
     resp = await fetchAppleTransaction(token, transactionId, false);
   }
-  if (resp.status === 404) {
-    resp = await fetchAppleTransaction(token, transactionId, true);
-  }
   if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    console.error(`Apple doğrulama başarısız: ${resp.status} ${body.slice(0, 200)}`);
-    return { valid: false, orderId: transactionId };
+    const prodStatus = resp.status;
+    const prodBody = await resp.text().catch(() => "");
+    const sandboxResp = await fetchAppleTransaction(token, transactionId, true);
+    if (sandboxResp.ok) {
+      resp = sandboxResp;
+    } else {
+      const sbBody = await sandboxResp.text().catch(() => "");
+      const authErr = sandboxResp.headers.get("www-authenticate") ||
+        resp.headers.get("www-authenticate") || "";
+      // Teşhis: 401 genelde JWT yetki reddidir (yanlış issuer/anahtar türü).
+      console.error(
+        `Apple doğrulama başarısız: prod=${prodStatus} sandbox=${sandboxResp.status} ` +
+        `prodBody="${prodBody.slice(0, 200)}" sbBody="${sbBody.slice(0, 200)}" ` +
+        `www-authenticate="${authErr}" kid=${APPLE_KEY_ID.value()} ` +
+        `issPrefix=${String(APPLE_ISSUER_ID.value()).slice(0, 8)}`,
+      );
+      return { valid: false, orderId: transactionId };
+    }
   }
   const json = await resp.json();
   const valid = !!json.signedTransactionInfo;
@@ -182,7 +195,11 @@ exports.verifyPurchase = onCall(
     }
 
     const walletRef = db.doc(`users/${uid}/private/wallet`);
-    const processedRef = db.doc(`users/${uid}/private/processedPurchases/${verification.orderId}`);
+    // NOT: 'users/{uid}/private/processedPurchases/{orderId}' 5 parça (tek sayı)
+    // = geçersiz Firestore doküman yolu. Araya sabit 'payments' dokümanı
+    // eklenerek 6 parçaya (geçerli) çıkarılır — genJobs ile aynı düzeltme.
+    const processedRef = db.doc(
+      `users/${uid}/private/payments/processedPurchases/${verification.orderId}`);
 
     const result = await db.runTransaction(async (tx) => {
       const processedSnap = await tx.get(processedRef);
