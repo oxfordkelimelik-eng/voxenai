@@ -253,7 +253,8 @@ exports.startPhotoGeneration = onCall(
         freePhotoUsed: false,
       };
 
-      if ((wallet.photoBalance || 0) < unitsNeeded) {
+      const balance = wallet.photoBalance || 0;
+      if (balance < unitsNeeded) {
         if (!wallet.freePhotoUsed && styles.length === 1) {
           unitsToCharge = 0;
           usedFreeTier = true;
@@ -262,8 +263,18 @@ exports.startPhotoGeneration = onCall(
             "failed-precondition",
             "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
           );
+        } else if (balance > 0) {
+          // Bakiyesi var ama seçtiği stil sayısından az — net yönlendirme yap.
+          throw new HttpsError(
+            "failed-precondition",
+            `Paketinde ${balance} stil hakkın var ama ${styles.length} stil seçtin. ` +
+            `${balance} stil seç ya da daha fazla paket al.`
+          );
         } else {
-          throw new HttpsError("failed-precondition", "Yetersiz paket bakiyesi.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Paket hakkın kalmadı. Devam etmek için AI Foto paketi al."
+          );
         }
       }
 
@@ -516,10 +527,15 @@ async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = fal
         // Mevcut politika: herhangi bir stil başarısızsa tüm paketi iade et.
         const walletSnap = await tx.get(walletRef);
         const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
-        tx.set(walletRef, {
+        const walletUpdate = {
           photoBalance: (wallet.photoBalance || 0) + (j.packUnitsCharged || 0),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
+        };
+        // Ücretsiz hakla başlatılan iş başarısızsa ücretsiz hakkı da geri ver.
+        if (j.usedFreeTier === true) {
+          walletUpdate.freePhotoUsed = false;
+        }
+        tx.set(walletRef, walletUpdate, { merge: true });
         update.status = "failed";
         update.errorMessage = "Bazı stiller üretilemedi.";
       } else {
@@ -553,12 +569,20 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
     if (!jobSnap.exists || jobSnap.data().status === "failed" || jobSnap.data().status === "done") {
       return; // zaten sonuçlanmış
     }
+    const job = jobSnap.data();
     const walletSnap = await tx.get(walletRef);
     const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
-    tx.set(walletRef, {
+    const walletUpdate = {
       photoBalance: (wallet.photoBalance || 0) + unitsToRefund,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    };
+    // İş ücretsiz hakla başlatıldıysa ve foto üretilemedise ücretsiz hakkı da
+    // geri ver — aksi halde kullanıcı hiç foto almadan ücretsiz denemesini
+    // kaybediyordu ("Yetersiz paket bakiyesi" ile kilitleniyordu).
+    if (job.usedFreeTier === true) {
+      walletUpdate.freePhotoUsed = false;
+    }
+    tx.set(walletRef, walletUpdate, { merge: true });
     tx.set(jobRef, {
       status: "failed",
       errorMessage,

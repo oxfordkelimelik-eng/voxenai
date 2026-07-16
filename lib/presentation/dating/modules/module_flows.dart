@@ -466,6 +466,55 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           ),
         ),
+        // Bakiye/seçim bilgisi: kullanıcı kaç stil üretebileceğini üretimden
+        // ÖNCE net görsün (her stil 1 paket hakkı = 10 foto). Bakiye 0 ise
+        // ilk stil ücretsiz denenebilir.
+        Builder(builder: (_) {
+          final bal = ref.watch(packBalanceProvider).photo;
+          final selected = _styles.length;
+          final tooMany = bal > 0 && selected > bal;
+          final text = bal > 0
+              ? 'Paketinde $bal stil hakkın var · $selected stil seçtin'
+              : 'İlk stilin ücretsiz · $selected stil seçtin';
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: tooMany ? AppColors.error.withValues(alpha: 0.12)
+                    : AppColors.goldSurface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: tooMany ? AppColors.error : AppColors.borderGold,
+                    width: 0.8),
+              ),
+              child: Row(
+                children: [
+                  Icon(tooMany ? Icons.warning_amber_rounded
+                      : Icons.info_outline_rounded,
+                      size: 16,
+                      color: tooMany ? AppColors.error : AppColors.gold),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      tooMany
+                          ? '$bal stil hakkın var, $selected seçtin. $bal stil '
+                              'seç ya da paket al.'
+                          : text,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: tooMany
+                              ? AppColors.error
+                              : AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(16),
