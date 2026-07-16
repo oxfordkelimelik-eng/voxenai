@@ -406,6 +406,13 @@ exports.falInferenceWebhook = onRequest(
     }
 
     if (req.body?.status !== "OK" && req.body?.status !== "COMPLETED") {
+      // fal.ai üretimi başarısız — GERÇEK nedeni logla (moderasyon, model
+      // hatası, vb.). "Bazı stiller üretilemedi"nin kök nedeni burada görünür.
+      let errDetail = "";
+      try {
+        errDetail = JSON.stringify(req.body?.error || req.body?.payload || req.body).slice(0, 400);
+      } catch { errDetail = String(req.body?.status); }
+      console.error(`fal.ai üretim başarısız (style=${styleId}): status=${req.body?.status} ${errDetail}`);
       await finalizeStyle(uid, jobId, styleId, { failed: true });
       res.status(200).send("ok");
       return;
@@ -413,6 +420,10 @@ exports.falInferenceWebhook = onRequest(
 
     // Çıktıları paralel indir.
     const images = req.body?.payload?.images || [];
+    if (images.length === 0) {
+      console.error(`fal.ai OK döndü ama görsel yok (style=${styleId}):`,
+        JSON.stringify(req.body?.payload || {}).slice(0, 300));
+    }
     let downloaded = [];
     try {
       downloaded = await Promise.all(images.map(async (img, i) => {

@@ -318,9 +318,34 @@ class CreditsNotifier extends StateNotifier<int> {
 class PackBalance {
   final int photo;
   final int analysis;
-  const PackBalance({this.photo = 0, this.analysis = 0});
-  PackBalance copyWith({int? photo, int? analysis}) =>
-      PackBalance(photo: photo ?? this.photo, analysis: analysis ?? this.analysis);
+  final bool freePhotoUsed; // AI foto ücretsiz denemesi kullanıldı mı
+  final bool freeAnalysisUsed; // foto analizi ücretsiz denemesi kullanıldı mı
+  const PackBalance({
+    this.photo = 0,
+    this.analysis = 0,
+    this.freePhotoUsed = false,
+    this.freeAnalysisUsed = false,
+  });
+  PackBalance copyWith(
+          {int? photo,
+          int? analysis,
+          bool? freePhotoUsed,
+          bool? freeAnalysisUsed}) =>
+      PackBalance(
+        photo: photo ?? this.photo,
+        analysis: analysis ?? this.analysis,
+        freePhotoUsed: freePhotoUsed ?? this.freePhotoUsed,
+        freeAnalysisUsed: freeAnalysisUsed ?? this.freeAnalysisUsed,
+      );
+
+  /// Verilen sayıda stil üretimini karşılayabilir mi? (paket hakkı VEYA
+  /// tek stil için ücretsiz deneme). Sunucudaki startPhotoGeneration
+  /// mantığıyla aynı — kredi harcamadan ÖNCE istemcide kontrol için.
+  bool canAffordStyles(int styleCount) {
+    if (photo >= styleCount) return true;
+    if (styleCount == 1 && !freePhotoUsed) return true; // ücretsiz ilk stil
+    return false;
+  }
 }
 
 final packBalanceProvider =
@@ -362,6 +387,8 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
       state = PackBalance(
         photo: (data['photoBalance'] as num?)?.toInt() ?? 0,
         analysis: (data['analysisBalance'] as num?)?.toInt() ?? 0,
+        freePhotoUsed: data['freePhotoUsed'] == true,
+        freeAnalysisUsed: data['freeAnalysisUsed'] == true,
       );
       _persist();
     });

@@ -146,7 +146,7 @@ class AiPhotoFlow extends ConsumerStatefulWidget {
   ConsumerState<AiPhotoFlow> createState() => _AiPhotoFlowState();
 }
 
-enum _AiStage { style, package, loading, result, error }
+enum _AiStage { style, package, loading, result, error, teaser }
 
 class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   _AiStage _stage = _AiStage.style;
@@ -191,6 +191,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// gerçek zamanlı dinlemeye başlar.
   Future<void> _generate() async {
     if (_photos.length != 5 || _styles.isEmpty) return;
+
+    // Bakiye/ücretsiz hak yetmiyorsa SUNUCUYA HİÇ GİTME: ne fal.ai kredisi ne
+    // de paket hakkı harcanır. Bunun yerine blurlu "teaser" gösterilir; blura
+    // dokununca paket ekranına yönlendirilir.
+    final pack = ref.read(packBalanceProvider);
+    if (!pack.canAffordStyles(_styles.length)) {
+      setState(() {
+        _stage = _AiStage.teaser;
+        _errorMessage = null;
+      });
+      return;
+    }
+
     setState(() {
       _stage = _AiStage.loading;
       _errorMessage = null;
@@ -417,6 +430,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         _AiStage.loading => AiLoadingView(steps: _loadingSteps),
         _AiStage.result => _resultStep(),
         _AiStage.error => _errorStep(),
+        _AiStage.teaser => _teaserStep(),
       },
     );
   }
@@ -437,6 +451,116 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     fontSize: 15, color: AppColors.textSecondary)),
             const SizedBox(height: 20),
             PrimaryButton(label: 'Tekrar Dene', onPressed: _reset),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Bakiye yetmeyince gösterilen "teaser": seçilen stillerin örnek
+  /// fotoğrafları BLURLU gösterilir (gerçek üretim YAPILMAZ — ne fal.ai
+  /// kredisi ne paket hakkı harcanır). Blura dokununca paket ekranına gidilir;
+  /// paket alınırsa üretim otomatik başlar.
+  Future<void> _openPaywallThenMaybeGenerate() async {
+    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
+    if (!mounted) return;
+    // Paketten dönüldü: artık karşılanabiliyorsa gerçek üretimi başlat.
+    if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
+      _generate();
+    }
+  }
+
+  Widget _teaserStep() {
+    // Seçilen stillerin örnek görsellerinden blurlu bir vitrin oluştur.
+    final previews = <String>[];
+    for (final id in _styles) {
+      for (int i = 1; i <= 3; i++) {
+        previews.add(DatingAssetPaths.styleSample(id, i));
+      }
+    }
+    // Grid'i doldurmak için en az 6 kare (tek stilde 3 örnek → döngüyle tekrar).
+    final base = List<String>.from(previews);
+    for (int k = 0; previews.length < 6 && base.isNotEmpty; k++) {
+      previews.add(base[k % base.length]);
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Fotoğrafların hazır! 🎉',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 6),
+                const Text(
+                    'Fotoğraflarının kilidini açmak için AI Foto paketi al. '
+                    'Herhangi bir fotoğrafa dokun.',
+                    style: TextStyle(
+                        fontSize: 13, color: AppColors.textSecondary)),
+                const SizedBox(height: 14),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 3 / 4,
+                  children: [
+                    for (final p in previews) _teaserTile(p),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: Column(
+            children: [
+              PrimaryButton(
+                label: 'Paketi Aç ve Fotoğrafları Gör',
+                onPressed: _openPaywallThenMaybeGenerate,
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: _reset,
+                child: const Text('Vazgeç',
+                    style: TextStyle(color: AppColors.textSecondary)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _teaserTile(String assetPath) {
+    return GestureDetector(
+      onTap: _openPaywallThenMaybeGenerate,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DatingModuleImage(
+              assetPath: assetPath,
+              fallbackIcon: Icons.auto_awesome,
+              borderRadius: BorderRadius.zero,
+              alignment: Alignment.center,
+            ),
+            BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+              child: Container(color: Colors.black.withValues(alpha: 0.45)),
+            ),
+            const Center(
+              child: Icon(Icons.lock_rounded, color: Colors.white, size: 28),
+            ),
           ],
         ),
       ),
