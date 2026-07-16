@@ -373,29 +373,10 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
     await prefs.setInt(DatingKeys.packAnalysisBalance, state.analysis);
   }
 
-  /// Foto üretim bakiyesinden en fazla [want] "set/stil" düşer (iyimser,
-  /// yalnızca YEREL önbellek/UI için — gerçek harcama yetkisi ve düşüm
-  /// `startPhotoGeneration` Cloud Function'ında sunucu tarafında yapılır;
-  /// Firestore wallet dinleyicisi bu değeri kısa süre sonra gerçek değerle
-  /// ezer). Bakiye yetersizse olabildiğince düşüp gerçekte düşülen miktarı
-  /// döner.
-  Future<int> spendPhoto(int want) async {
-    final spend = want < state.photo ? want : state.photo;
-    if (spend <= 0) return 0;
-    state = state.copyWith(photo: state.photo - spend);
-    await _persist();
-    return spend;
-  }
-
-  /// Analiz bakiyesinden en fazla [want] hak düşer (iyimser yerel önbellek —
-  /// bkz. [spendPhoto] açıklaması).
-  Future<int> spendAnalysis(int want) async {
-    final spend = want < state.analysis ? want : state.analysis;
-    if (spend <= 0) return 0;
-    state = state.copyWith(analysis: state.analysis - spend);
-    await _persist();
-    return spend;
-  }
+  // NOT: Bakiye düşümü artık YEREL yapılmaz. Foto üretiminde
+  // `startPhotoGeneration`, foto analizinde `consumeAnalysis` Cloud
+  // Function'ları bakiyeyi/ücretsiz hakkı SUNUCU tarafında atomik düşer;
+  // bu provider yalnızca Firestore `wallet` dokümanını dinleyip UI'a yansıtır.
 
   Future<void> reset() async {
     state = const PackBalance();

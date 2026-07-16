@@ -111,16 +111,20 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                       height: 1.35,
                       color: AppColors.textSecondary)),
               const SizedBox(height: 14),
+              // İki modül kartı tek ekrana sığar (scroll yok): kalan dikey
+              // alanı eşit bölüşürler.
               Expanded(
-                child: ListView(
-                  padding: EdgeInsets.zero,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (int i = 0; i < DatingModule.all.length; i++) ...[
                       if (i > 0) const SizedBox(height: 12),
-                      _FeatureCard(
-                        module: DatingModule.all[i],
-                        hasPack: _hasPack(DatingModule.all[i]),
-                        onTap: () => _openModule(DatingModule.all[i]),
+                      Expanded(
+                        child: _FeatureCard(
+                          module: DatingModule.all[i],
+                          hasPack: _hasPack(DatingModule.all[i]),
+                          onTap: () => _openModule(DatingModule.all[i]),
+                        ),
                       ),
                     ],
                   ],
@@ -254,50 +258,61 @@ class _FeatureCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
           children: [
-            // Üst: yatay kapak görseli — 16:9 kendi oranında, kırpılmadan tam sığar.
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: DatingModuleImage(
-                assetPath: _ModuleMeta.imageFor(module.id),
-                fallbackIcon: module.icon,
-                borderRadius: BorderRadius.zero,
-                alignment: Alignment.center,
+            // Üst: kapak görseli — kalan alanı doldurur, BoxFit.contain ile
+            // TAMAMI kırpılmadan görünür (bunlar kenarında yazı/tasarım olan
+            // infografiklerdir; cover ile kesilirlerdi). Boşluklar için nötr
+            // arka plan.
+            Expanded(
+              child: Container(
+                color: AppColors.surfaceElevated,
+                child: DatingModuleImage(
+                  assetPath: _ModuleMeta.imageFor(module.id),
+                  fallbackIcon: module.icon,
+                  borderRadius: BorderRadius.zero,
+                  fit: BoxFit.contain,
+                  alignment: Alignment.center,
+                ),
               ),
             ),
-            // Alt: rozet + başlık + açıklama + CTA
+            // Alt: rozet + başlık + açıklama + CTA (sabit yükseklik).
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (meta.badge.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.goldSurface,
-                        borderRadius: BorderRadius.circular(6),
+                  // Başlık + rozet aynı satırda (dikey alan tasarrufu).
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(module.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textPrimary)),
                       ),
-                      child: Text(meta.badge,
-                          style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5,
-                              color: AppColors.gold)),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  // Başlık kendi satırında — tam genişlik, taşma yok.
-                  Text(module.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textPrimary)),
+                      if (meta.badge.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.goldSurface,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(meta.badge,
+                              style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gold)),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 4),
                   // Açıklama + CTA yan yana; açıklamaya kalan alanı ver.
                   Row(
@@ -310,7 +325,7 @@ class _FeatureCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12.5,
-                            height: 1.35,
+                            height: 1.3,
                             color: AppColors.textSecondary,
                           ),
                         ),

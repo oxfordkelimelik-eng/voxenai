@@ -204,18 +204,26 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               assetPath: s.$1,
                               fallbackIcon: s.$2,
                               borderRadius: BorderRadius.zero,
-                              alignment: Alignment.topCenter,
+                              // Yüz görselin dikey ortasında; 'center' ile
+                              // geniş kapaktan yüz tam ortalanır (üstten
+                              // kırpınca yüz aşağıda kesiliyordu).
+                              alignment: Alignment.center,
                             ),
                           ),
+                          // Yazı okunurluğu için alttan yukarı koyulaşan
+                          // gradient — üst kısım neredeyse şeffaf, böylece yüz
+                          // kararmaz; yalnızca alttaki metin bloğu koyulaşır.
                           DecoratedBox(
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
                                 colors: [
-                                  Colors.black.withValues(alpha: 0.15),
-                                  Colors.black.withValues(alpha: 0.72),
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.30),
+                                  Colors.black.withValues(alpha: 0.78),
                                 ],
+                                stops: const [0.0, 0.55, 1.0],
                               ),
                             ),
                           ),
@@ -348,7 +356,6 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               sub: '5 analiz · Avantajlı',
                               price: DatingConfig.analysisStandardPriceLabel,
                               busy: _busy,
-                              highlighted: true,
                               onTap: () => _buy(_PackKind.analysis5),
                             ),
                           ),
@@ -371,7 +378,6 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               sub: '50 foto · 5 stil',
                               price: DatingConfig.photoPremiumPriceLabel,
                               busy: _busy,
-                              highlighted: true,
                               onTap: () => _buy(_PackKind.photo50),
                             ),
                           ),
@@ -474,7 +480,6 @@ class _PriceRow extends StatelessWidget {
   final String sub;
   final String price;
   final bool busy;
-  final bool highlighted;
   final VoidCallback onTap;
   const _PriceRow({
     required this.icon,
@@ -483,7 +488,6 @@ class _PriceRow extends StatelessWidget {
     required this.price,
     required this.busy,
     required this.onTap,
-    this.highlighted = false,
   });
 
   @override
@@ -493,11 +497,11 @@ class _PriceRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: highlighted ? AppColors.goldSurface : AppColors.surface,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: highlighted ? AppColors.gold : AppColors.borderSubtle,
-            width: highlighted ? 1.2 : 0.8,
+            color: AppColors.borderSubtle,
+            width: 0.8,
           ),
         ),
         child: Row(

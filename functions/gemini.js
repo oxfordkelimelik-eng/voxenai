@@ -1,8 +1,13 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const { admin, db } = require("./_shared");
 
 // Gemini anahtarı Firebase Secret olarak saklanır (kodda/APK'da görünmez)
 const GEMINI_KEY = defineSecret("GEMINI_KEY");
+
+// Foto analizinde ömür boyu ücretsiz gösterilen foto sayısı (hesap başına 1).
+// dating_constants.dart DatingConfig.freePreviewCount ile senkron tutulmalı.
+const FREE_ANALYSIS_PHOTOS = 1;
 
 // Sıralı denenecek modeller — biri meşgulse (503) sıradakine geçilir.
 const GEMINI_MODELS = [
@@ -134,5 +139,89 @@ exports.chat = onCall(
       console.error("chat hata:", e);
       throw new HttpsError("internal", "Sohbet başarısız.");
     }
+  }
+);
+
+/**
+ * Foto analizi sonuçlarının kaç tanesinin AÇIK gösterileceğini SUNUCU
+ * TARAFINDA atomik olarak belirler ve tüketir. İstemcinin yerel bakiyeyle
+ * oynamasını engeller (analiz "kredi/hak" taşıyan bir kaynaktır).
+ *
+ * Kural:
+ *  - Hesap başına ömür boyu ilk [FREE_ANALYSIS_PHOTOS] foto ücretsiz açılır
+ *    (freeAnalysisUsed bir kez true olur, bir daha ücretsiz verilmez).
+ *  - Kalan fotolar analysisBalance'tan foto başına 1 hak düşülerek açılır.
+ *  - Bakiye yetmezse yetebildiği kadar açılır; gerisi kilitli (blur) kalır.
+ *
+ * data: { requested: number, alreadyUnlocked?: number }
+ *   requested       = sonuç setindeki toplam foto sayısı
+ *   alreadyUnlocked = bu set için DAHA ÖNCE (bu istekten önce) açılmış sayı;
+ *                     yalnızca (requested - alreadyUnlocked) kadarı için yeni
+ *                     hak/bakiye tüketilir (çift-sayım/çift-düşüm önlenir).
+ * dönüş: { unlocked: number, usedFree: boolean, analysisBalance: number }
+ *   unlocked = bu istekten sonra TOPLAM açık sayı (alreadyUnlocked dahil).
+ */
+exports.consumeAnalysis = onCall(
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Giriş gerekli.");
+    }
+    const uid = request.auth.uid;
+    const requested = Number(request.data?.requested);
+    if (!Number.isInteger(requested) || requested <= 0) {
+      throw new HttpsError("invalid-argument", "requested pozitif tam sayı olmalı.");
+    }
+    let alreadyUnlocked = Number(request.data?.alreadyUnlocked || 0);
+    if (!Number.isInteger(alreadyUnlocked) || alreadyUnlocked < 0) {
+      alreadyUnlocked = 0;
+    }
+    alreadyUnlocked = Math.min(alreadyUnlocked, requested);
+    // Yeni açılması gereken (henüz açılmamış) foto sayısı.
+    const toUnlock = requested - alreadyUnlocked;
+    if (toUnlock <= 0) {
+      return { success: true, unlocked: requested, usedFree: false };
+    }
+
+    const walletRef = db.doc(`users/${uid}/private/wallet`);
+
+    const result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(walletRef);
+      const wallet = snap.data() || {};
+      const analysisBalance = (wallet.analysisBalance || 0);
+      const freeUsed = wallet.freeAnalysisUsed === true;
+
+      // 1) Ücretsiz hak (hesap başına ömür boyu bir kez) — yalnızca bu set
+      //    için henüz hiç açılmamışsa (alreadyUnlocked === 0) uygulanır.
+      let newlyUnlocked = 0;
+      let usedFree = false;
+      if (!freeUsed && alreadyUnlocked === 0) {
+        newlyUnlocked = Math.min(FREE_ANALYSIS_PHOTOS, toUnlock);
+        usedFree = newlyUnlocked > 0;
+      }
+
+      // 2) Kalanları paket bakiyesinden karşıla (foto başına 1 hak).
+      const stillLocked = toUnlock - newlyUnlocked;
+      const fromPack = Math.min(stillLocked, analysisBalance);
+      newlyUnlocked += fromPack;
+
+      const update = {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (usedFree) update.freeAnalysisUsed = true;
+      if (fromPack > 0) update.analysisBalance = analysisBalance - fromPack;
+      // Yazılacak bir şey yoksa (hepsi kilitli) transaction'ı boşuna yazma.
+      if (usedFree || fromPack > 0) {
+        tx.set(walletRef, update, { merge: true });
+      }
+
+      return {
+        unlocked: alreadyUnlocked + newlyUnlocked,
+        usedFree,
+        analysisBalance: analysisBalance - fromPack,
+      };
+    });
+
+    return { success: true, ...result };
   }
 );

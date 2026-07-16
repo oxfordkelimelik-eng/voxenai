@@ -95,48 +95,6 @@ Future<bool> _charge(BuildContext context, WidgetRef ref, int cost) async {
   return ok;
 }
 
-/// Bir üretim/analiz sonucundan kaç tanesinin AÇIK (kilitsiz) gösterileceğini
-/// hesaplar: ilk [DatingConfig.freePreviewCount] her zaman ücretsiz açık;
-/// devamı paket bakiyesinden karşılandığı kadar açılır (bakiye = üretimde
-/// "set/stil" sayısı, analizde "hak" sayısı — burada [totalCount] tekil foto
-/// sayısına göre orantılanır).
-int _unlockedCount({
-  required int totalCount,
-  required int packBalance,
-  required int photosPerUnit, // 1 analizde 1, foto üretiminde photosPerSet
-}) {
-  final free = DatingConfig.freePreviewCount;
-  final paidUnlocked = packBalance * photosPerUnit;
-  final unlocked = free + paidUnlocked;
-  return unlocked > totalCount ? totalCount : unlocked;
-}
-
-/// Kilitli kalan foto/sonuç sayısını paket bakiyesinden karşılayabildiği
-/// kadar düşüp aç. [photo] true ise foto üretim bakiyesi, false ise analiz
-/// bakiyesi kullanılır. Yeni açılan toplam kilitsiz sayıyı döner.
-Future<int> _unlockWithPack(
-  WidgetRef ref, {
-  required bool photo,
-  required int totalCount,
-  required int photosPerUnit,
-}) async {
-  final pack = ref.read(packBalanceProvider);
-  final already = _unlockedCount(
-    totalCount: totalCount,
-    packBalance: photo ? pack.photo : pack.analysis,
-    photosPerUnit: photosPerUnit,
-  );
-  if (already >= totalCount) return already;
-  final remaining = totalCount - already;
-  final unitsNeeded = (remaining / photosPerUnit).ceil();
-  final spent = photo
-      ? await ref.read(packBalanceProvider.notifier).spendPhoto(unitsNeeded)
-      : await ref
-          .read(packBalanceProvider.notifier)
-          .spendAnalysis(unitsNeeded);
-  return already + (spent * photosPerUnit).clamp(0, remaining);
-}
-
 Future<List<File>> _pickImages({bool multi = false, int limit = 5}) async {
   final picker = ImagePicker();
   if (multi) {
@@ -200,7 +158,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
   Map<String, dynamic>? _jobData;
-  int _unlocked = DatingConfig.freePreviewCount;
 
   // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
   // sonuçlanır (eğitim aşaması yok).
@@ -302,12 +259,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
         } else if (status == 'done' || _resultUrls.isNotEmpty) {
+          // Üretim yalnızca ödenen (veya ücretsiz hakla açılan) stiller için
+          // çalıştı; dolayısıyla dönen TÜM fotolar zaten ödenmiştir — hepsi
+          // açık gösterilir, ekstra kilit/blur yok.
           _stage = _AiStage.result;
-          _unlocked = _unlockedCount(
-            totalCount: _resultUrls.length,
-            packBalance: ref.read(packBalanceProvider).photo,
-            photosPerUnit: DatingConfig.photosPerSet,
-          );
         }
       });
     });
@@ -345,21 +300,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _styles.clear();
       _jobData = null;
       _errorMessage = null;
-      _unlocked = DatingConfig.freePreviewCount;
     });
-  }
-
-  Future<void> _unlockMorePhotos() async {
-    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
-    if (!mounted) return;
-    final unlocked = await _unlockWithPack(
-      ref,
-      photo: true,
-      totalCount: _resultUrls.length,
-      photosPerUnit: DatingConfig.photosPerSet,
-    );
-    if (!mounted) return;
-    setState(() => _unlocked = unlocked);
   }
 
   void _openStyleSheet(PhotoStyle style) {
@@ -852,7 +793,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     final urls = _resultUrls;
     final stillGenerating = (_jobData?['status'] as String?) == 'generating';
     final total = _styles.length;
-    final lockedCount = urls.length - _unlocked;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -864,11 +804,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 6),
-          Text(
-            lockedCount > 0
-                ? 'İlk fotoğrafın ücretsiz. Kalan $lockedCount fotoğraf için paket al.'
-                : 'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
-            style: const TextStyle(
+          const Text(
+            'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
+            style: TextStyle(
                 fontSize: 13, color: AppColors.textSecondary),
           ),
           if (stillGenerating) ...[
@@ -901,13 +839,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 _resultTile(urls[i], index: i),
             ],
           ),
-          if (lockedCount > 0) ...[
-            const SizedBox(height: 16),
-            PrimaryButton(
-              label: 'Kalan $lockedCount Fotoğrafı Aç',
-              onPressed: _unlockMorePhotos,
-            ),
-          ],
           const SizedBox(height: 16),
           Center(
             child: TextButton(
@@ -925,58 +856,37 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// bir indirme URL'ine çözüp gösterir (Firebase Auth token'ı ile —
   /// storage.rules yalnızca sahibine izin verir).
   Widget _resultTile(String gsUrl, {required int index}) {
-    final unlocked = index < _unlocked;
-    return GestureDetector(
-      onTap: unlocked ? null : _unlockMorePhotos,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: 3 / 4,
-          child: FutureBuilder<String>(
-            future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
-            builder: (context, snap) {
-              if (!snap.hasData) {
-                return Container(
-                  color: AppColors.surface,
-                  child: const Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2.2, color: AppColors.gold),
-                    ),
+    // Foto üretiminde dönen tüm fotolar ödenmiştir; kilit/blur yok.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: AspectRatio(
+        aspectRatio: 3 / 4,
+        child: FutureBuilder<String>(
+          future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
+          builder: (context, snap) {
+            if (!snap.hasData) {
+              return Container(
+                color: AppColors.surface,
+                child: const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.2, color: AppColors.gold),
                   ),
-                );
-              }
-              Widget image = CachedNetworkImage(
-                imageUrl: snap.data!,
-                fit: BoxFit.cover,
-                errorWidget: (_, _, _) => Container(
-                  color: AppColors.surface,
-                  child: const Icon(Icons.broken_image_outlined,
-                      color: AppColors.textMuted),
                 ),
               );
-              if (!unlocked) {
-                image = Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    image,
-                    BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                      child: Container(
-                          color: Colors.black.withValues(alpha: 0.45)),
-                    ),
-                    const Center(
-                      child: Icon(Icons.lock_rounded,
-                          color: Colors.white, size: 28),
-                    ),
-                  ],
-                );
-              }
-              return image;
-            },
-          ),
+            }
+            return CachedNetworkImage(
+              imageUrl: snap.data!,
+              fit: BoxFit.cover,
+              errorWidget: (_, _, _) => Container(
+                color: AppColors.surface,
+                child: const Icon(Icons.broken_image_outlined,
+                    color: AppColors.textMuted),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -1031,19 +941,16 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
     setState(() {
       _stage = 1;
       _errorMessage = null;
+      _unlocked = 0; // yeni analiz: önceki oturumdan devretme, alreadyUnlocked=0
     });
     try {
       final scores =
           await ref.read(claudeApiServiceProvider).scoreDatingPhotos(_photos);
       if (!mounted) return;
-      // İlk seçilen sonuç her zaman ücretsiz; kalanı analiz paketi bakiyesinden
-      // (varsa) karşılandığı kadar açılır.
-      final unlocked = await _unlockWithPack(
-        ref,
-        photo: false,
-        totalCount: scores.length,
-        photosPerUnit: 1,
-      );
+      // Kaç sonucun açılacağını SUNUCU belirler ve tüketir: hesap başına ömür
+      // boyu 1 ücretsiz foto + analysisBalance'tan foto başına 1 hak. Bakiye
+      // yetmezse gerisi kilitli (blur) kalır.
+      final unlocked = await _consumeAnalysis(scores.length);
       if (!mounted) return;
       setState(() {
         _scores = scores;
@@ -1285,16 +1192,33 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   /// Paket satın alma akışını (paywall) açar; dönünce mevcut paket
   /// bakiyesiyle kilitli sonuçları yeniden hesaplar.
   Future<void> _unlockMore() async {
-    await context.push('${DatingRoutes.paywall}?mode=analysis');
-    if (!mounted) return;
-    final unlocked = await _unlockWithPack(
-      ref,
-      photo: false,
-      totalCount: _scores.length,
-      photosPerUnit: 1,
-    );
+    // Kilitli sonuç yoksa (hepsi açık) bir şey yapma.
+    if (_unlocked >= _scores.length) return;
+    // Paket almadan da bakiye varsa sunucu zaten düşer; yoksa paywall'a git.
+    if (ref.read(packBalanceProvider).analysis <= 0) {
+      await context.push('${DatingRoutes.paywall}?mode=analysis');
+      if (!mounted) return;
+    }
+    final unlocked = await _consumeAnalysis(_scores.length);
     if (!mounted) return;
     setState(() => _unlocked = unlocked);
+  }
+
+  /// Sunucudan kaç sonucun açılacağını atomik olarak ister ve TÜKETİR
+  /// (ücretsiz hak + analysisBalance düşümü sunucuda; bkz. consumeAnalysis).
+  /// [alreadyUnlocked] bu set için önceden açılmış sayıdır; yalnızca kalanı
+  /// için hak/bakiye tüketilir (çift-düşüm önlenir). Ağ/sunucu hatasında
+  /// güvenli tarafta kalır: mevcut açık sayıyı korur.
+  Future<int> _consumeAnalysis(int requested) async {
+    try {
+      final res = await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('consumeAnalysis')
+          .call({'requested': requested, 'alreadyUnlocked': _unlocked});
+      final data = res.data as Map?;
+      return (data?['unlocked'] as num?)?.toInt() ?? _unlocked;
+    } catch (e) {
+      return _unlocked; // mevcut açık sayıyı koru
+    }
   }
 }
 
