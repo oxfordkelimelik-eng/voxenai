@@ -13,11 +13,37 @@ const EDIT_MODEL = "fal-ai/nano-banana-2/edit";
 // sıkça moderasyon reddi / boş sonuç üretiyordu ("Bazı stiller üretilemedi").
 const SAFETY_TOLERANCE = "4";
 
-const NUM_IMAGES = 10; // stil başına üretilen foto (DatingConfig.photosPerSet)
-// Kalite kapısından bu sayının altında foto geçerse stil bir kez otomatik
+// fal-ai/nano-banana-2/edit'in num_images için sabit ÜST SINIRI 4 — bunun
+// üzerinde her istek 422 (Unprocessable Entity) ile reddedilir. Ödenen paket
+// vaadini (bkz. DatingConfig.photosPerSet — 10 foto/stil) korumak için stil
+// başına TEK büyük istek yerine birden fazla küçük istek ("chunk") gönderilir
+// ve sonuçlar birleştirilir (bkz. chunkSizes, submitStyleJob, finalizeChunk).
+const MAX_IMAGES_PER_REQUEST = 4;
+// Stil başına toplam üretilecek foto — lib/core/constants/dating_constants.dart
+// DatingConfig.photosPerSet ile EL İLE senkron tutulmalı (ödenen paket vaadi).
+const IMAGES_PER_STYLE = 10;
+// Kalite kapısından bu sayının altında foto geçerse chunk bir kez otomatik
 // yeniden üretilir (kimlik sapması olan üretimleri kurtarmak için).
-const MIN_PASS_FOR_STYLE = 2; // 4 çok katıydı — az geçen üretimleri gereksiz yere fail ediyordu
-const MAX_STYLE_RETRIES = 2;
+const MAX_CHUNK_RETRIES = 2;
+
+// Chunk boyutuna göre asgari geçiş sayısı (~%50 — küçük chunk'larda oranı
+// korumak için 1'e yuvarlanır).
+function minPassForChunk(size) {
+  return size >= 4 ? 2 : 1;
+}
+
+// IMAGES_PER_STYLE'ı MAX_IMAGES_PER_REQUEST'i aşmayan parçalara böler.
+// Örn. (10, 4) -> [4, 4, 2].
+function chunkSizes(total, maxPerChunk) {
+  const sizes = [];
+  let remaining = total;
+  while (remaining > 0) {
+    const size = Math.min(maxPerChunk, remaining);
+    sizes.push(size);
+    remaining -= size;
+  }
+  return sizes;
+}
 
 // Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
@@ -190,14 +216,16 @@ async function uploadReferencePhotos(uid, jobId) {
 }
 
 /**
- * fal.ai queue API'sine bir görsel düzenleme (edit) işi gönderir.
+ * fal.ai queue API'sine bir görsel düzenleme (edit) işi gönderir. Bir stilin
+ * TEK bir chunk'ı (parçası) için çağrılır — chunkIdx, webhook'un hangi
+ * chunk'a ait sonucu işleyeceğini bilmesi için query'ye eklenir.
  */
-async function submitStyleJob(uid, jobId, styleId, imageUrls) {
-  const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}`;
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, imageUrls, numImages) {
+  const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
     prompt: buildPrompt(styleId),
     image_urls: imageUrls,
-    num_images: NUM_IMAGES,
+    num_images: numImages,
     aspect_ratio: "3:4", // portrait
     resolution: "2K", // dating fotoğrafı — kalite öncelikli
     output_format: "jpeg",
@@ -362,11 +390,25 @@ exports.startPhotoGeneration = onCall(
 
     try {
       for (const styleId of styles) {
-        const falJob = await submitStyleJob(uid, jobId, styleId, refUrls);
+        // Stil başına IMAGES_PER_STYLE (10) fotoğrafı, her biri en fazla
+        // MAX_IMAGES_PER_REQUEST (4) görsellik ayrı fal işlerine bölerek
+        // gönder — tek istekte 10 istemek 422 ile reddediliyordu.
+        const sizes = chunkSizes(IMAGES_PER_STYLE, MAX_IMAGES_PER_REQUEST);
+        const chunks = {};
+        for (let i = 0; i < sizes.length; i++) {
+          const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, sizes[i]);
+          chunks[String(i)] = {
+            requestId: falJob.request_id,
+            photoUrls: [],
+            status: "pending",
+            retries: 0,
+            size: sizes[i],
+          };
+        }
         // Nokta içeren anahtar yerine iç içe nesne — set(merge) bunu derin
         // birleştirir; "results.styleId" düz alan adı olarak yorumlanmaz.
         await jobRef.set({
-          results: { [styleId]: { requestId: falJob.request_id, photoUrls: [], status: "pending", retries: 0 } },
+          results: { [styleId]: { status: "pending", photoUrls: [], chunks } },
         }, { merge: true });
       }
 
@@ -392,10 +434,11 @@ exports.startPhotoGeneration = onCall(
 );
 
 /**
- * fal.ai bir stilin işi tamamlanınca (webhook) çağrılır. Çıktıyı indirir,
- * kalite kapısından geçirir, geçenleri Storage'a yazar ve iş dokümanını
- * (atomik + idempotent) günceller. Kimlik benzerliği düşükse stili bir kez
- * otomatik yeniden üretir.
+ * fal.ai bir chunk'ın (stilin bir parçasının) işi tamamlanınca (webhook)
+ * çağrılır. Çıktıyı indirir, kalite kapısından geçirir, geçenleri Storage'a
+ * yazar ve iş dokümanını (atomik + idempotent) günceller. Kimlik benzerliği
+ * düşükse chunk'ı bir kez otomatik yeniden üretir. Bir stilin TÜM chunk'ları
+ * bitince sonuçlar birleştirilir (bkz. finalizeChunk).
  */
 exports.falInferenceWebhook = onRequest(
   {
@@ -409,8 +452,9 @@ exports.falInferenceWebhook = onRequest(
     const uid = req.query.uid;
     const jobId = req.query.jobId;
     const styleId = req.query.style;
-    if (!uid || !jobId || !styleId) {
-      res.status(400).send("uid/jobId/style eksik");
+    const chunkIdx = req.query.chunk;
+    if (!uid || !jobId || !styleId || chunkIdx === undefined) {
+      res.status(400).send("uid/jobId/style/chunk eksik");
       return;
     }
     const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
@@ -420,35 +464,40 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
     const job = jobSnap.data();
-    const styleResult = job.results?.[styleId];
+    const chunk = job.results?.[styleId]?.chunks?.[chunkIdx];
+    if (!chunk) {
+      res.status(404).send("chunk bulunamadı");
+      return;
+    }
 
     // request_id doğrulaması (anti-spoofing).
     const requestId = req.body?.request_id;
-    if (!requestId || requestId !== styleResult?.requestId) {
+    if (!requestId || requestId !== chunk.requestId) {
       res.status(403).send("request_id uyuşmuyor");
       return;
     }
 
     // Idempotency: fal webhook'u aynı çağrıyı birden çok kez gönderebilir.
-    // Bu stil zaten sonuçlandıysa hiçbir şey yapma.
-    if (styleResult.status === "done" || styleResult.status === "failed") {
+    // Bu chunk zaten sonuçlandıysa hiçbir şey yapma.
+    if (chunk.status === "done" || chunk.status === "failed") {
       res.status(200).send("zaten işlendi");
       return;
     }
 
     if (req.body?.status !== "OK" && req.body?.status !== "COMPLETED") {
       // fal.ai üretimi başarısız — GERÇEK nedeni logla (moderasyon, model
-      // hatası, vb.). "Bazı stiller üretilemedi"nin kök nedeni burada görünür.
+      // hatası, geçersiz parametre vb.). "Bazı stiller üretilemedi"nin kök
+      // nedeni burada görünür.
       let errDetail = "";
       try {
         errDetail = JSON.stringify(req.body?.error || req.body?.payload || req.body).slice(0, 400);
       } catch { errDetail = String(req.body?.status); }
-      console.error(`fal.ai üretim başarısız (style=${styleId}): status=${req.body?.status} ${errDetail}`);
-      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+      console.error(`fal.ai üretim başarısız (style=${styleId}, chunk=${chunkIdx}): status=${req.body?.status} ${errDetail}`);
+      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
         res.status(200).send("yeniden üretiliyor");
         return;
       }
-      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
@@ -456,13 +505,13 @@ exports.falInferenceWebhook = onRequest(
     // Çıktıları paralel indir.
     const images = req.body?.payload?.images || [];
     if (images.length === 0) {
-      console.error(`fal.ai OK döndü ama görsel yok (style=${styleId}):`,
+      console.error(`fal.ai OK döndü ama görsel yok (style=${styleId}, chunk=${chunkIdx}):`,
         JSON.stringify(req.body?.payload || {}).slice(0, 300));
-      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
         res.status(200).send("yeniden üretiliyor");
         return;
       }
-      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
@@ -476,11 +525,11 @@ exports.falInferenceWebhook = onRequest(
       }));
     } catch (e) {
       console.error("Sonuç görseli indirme hatası:", e);
-      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
         res.status(200).send("yeniden üretiliyor");
         return;
       }
-      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
@@ -500,11 +549,11 @@ exports.falInferenceWebhook = onRequest(
     }
 
     // Otomatik yeniden üretim: çok az foto kimlik eşiğini geçtiyse ve henüz
-    // yeniden üretim hakkı varsa, bu stili yeni bir edit işiyle tekrar dene.
+    // yeniden üretim hakkı varsa, bu chunk'ı yeni bir edit işiyle tekrar dene.
     if (
       job.refDescriptor &&
-      passed.length < MIN_PASS_FOR_STYLE &&
-      await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)
+      passed.length < minPassForChunk(chunk.size) &&
+      await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)
     ) {
       res.status(200).send("yeniden üretiliyor");
       return;
@@ -516,75 +565,85 @@ exports.falInferenceWebhook = onRequest(
     let photoUrls = [];
     try {
       photoUrls = await Promise.all(toSave.map(async ({ i, buf }) => {
-        const path = `dating_results/${uid}/${jobId}/${styleId}_${i}.jpg`;
+        // chunkIdx dosya adına eklenir — aksi halde farklı chunk'ların aynı
+        // "i" indeksli görselleri birbirinin üstüne yazardı.
+        const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
         await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
         return `gs://${bucket().name}/${path}`;
       }));
     } catch (e) {
       console.error("Sonuç görseli kaydetme hatası:", e);
-      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
 
     if (photoUrls.length === 0) {
-      if (await maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef)) {
+      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
         res.status(200).send("yeniden üretiliyor");
         return;
       }
-      await finalizeStyle(uid, jobId, styleId, { failed: true });
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
 
-    await finalizeStyle(uid, jobId, styleId, { photoUrls });
+    await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls });
     res.status(200).send("ok");
   }
 );
 
 /**
- * Stil için yeniden üretim hakkı varsa yeni fal işi kuyruğa alır.
- * Döner: true = yeniden kuyruğa alındı (finalize etme).
+ * Bir chunk için yeniden üretim hakkı varsa aynı boyutta yeni fal işi
+ * kuyruğa alır. Döner: true = yeniden kuyruğa alındı (finalize etme).
  */
-async function maybeRetryStyle(uid, jobId, styleId, job, styleResult, jobRef) {
-  const retries = styleResult?.retries || 0;
+async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef) {
+  const retries = chunk?.retries || 0;
   if (
-    retries >= MAX_STYLE_RETRIES ||
+    retries >= MAX_CHUNK_RETRIES ||
     !Array.isArray(job.falRefUrls) ||
     job.falRefUrls.length === 0
   ) {
     return false;
   }
   try {
-    const falJob = await submitStyleJob(uid, jobId, styleId, job.falRefUrls);
+    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, job.falRefUrls, chunk.size);
     await jobRef.set({
       results: {
         [styleId]: {
-          requestId: falJob.request_id,
-          photoUrls: [],
-          status: "pending",
-          retries: retries + 1,
+          chunks: {
+            [chunkIdx]: {
+              requestId: falJob.request_id,
+              photoUrls: [],
+              status: "pending",
+              retries: retries + 1,
+              size: chunk.size,
+            },
+          },
         },
       },
     }, { merge: true });
     return true;
   } catch (e) {
-    console.error("Otomatik yeniden üretim başlatılamadı:", e);
+    console.error("Otomatik chunk yeniden üretimi başlatılamadı:", e);
     return false;
   }
 }
 
 /**
- * Bir stilin sonucunu ATOMİK ve IDEMPOTENT şekilde işler:
- *  - Stil zaten 'done'/'failed' ise hiçbir şey yapmaz (çift-teslimat koruması).
- *  - pendingStyles'ı transaction içinde azaltır (yarış koşulu yok).
- *  - Son stil de bittiğinde: EN AZ BİR stil fotoğraf ürettiyse iş 'done'
- *    (kısmi başarı). Hiçbir stil üretmediyse paket iade + 'failed'.
+ * Bir chunk'ın sonucunu ATOMİK ve IDEMPOTENT şekilde işler:
+ *  - Chunk zaten 'done'/'failed' ise hiçbir şey yapmaz (çift-teslimat koruması).
+ *  - Stilin TÜM chunk'ları bitince: en az bir chunk foto ürettiyse stil 'done'
+ *    (kısmi başarı dahil, chunk'ların photoUrls'leri birleştirilir), hiçbiri
+ *    üretmediyse stil 'failed'.
+ *  - Stil de bu çağrıda yeni sonuçlandıysa: pendingStyles azaltılır ve son
+ *    stil de bitince iş genelinde başarı/iade kararı verilir — hepsi TEK
+ *    transaction içinde (chunk → stil → iş, üç seviye tek atomik yazım).
  */
-async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = false }) {
+async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], failed = false }) {
   const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
   const walletRef = db.doc(`users/${uid}/private/wallet`);
-  // Boş sonuç = başarısız stil (kullanıcıya boş galeri gösterme).
+  // Boş sonuç = başarısız chunk (kullanıcıya boş galeri gösterme).
   if (!failed && (!Array.isArray(photoUrls) || photoUrls.length === 0)) {
     failed = true;
   }
@@ -592,19 +651,45 @@ async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = fal
     const snap = await tx.get(jobRef);
     if (!snap.exists) return;
     const j = snap.data();
-    const cur = j.results?.[styleId]?.status;
-    if (cur === "done" || cur === "failed") return; // idempotent no-op
+    const chunks = j.results?.[styleId]?.chunks || {};
+    const chunk = chunks[chunkIdx];
+    if (!chunk || chunk.status === "done" || chunk.status === "failed") return; // idempotent no-op
 
-    const newPending = Math.max(0, (j.pendingStyles ?? (j.styles?.length || 1)) - 1);
-    // İç içe nesne — set(merge) derin birleştirir; requestId/retries korunur.
+    const mergedChunks = {
+      ...chunks,
+      [chunkIdx]: { ...chunk, status: failed ? "failed" : "done", photoUrls },
+    };
+    const chunkKeys = Object.keys(mergedChunks);
+    const styleTerminal = chunkKeys.every(
+      (k) => mergedChunks[k].status === "done" || mergedChunks[k].status === "failed"
+    );
+
+    // İç içe nesne — set(merge) derin birleştirir; kardeş chunk'lar/stiller
+    // etkilenmez (bkz. dosyanın diğer yerlerindeki aynı desen).
     const update = {
-      results: { [styleId]: { status: failed ? "failed" : "done", photoUrls } },
-      pendingStyles: newPending,
+      results: { [styleId]: { chunks: { [chunkIdx]: mergedChunks[chunkIdx] } } },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
+    if (!styleTerminal) {
+      tx.set(jobRef, update, { merge: true });
+      return;
+    }
+
+    // Stilin tüm chunk'ları bitti — nihai stil sonucunu hesapla (birleştir).
+    const styleMergedUrls = chunkKeys.flatMap((k) => mergedChunks[k].photoUrls || []);
+    const styleFailed = styleMergedUrls.length === 0;
+    update.results[styleId].status = styleFailed ? "failed" : "done";
+    update.results[styleId].photoUrls = styleMergedUrls;
+
+    const newPending = Math.max(0, (j.pendingStyles ?? (j.styles?.length || 1)) - 1);
+    update.pendingStyles = newPending;
+
     if (newPending === 0) {
-      const results = { ...(j.results || {}), [styleId]: update.results[styleId] };
+      const results = {
+        ...(j.results || {}),
+        [styleId]: { status: update.results[styleId].status, photoUrls: update.results[styleId].photoUrls },
+      };
       const successCount = Object.keys(results).filter((k) => {
         const r = results[k];
         return r?.status === "done" && Array.isArray(r.photoUrls) && r.photoUrls.length > 0;
