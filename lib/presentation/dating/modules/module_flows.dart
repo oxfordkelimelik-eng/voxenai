@@ -154,6 +154,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   final List<File> _photos = [];
   String? _errorMessage;
   bool _validatingPhotos = false; // seçilen fotoğraflarda yüz kontrolü sürüyor
+  bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
+  String? _prepareError; // doğrulama başarısızsa paket adımında gösterilir
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
@@ -161,7 +163,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
   // sonuçlanır (eğitim aşaması yok).
-  static const _uploadingSteps = ['Fotoğrafların yükleniyor…'];
+  static const _uploadingSteps = ['Üretim başlatılıyor…'];
   static const _generatingSteps = [
     'Yüzün referans alınıyor…',
     'Seçtiğin stiller uygulanıyor…',
@@ -185,10 +187,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     super.dispose();
   }
 
-  /// 5 fotoğrafı Firebase Storage'a yükler, sunucu tarafında bakiye
-  /// kontrolü + fal.ai zero-shot üretimini başlatan `startPhotoGeneration`
-  /// Cloud Function'ını çağırır, sonra iş dokümanını (genJobs/{jobId})
-  /// gerçek zamanlı dinlemeye başlar.
+  /// İKİ AŞAMALI ÜRETİM.
+  ///
+  /// AŞAMA 1 — DOĞRULAMA (loader YOK, kredi harcanmaz): 5 fotoğraf Storage'a
+  /// yüklenir ve `prepareReferencePhotos` çağrılır; bu adım fotoğraflarla ilgili
+  /// TÜM kapıları (+18/uygunsuz içerik, net/tek yüz) çalıştırır. Başarısız
+  /// olursa kullanıcı paket adımında kalır ve hatayı görür — fotoğrafını
+  /// değiştirebilir. Loader HİÇ başlamaz.
+  ///
+  /// AŞAMA 2 — ÜRETİM (loader burada başlar): doğrulama geçtiyse loader gösterilir
+  /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
+  /// başladıysa, fotoğraflar zaten sorunsuz demektir.
   Future<void> _generate() async {
     if (_photos.length != 5 || _styles.isEmpty) return;
 
@@ -204,11 +213,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       return;
     }
 
-    setState(() {
-      _stage = _AiStage.loading;
-      _errorMessage = null;
-    });
-
     final uid = ref.read(authServiceProvider).uid;
     if (uid == null) {
       setState(() {
@@ -219,14 +223,55 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     }
 
     final jobId = const Uuid().v4();
+    final functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
+
+    // ---- AŞAMA 1: DOĞRULAMA (loader yok) ----
+    setState(() {
+      _preparing = true;
+      _prepareError = null;
+    });
     try {
       for (var i = 0; i < _photos.length; i++) {
-        final ref = FirebaseStorage.instance
-            .ref('dating_training/$uid/$jobId/photo_$i.jpg');
-        await ref.putFile(_photos[i]);
+        await FirebaseStorage.instance
+            .ref('dating_training/$uid/$jobId/photo_$i.jpg')
+            .putFile(_photos[i]);
       }
+      await functions
+          .httpsCallable('prepareReferencePhotos')
+          .call({'jobId': jobId});
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      // Fotoğraf kaynaklı hata: paket adımında kal, kullanıcı fotoğrafını
+      // değiştirsin. Loader hiç başlamadı, kredi harcanmadı.
+      final detail = e.message?.trim();
+      setState(() {
+        _preparing = false;
+        _prepareError = (detail != null && detail.isNotEmpty)
+            ? detail
+            : 'Fotoğraflar doğrulanamadı. Lütfen tekrar dene.';
+      });
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _preparing = false;
+        _prepareError = 'Fotoğraflar doğrulanamadı. Lütfen tekrar dene.';
+      });
+      return;
+    }
 
-      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+    if (!mounted) return;
+
+    // ---- AŞAMA 2: ÜRETİM (loader burada başlar) ----
+    setState(() {
+      _preparing = false;
+      _prepareError = null;
+      _stage = _AiStage.loading;
+      _errorMessage = null;
+    });
+
+    try {
+      await functions
           .httpsCallable('startPhotoGeneration')
           .call({'styles': _styles.toList(), 'jobId': jobId});
 
@@ -313,6 +358,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _styles.clear();
       _jobData = null;
       _errorMessage = null;
+      _preparing = false;
+      _prepareError = null;
     });
   }
 
@@ -866,7 +913,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 for (int i = 0; i < _photos.length; i++)
                   _RemovableThumb(
                     file: _photos[i],
-                    onRemove: () => setState(() => _photos.removeAt(i)),
+                    onRemove: () => setState(() {
+                      _photos.removeAt(i);
+                      _prepareError = null; // fotoğraf değişti, eski uyarı geçersiz
+                    }),
                   ),
               ],
             ),
@@ -907,6 +957,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     }
                     if (valid.isEmpty) return;
                     setState(() {
+                      _prepareError = null; // fotoğraf listesi değişti
                       for (final f in valid) {
                         if (_photos.length < 5) _photos.add(f);
                       }
@@ -934,14 +985,40 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ),
           const SizedBox(height: 20),
+          if (_prepareError != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded,
+                      color: AppColors.error, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(_prepareError!,
+                        style: const TextStyle(
+                            fontSize: 13, color: AppColors.textSecondary)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           PrimaryButton(
-            label: 'Fotoğraflarımı Oluştur',
-            onPressed: _photos.length == 5 ? _generate : null,
+            label:
+                _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
+            onPressed: (_photos.length == 5 && !_preparing) ? _generate : null,
           ),
           const SizedBox(height: 8),
           Center(
             child: TextButton(
-              onPressed: () => setState(() => _stage = _AiStage.style),
+              onPressed: _preparing
+                  ? null
+                  : () => setState(() => _stage = _AiStage.style),
               child: const Text('← Stili değiştir',
                   style: TextStyle(color: AppColors.textSecondary)),
             ),
