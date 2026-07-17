@@ -5,45 +5,22 @@ const { admin, db, bucket } = require("./_shared");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-// Zero-shot referans-görsel düzenleme modeli — kullanıcı başına eğitim YOK.
-// 5 selfie doğrudan referans olarak verilir, saniyeler içinde sonuç döner.
-// Nano Banana 2, kimlik/yüz sadakati konusunda güçlü (kalite öncelikli).
-const EDIT_MODEL = "fal-ai/nano-banana-2/edit";
-// 1 = en katı, 6 = en gevşek. Varsayılan 4 — "2" kullanıcı selfielerinde
-// sıkça moderasyon reddi / boş sonuç üretiyordu ("Bazı stiller üretilemedi").
-const SAFETY_TOLERANCE = "4";
-
-// fal-ai/nano-banana-2/edit'in num_images için sabit ÜST SINIRI 4 — bunun
-// üzerinde her istek 422 (Unprocessable Entity) ile reddedilir. Ödenen paket
-// vaadini (bkz. DatingConfig.photosPerSet — 10 foto/stil) korumak için stil
-// başına TEK büyük istek yerine birden fazla küçük istek ("chunk") gönderilir
-// ve sonuçlar birleştirilir (bkz. chunkSizes, submitStyleJob, finalizeChunk).
-const MAX_IMAGES_PER_REQUEST = 4;
-// Stil başına toplam üretilecek foto — lib/core/constants/dating_constants.dart
-// DatingConfig.photosPerSet ile EL İLE senkron tutulmalı (ödenen paket vaadi).
-const IMAGES_PER_STYLE = 10;
-// Kalite kapısından bu sayının altında foto geçerse chunk bir kez otomatik
-// yeniden üretilir (kimlik sapması olan üretimleri kurtarmak için).
+// Kimlik-koşullu üretim modeli: PuLID-Flux. TEK bir referans yüz görselinden
+// (reference_image_url) yola çıkıp, prompt'taki sahneyi/arka planı SIFIRDAN
+// Flux kalitesinde üretirken kişinin yüz kimliğini korur. Eski nano-banana
+// "edit" modeli, referansın arka planını düzenlediği için gerçekçi olmayan
+// arka planlar veriyordu; PuLID sahneyi baştan kurduğu için arka planlar
+// belirgin biçimde daha gerçekçi.
+const GEN_MODEL = "fal-ai/flux-pulid";
+// Kimlik korunma gücü (0..~1.5). 1 = güçlü kimlik. Çok yüksek olursa yüz
+// "yapıştırılmış" görünür; çok düşük olursa benzerlik kaybolur.
+const ID_WEIGHT = 1;
+// PuLID istek başına TEK görsel üretir (num_images yok). Stil başına
+// IMAGES_PER_STYLE (10) foto için her biri farklı seed'li 10 ayrı istek
+// ("chunk") gönderilir; sonuçlar birleştirilir (bkz. finalizeChunk).
+const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
 const MAX_CHUNK_RETRIES = 2;
-
-// Chunk boyutuna göre asgari geçiş sayısı (~%50 — küçük chunk'larda oranı
-// korumak için 1'e yuvarlanır).
-function minPassForChunk(size) {
-  return size >= 4 ? 2 : 1;
-}
-
-// IMAGES_PER_STYLE'ı MAX_IMAGES_PER_REQUEST'i aşmayan parçalara böler.
-// Örn. (10, 4) -> [4, 4, 2].
-function chunkSizes(total, maxPerChunk) {
-  const sizes = [];
-  let remaining = total;
-  while (remaining > 0) {
-    const size = Math.min(maxPerChunk, remaining);
-    sizes.push(size);
-    remaining -= size;
-  }
-  return sizes;
-}
 
 // Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
@@ -60,18 +37,25 @@ const STYLE_SCENES = {
   car: "a prestige portrait next to a luxury car, confident stance, urban background",
 };
 
-// Kimlik-koruma yönergesiyle sarılmış tam prompt. Referans görsellerdeki
-// KİŞİNİN yüz kimliğini/hatlarını koruması açıkça istenir — zero-shot edit
-// modellerinde yüz benzerliğini ölçülebilir şekilde artırır.
+// PuLID-Flux prompt'u: kimlik referans görselden (reference_image_url +
+// id_weight) geldiği için burada YÜZÜ değil, SAHNEYİ/ARKA PLANI ve fotoğraf
+// kalitesini betimleriz. Gerçekçilik ipuçları (DSLR, doğal ışık, film grain)
+// arka planların yapay görünmesini azaltır.
 function buildPrompt(styleId) {
   const scene = STYLE_SCENES[styleId];
   return (
-    "Generate a photorealistic photo of the SAME person shown in the reference " +
-    "images. Preserve their exact facial identity, bone structure, and unique " +
-    "features so they remain clearly recognizable. Do not change their face, " +
-    "age, or ethnicity. Scene and style: " + scene + "."
+    scene + ". Ultra-realistic candid DSLR photograph, natural lighting, " +
+    "shallow depth of field, realistic skin texture and detailed background, " +
+    "shot on 50mm lens, high dynamic range, subtle film grain, professional " +
+    "color grading. No text, no watermark, not a cartoon, not CGI."
   );
 }
+
+// PuLID'in reddedeceği/bozacağı istikametleri kısan negatif prompt.
+const NEGATIVE_PROMPT =
+  "cartoon, 3d render, cgi, illustration, painting, plastic skin, waxy, " +
+  "distorted face, deformed, extra fingers, blurry, low quality, watermark, " +
+  "text, oversaturated, unrealistic background";
 
 function styleUnitsFor(styleCount) {
   return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
@@ -216,23 +200,25 @@ async function uploadReferencePhotos(uid, jobId) {
 }
 
 /**
- * fal.ai queue API'sine bir görsel düzenleme (edit) işi gönderir. Bir stilin
- * TEK bir chunk'ı (parçası) için çağrılır — chunkIdx, webhook'un hangi
- * chunk'a ait sonucu işleyeceğini bilmesi için query'ye eklenir.
+ * fal.ai queue API'sine bir PuLID-Flux üretim işi gönderir (tek görsel). Bir
+ * stilin TEK bir chunk'ı için çağrılır — chunkIdx, webhook'un hangi chunk'a ait
+ * sonucu işleyeceğini bilmesi için query'ye eklenir. Her chunk farklı `seed`
+ * kullanır ki aynı stilde 10 farklı foto çıksın.
  */
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, imageUrls, numImages) {
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrl, seed) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
     prompt: buildPrompt(styleId),
-    image_urls: imageUrls,
-    num_images: numImages,
-    aspect_ratio: "3:4", // portrait
-    resolution: "2K", // dating fotoğrafı — kalite öncelikli
-    output_format: "jpeg",
-    safety_tolerance: SAFETY_TOLERANCE,
+    negative_prompt: NEGATIVE_PROMPT,
+    reference_image_url: referenceImageUrl,
+    id_weight: ID_WEIGHT,
+    image_size: "portrait_4_3", // dikey dating fotoğrafı
+    seed,
+    enable_safety_checker: false, // girdi zaten moderasyondan geçti; çıktı
+    // safety_checker'ı meşru portrelerde boş sonuç üretebiliyor.
   };
   const resp = await fetch(
-    `${FAL_QUEUE_BASE}/${EDIT_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+    `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
     {
       method: "POST",
       headers: {
@@ -258,23 +244,30 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, imageUrls, numImage
  * sonra, HENÜZ HİÇBİR KREDİ/BAKİYE HARCANMADAN ve fal.ai'ye hiçbir üretim işi
  * gönderilmeden çağrılır. Fotoğrafla ilgili TÜM kapılar burada çalışır:
  *   - +18/uygunsuz içerik (Cloud Vision SafeSearch)
- *   - kimlik kalite kapısı (net/tek yüz — face-api descriptor)
+ *   - net/tek yüz kapısı + en iyi referans seçimi (ssd_mobilenetv1 tespiti)
  * Buradan bir HttpsError dönerse client hâlâ fotoğraf seçme ekranındadır ve
  * kullanıcı ilgili fotoğrafı değiştirir. Bu fonksiyon BAŞARIYLA dönerse
  * fotoğraf kaynaklı hiçbir uyarı kalmaz — client ancak o zaman üretim
  * loader'ını başlatır ve startPhotoGeneration'ı çağırır.
  *
- * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri + kimlik
- * vektörü dokümana yazılır (startPhotoGeneration bunları YENİDEN hesaplamaz),
- * referans selfie'ler Storage'dan silinir (KVKK — biyometrik veriyi bırakma).
+ * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri ve üretim
+ * modeline verilecek "primary" referans (en net/en büyük yüzlü selfie) dokümana
+ * yazılır; referans selfie'ler Storage'dan silinir (KVKK — biyometrik veri).
  *
  * data: { jobId: string } -> { ok: true }
  */
 exports.prepareReferencePhotos = onCall(
-  // face-api modelleri (tfjs-wasm + 3 model) burada yükleniyor. 1GiB, modeller
-  // + selfie tensörleriyle birlikte aşılıyordu (OOM → "internal"); 2GiB.
-  // Selfie'ler ~800px'e küçültülüyor (bkz. faceQuality.bufferToTensor).
-  { secrets: [FAL_KEY], region: "europe-west1", memory: "2GiB", timeoutSeconds: 180 },
+  // Yalnızca ssd_mobilenetv1 tespit modeli yükleniyor (descriptor YOK) →
+  // eskisine göre çok daha hafif. minInstances:1 ile soğuk başlangıç (model
+  // yeniden yükleme) gecikmesi ortadan kaldırıldı — "kontrol çok uzun sürüyor"
+  // şikayetinin başlıca nedeni buydu.
+  {
+    secrets: [FAL_KEY],
+    region: "europe-west1",
+    memory: "1GiB",
+    timeoutSeconds: 120,
+    minInstances: 1,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -289,17 +282,17 @@ exports.prepareReferencePhotos = onCall(
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
-    // Kimlik kalite kapısı. Fail-safe — kontrolün KENDİSİ (tfjs/face-api)
-    // hata verirse üretim bloklanmaz, yalnızca filtre devre dışı kalır.
-    let refDescriptor = null;
+    // Net/tek yüz kapısı + en iyi referans seçimi. Fail-safe: kontrolün KENDİSİ
+    // (tfjs/tespit) hata verirse üretim bloklanmaz; primary referans olarak ilk
+    // foto kullanılır.
+    let primaryRefUrl = refUrls[0];
     try {
-      const { computeReferenceQuality } = require("./faceQuality");
-      const quality = await computeReferenceQuality(refBuffers);
-      if (quality.avgDescriptor) refDescriptor = Array.from(quality.avgDescriptor);
-      if (quality.unclearIndices.length > 0) {
+      const { analyzeReferences } = require("./faceQuality");
+      const analysis = await analyzeReferences(refBuffers);
+      if (analysis.unclearIndices.length > 0) {
         // unclearIndices, kullanıcının seçtiği fotoğraf sırasıyla (0-tabanlı)
         // birebir eşleşir — client'a 1-tabanlı sıra numarası olarak gösterilir.
-        const positions = quality.unclearIndices.map((i) => i + 1);
+        const positions = analysis.unclearIndices.map((i) => i + 1);
         const many = positions.length > 1;
         const label = many
           ? `${positions.slice(0, -1).join(", ")}. ve ${positions[positions.length - 1]}. fotoğraflar`
@@ -309,12 +302,15 @@ exports.prepareReferencePhotos = onCall(
           `${label} net değil ya da yüzün yeterince görünmüyor. Lütfen ` +
           `${many ? "bunları" : "bunu"} net, iyi aydınlatılmış, tek kişinin ` +
           "göründüğü selfie ile değiştirip tekrar dene.",
-          { unclearPhotoIndices: quality.unclearIndices }
+          { unclearPhotoIndices: analysis.unclearIndices }
         );
+      }
+      if (analysis.bestIndex != null && refUrls[analysis.bestIndex]) {
+        primaryRefUrl = refUrls[analysis.bestIndex];
       }
     } catch (e) {
       if (e instanceof HttpsError) throw e;
-      console.error("Kimlik kalite kontrolü başarısız (filtresiz devam ediliyor):", e);
+      console.error("Yüz kontrolü başarısız (ilk foto primary alınıyor):", e);
     }
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
@@ -326,10 +322,10 @@ exports.prepareReferencePhotos = onCall(
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       errorMessage: null,
       falRefUrls: refUrls,
-      ...(refDescriptor ? { refDescriptor } : {}),
+      primaryRefUrl,
     });
 
-    // Referans selfie'ler artık gerekmiyor (fal kopyası + descriptor var).
+    // Referans selfie'ler artık gerekmiyor (fal kopyası var).
     await deleteTrainingPhotos(uid, jobId);
 
     return { ok: true };
@@ -371,8 +367,9 @@ exports.startPhotoGeneration = onCall(
         "Fotoğraflar henüz doğrulanmadı. Lütfen baştan tekrar dene."
       );
     }
-    const refUrls = prepSnap.data().falRefUrls;
-    if (!Array.isArray(refUrls) || refUrls.length === 0) {
+    const primaryRefUrl = prepSnap.data().primaryRefUrl ||
+      (Array.isArray(prepSnap.data().falRefUrls) ? prepSnap.data().falRefUrls[0] : null);
+    if (!primaryRefUrl) {
       throw new HttpsError(
         "failed-precondition",
         "Referans fotoğrafları hazır değil. Lütfen baştan tekrar dene."
@@ -429,7 +426,7 @@ exports.startPhotoGeneration = onCall(
       }
       tx.set(walletRef, walletUpdate, { merge: true });
 
-      // merge — prepareReferencePhotos'un yazdığı falRefUrls/refDescriptor korunur.
+      // merge — prepareReferencePhotos'un yazdığı falRefUrls/primaryRefUrl korunur.
       tx.set(jobRef, {
         status: "generating",
         styles,
@@ -444,21 +441,23 @@ exports.startPhotoGeneration = onCall(
 
     try {
       for (const styleId of styles) {
-        // Stil başına IMAGES_PER_STYLE (10) fotoğrafı, her biri en fazla
-        // MAX_IMAGES_PER_REQUEST (4) görsellik ayrı fal işlerine bölerek
-        // gönder — tek istekte 10 istemek 422 ile reddediliyordu.
-        const sizes = chunkSizes(IMAGES_PER_STYLE, MAX_IMAGES_PER_REQUEST);
-        const chunks = {};
-        for (let i = 0; i < sizes.length; i++) {
-          const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, sizes[i]);
-          chunks[String(i)] = {
-            requestId: falJob.request_id,
-            photoUrls: [],
-            status: "pending",
-            retries: 0,
-            size: sizes[i],
-          };
-        }
+        // Stil başına IMAGES_PER_STYLE (10) foto. PuLID istek başına tek görsel
+        // ürettiği için 10 ayrı istek ("chunk"), her biri farklı seed ile.
+        // İstekler PARALEL gönderilir — 10 sıralı POST loader'ı gereksiz uzatıyordu.
+        const submissions = await Promise.all(
+          Array.from({ length: IMAGES_PER_STYLE }, async (_, i) => {
+            const seed = Math.floor(Math.random() * 2147483647);
+            const falJob = await submitStyleJob(uid, jobId, styleId, i, primaryRefUrl, seed);
+            return [String(i), {
+              requestId: falJob.request_id,
+              photoUrls: [],
+              status: "pending",
+              retries: 0,
+              seed,
+            }];
+          })
+        );
+        const chunks = Object.fromEntries(submissions);
         // Nokta içeren anahtar yerine iç içe nesne — set(merge) bunu derin
         // birleştirir; "results.styleId" düz alan adı olarak yorumlanmaz.
         await jobRef.set({
@@ -495,9 +494,11 @@ exports.falInferenceWebhook = onRequest(
   {
     secrets: [FAL_KEY], // otomatik yeniden üretim fal'a yeni iş gönderiyor
     region: "europe-west1",
-    memory: "2GiB", // tfjs-wasm + face-api modelleri + sonuç görselleri (OOM önlemi)
-    timeoutSeconds: 180,
-    minInstances: 1, // soğuk başlangıçta model yeniden yüklemesini önle
+    // Artık face-api YÜKLENMİYOR (kimlik sadakati PuLID id_weight ile modelin
+    // içinde) — webhook yalnızca sonuç görselini indirip Storage'a yazıyor.
+    memory: "512MiB",
+    timeoutSeconds: 120,
+    minInstances: 1,
   },
   async (req, res) => {
     const uid = req.query.uid;
@@ -585,37 +586,12 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
 
-    // Kalite kapısı: önbellekteki kaynak kimlik vektörüyle karşılaştır
-    // (referansları YENİDEN indirip embed ETMEZ — bir kez startPhotoGeneration'da
-    // hesaplandı). Herhangi bir hata olursa filtresiz devam (fail-safe).
-    let passed = downloaded;
-    try {
-      if (job.refDescriptor) {
-        const { filterByFaceMatch } = require("./faceQuality");
-        passed = await filterByFaceMatch(downloaded, job.refDescriptor, (d) => d.buf);
-      }
-    } catch (e) {
-      console.error("Kalite kapısı hatası (filtresiz devam ediliyor):", e);
-      passed = downloaded;
-    }
-
-    // Otomatik yeniden üretim: çok az foto kimlik eşiğini geçtiyse ve henüz
-    // yeniden üretim hakkı varsa, bu chunk'ı yeni bir edit işiyle tekrar dene.
-    if (
-      job.refDescriptor &&
-      passed.length < minPassForChunk(chunk.size) &&
-      await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)
-    ) {
-      res.status(200).send("yeniden üretiliyor");
-      return;
-    }
-
-    // Son karar: geçen varsa onları, hiç geçen yoksa (nadir) boş sonuç
-    // göstermemek için tümünü kaydet.
-    const toSave = passed.length > 0 ? passed : downloaded;
+    // Kimlik sadakati PuLID (id_weight) ile üretimde sağlandığı için çıktı
+    // görsellerini ARTIK ELEMİYORUZ — üretilen her foto saklanır (vaat edilen
+    // stil başına 10 sayısı böylece korunur).
     let photoUrls = [];
     try {
-      photoUrls = await Promise.all(toSave.map(async ({ i, buf }) => {
+      photoUrls = await Promise.all(downloaded.map(async ({ i, buf }) => {
         // chunkIdx dosya adına eklenir — aksi halde farklı chunk'ların aynı
         // "i" indeksli görselleri birbirinin üstüne yazardı.
         const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
@@ -650,15 +626,15 @@ exports.falInferenceWebhook = onRequest(
  */
 async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef) {
   const retries = chunk?.retries || 0;
-  if (
-    retries >= MAX_CHUNK_RETRIES ||
-    !Array.isArray(job.falRefUrls) ||
-    job.falRefUrls.length === 0
-  ) {
+  const primaryRefUrl = job.primaryRefUrl ||
+    (Array.isArray(job.falRefUrls) ? job.falRefUrls[0] : null);
+  if (retries >= MAX_CHUNK_RETRIES || !primaryRefUrl) {
     return false;
   }
   try {
-    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, job.falRefUrls, chunk.size);
+    // Yeni seed — takılan/başarısız üretimi farklı bir çıktı ile kurtar.
+    const seed = Math.floor(Math.random() * 2147483647);
+    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, primaryRefUrl, seed);
     await jobRef.set({
       results: {
         [styleId]: {
@@ -668,7 +644,7 @@ async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef
               photoUrls: [],
               status: "pending",
               retries: retries + 1,
-              size: chunk.size,
+              seed,
             },
           },
         },
