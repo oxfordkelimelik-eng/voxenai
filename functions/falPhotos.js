@@ -157,6 +157,25 @@ async function uploadReferencePhotos(uid, jobId) {
   }
   const results = await Promise.all(photoFiles.map(async (file, idx) => {
     const [buf] = await file.download();
+
+    // +18/uygunsuz içerik kapısı — fal.ai'ye hiçbir görsel gönderilmeden önce.
+    // Vision API'nin kendisi hata verirse fail-open (loglanır, engellenmez);
+    // gerçek bir tespit ise her zaman engeller (bkz. contentModeration.js).
+    try {
+      const { isExplicit } = require("./contentModeration");
+      if (await isExplicit(buf)) {
+        throw new HttpsError(
+          "invalid-argument",
+          `${idx + 1}. fotoğraf uygunsuz/yetişkin içerik olarak tespit edildi. ` +
+          "Lütfen bu fotoğrafı uygun bir profil fotoğrafıyla değiştirip tekrar dene.",
+          { explicitPhotoIndex: idx }
+        );
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      console.error("İçerik moderasyonu kontrolü başarısız (filtresiz devam ediliyor):", e);
+    }
+
     let url;
     try {
       url = await uploadToFalStorage(buf, `ref_${idx}.jpg`);
@@ -208,9 +227,13 @@ async function submitStyleJob(uid, jobId, styleId, imageUrls) {
 
 /**
  * Kullanıcı 5 referans selfie'sini Storage'a yükledikten SONRA çağrılır.
- * Bakiye kontrolü + düşme (client atlayamaz), referansları fal'a yükleme,
- * kalite kapısı için kaynak kimlik vektörünü BİR KEZ hesaplama, ve her
- * stil için edit işi gönderme. Referans selfie'ler bu noktadan sonra
+ * Önce referansları indirir + içerik moderasyonu yapar + fal'a yükler +
+ * kimlik kalite kapısını (bulanık/net olmayan selfie) çalıştırır — bunların
+ * HİÇBİRİ bakiye düşülmeden veya fal'a üretim işi gönderilmeden önce
+ * gerçekleşmez. Böylece uygunsuz içerik ya da net olmayan fotoğraflar,
+ * kullanıcı ücret ödemeden ve loading ekranına hiç girmeden reddedilir.
+ * Ancak bu kapılar geçilince: bakiye kontrolü + düşme (client atlayamaz),
+ * ve her stil için edit işi gönderme. Referans selfie'ler bu noktadan sonra
  * gerekmediği için hemen silinir (KVKK — biyometrik veriyi geride bırakma).
  *
  * data: { styles: string[], jobId: string } -> { jobId }
@@ -219,8 +242,7 @@ exports.startPhotoGeneration = onCall(
   // Referans descriptor'ı burada hesaplandığı için face-api modelleri (tfjs-wasm
   // + 3 model) yükleniyor. 1GiB, modeller + selfie tensörleriyle birlikte
   // aşılıyordu (OOM → "internal"); 2GiB'ye çıkarıldı. Ayrıca selfie'ler kalite
-  // kapısında ~800px'e küçültülüyor (bkz. faceQuality.bufferToTensor). Kalite
-  // kapısı fail-safe: hata olursa filtresiz devam edilir, akış bloklanmaz.
+  // kapısında ~800px'e küçültülüyor (bkz. faceQuality.bufferToTensor).
   { secrets: [FAL_KEY], region: "europe-west1", memory: "2GiB", timeoutSeconds: 180 },
   async (request) => {
     if (!request.auth) {
@@ -234,6 +256,40 @@ exports.startPhotoGeneration = onCall(
     const invalidStyle = styles.find((s) => !STYLE_SCENES[s]);
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
+    }
+
+    // Referansları indir (+ içerik moderasyonu, bkz. uploadReferencePhotos) ve
+    // fal'a yükle. Bu adım bakiye/ücret ve fal üretim işinden ÖNCE gelir —
+    // burada atılan bir HttpsError (ör. uygunsuz içerik) doğrudan kullanıcıya
+    // gider, hiçbir bakiye/iş dokümanı oluşturulmamış olur.
+    const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
+
+    // Kimlik kalite kapısı: kaynak selfie'lerden kaç tanesinde net bir yüz
+    // vektörü çıkarılamadığını kontrol et. Fail-safe — bu kontrolün kendisi
+    // (tfjs/face-api) hata verirse filtresiz devam edilir, akış bloklanmaz.
+    let refDescriptor = null;
+    try {
+      const { computeReferenceQuality } = require("./faceQuality");
+      const quality = await computeReferenceQuality(refBuffers);
+      if (quality.avgDescriptor) refDescriptor = Array.from(quality.avgDescriptor);
+      if (quality.unclearIndices.length > 1) {
+        // unclearIndices, kullanıcının seçtiği fotoğraf sırasıyla (0-tabanlı)
+        // birebir eşleşir — client'a 1-tabanlı sıra numarası olarak gösterilir.
+        const positions = quality.unclearIndices.map((i) => i + 1);
+        const label = positions.length === 2
+          ? `${positions[0]}. ve ${positions[1]}. fotoğraflar`
+          : `${positions.slice(0, -1).join(", ")}. ve ${positions[positions.length - 1]}. fotoğraflar`;
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} net değil ya da yüzün yeterince görünmüyor. Lütfen bu ` +
+          "fotoğrafları net, iyi aydınlatılmış, tek kişinin göründüğü " +
+          "selfie'lerle değiştirip tekrar dene.",
+          { unclearPhotoIndices: quality.unclearIndices }
+        );
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      console.error("Kimlik kalite kontrolü başarısız (filtresiz devam ediliyor):", e);
     }
 
     const unitsNeeded = styleUnitsFor(styles.length);
@@ -290,7 +346,7 @@ exports.startPhotoGeneration = onCall(
       tx.set(walletRef, walletUpdate, { merge: true });
 
       tx.set(jobRef, {
-        status: "uploading",
+        status: "generating",
         styles,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -299,22 +355,12 @@ exports.startPhotoGeneration = onCall(
         errorMessage: null,
         packUnitsCharged: unitsToCharge,
         usedFreeTier,
+        falRefUrls: refUrls,
+        ...(refDescriptor ? { refDescriptor } : {}),
       });
     });
 
     try {
-      const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
-
-      // ÖNCE üretim işlerini fal.ai'a gönder — para bunun için ödendi, kritik
-      // adım bu. Kalite kapısı (descriptor) İKİNCİL ve fail-safe olduğundan
-      // ondan SONRA hesaplanır; böylece descriptor hesabı (ağır tfjs işlemi)
-      // beklenmedik bir hataya/OOM'a düşse bile üretim zaten başlamış olur.
-      await jobRef.set({
-        status: "generating",
-        falRefUrls: refUrls,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-
       for (const styleId of styles) {
         const falJob = await submitStyleJob(uid, jobId, styleId, refUrls);
         // Nokta içeren anahtar yerine iç içe nesne — set(merge) bunu derin
@@ -322,21 +368,6 @@ exports.startPhotoGeneration = onCall(
         await jobRef.set({
           results: { [styleId]: { requestId: falJob.request_id, photoUrls: [], status: "pending", retries: 0 } },
         }, { merge: true });
-      }
-
-      // Üretim başladı. Şimdi kalite kapısı için kaynak kimlik vektörünü BİR
-      // KEZ hesapla (fail-safe — hata olursa refDescriptor null kalır ve
-      // webhook kalite filtresini atlar, üretim yine de tamamlanır).
-      let refDescriptor = null;
-      try {
-        const { averageDescriptor } = require("./faceQuality");
-        const desc = await averageDescriptor(refBuffers);
-        if (desc) refDescriptor = Array.from(desc); // Firestore için düz dizi
-      } catch (e) {
-        console.error("Referans descriptor hesaplanamadı (kalite kapısı devre dışı):", e);
-      }
-      if (refDescriptor) {
-        await jobRef.set({ refDescriptor }, { merge: true });
       }
 
       // Referans selfie'leri artık gerekmiyor (fal kopyası + descriptor var).
@@ -607,8 +638,13 @@ async function finalizeStyle(uid, jobId, styleId, { photoUrls = [], failed = fal
         }
         tx.set(walletRef, walletUpdate, { merge: true });
         update.status = "failed";
+        // Bu mesaj, üretilen görsellerin kaynak selfie'lerle kimlik eşleşme
+        // eşiğini (bkz. faceQuality.FACE_MATCH_THRESHOLD) tutturamamasından
+        // gelir — girdi fotoğrafının "bulanık" olmasından değil. Kullanıcıya
+        // gerçek nedeni ve işe yarayan bir öneri sunar.
         update.errorMessage =
-          "Fotoğraflar üretilemedi. Lütfen net, yüzün göründüğü fotoğraflarla tekrar dene.";
+          "Üretilen fotoğraflar yüzünle yeterince eşleşmedi. Farklı ışıkta/açıda " +
+          "çekilmiş, yüzünün net ve tek başına göründüğü selfie'lerle tekrar dene.";
       }
     }
     tx.set(jobRef, update, { merge: true });

@@ -91,27 +91,39 @@ async function descriptorFromBuffer(buf) {
 }
 
 /**
- * Birden fazla referans selfie buffer'ından ortalama (kanonik) kimlik
- * vektörünü hesaplar. Hiçbirinde yüz bulunamazsa null döner.
+ * Referans selfie buffer'larından ortalama (kanonik) kimlik vektörünü VE
+ * hangi indekslerde net bir yüz vektörü ÇIKARILAMADIĞINI (unclearIndices)
+ * hesaplar. Çağıran taraf (falPhotos.js) bunu, üretime hiç başlamadan
+ * "şu fotoğraf(lar) net değil" kararı vermek için kullanır — bulanık/karanlık/
+ * yüzü kapalı selfie'leri, para harcanmadan ve fal.ai'ye gönderilmeden önce
+ * yakalamak için. buffers dizisindeki sıra, kullanıcının fotoğraf seçme
+ * sırasıyla (photo_0, photo_1, ...) aynıdır — bkz. uploadReferencePhotos.
  */
-async function averageDescriptor(buffers) {
-  const faceapi = await ensureModelsLoaded();
+async function computeReferenceQuality(buffers) {
   const descriptors = [];
-  for (const buf of buffers) {
+  const unclearIndices = [];
+  for (let idx = 0; idx < buffers.length; idx++) {
     try {
-      const d = await descriptorFromBuffer(buf);
-      if (d) descriptors.push(d);
+      const d = await descriptorFromBuffer(buffers[idx]);
+      if (d) {
+        descriptors.push(d);
+      } else {
+        unclearIndices.push(idx);
+      }
     } catch {
-      // Tek bir referans fotoğrafın işlenememesi tüm işlemi düşürmesin.
+      // Tek bir referans fotoğrafın işlenememesi net-değil sayılır.
+      unclearIndices.push(idx);
     }
   }
-  if (descriptors.length === 0) return null;
-  const len = descriptors[0].length;
-  const avg = new Float32Array(len);
-  for (const d of descriptors) {
-    for (let i = 0; i < len; i++) avg[i] += d[i] / descriptors.length;
+  let avgDescriptor = null;
+  if (descriptors.length > 0) {
+    const len = descriptors[0].length;
+    avgDescriptor = new Float32Array(len);
+    for (const d of descriptors) {
+      for (let i = 0; i < len; i++) avgDescriptor[i] += d[i] / descriptors.length;
+    }
   }
-  return avg;
+  return { avgDescriptor, unclearIndices, totalCount: buffers.length };
 }
 
 /**
@@ -142,4 +154,4 @@ async function filterByFaceMatch(items, referenceDescriptor, getBuf) {
     .map((s) => s.item);
 }
 
-module.exports = { averageDescriptor, filterByFaceMatch, FACE_MATCH_THRESHOLD };
+module.exports = { computeReferenceQuality, filterByFaceMatch, FACE_MATCH_THRESHOLD };
