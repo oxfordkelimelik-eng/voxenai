@@ -183,10 +183,19 @@ workflows:
           # yukleme FIILEN basarili ("UPLOAD SUCCEEDED with no errors"). Bu
           # sahte basarisizligi ele almak icin: ciktiyi yakala, "UPLOAD
           # SUCCEEDED" varsa basarili say; yoksa 3 kez'e kadar yeniden dene.
+          # --max-find-build-wait: yukleme TAMAMLANDIKTAN sonra arac, Apple'in
+          # binary'yi islemesini bekleyip "beta review'e gonder / test notu
+          # yaz" gibi EK islemler yapmaya calisir. Bu bekleme varsayilan 10 dk
+          # ve build suresini direkt sisiriyordu — halbuki bu adimin ciktisini
+          # hicbir yerde kullanmiyoruz (beta review'e otomatik gondermiyoruz).
+          # Kisa tutulunca arac birkac saniyede "henuz hazir degil" deyip
+          # UYARIYLA (hata degil) devam ediyor; asil yukleme zaten tamamlanmis
+          # oluyor, TestFlight'ta Apple kendi hizinda islemeye devam ediyor.
           upload_ipa() {
             app-store-connect publish \
               --path "$CM_BUILD_DIR/build/ios/ipa/*.ipa" \
               --testflight \
+              --max-find-build-wait 60 \
               --issuer-id "$ASC_ISSUER_ID" \
               --key-id "$ASC_KEY_ID" \
               --private-key @file:"$CM_BUILD_DIR/AuthKey.p8" 2>&1 | tee "$CM_BUILD_DIR/publish.log"
