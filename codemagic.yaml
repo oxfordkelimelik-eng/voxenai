@@ -5,11 +5,17 @@ workflows:
     instance_type: mac_mini_m2
     # pub + CocoaPods önbelleği: her build'de bağımlılıkları sıfırdan indirmeyi azaltır.
     # Çıktıyı değiştirmez; yalnızca indirme süresini kısaltır.
+    #
+    # ios/Pods: Podfile.lock sabit olduğu sürece pod'ları yeniden İNDİRİP
+    # açmaya gerek yok — 'pod install' önbellekten çok daha hızlı tamamlanır.
+    # Podfile.lock değişirse CocoaPods farkı görüp gerekli pod'ları zaten
+    # günceller, yani bayat kalma riski yok.
     cache:
       cache_paths:
         - $FLUTTER_ROOT/.pub-cache
         - $HOME/.pub-cache
         - $HOME/Library/Caches/CocoaPods
+        - ios/Pods
     environment:
       flutter: stable
       xcode: latest
