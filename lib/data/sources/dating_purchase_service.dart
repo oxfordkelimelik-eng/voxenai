@@ -17,10 +17,19 @@ class DatingPurchaseService {
   StreamSubscription<List<PurchaseDetails>>? _sub;
 
   /// Aynı satın alma (purchaseID) için sunucu doğrulamasının birden çok kez
-  /// eş zamanlı başlatılmasını engeller (mağaza aynı satın almayı birden
+  /// EŞ ZAMANLI başlatılmasını engeller (mağaza aynı satın almayı birden
   /// fazla event olarak yeniden gönderebilir — bkz. _onPurchaseUpdate).
   final Set<String> _verifying = {};
-  final Set<String> _handled = {};
+
+  /// Daha önce doğrulanmış işlemlerin SONUCU (key -> doğrulandı mı).
+  ///
+  /// Önceden burada sonuç tutmayan bir `_handled` kümesi vardı ve tekrar gelen
+  /// event'ler `continue` ile sessizce atlanıyordu. Bu, bekleyen
+  /// purchaseAndWait'in completer'ının hiç tamamlanmamasına → 3 dk timeout →
+  /// "Satın alma tamamlanamadı" hatasına yol açıyordu (sunucu satın almayı
+  /// başarıyla doğrulamış olsa bile). Artık sonuç saklanıyor ve tekrar gelen
+  /// event'te bekleyen taraf ANINDA bilgilendiriliyor.
+  final Map<String, bool> _results = {};
 
   static const Set<String> productIds = {
     DatingConfig.analysisSingleProductId,
@@ -130,28 +139,46 @@ class DatingPurchaseService {
       if (p.status == PurchaseStatus.purchased ||
           p.status == PurchaseStatus.restored) {
         final key = _purchaseKey(p);
-        // Mağaza aynı satın almayı birden fazla event olarak yeniden
-        // gönderebilir — zaten sonuçlanmış veya doğrulanmakta olan bir
-        // işlemi tekrar işlemeye çalışmayı engelle (çapraz "başarılı/
-        // başarısız" event'lerinin birbirini ezmesinin asıl nedeni buydu).
-        if (_handled.contains(key) || _verifying.contains(key)) continue;
-        _verifying.add(key);
+
+        // Aynı işlem ŞU AN doğrulanıyorsa atla — o çağrı bittiğinde bekleyen
+        // taraf zaten bilgilendirilecek (çift doğrulama isteği önlenir).
+        if (_verifying.contains(key)) continue;
+
         bool verified;
-        try {
-          verified = await _verifyOnServer(p);
-        } finally {
-          _verifying.remove(key);
+        if (_results.containsKey(key)) {
+          // Daha önce doğrulanmış. Sunucuya TEKRAR gitme (verifyPurchase
+          // idempotent, ikinci kez kredi vermez) ama bekleyen tarafı MUTLAKA
+          // bilgilendir — burada sessizce `continue` etmek, purchaseAndWait'i
+          // timeout'a düşürüp başarılı satın almayı "tamamlanamadı" gösteren
+          // hatanın ta kendisiydi.
+          verified = _results[key]!;
+          _logger.i('Tekrar gelen satın alma event\'i: ${p.productID} '
+              '(önceki sonuç: $verified)');
+        } else {
+          _verifying.add(key);
+          try {
+            verified = await _verifyOnServer(p);
+          } finally {
+            _verifying.remove(key);
+          }
+          _results[key] = verified;
         }
-        _handled.add(key);
+
         if (verified) {
           onPurchaseVerified?.call(p);
           _logger.i('Satın alma doğrulandı: ${p.productID}');
-          if (p.pendingCompletePurchase) {
-            await _iap.completePurchase(p);
-          }
         } else {
           onPurchaseError?.call(p);
           _logger.e('Satın alma doğrulanamadı: ${p.productID}');
+        }
+
+        // Doğrulanmış işlemi HER ZAMAN kapat — tekrar teslim edilen bir
+        // işlemde de (yukarıdaki önbellek yolu) bu adım çalışmalı, aksi halde
+        // işlem mağazada süresiz "tamamlanmamış" kalır ve her açılışta
+        // yeniden teslim edilir. Doğrulanmayanlar bilinçli olarak KAPATILMAZ
+        // ki geçici bir sunucu hatasından sonra yeniden denenebilsin.
+        if (verified && p.pendingCompletePurchase) {
+          await _iap.completePurchase(p);
         }
       } else if (p.status == PurchaseStatus.error) {
         onPurchaseError?.call(p);
