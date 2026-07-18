@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!-- Üretilen AI fotoğraflarını galeriye kaydetme (gal paketi).
+         Android 10+ (API 29) scoped storage ile izin GEREKMEZ; bu izin
+         yalnızca Android 9 ve öncesi için maxSdkVersion ile sınırlandırıldı. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
+
     <!-- Rehberli çekim: kamera ile canlı yüz/vücut hizalama -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>

@@ -28,6 +28,9 @@ dependencies:
   camera: ^0.11.0+2
   image_picker: ^1.1.2
   video_player: ^2.9.2
+  # Üretilen fotoğrafları telefon galerisine kaydetmek için (path_provider
+  # yalnızca uygulama klasörüne yazar, galeride görünmez).
+  gal: ^2.3.1
 
   # Rehberli çekim — canlı yüz/vücut hizalama tespiti (ML Kit)
   google_mlkit_face_detection: ^0.13.1

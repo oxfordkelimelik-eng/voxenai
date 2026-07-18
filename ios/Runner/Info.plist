@@ -12,6 +12,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Yüz ve vücut analizin için ön/sağ/sol açılardan rehberli fotoğraf çekmek üzere kameraya erişim gerekir.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Senin için üretilen AI dating fotoğraflarını telefonunun galerisine kaydetmek için erişim gerekir.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

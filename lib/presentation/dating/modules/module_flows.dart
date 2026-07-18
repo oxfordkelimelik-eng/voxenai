@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:dio/dio.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:gal/gal.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -1119,38 +1122,244 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// storage.rules yalnızca sahibine izin verir).
   Widget _resultTile(String gsUrl, {required int index}) {
     // Foto üretiminde dönen tüm fotolar ödenmiştir; kilit/blur yok.
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: AspectRatio(
-        aspectRatio: 3 / 4,
-        child: FutureBuilder<String>(
-          future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
-          builder: (context, snap) {
-            if (!snap.hasData) {
-              return Container(
-                color: AppColors.surface,
-                child: const Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2.2, color: AppColors.gold),
-                  ),
-                ),
-              );
-            }
-            return CachedNetworkImage(
-              imageUrl: snap.data!,
-              fit: BoxFit.cover,
-              errorWidget: (_, _, _) => Container(
-                color: AppColors.surface,
-                child: const Icon(Icons.broken_image_outlined,
-                    color: AppColors.textMuted),
-              ),
-            );
-          },
+    // Dokununca tam ekran görüntüleyici açılır (kaydırmalı + indirmeli).
+    return GestureDetector(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => PhotoViewerPage(
+            gsUrls: _resultUrls,
+            initialIndex: index,
+          ),
         ),
       ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 3 / 4,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FutureBuilder<String>(
+                future:
+                    FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
+                builder: (context, snap) {
+                  if (!snap.hasData) {
+                    return Container(
+                      color: AppColors.surface,
+                      child: const Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.2, color: AppColors.gold),
+                        ),
+                      ),
+                    );
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: snap.data!,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, _, _) => Container(
+                      color: AppColors.surface,
+                      child: const Icon(Icons.broken_image_outlined,
+                          color: AppColors.textMuted),
+                    ),
+                  );
+                },
+              ),
+              // Büyütme ipucu — fotoğrafın tıklanabilir olduğunu belli eder.
+              Positioned(
+                right: 6,
+                bottom: 6,
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.fullscreen_rounded,
+                      color: Colors.white, size: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// Üretilen fotoğraf görüntüleyici — tam ekran, kaydırmalı, indirilebilir
+// ============================================================
+class PhotoViewerPage extends StatefulWidget {
+  /// `gs://` biçimindeki Storage yolları (sonuç listesinin tamamı).
+  final List<String> gsUrls;
+  final int initialIndex;
+  const PhotoViewerPage({
+    super.key,
+    required this.gsUrls,
+    required this.initialIndex,
+  });
+
+  @override
+  State<PhotoViewerPage> createState() => _PhotoViewerPageState();
+}
+
+class _PhotoViewerPageState extends State<PhotoViewerPage> {
+  late final PageController _controller;
+  late int _index;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _controller = PageController(initialPage: _index);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _snack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: error ? AppColors.error : null,
+      duration: const Duration(seconds: 3),
+    ));
+  }
+
+  /// Görüntülenen fotoğrafı telefonun galerisine kaydeder.
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      // Galeri izni (Android 13+ ve iOS için Gal kendi izin akışını yürütür).
+      if (!await Gal.hasAccess()) {
+        final granted = await Gal.requestAccess();
+        if (!granted) {
+          _snack('Galeriye kaydetmek için izin gerekiyor.', error: true);
+          return;
+        }
+      }
+      final url = await FirebaseStorage.instance
+          .refFromURL(widget.gsUrls[_index])
+          .getDownloadURL();
+      final resp = await Dio().get<List<int>>(
+        url,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final data = resp.data;
+      if (data == null || data.isEmpty) {
+        _snack('Fotoğraf indirilemedi. Lütfen tekrar dene.', error: true);
+        return;
+      }
+      await Gal.putImageBytes(Uint8List.fromList(data), album: 'Voxen AI');
+      _snack('Fotoğraf galerine kaydedildi ✓');
+    } on GalException catch (e) {
+      _snack('Kaydedilemedi: ${e.type.message}', error: true);
+    } catch (_) {
+      _snack('Fotoğraf kaydedilemedi. Lütfen tekrar dene.', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Üst bar: kapat + sayaç
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${_index + 1} / ${widget.gsUrls.length}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  const SizedBox(width: 48), // sayacı ortalamak için denge
+                ],
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: widget.gsUrls.length,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (_, i) => _page(widget.gsUrls[i]),
+              ),
+            ),
+            // Alt bar: indir
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.download_rounded),
+                  label: Text(_saving ? 'Kaydediliyor…' : 'Telefona İndir'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _page(String gsUrl) {
+    return FutureBuilder<String>(
+      future: FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.gold),
+          );
+        }
+        // Çift dokunuş/parmakla yakınlaştırma.
+        return InteractiveViewer(
+          minScale: 1,
+          maxScale: 4,
+          child: CachedNetworkImage(
+            imageUrl: snap.data!,
+            fit: BoxFit.contain,
+            errorWidget: (_, _, _) => const Center(
+              child: Icon(Icons.broken_image_outlined, color: Colors.white54),
+            ),
+          ),
+        );
+      },
     );
   }
 }

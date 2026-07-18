@@ -35,85 +35,100 @@ const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
 // Sahneler bilinçli olarak ÇOK SOMUT yazıldı: "elegant portrait" gibi soyut
 // ifadeler modeli stüdyo-vari, arka plansız yakın çekime itiyordu. Somut mekân
 // + kıyafet + ışık tarifi, arka planın gerçekten oluşmasını sağlar.
+// Sahneler CİNSİYET BELİRTMEZ (zamir kullanılmaz) — cinsiyet referans
+// fotoğraflardan gelir. "he/she" yazmak, modeli kullanıcının cinsiyetinden
+// bağımsız olarak o cinsiyete zorluyor.
+//
+// Her varyant dört şeyi birlikte tarif eder: MEKÂN + O ANDA NE YAPTIĞI +
+// İFADE + IŞIK. "Ne yaptığı" kritik: poz vermiş donuk bir figür yerine bir
+// ana yakalanmış izlenimi, fotoğrafı "çekilmiş" gösteren şeydir.
 const STYLE_SCENES = {
   elegance: [
-    "standing in a modern hotel lobby, wearing a well-fitted charcoal blazer over a white shirt, soft daylight from a tall window to the side, marble and warm lamps visible behind",
-    "seated at a marble bar counter in an upscale restaurant, wearing a navy suit without a tie, warm evening interior lighting, shelves of bottles softly blurred behind",
-    "walking along a city street at golden hour wearing a tailored coat, blurred shopfronts and passers-by behind, low warm sunlight",
-    "leaning against the glass facade of an office building in daylight, wearing a light grey suit, city skyline and reflections behind",
-    "in an art gallery with white walls and framed artwork behind, wearing a black turtleneck, soft even gallery lighting",
+    "Mid-step through the lobby of a boutique hotel, adjusting a cuff and glancing off-camera with a relaxed half-smile, wearing a well-cut charcoal blazer over an open white shirt. Behind: a marble reception desk, warm brass lamps, and a tall arched window spilling soft late-afternoon light across the floor",
+    "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, laughing at something just out of frame. Behind: backlit shelves of bottles, low pendant lights, a bartender blurred mid-motion",
+    "Crossing a European city street at golden hour in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: blurred shopfronts, warm low sun flaring between buildings, out-of-focus passers-by",
+    "Standing at the railing of a rooftop terrace at dusk in a light grey suit with the collar open, one hand resting on the rail, easy natural smile. Behind: glass towers with lit windows against a deep blue evening sky",
+    "Pausing in a quiet art gallery, hands in pockets, head turned to study a painting with a thoughtful expression, wearing a fine black turtleneck. Behind: white walls, large framed artworks, soft even ceiling light",
   ],
   athletic: [
-    "in a modern gym with weights, machines and mirrors visible behind, wearing a fitted training t-shirt, natural overhead lighting, light sweat on the skin",
-    "outdoors on a running track at sunrise wearing athletic gear, empty stadium seating and warm low sun behind",
-    "in a boxing gym with punching bags and brick walls behind, wearing a tank top and hand wraps, window light from the left",
-    "on a forest hiking trail wearing sportswear with a small backpack, dappled sunlight through the trees behind",
-    "on an outdoor basketball court in late afternoon holding a ball, chain-link fence and apartment buildings behind",
+    "Resting between sets on a gym bench, forearms on knees, catching breath and looking up with a slight grin, wearing a fitted training t-shirt damp with sweat. Behind: racks of weights, mirrors and machines under natural overhead light",
+    "Mid-stride on an outdoor running track at sunrise, breath visible in cool air, focused expression, wearing technical running gear. Behind: empty stadium seating and a low warm sun casting long shadows",
+    "Wrapping hands with tape in a worn boxing gym, head down in concentration then glancing up, wearing a loose tank top. Behind: hanging heavy bags, exposed brick and dusty window light from the left",
+    "Stopping on a forest hiking trail to look back over one shoulder with an open smile, wearing technical outerwear and a small backpack. Behind: tall trees with dappled sunlight breaking through the canopy",
+    "Holding a basketball on one hip on an outdoor court in late afternoon, mid-conversation, relaxed and smiling. Behind: chain-link fencing, painted court lines and apartment blocks in warm side light",
   ],
   traveller: [
-    "standing on a cobbled street in an old European town, historic facades and cafe awnings behind, wearing a casual jacket, soft overcast daylight",
-    "at a mountain viewpoint wearing a light outdoor jacket, valley and distant peaks stretching out behind, bright natural daylight",
-    "on a coastal cliff path with the open sea and horizon behind, wearing a linen shirt moving slightly in the breeze, sunny day",
-    "in a busy street market with colourful stalls and hanging goods behind, wearing a casual shirt, warm afternoon light",
-    "on the wooden deck of a boat with a harbour and moored sailboats behind, sunglasses pushed up on the head, bright daylight",
+    "Walking a narrow cobbled street in an old European town, looking up at the buildings with genuine curiosity, wearing a casual jacket with a bag slung across the body. Behind: weathered stone facades, cafe awnings and shuttered windows under soft overcast light",
+    "Standing at a mountain viewpoint with a light outdoor jacket, wind in the hair, quietly taking in the view with a small satisfied smile. Behind: a wide valley falling away to layered blue peaks in clear daylight",
+    "On a coastal cliff path with a linen shirt moving in the breeze, one hand shielding the eyes from the sun, laughing. Behind: open sea, a long horizon line and scattered white clouds",
+    "Browsing a stall in a busy street market, mid-gesture talking to the vendor, wearing a simple casual shirt. Behind: colourful hanging goods, crates of produce and warm dappled afternoon light",
+    "Sitting on the wooden deck of a boat with sunglasses pushed up on the head, one arm over the rail, easy unposed expression. Behind: a working harbour, moored sailboats and bright reflected water",
   ],
   oldmoney: [
-    "seated in a leather armchair in a wood-panelled library, bookshelves behind, wearing a cream knit sweater, warm lamp light",
-    "standing on the stone terrace of a countryside estate, wearing a navy blazer over a polo shirt, manicured lawn and old trees behind",
-    "on a yacht club dock wearing a light sweater over a collared shirt, moored boats and calm water behind, clear daylight",
-    "beside wooden stables in an equestrian setting, wearing a quilted jacket, paddock and fencing behind, natural daylight",
-    "in a classic dining room with antique furniture and a large window, wearing a crisp tailored shirt, soft window light",
+    "Settled into a worn leather armchair in a wood-panelled library, a book resting on one knee, looking up mid-thought, wearing a cream cable-knit sweater. Behind: floor-to-ceiling bookshelves and the warm pool of a brass reading lamp",
+    "Standing on the stone terrace of a countryside estate with a hand in one pocket, turning toward the camera with a relaxed smile, wearing a navy blazer over a polo. Behind: a manicured lawn, mature oak trees and soft morning haze",
+    "On a wooden yacht club dock, coiling a rope, glancing up with an unhurried expression, wearing a light sweater over a collared shirt. Behind: moored boats, masts and calm water under clear daylight",
+    "Beside weathered stable doors, resting a hand on the timber, calm and at ease, wearing a quilted jacket. Behind: a paddock, white fencing and long grass in soft natural daylight",
+    "At the head of a classic dining room table, mid-conversation with a warm expression, wearing a crisp tailored shirt with sleeves rolled. Behind: antique furniture, framed pictures and light from a tall sash window",
   ],
   nightout: [
-    "in a dimly lit cocktail bar, warm amber lighting, blurred bottles and pendant lamps behind, wearing a dark shirt",
-    "on a rooftop bar at night with out-of-focus city lights spread out behind, wearing a fitted jacket",
-    "on a neon-lit city street at night, reflections on wet pavement and glowing signs behind, wearing a leather jacket",
-    "at a lively restaurant table with warm string lights and other diners blurred behind, wearing a casual button-up shirt",
-    "outside a venue at night under a soft street lamp, brick wall and warm light spill behind, smart casual outfit",
+    "At the counter of a dim cocktail bar, turning toward the camera mid-laugh with a drink in hand, wearing a dark shirt with the top button open. Behind: warm amber light, blurred bottles and glowing pendant lamps",
+    "On a rooftop bar at night, leaning back against the railing with a relaxed grin, wearing a well-fitted jacket. Behind: a wide spread of out-of-focus city lights and a dark skyline",
+    "Walking a neon-lit street at night, hands in jacket pockets, glancing sideways with a half-smile, wearing a leather jacket. Behind: glowing signs reflected in wet pavement and passing headlights",
+    "At a busy restaurant table, mid-conversation and gesturing with one hand, genuine laughter, wearing a casual button-up. Behind: warm string lights, other diners softly blurred and candles on tables",
+    "Standing outside a venue at night under a street lamp, checking a phone then looking up, smart casual outfit. Behind: a brick wall, warm light spill from a doorway and soft bokeh from traffic",
   ],
   beach: [
-    "standing on a sandy beach at golden hour, breaking waves and open ocean behind, wearing an open linen shirt",
-    "walking along the shoreline in swim shorts, bright midday sun, sea and wet sand behind",
-    "sitting on weathered wooden beach steps, palm trees and dunes behind, warm late afternoon light",
-    "at a thatched-roof beach bar with the sea visible behind, wearing a casual short-sleeve shirt",
-    "standing on coastal rocks with sea spray and the horizon behind, wearing a plain t-shirt, natural daylight",
+    "Standing barefoot on wet sand at golden hour, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves, a low warm sun and a long empty shoreline",
+    "Walking out of the shallows, running a hand back through wet hair, laughing, wearing swim shorts. Behind: bright midday sea, foam and sunlit water",
+    "Sitting on weathered wooden beach steps with forearms on knees, relaxed and looking off to the side, wearing a light shirt. Behind: palm fronds, dune grass and warm late-afternoon light",
+    "Leaning on the bamboo counter of a thatched beach bar with a cold drink, mid-conversation, wearing a casual short-sleeve shirt. Behind: the open sea framed by the bar's roof and hanging lights",
+    "Standing on dark coastal rocks with a plain t-shirt, arms loose, watching the swell with an unguarded expression. Behind: sea spray, deep blue water and a clean horizon under natural daylight",
   ],
   car: [
-    "standing beside a dark luxury sedan on a city street in the evening, wearing a smart jacket, warm street lighting and buildings behind",
-    "leaning on the front of a sports car in an underground car park, dramatic overhead lighting, concrete pillars behind",
-    "next to a car parked on a mountain road, sweeping scenic valley view behind, clear daylight",
-    "opening the door of a luxury car outside a modern glass building, daytime, city reflections behind",
-    "seated on the sill of an open car door at a scenic overlook at sunset, warm low light, landscape behind",
+    "Standing beside a dark luxury sedan on a city street in the evening, one hand on the roof, turning toward the camera with a relaxed expression, wearing a smart jacket. Behind: warm street lighting, shopfronts and soft traffic bokeh",
+    "Leaning back against the front of a sports car in an underground car park, arms loosely crossed, calm and direct, wearing a dark jacket. Behind: concrete pillars and dramatic overhead lighting pooling on the floor",
+    "Standing at the open door of a car parked on a mountain road, one foot on the sill, looking out at the view then back to the lens. Behind: a sweeping valley, winding road and clear bright daylight",
+    "Mid-motion closing a car door outside a modern glass building in daytime, glancing up with an easy smile, wearing a well-fitted coat. Behind: reflective glass, city reflections and clean daylight",
+    "Sitting on the sill of an open car door at a scenic overlook at sunset, elbows on knees, quietly taking in the view. Behind: a warm low sun, a wide landscape and long golden light",
   ],
 };
 
 /**
- * Edit modeline verilen tam talimat. Üç parçadan oluşur:
- *  1) KİMLİK: referans fotoğraflardaki kişinin yüzünü aynen koru (modelin en
- *     sık hatası, "benzer ama başka biri" üretmek).
- *  2) SAHNE: somut mekân/kıyafet/ışık (arka planın oluşmasını garanti eder).
- *  3) GERÇEKÇİLİK: gözenekli/rötuşsuz cilt, doğal asimetri, gerçek kamera
- *     dili + yarım boy kadraj (arka planın GÖRÜNMESİ için şart) ve "AI gibi
- *     durma" yasakları.
+ * Edit modeline verilen tam talimat. Dört bölümden oluşur:
+ *  1) KİMLİK: kişi tanınabilir kalmalı.
+ *  2) BÜTÜNLEŞME (kritik): bu YENİ bir fotoğraf — yüz sahnenin ışığına göre
+ *     YENİDEN aydınlatılmalı. Önceki sürümde "yüzü hiçbir şekilde değiştirme"
+ *     dendiği için model yüzü birebir kopyalayıp yapıştırıyordu; sonuç
+ *     "kesme-yapıştırma" gibi duruyordu. Artık ışık/açı/ifade uyumu açıkça
+ *     isteniyor, kimlik ise korunuyor.
+ *  3) SAHNE: mekân + eylem + ifade + ışık (arka planı gerçekten kurar).
+ *  4) ZANAAT + YASAKLAR: gerçek kamera dili, rötuşsuz cilt, "AI görünümü" yasağı.
  */
 function buildPrompt(styleId, variantIdx) {
   const variants = STYLE_SCENES[styleId];
   const scene = variants[variantIdx % variants.length];
   return (
-    "Photograph the exact same person shown in the reference images, in a completely new setting. " +
-    "Preserve their facial identity precisely: same bone structure, eyes, nose, mouth, jawline, " +
-    "skin tone, hairline and age. They must be immediately recognisable as the same individual. " +
-    "Do not beautify, slim, or alter their face in any way.\n\n" +
-    "Scene: " + scene + ".\n\n" +
-    "Framing: natural half-body or waist-up shot with the surroundings clearly visible behind them — " +
-    "the location must be readable, not a blank or blurred-out studio backdrop. " +
-    "Style: an authentic candid photograph that looks like it was taken by a friend on a good camera. " +
-    "Natural unretouched skin with visible pores, real texture and slight imperfections, natural facial " +
-    "asymmetry, individual hair strands, realistic fabric folds. Shot on a full-frame camera with a 50mm " +
-    "lens at f/2.0, available natural light, true-to-life colours, gentle depth of field. " +
-    "Absolutely avoid: airbrushed or plastic skin, waxy sheen, beauty filter, over-smoothing, " +
-    "oversaturated colours, CGI or 3D render look, illustration, cartoon, symmetrical AI face, " +
-    "studio backdrop, text, watermark, extra fingers or distorted hands."
+    "Create a brand-new photograph of the person from the reference images.\n\n" +
+    "IDENTITY: Keep them genuinely recognisable — same bone structure, eye shape and colour, " +
+    "nose, mouth, jawline, hairline, skin tone and apparent age.\n\n" +
+    "INTEGRATION (most important): This is a NEW photograph actually taken in the location below — " +
+    "it is NOT a cut-out of the reference face placed onto a background. Re-light the face and body to " +
+    "match the direction, colour temperature and softness of the scene's light. Shadows across the face, " +
+    "catchlights in the eyes, and skin tone must all agree with the environment. Head angle, gaze, posture " +
+    "and expression must suit the moment described. Hair, collar and shoulders must sit naturally in the " +
+    "scene with consistent grain and focus. No pasted-on look, no mismatched lighting, no sharp cut-out " +
+    "edges, no floating head, no sticker effect.\n\n" +
+    "SCENE: " + scene + ".\n\n" +
+    "FRAMING: a natural half-body or waist-up shot with the environment clearly readable behind — " +
+    "never a blank, plain or studio backdrop.\n\n" +
+    "CRAFT: an authentic candid photograph, the kind a friend takes on a good camera. Natural unretouched " +
+    "skin with visible pores and real texture, faint blemishes and natural facial asymmetry, individual " +
+    "flyaway hairs, realistic fabric folds and creases. Full-frame camera, 35mm or 50mm lens at f/2.0, " +
+    "available natural light, true-to-life colour, gentle depth of field, a touch of real lens character.\n\n" +
+    "AVOID: airbrushed or plastic skin, waxy sheen, beauty filter, over-smoothing, oversaturated colour, " +
+    "HDR glow, CGI or 3D render look, illustration, cartoon, perfectly symmetrical AI face, vacant " +
+    "expression, stiff posed mannequin stance, studio backdrop, text, watermark, distorted hands."
   );
 }
 
@@ -274,7 +289,10 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls,
   const input = {
     prompt: buildPrompt(styleId, chunkIdx),
     image_urls: referenceImageUrls,
-    image_size: "portrait_4_3", // dikey dating fotoğrafı
+    // 3:4 dikey, yüksek çözünürlük. Hazır "portrait_4_3" preset'i daha düşük
+    // çözünürlüklü; cilt gözenekleri/saç telleri gibi doğallık veren detaylar
+    // ancak bu ölçekte korunuyor (Seedream sınırı: 1024–2048 px).
+    image_size: { width: 1536, height: 2048 },
     num_images: 1,
     output_format: "jpeg",
     seed,
