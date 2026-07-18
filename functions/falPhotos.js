@@ -5,18 +5,24 @@ const { admin, db, bucket } = require("./_shared");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-// Üretim modeli: Seedream v5 Pro (edit). Kullanıcının GERÇEK fotoğraflarını
-// referans alıp (image_urls — 10 taneye kadar) o kişiyi yeni bir sahnede
-// yeniden fotoğraflar.
+// Üretim modeli: Nano Banana Pro (edit) — Google'ın gerçekçilik odaklı edit
+// modeli. Kullanıcının GERÇEK fotoğraflarını referans alıp (image_urls) o
+// kişiyi yeni bir sahnede yeniden fotoğraflar.
 //
-// NEDEN PuLID DEĞİL: PuLID yüzü bir kimlik-embedding'inden SIFIRDAN sentezler;
-// bu, cilt dokusunu kaybettirip "plastik/AI" görünüme yol açıyordu ve
-// id_weight yüksekken sahneyi ezdiği için arka planlar tamamen çöküyordu
-// ("hiçbir fotoğrafta arka plan yok"). Edit modeli gerçek foto piksellerinden
-// çalıştığı için hem cilt/yüz doğal kalır hem sahne ayakta durur. Ayrıca
-// Seedream TEK referans yerine 3 referansın HEPSİNİ birden görür → kimlik
-// sadakati belirgin biçimde daha yüksek.
-const GEN_MODEL = "bytedance/seedream/v5/pro/edit";
+// MODEL GEÇMİŞİ (aynı hatayı tekrarlamamak için):
+//  1) nano-banana-2/edit  → arka planlar gerçekçi değildi.
+//  2) flux-pulid          → yüzü embedding'den SIFIRDAN sentezlediği için
+//     plastik görünüm; id_weight sahneyi ezdiğinden arka plan hiç oluşmuyordu.
+//  3) seedream/v5/pro/edit→ arka plan oluştu ama "kişi ön planda, arka plan
+//     arkada" katmanlı/yapıştırma hissi sürdü.
+//  4) nano-banana-pro/edit (şu an) → gerçekçilik odaklı; 3. maddedeki katman
+//     hissini azaltıp azaltmadığı ÖLÇÜLECEK.
+//
+// ÖNEMLİ SINIR: bunların hepsi "edit" ailesidir ve kişiyi korunacak bir nesne
+// olarak ele alır — bu yüzden bir miktar katman/yapıştırma hissi yapısaldır.
+// Bunu kökten çözmenin yolu kullanıcıya özel LoRA eğitimidir (kişi sahneyle
+// birlikte sıfırdan üretilir); maliyet/bekleme nedeniyle şimdilik seçilmedi.
+const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -120,8 +126,15 @@ function buildPrompt(styleId, variantIdx) {
     "scene with consistent grain and focus. No pasted-on look, no mismatched lighting, no sharp cut-out " +
     "edges, no floating head, no sticker effect.\n\n" +
     "SCENE: " + scene + ".\n\n" +
-    "FRAMING: a natural half-body or waist-up shot with the environment clearly readable behind — " +
-    "never a blank, plain or studio backdrop.\n\n" +
+    "FRAMING & DEPTH (fixes the flat 'subject on a backdrop' look): compose this as a real " +
+    "environmental portrait with three distinct depth layers. Put something genuinely in FRONT of the " +
+    "subject and let it partially overlap or softly blur across the edge of the frame — a railing, a " +
+    "doorway edge, foliage, a table corner, a passing person, glass. Place the subject OFF-CENTRE in the " +
+    "middle layer, standing within the space rather than in front of it, with the floor or ground visible " +
+    "so they are clearly grounded. Let the background recede with real distance and perspective, not sit " +
+    "flat behind them. Light must wrap around the subject from the scene's own sources, with contact " +
+    "shadows where they meet the ground or lean on something. Half-body or waist-up. " +
+    "Never a blank, plain, flat or studio backdrop.\n\n" +
     "CRAFT: an authentic candid photograph, the kind a friend takes on a good camera. Natural unretouched " +
     "skin with visible pores and real texture, faint blemishes and natural facial asymmetry, individual " +
     "flyaway hairs, realistic fabric folds and creases. Full-frame camera, 35mm or 50mm lens at f/2.0, " +
@@ -289,15 +302,17 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls,
   const input = {
     prompt: buildPrompt(styleId, chunkIdx),
     image_urls: referenceImageUrls,
-    // 3:4 dikey, yüksek çözünürlük. Hazır "portrait_4_3" preset'i daha düşük
-    // çözünürlüklü; cilt gözenekleri/saç telleri gibi doğallık veren detaylar
-    // ancak bu ölçekte korunuyor (Seedream sınırı: 1024–2048 px).
-    image_size: { width: 1536, height: 2048 },
+    // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
+    aspect_ratio: "3:4", // dikey dating fotoğrafı
+    // 2K: cilt gözenekleri/saç telleri gibi doğallık veren detaylar 1K'da
+    // "temizlenip" plastikleşiyor.
+    resolution: "2K",
     num_images: 1,
     output_format: "jpeg",
     seed,
-    enable_safety_checker: false, // girdi zaten moderasyondan geçti; çıktı
-    // safety_checker'ı meşru portrelerde boş sonuç üretebiliyor.
+    // 1 = en katı, 6 = en gevşek. Girdi zaten Vision SafeSearch'ten geçti;
+    // burada katı bir eşik meşru portrelerde boş sonuç üretiyordu.
+    safety_tolerance: "4",
   };
   const resp = await fetch(
     `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
