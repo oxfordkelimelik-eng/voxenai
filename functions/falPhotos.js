@@ -101,40 +101,28 @@ const STYLE_SCENES = {
 };
 
 /**
- * Edit modeline verilen tam talimat. Dört bölümden oluşur:
- *  1) KİMLİK: kişi tanınabilir kalmalı.
- *  2) BÜTÜNLEŞME (kritik): bu YENİ bir fotoğraf — yüz sahnenin ışığına göre
- *     YENİDEN aydınlatılmalı. Önceki sürümde "yüzü hiçbir şekilde değiştirme"
- *     dendiği için model yüzü birebir kopyalayıp yapıştırıyordu; sonuç
- *     "kesme-yapıştırma" gibi duruyordu. Artık ışık/açı/ifade uyumu açıkça
- *     isteniyor, kimlik ise korunuyor.
- *  3) SAHNE: mekân + eylem + ifade + ışık (arka planı gerçekten kurar).
- *  4) ZANAAT + YASAKLAR: gerçek kamera dili, rötuşsuz cilt, "AI görünümü" yasağı.
+ * Edit modeline verilen tam talimat. ÖNCELİK SIRASI bilinçli: model uzun
+ * prompt'larda önce gelen ve en çok tekrar eden talimata ağırlık veriyor.
+ * Bu yüzden SAHNE en başta ve en vurgulu; kimlik kısıtı kısa ama kesin;
+ * "bütünleşme" tek cümleye indirildi (önceki sürümde uzun bir bütünleşme/
+ * derinlik bloğu vardı — modele yüzü "yeniden yorumlama" lisansı verip hem
+ * kimlik kaymasına hem de sahnenin gölgede kalıp alakasız arka plan
+ * üretilmesine yol açtı; SCENE ile rekabet eden metin azaltıldı).
  */
 function buildPrompt(styleId, variantIdx) {
   const variants = STYLE_SCENES[styleId];
   const scene = variants[variantIdx % variants.length];
   return (
-    "Create a brand-new photograph of the person from the reference images.\n\n" +
-    "IDENTITY: Keep them genuinely recognisable — same bone structure, eye shape and colour, " +
-    "nose, mouth, jawline, hairline, skin tone and apparent age.\n\n" +
-    "INTEGRATION (most important): This is a NEW photograph actually taken in the location below — " +
-    "it is NOT a cut-out of the reference face placed onto a background. Re-light the face and body to " +
-    "match the direction, colour temperature and softness of the scene's light. Shadows across the face, " +
-    "catchlights in the eyes, and skin tone must all agree with the environment. Head angle, gaze, posture " +
-    "and expression must suit the moment described. Hair, collar and shoulders must sit naturally in the " +
-    "scene with consistent grain and focus. No pasted-on look, no mismatched lighting, no sharp cut-out " +
-    "edges, no floating head, no sticker effect.\n\n" +
-    "SCENE: " + scene + ".\n\n" +
-    "FRAMING & DEPTH (fixes the flat 'subject on a backdrop' look): compose this as a real " +
-    "environmental portrait with three distinct depth layers. Put something genuinely in FRONT of the " +
-    "subject and let it partially overlap or softly blur across the edge of the frame — a railing, a " +
-    "doorway edge, foliage, a table corner, a passing person, glass. Place the subject OFF-CENTRE in the " +
-    "middle layer, standing within the space rather than in front of it, with the floor or ground visible " +
-    "so they are clearly grounded. Let the background recede with real distance and perspective, not sit " +
-    "flat behind them. Light must wrap around the subject from the scene's own sources, with contact " +
-    "shadows where they meet the ground or lean on something. Half-body or waist-up. " +
-    "Never a blank, plain, flat or studio backdrop.\n\n" +
+    "Photograph this EXACT scene, precisely as described — do not simplify, generalise or substitute " +
+    "any part of it: " + scene + ".\n\n" +
+    "The person in the reference images must be placed into this scene, fully recognisable: same face " +
+    "shape, bone structure, eyes, nose, mouth, jawline, hairline, skin tone and age as the references. " +
+    "Do not reshape or reinterpret their face.\n\n" +
+    "Match the lighting on their face and clothes to the scene's own light source so it reads as one " +
+    "real photograph, not a cut-out on a backdrop — but the scene and its exact setting described above " +
+    "always take priority over any other consideration.\n\n" +
+    "FRAMING: half-body or waist-up, environment clearly visible and identifiable behind and around them, " +
+    "never a blank or plain backdrop.\n\n" +
     "CRAFT: an authentic candid photograph, the kind a friend takes on a good camera. Natural unretouched " +
     "skin with visible pores and real texture, faint blemishes and natural facial asymmetry, individual " +
     "flyaway hairs, realistic fabric folds and creases. Full-frame camera, 35mm or 50mm lens at f/2.0, " +
