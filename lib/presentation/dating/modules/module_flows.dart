@@ -95,7 +95,7 @@ Future<bool> _charge(BuildContext context, WidgetRef ref, int cost) async {
   return ok;
 }
 
-Future<List<File>> _pickImages({bool multi = false, int limit = 5}) async {
+Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
   final picker = ImagePicker();
   if (multi) {
     final xs = await picker.pickMultiImage(limit: limit);
@@ -189,7 +189,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   /// İKİ AŞAMALI ÜRETİM.
   ///
-  /// AŞAMA 1 — DOĞRULAMA (loader YOK, kredi harcanmaz): 5 fotoğraf Storage'a
+  /// AŞAMA 1 — DOĞRULAMA (loader YOK, kredi harcanmaz): referans fotoğraflar Storage'a
   /// yüklenir ve `prepareReferencePhotos` çağrılır; bu adım fotoğraflarla ilgili
   /// TÜM kapıları (+18/uygunsuz içerik, net/tek yüz) çalıştırır. Başarısız
   /// olursa kullanıcı paket adımında kalır ve hatayı görür — fotoğrafını
@@ -199,7 +199,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
   Future<void> _generate() async {
-    if (_photos.length != 5 || _styles.isEmpty) return;
+    if (_photos.length != DatingConfig.referencePhotoCount || _styles.isEmpty) {
+      return;
+    }
 
     // Bakiye/ücretsiz hak yetmiyorsa SUNUCUYA HİÇ GİTME: ne fal.ai kredisi ne
     // de paket hakkı harcanır. Bunun yerine blurlu "teaser" gösterilir; blura
@@ -882,16 +884,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           const SizedBox(height: 16),
           const PhotoQualityGuide(),
           const SizedBox(height: 16),
-          const Text('Fotoğraflarını yükle (5 net fotoğraf)',
-              style: TextStyle(
+          Text(
+              'Fotoğraflarını yükle (${DatingConfig.referencePhotoCount} net fotoğraf)',
+              style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 4),
-          const Text(
-              'Yapay zekanın yüzünü doğru öğrenmesi için tam 5 net, farklı '
-              'açılardan fotoğraf gerekir.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          Text(
+              'Yüzünün doğru aktarılması için tam '
+              '${DatingConfig.referencePhotoCount} net, farklı açılardan '
+              'fotoğraf gerekir.',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
           const SizedBox(height: 10),
           if (_photos.isEmpty)
             Container(
@@ -926,7 +931,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 ? null
                 : () async {
                     // Kalan boş slot kadar yeni foto seçilebilir (toplam 5).
-                    final remaining = 5 - _photos.length;
+                    final remaining =
+                        DatingConfig.referencePhotoCount - _photos.length;
                     if (remaining <= 0) return;
                     final files =
                         await _pickImages(multi: true, limit: remaining);
@@ -959,7 +965,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     setState(() {
                       _prepareError = null; // fotoğraf listesi değişti
                       for (final f in valid) {
-                        if (_photos.length < 5) _photos.add(f);
+                        if (_photos.length <
+                            DatingConfig.referencePhotoCount) {
+                          _photos.add(f);
+                        }
                       }
                     });
                   },
@@ -1011,7 +1020,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           PrimaryButton(
             label:
                 _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
-            onPressed: (_photos.length == 5 && !_preparing) ? _generate : null,
+            onPressed: (_photos.length == DatingConfig.referencePhotoCount &&
+                    !_preparing)
+                ? _generate
+                : null,
           ),
           const SizedBox(height: 8),
           Center(

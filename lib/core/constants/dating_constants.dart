@@ -18,12 +18,19 @@ class DatingConfig {
   // PAKETLER:
   //   Foto Analizi : Tekli   1 analiz  → ₺99
   //                  Standart 5 analiz  → ₺249
-  //   AI Foto Üretimi : Standart 10 foto (1 stil)  → ₺249
-  //                     Premium  50 foto (5 stil)  → ₺999
+  //   AI Foto Üretimi : Standart 5 foto  (1 stil)  → ₺249
+  //                     Premium  25 foto (5 stil)  → ₺999
   // ============================================================
 
   // --- Üretim birimi ---
-  static const int photosPerSet = 10; // tek üretimde/stilde çıkan foto sayısı
+  // Stil başına üretilen foto sayısı. Her foto AYRI bir sahne varyantıdır
+  // (bkz. functions/falPhotos.js STYLE_SCENES) — kalite/çeşitlilik önceliği.
+  // functions/falPhotos.js IMAGES_PER_STYLE ile EL İLE senkron tutulmalı.
+  static const int photosPerSet = 5; // tek üretimde/stilde çıkan foto sayısı
+
+  // AI foto üretimi için kullanıcıdan istenen referans fotoğraf sayısı.
+  // functions/falPhotos.js REFERENCE_PHOTO_COUNT ile senkron.
+  static const int referencePhotoCount = 3;
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç
@@ -40,13 +47,18 @@ class DatingConfig {
   static const String analysisStandardProductId = 'dating_pack_analysis5';
 
   // --- AI Foto Üretimi paketleri ---
-  static const int photoStandardSets = 1; // Standart: 1 stil (10 foto)
-  static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 10
+  // NOT: Ürün ID'lerindeki "10"/"50" sayıları mağazada kayıtlı ESKİ isimlerdir
+  // (photosPerSet 10'dan 5'e düşürüldü). ID'ler mağaza kaydına bağlı olduğu
+  // için DEĞİŞTİRİLEMEZ; kullanıcıya gösterilen sayı photoStandardPhotos /
+  // photoPremiumPhotos üzerinden gelir. Mağaza açıklamalarının güncellenmesi
+  // gerekir — bkz. App Store / Play Console ürün metinleri.
+  static const int photoStandardSets = 1; // Standart: 1 stil (5 foto)
+  static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 5
   static const String photoStandardPriceLabel = '₺249';
   static const String photoStandardProductId = 'dating_pack_photo10';
 
-  static const int photoPremiumSets = 5; // Premium: 5 stil (50 foto)
-  static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 50
+  static const int photoPremiumSets = 5; // Premium: 5 stil (25 foto)
+  static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 25
   static const String photoPremiumPriceLabel = '₺999';
   static const String photoPremiumProductId = 'dating_pack_photo50';
 

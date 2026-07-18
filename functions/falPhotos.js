@@ -5,57 +5,117 @@ const { admin, db, bucket } = require("./_shared");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-// Kimlik-koşullu üretim modeli: PuLID-Flux. TEK bir referans yüz görselinden
-// (reference_image_url) yola çıkıp, prompt'taki sahneyi/arka planı SIFIRDAN
-// Flux kalitesinde üretirken kişinin yüz kimliğini korur. Eski nano-banana
-// "edit" modeli, referansın arka planını düzenlediği için gerçekçi olmayan
-// arka planlar veriyordu; PuLID sahneyi baştan kurduğu için arka planlar
-// belirgin biçimde daha gerçekçi.
-const GEN_MODEL = "fal-ai/flux-pulid";
-// Kimlik korunma gücü (0..~1.5). 1 = güçlü kimlik. Çok yüksek olursa yüz
-// "yapıştırılmış" görünür; çok düşük olursa benzerlik kaybolur.
-const ID_WEIGHT = 1;
-// PuLID istek başına TEK görsel üretir (num_images yok). Stil başına
-// IMAGES_PER_STYLE (10) foto için her biri farklı seed'li 10 ayrı istek
-// ("chunk") gönderilir; sonuçlar birleştirilir (bkz. finalizeChunk).
-const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// Üretim modeli: Seedream v5 Pro (edit). Kullanıcının GERÇEK fotoğraflarını
+// referans alıp (image_urls — 10 taneye kadar) o kişiyi yeni bir sahnede
+// yeniden fotoğraflar.
+//
+// NEDEN PuLID DEĞİL: PuLID yüzü bir kimlik-embedding'inden SIFIRDAN sentezler;
+// bu, cilt dokusunu kaybettirip "plastik/AI" görünüme yol açıyordu ve
+// id_weight yüksekken sahneyi ezdiği için arka planlar tamamen çöküyordu
+// ("hiçbir fotoğrafta arka plan yok"). Edit modeli gerçek foto piksellerinden
+// çalıştığı için hem cilt/yüz doğal kalır hem sahne ayakta durur. Ayrıca
+// Seedream TEK referans yerine 3 referansın HEPSİNİ birden görür → kimlik
+// sadakati belirgin biçimde daha yüksek.
+const GEN_MODEL = "bytedance/seedream/v5/pro/edit";
+// Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
+// STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
+const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// Kullanıcıdan istenen referans foto sayısı (client ile senkron).
+const REFERENCE_PHOTO_COUNT = 3;
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
 const MAX_CHUNK_RETRIES = 2;
 
 // Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
 
-// PhotoStyle.id -> sahne/stil betimlemesi. lib/core/constants/dating_constants.dart
-// PhotoStyle.coreStyles ile EL İLE senkron tutulmalı.
+// PhotoStyle.id -> stil başına IMAGES_PER_STYLE adet AYRI sahne varyantı.
+// lib/core/constants/dating_constants.dart PhotoStyle.coreStyles ile EL İLE
+// senkron tutulmalı.
+//
+// Sahneler bilinçli olarak ÇOK SOMUT yazıldı: "elegant portrait" gibi soyut
+// ifadeler modeli stüdyo-vari, arka plansız yakın çekime itiyordu. Somut mekân
+// + kıyafet + ışık tarifi, arka planın gerçekten oluşmasını sağlar.
 const STYLE_SCENES = {
-  elegance: "an elegant, charismatic, well-groomed portrait, sharp studio lighting, upscale attire",
-  athletic: "an athletic, dynamic, fit portrait, gym or outdoor sport setting, confident pose",
-  traveller: "a world traveller portrait, scenic landmark background, adventurous casual outfit",
-  oldmoney: "a classic old-money aesthetic portrait, tailored blazer, refined interior background",
-  nightout: "a night-out social portrait, stylish club/bar lighting, trendy outfit",
-  beach: "a beach body portrait, sunny coastline background, fit and relaxed",
-  car: "a prestige portrait next to a luxury car, confident stance, urban background",
+  elegance: [
+    "standing in a modern hotel lobby, wearing a well-fitted charcoal blazer over a white shirt, soft daylight from a tall window to the side, marble and warm lamps visible behind",
+    "seated at a marble bar counter in an upscale restaurant, wearing a navy suit without a tie, warm evening interior lighting, shelves of bottles softly blurred behind",
+    "walking along a city street at golden hour wearing a tailored coat, blurred shopfronts and passers-by behind, low warm sunlight",
+    "leaning against the glass facade of an office building in daylight, wearing a light grey suit, city skyline and reflections behind",
+    "in an art gallery with white walls and framed artwork behind, wearing a black turtleneck, soft even gallery lighting",
+  ],
+  athletic: [
+    "in a modern gym with weights, machines and mirrors visible behind, wearing a fitted training t-shirt, natural overhead lighting, light sweat on the skin",
+    "outdoors on a running track at sunrise wearing athletic gear, empty stadium seating and warm low sun behind",
+    "in a boxing gym with punching bags and brick walls behind, wearing a tank top and hand wraps, window light from the left",
+    "on a forest hiking trail wearing sportswear with a small backpack, dappled sunlight through the trees behind",
+    "on an outdoor basketball court in late afternoon holding a ball, chain-link fence and apartment buildings behind",
+  ],
+  traveller: [
+    "standing on a cobbled street in an old European town, historic facades and cafe awnings behind, wearing a casual jacket, soft overcast daylight",
+    "at a mountain viewpoint wearing a light outdoor jacket, valley and distant peaks stretching out behind, bright natural daylight",
+    "on a coastal cliff path with the open sea and horizon behind, wearing a linen shirt moving slightly in the breeze, sunny day",
+    "in a busy street market with colourful stalls and hanging goods behind, wearing a casual shirt, warm afternoon light",
+    "on the wooden deck of a boat with a harbour and moored sailboats behind, sunglasses pushed up on the head, bright daylight",
+  ],
+  oldmoney: [
+    "seated in a leather armchair in a wood-panelled library, bookshelves behind, wearing a cream knit sweater, warm lamp light",
+    "standing on the stone terrace of a countryside estate, wearing a navy blazer over a polo shirt, manicured lawn and old trees behind",
+    "on a yacht club dock wearing a light sweater over a collared shirt, moored boats and calm water behind, clear daylight",
+    "beside wooden stables in an equestrian setting, wearing a quilted jacket, paddock and fencing behind, natural daylight",
+    "in a classic dining room with antique furniture and a large window, wearing a crisp tailored shirt, soft window light",
+  ],
+  nightout: [
+    "in a dimly lit cocktail bar, warm amber lighting, blurred bottles and pendant lamps behind, wearing a dark shirt",
+    "on a rooftop bar at night with out-of-focus city lights spread out behind, wearing a fitted jacket",
+    "on a neon-lit city street at night, reflections on wet pavement and glowing signs behind, wearing a leather jacket",
+    "at a lively restaurant table with warm string lights and other diners blurred behind, wearing a casual button-up shirt",
+    "outside a venue at night under a soft street lamp, brick wall and warm light spill behind, smart casual outfit",
+  ],
+  beach: [
+    "standing on a sandy beach at golden hour, breaking waves and open ocean behind, wearing an open linen shirt",
+    "walking along the shoreline in swim shorts, bright midday sun, sea and wet sand behind",
+    "sitting on weathered wooden beach steps, palm trees and dunes behind, warm late afternoon light",
+    "at a thatched-roof beach bar with the sea visible behind, wearing a casual short-sleeve shirt",
+    "standing on coastal rocks with sea spray and the horizon behind, wearing a plain t-shirt, natural daylight",
+  ],
+  car: [
+    "standing beside a dark luxury sedan on a city street in the evening, wearing a smart jacket, warm street lighting and buildings behind",
+    "leaning on the front of a sports car in an underground car park, dramatic overhead lighting, concrete pillars behind",
+    "next to a car parked on a mountain road, sweeping scenic valley view behind, clear daylight",
+    "opening the door of a luxury car outside a modern glass building, daytime, city reflections behind",
+    "seated on the sill of an open car door at a scenic overlook at sunset, warm low light, landscape behind",
+  ],
 };
 
-// PuLID-Flux prompt'u: kimlik referans görselden (reference_image_url +
-// id_weight) geldiği için burada YÜZÜ değil, SAHNEYİ/ARKA PLANI ve fotoğraf
-// kalitesini betimleriz. Gerçekçilik ipuçları (DSLR, doğal ışık, film grain)
-// arka planların yapay görünmesini azaltır.
-function buildPrompt(styleId) {
-  const scene = STYLE_SCENES[styleId];
+/**
+ * Edit modeline verilen tam talimat. Üç parçadan oluşur:
+ *  1) KİMLİK: referans fotoğraflardaki kişinin yüzünü aynen koru (modelin en
+ *     sık hatası, "benzer ama başka biri" üretmek).
+ *  2) SAHNE: somut mekân/kıyafet/ışık (arka planın oluşmasını garanti eder).
+ *  3) GERÇEKÇİLİK: gözenekli/rötuşsuz cilt, doğal asimetri, gerçek kamera
+ *     dili + yarım boy kadraj (arka planın GÖRÜNMESİ için şart) ve "AI gibi
+ *     durma" yasakları.
+ */
+function buildPrompt(styleId, variantIdx) {
+  const variants = STYLE_SCENES[styleId];
+  const scene = variants[variantIdx % variants.length];
   return (
-    scene + ". Ultra-realistic candid DSLR photograph, natural lighting, " +
-    "shallow depth of field, realistic skin texture and detailed background, " +
-    "shot on 50mm lens, high dynamic range, subtle film grain, professional " +
-    "color grading. No text, no watermark, not a cartoon, not CGI."
+    "Photograph the exact same person shown in the reference images, in a completely new setting. " +
+    "Preserve their facial identity precisely: same bone structure, eyes, nose, mouth, jawline, " +
+    "skin tone, hairline and age. They must be immediately recognisable as the same individual. " +
+    "Do not beautify, slim, or alter their face in any way.\n\n" +
+    "Scene: " + scene + ".\n\n" +
+    "Framing: natural half-body or waist-up shot with the surroundings clearly visible behind them — " +
+    "the location must be readable, not a blank or blurred-out studio backdrop. " +
+    "Style: an authentic candid photograph that looks like it was taken by a friend on a good camera. " +
+    "Natural unretouched skin with visible pores, real texture and slight imperfections, natural facial " +
+    "asymmetry, individual hair strands, realistic fabric folds. Shot on a full-frame camera with a 50mm " +
+    "lens at f/2.0, available natural light, true-to-life colours, gentle depth of field. " +
+    "Absolutely avoid: airbrushed or plastic skin, waxy sheen, beauty filter, over-smoothing, " +
+    "oversaturated colours, CGI or 3D render look, illustration, cartoon, symmetrical AI face, " +
+    "studio backdrop, text, watermark, extra fingers or distorted hands."
   );
 }
-
-// PuLID'in reddedeceği/bozacağı istikametleri kısan negatif prompt.
-const NEGATIVE_PROMPT =
-  "cartoon, 3d render, cgi, illustration, painting, plastic skin, waxy, " +
-  "distorted face, deformed, extra fingers, blurry, low quality, watermark, " +
-  "text, oversaturated, unrealistic background";
 
 function styleUnitsFor(styleCount) {
   return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
@@ -200,19 +260,23 @@ async function uploadReferencePhotos(uid, jobId) {
 }
 
 /**
- * fal.ai queue API'sine bir PuLID-Flux üretim işi gönderir (tek görsel). Bir
- * stilin TEK bir chunk'ı için çağrılır — chunkIdx, webhook'un hangi chunk'a ait
- * sonucu işleyeceğini bilmesi için query'ye eklenir. Her chunk farklı `seed`
- * kullanır ki aynı stilde 10 farklı foto çıksın.
+ * fal.ai queue API'sine bir Seedream edit işi gönderir (tek görsel). Bir stilin
+ * TEK bir chunk'ı için çağrılır — chunkIdx hem webhook'un hangi sonucu
+ * işleyeceğini belirler HEM DE hangi sahne varyantının üretileceğini seçer
+ * (chunk 0..4 -> STYLE_SCENES[style][0..4]). Böylece bir stildeki 5 foto
+ * birbirinin kopyası değil, 5 farklı gerçek ortam olur.
+ *
+ * Kullanıcının TÜM referans fotoğrafları (3 adet) image_urls ile gönderilir —
+ * model kişiyi birden fazla açıdan gördüğü için kimlik sadakati artar.
  */
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrl, seed) {
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls, seed) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
-    prompt: buildPrompt(styleId),
-    negative_prompt: NEGATIVE_PROMPT,
-    reference_image_url: referenceImageUrl,
-    id_weight: ID_WEIGHT,
+    prompt: buildPrompt(styleId, chunkIdx),
+    image_urls: referenceImageUrls,
     image_size: "portrait_4_3", // dikey dating fotoğrafı
+    num_images: 1,
+    output_format: "jpeg",
     seed,
     enable_safety_checker: false, // girdi zaten moderasyondan geçti; çıktı
     // safety_checker'ı meşru portrelerde boş sonuç üretebiliyor.
@@ -282,10 +346,11 @@ exports.prepareReferencePhotos = onCall(
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
-    // Net/tek yüz kapısı + en iyi referans seçimi. Fail-safe: kontrolün KENDİSİ
-    // (tfjs/tespit) hata verirse üretim bloklanmaz; primary referans olarak ilk
-    // foto kullanılır.
-    let primaryRefUrl = refUrls[0];
+    // Net/tek yüz kapısı + en iyi referansın öne alınması. Seedream referansların
+    // HEPSİNİ kullanır, ama ilk sıradakine daha çok ağırlık verme eğilimindedir;
+    // bu yüzden en net yüzlü foto başa taşınır. Fail-safe: kontrolün KENDİSİ
+    // (tfjs/tespit) hata verirse üretim bloklanmaz, sıra olduğu gibi kalır.
+    let orderedRefUrls = refUrls;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers);
@@ -306,11 +371,12 @@ exports.prepareReferencePhotos = onCall(
         );
       }
       if (analysis.bestIndex != null && refUrls[analysis.bestIndex]) {
-        primaryRefUrl = refUrls[analysis.bestIndex];
+        const best = refUrls[analysis.bestIndex];
+        orderedRefUrls = [best, ...refUrls.filter((u) => u !== best)];
       }
     } catch (e) {
       if (e instanceof HttpsError) throw e;
-      console.error("Yüz kontrolü başarısız (ilk foto primary alınıyor):", e);
+      console.error("Yüz kontrolü başarısız (referans sırası korunuyor):", e);
     }
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
@@ -321,8 +387,8 @@ exports.prepareReferencePhotos = onCall(
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       errorMessage: null,
-      falRefUrls: refUrls,
-      primaryRefUrl,
+      // Tümü üretime gönderilir (en net olan başta) — bkz. submitStyleJob.
+      falRefUrls: orderedRefUrls,
     });
 
     // Referans selfie'ler artık gerekmiyor (fal kopyası var).
@@ -367,9 +433,8 @@ exports.startPhotoGeneration = onCall(
         "Fotoğraflar henüz doğrulanmadı. Lütfen baştan tekrar dene."
       );
     }
-    const primaryRefUrl = prepSnap.data().primaryRefUrl ||
-      (Array.isArray(prepSnap.data().falRefUrls) ? prepSnap.data().falRefUrls[0] : null);
-    if (!primaryRefUrl) {
+    const refUrls = prepSnap.data().falRefUrls;
+    if (!Array.isArray(refUrls) || refUrls.length === 0) {
       throw new HttpsError(
         "failed-precondition",
         "Referans fotoğrafları hazır değil. Lütfen baştan tekrar dene."
@@ -426,7 +491,7 @@ exports.startPhotoGeneration = onCall(
       }
       tx.set(walletRef, walletUpdate, { merge: true });
 
-      // merge — prepareReferencePhotos'un yazdığı falRefUrls/primaryRefUrl korunur.
+      // merge — prepareReferencePhotos'un yazdığı falRefUrls korunur.
       tx.set(jobRef, {
         status: "generating",
         styles,
@@ -441,13 +506,13 @@ exports.startPhotoGeneration = onCall(
 
     try {
       for (const styleId of styles) {
-        // Stil başına IMAGES_PER_STYLE (10) foto. PuLID istek başına tek görsel
-        // ürettiği için 10 ayrı istek ("chunk"), her biri farklı seed ile.
-        // İstekler PARALEL gönderilir — 10 sıralı POST loader'ı gereksiz uzatıyordu.
+        // Stil başına IMAGES_PER_STYLE (5) foto = 5 ayrı istek ("chunk"), her
+        // biri FARKLI bir sahne varyantı (chunk index -> STYLE_SCENES sırası).
+        // İstekler PARALEL gönderilir — sıralı POST loader'ı gereksiz uzatıyordu.
         const submissions = await Promise.all(
           Array.from({ length: IMAGES_PER_STYLE }, async (_, i) => {
             const seed = Math.floor(Math.random() * 2147483647);
-            const falJob = await submitStyleJob(uid, jobId, styleId, i, primaryRefUrl, seed);
+            const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, seed);
             return [String(i), {
               requestId: falJob.request_id,
               photoUrls: [],
@@ -626,15 +691,15 @@ exports.falInferenceWebhook = onRequest(
  */
 async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef) {
   const retries = chunk?.retries || 0;
-  const primaryRefUrl = job.primaryRefUrl ||
-    (Array.isArray(job.falRefUrls) ? job.falRefUrls[0] : null);
-  if (retries >= MAX_CHUNK_RETRIES || !primaryRefUrl) {
+  const refUrls = job.falRefUrls;
+  if (retries >= MAX_CHUNK_RETRIES || !Array.isArray(refUrls) || refUrls.length === 0) {
     return false;
   }
   try {
     // Yeni seed — takılan/başarısız üretimi farklı bir çıktı ile kurtar.
+    // Aynı chunkIdx → aynı sahne varyantı korunur.
     const seed = Math.floor(Math.random() * 2147483647);
-    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, primaryRefUrl, seed);
+    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, refUrls, seed);
     await jobRef.set({
       results: {
         [styleId]: {
