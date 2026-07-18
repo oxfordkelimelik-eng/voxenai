@@ -6,6 +6,7 @@ import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/shared_widgets.dart';
+import 'module_flows.dart' show GeneratedPhotosScreen;
 
 /// Giriş/abonelik sonrası ana merkez (Bölüm 6). Alt menü: Modüller / Bize
 /// Ulaşın / Ayarlar. 2 aktif modül + kredi bakiyesi.
@@ -36,7 +37,14 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(child: _tab == 0 ? _modules() : _contact()),
+      body: SafeArea(
+        child: switch (_tab) {
+          0 => _modules(),
+          1 => const GeneratedPhotosScreen(),
+          2 => _contact(),
+          _ => _modules(),
+        },
+      ),
       bottomNavigationBar: _bottomNav(),
     );
   }
@@ -55,7 +63,9 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
         type: BottomNavigationBarType.fixed,
         elevation: 0,
         onTap: (i) {
-          if (i == 2) {
+          // Ayarlar bir sekme değil, ayrı bir ekrana geçiştir (_tab
+          // değişmez — geri dönünce en son gerçek sekmede kalınır).
+          if (i == 3) {
             context.push(DatingRoutes.settings);
             return;
           }
@@ -64,6 +74,9 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
         items: const [
           BottomNavigationBarItem(
               icon: Icon(Icons.grid_view_rounded), label: 'Modüller'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.photo_library_rounded),
+              label: 'Fotoğraflarım'),
           BottomNavigationBarItem(
               icon: Icon(Icons.support_agent_rounded), label: 'Bize Ulaşın'),
           BottomNavigationBarItem(

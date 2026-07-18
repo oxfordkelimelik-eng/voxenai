@@ -987,7 +987,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             label: Text(
                 _validatingPhotos
                     ? 'Yüzler kontrol ediliyor…'
-                    : (_photos.isEmpty ? 'Galeriden Seç' : 'Değiştir'),
+                    // Bu akışta seçilen fotoğraflar LİSTEYE EKLENİR (bkz.
+                    // yukarıdaki onPressed — _photos.add), değiştirilmez;
+                    // buton metni davranışla uyuşmalı.
+                    : (_photos.isEmpty ? 'Galeriden Seç' : 'Ekle'),
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
@@ -1099,6 +1102,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             crossAxisCount: 2,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
+            // Hücrelerle içerik aynı orana (3:4) sahip olmalı — aksi halde
+            // GridView.count'un varsayılanı (1:1, kare) her hücreyi kare
+            // ayırır, içerik 3:4 diye ortalanıp küçülür ve hücrenin kenar
+            // boşluklarında görünmez/tıklanamaz bir alan kalır.
+            childAspectRatio: 3 / 4,
             children: [
               for (int i = 0; i < urls.length; i++)
                 _resultTile(urls[i], index: i),
@@ -1117,60 +1125,85 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     );
   }
 
-  /// `gs://bucket/path` biçimindeki bir Firebase Storage URL'ini gerçek
-  /// bir indirme URL'ine çözüp gösterir (Firebase Auth token'ı ile —
-  /// storage.rules yalnızca sahibine izin verir).
-  Widget _resultTile(String gsUrl, {required int index}) {
-    // Foto üretiminde dönen tüm fotolar ödenmiştir; kilit/blur yok.
-    // Dokununca tam ekran görüntüleyici açılır (kaydırmalı + indirmeli).
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => PhotoViewerPage(
-            gsUrls: _resultUrls,
-            initialIndex: index,
+  Widget _resultTile(String gsUrl, {required int index}) =>
+      GeneratedPhotoTile(gsUrl: gsUrl, allGsUrls: _resultUrls, index: index);
+}
+
+// ============================================================
+// Ortak üretilen-fotoğraf hücresi — hem güncel üretim sonucunda (AiPhotoFlow)
+// hem kalıcı "Fotoğraflarım" galerisinde (GeneratedPhotosScreen) kullanılır.
+// `gs://bucket/path` biçimindeki bir Firebase Storage URL'ini gerçek bir
+// indirme URL'ine çözüp gösterir (Firebase Auth token'ı ile — storage.rules
+// yalnızca sahibine izin verir). Dokununca tam ekran görüntüleyici açılır.
+// ============================================================
+class GeneratedPhotoTile extends StatelessWidget {
+  final String gsUrl;
+  final List<String> allGsUrls;
+  final int index;
+  const GeneratedPhotoTile({
+    super.key,
+    required this.gsUrl,
+    required this.allGsUrls,
+    required this.index,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Material + InkWell KASITLI olarak GestureDetector yerine kullanıldı:
+    // InkWell dokunulan alanı görsel olarak (ripple ile) doğrular ve
+    // Flutter'ın en test edilmiş tıklanabilir-görsel deseni — GestureDetector
+    // + iç içe Stack/ClipRRect/AspectRatio kombinasyonunda dokunma alanının
+    // gerçek hücreden küçük kalması ("tıklanmıyor" hissi) riskini ortadan
+    // kaldırır.
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => PhotoViewerPage(
+              gsUrls: allGsUrls,
+              initialIndex: index,
+            ),
           ),
         ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: AspectRatio(
-          aspectRatio: 3 / 4,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              FutureBuilder<String>(
-                future:
-                    FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
-                builder: (context, snap) {
-                  if (!snap.hasData) {
-                    return Container(
-                      color: AppColors.surface,
-                      child: const Center(
-                        child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.2, color: AppColors.gold),
-                        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FutureBuilder<String>(
+              future:
+                  FirebaseStorage.instance.refFromURL(gsUrl).getDownloadURL(),
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return Container(
+                    color: AppColors.surface,
+                    child: const Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.2, color: AppColors.gold),
                       ),
-                    );
-                  }
-                  return CachedNetworkImage(
-                    imageUrl: snap.data!,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, _, _) => Container(
-                      color: AppColors.surface,
-                      child: const Icon(Icons.broken_image_outlined,
-                          color: AppColors.textMuted),
                     ),
                   );
-                },
-              ),
-              // Büyütme ipucu — fotoğrafın tıklanabilir olduğunu belli eder.
-              Positioned(
-                right: 6,
-                bottom: 6,
+                }
+                return CachedNetworkImage(
+                  imageUrl: snap.data!,
+                  fit: BoxFit.cover,
+                  errorWidget: (_, _, _) => Container(
+                    color: AppColors.surface,
+                    child: const Icon(Icons.broken_image_outlined,
+                        color: AppColors.textMuted),
+                  ),
+                );
+              },
+            ),
+            // Büyütme ipucu — fotoğrafın tıklanabilir olduğunu belli eder.
+            Positioned(
+              right: 6,
+              bottom: 6,
+              child: IgnorePointer(
                 child: Container(
                   padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
@@ -1181,8 +1214,101 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                       color: Colors.white, size: 16),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// Kalıcı "Fotoğraflarım" galerisi — TÜM geçmiş üretim işlerindeki fotoğraflar
+// tek yerde. Hub'da ayrı bir sekme olarak açılır.
+// ============================================================
+class GeneratedPhotosScreen extends ConsumerWidget {
+  const GeneratedPhotosScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final uid = ref.watch(authServiceProvider).uid;
+    if (uid == null) {
+      return const Center(
+        child: Text('Giriş yapman gerekiyor.',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users/$uid/private/genData/genJobs')
+          .where('status', isEqualTo: 'done')
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.gold),
+          );
+        }
+        // Her işten YALNIZCA 'done' durumundaki stillerin fotoğrafları — iş
+        // kısmi başarıyla bittiyse başarısız stillerin boş sonucu atlanır.
+        final urls = <String>[];
+        for (final doc in snap.data?.docs ?? const []) {
+          final results = doc.data()['results'] as Map<String, dynamic>?;
+          if (results == null) continue;
+          for (final entry in results.values) {
+            final map = entry as Map<String, dynamic>;
+            if (map['status'] != 'done') continue;
+            urls.addAll((map['photoUrls'] as List?)?.cast<String>() ?? []);
+          }
+        }
+        if (urls.isEmpty) {
+          return _emptyState(context);
+        }
+        return GridView.count(
+          padding: const EdgeInsets.all(16),
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 3 / 4,
+          children: [
+            for (int i = 0; i < urls.length; i++)
+              GeneratedPhotoTile(gsUrl: urls[i], allGsUrls: urls, index: i),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _emptyState(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.photo_library_outlined,
+                color: AppColors.textMuted, size: 48),
+            const SizedBox(height: 12),
+            const Text('Henüz üretilmiş fotoğrafın yok',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            const Text(
+                'AI Dating Fotoğrafı modülünden bir set oluşturduğunda '
+                'ürettiğin tüm fotoğraflar burada birikir.',
+                textAlign: TextAlign.center,
+                style:
+                    TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 16),
+            PrimaryButton(
+              label: 'Fotoğraf Üret',
+              onPressed: () =>
+                  context.push('${DatingRoutes.module}/ai_photo'),
+            ),
+          ],
         ),
       ),
     );
