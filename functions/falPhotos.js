@@ -100,6 +100,33 @@ const STYLE_SCENES = {
   ],
 };
 
+// Chunk index (0-4) -> kompozisyon tarifi. Stil FARK ETMEKSİZİN her stildeki
+// 5 foto bu 5 kompozisyonu kullanır — böylece bir setin fotoğrafları birbirinin
+// aynı "stüdyo portresi" formülünün kopyaları değil, gerçek bir telefon
+// galerisindeki gibi ÇEŞİTLİ kadraj/mesafe/bulanıklık taşır (bazısı yakın ve
+// arka plan bulanık, bazısı geniş ve her şey net, bazısı ön planda bir nesne
+// var vb.). Bu, "hepsi aynı formülde" görünüp set hâlinde yapay durma
+// sorununu hedefler.
+const COMPOSITIONS = [
+  // 0: Yakın omuz üstü, güçlü arka plan bulanıklığı — klasik "portre" karesi.
+  "Tight head-and-shoulders framing, the subject fills most of the frame, shallow depth of " +
+  "field with the background strongly out of focus (like a portrait lens at f/1.8).",
+  // 1: Bel boyu, orta bulanıklık, hafif merkez dışı.
+  "Waist-up framing, the subject positioned slightly off-centre, background moderately soft " +
+  "but its shapes and colours still readable (like f/2.8).",
+  // 2: Geniş/tam boy, kişi küçük, sahne baskın, tamamen net — "ortam fotoğrafı".
+  "Wide environmental shot where the subject is a smaller element within the frame rather than " +
+  "filling it — the whole scene stays in sharp focus from near to far (like a wide-angle lens at " +
+  "f/8), the location itself is as much the subject as the person.",
+  // 3: Orta mesafe, kenarda, kadrajın önünde bir şey var (gerçek derinlik hissi).
+  "Medium-distance shot, the subject positioned toward one side of the frame with open space on " +
+  "the other side, something genuinely sits in the near foreground and is softly out of focus at " +
+  "the very edge of the frame (a railing, a plant, a doorway, a shoulder), moderate background blur.",
+  // 4: Gündelik, hafif eğik açı — "arkadaşın telefonla çektiği" hissi.
+  "Casual close-range framing from a slightly informal handheld angle, as if a friend quickly " +
+  "raised their phone — not perfectly centred or level, light natural background blur.",
+];
+
 /**
  * Edit modeline verilen tam talimat. ÖNCELİK SIRASI bilinçli: model uzun
  * prompt'larda önce gelen ve en çok tekrar eden talimata ağırlık veriyor.
@@ -108,10 +135,15 @@ const STYLE_SCENES = {
  * derinlik bloğu vardı — modele yüzü "yeniden yorumlama" lisansı verip hem
  * kimlik kaymasına hem de sahnenin gölgede kalıp alakasız arka plan
  * üretilmesine yol açtı; SCENE ile rekabet eden metin azaltıldı).
+ *
+ * variantIdx AYNI ZAMANDA kompozisyonu seçer (bkz. COMPOSITIONS) — sahne
+ * içeriği stile göre, kompozisyon (kadraj/mesafe/blur) chunk index'e göre
+ * değişir. Böylece 5 foto hem farklı ortamlarda hem farklı çekim tarzlarında.
  */
 function buildPrompt(styleId, variantIdx) {
   const variants = STYLE_SCENES[styleId];
   const scene = variants[variantIdx % variants.length];
+  const composition = COMPOSITIONS[variantIdx % COMPOSITIONS.length];
   return (
     "Photograph this EXACT scene, precisely as described — do not simplify, generalise or substitute " +
     "any part of it: " + scene + ".\n\n" +
@@ -121,15 +153,18 @@ function buildPrompt(styleId, variantIdx) {
     "Match the lighting on their face and clothes to the scene's own light source so it reads as one " +
     "real photograph, not a cut-out on a backdrop — but the scene and its exact setting described above " +
     "always take priority over any other consideration.\n\n" +
-    "FRAMING: half-body or waist-up, environment clearly visible and identifiable behind and around them, " +
-    "never a blank or plain backdrop.\n\n" +
-    "CRAFT: an authentic candid photograph, the kind a friend takes on a good camera. Natural unretouched " +
-    "skin with visible pores and real texture, faint blemishes and natural facial asymmetry, individual " +
-    "flyaway hairs, realistic fabric folds and creases. Full-frame camera, 35mm or 50mm lens at f/2.0, " +
-    "available natural light, true-to-life colour, gentle depth of field, a touch of real lens character.\n\n" +
-    "AVOID: airbrushed or plastic skin, waxy sheen, beauty filter, over-smoothing, oversaturated colour, " +
-    "HDR glow, CGI or 3D render look, illustration, cartoon, perfectly symmetrical AI face, vacant " +
-    "expression, stiff posed mannequin stance, studio backdrop, text, watermark, distorted hands."
+    "FRAMING: " + composition + " The environment must stay clearly visible and identifiable around " +
+    "them — never a blank or plain backdrop.\n\n" +
+    "CRAFT: this must read as one specific, unrepeatable moment captured on an ordinary phone or " +
+    "consumer camera, not a polished editorial shoot. Include real imperfections: natural skin " +
+    "texture with visible pores, faint blemishes or uneven tone in places, natural facial asymmetry, " +
+    "flyaway hairs out of place, slightly uneven or off-guard expression, a little sensor noise/grain " +
+    "in shadow areas, realistic fabric creases, and imperfect everyday framing (not perfectly level or " +
+    "centred). Natural available light with realistic, sometimes slightly mixed colour temperature, " +
+    "true-to-life (not boosted) colour and contrast.\n\n" +
+    "AVOID: airbrushed or plastic skin, beauty-filter smoothing, studio-perfect lighting, oversaturated " +
+    "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, a stiff posed mannequin " +
+    "stance, blank studio backdrop, text, watermark, distorted hands."
   );
 }
 
@@ -325,31 +360,34 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls,
 }
 
 /**
- * ADIM 1/2 — DOĞRULAMA. Kullanıcı 5 referans selfie'sini Storage'a yükledikten
+ * ADIM 1/2 — DOĞRULAMA. Kullanıcı 3 referans selfie'sini Storage'a yükledikten
  * sonra, HENÜZ HİÇBİR KREDİ/BAKİYE HARCANMADAN ve fal.ai'ye hiçbir üretim işi
  * gönderilmeden çağrılır. Fotoğrafla ilgili TÜM kapılar burada çalışır:
  *   - +18/uygunsuz içerik (Cloud Vision SafeSearch)
- *   - net/tek yüz kapısı + en iyi referans seçimi (ssd_mobilenetv1 tespiti)
+ *   - net/tek yüz kapısı + en iyi referans seçimi + kaynak kimlik vektörü
+ *     (ssd_mobilenetv1 tespit + landmark68 + recognition — bkz. faceQuality.js)
  * Buradan bir HttpsError dönerse client hâlâ fotoğraf seçme ekranındadır ve
  * kullanıcı ilgili fotoğrafı değiştirir. Bu fonksiyon BAŞARIYLA dönerse
  * fotoğraf kaynaklı hiçbir uyarı kalmaz — client ancak o zaman üretim
  * loader'ını başlatır ve startPhotoGeneration'ı çağırır.
  *
- * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri ve üretim
- * modeline verilecek "primary" referans (en net/en büyük yüzlü selfie) dokümana
- * yazılır; referans selfie'ler Storage'dan silinir (KVKK — biyometrik veri).
+ * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri ve kaynak
+ * kimlik vektörü (refDescriptor — falInferenceWebhook'ta üretim çıktısını
+ * doğrulamak için kullanılır) dokümana yazılır; referans selfie'ler
+ * Storage'dan silinir (KVKK — biyometrik veri geride bırakılmaz, yalnızca
+ * türetilmiş 128 sayılık vektör tutulur).
  *
  * data: { jobId: string } -> { ok: true }
  */
 exports.prepareReferencePhotos = onCall(
-  // Yalnızca ssd_mobilenetv1 tespit modeli yükleniyor (descriptor YOK) →
-  // eskisine göre çok daha hafif. minInstances:1 ile soğuk başlangıç (model
-  // yeniden yükleme) gecikmesi ortadan kaldırıldı — "kontrol çok uzun sürüyor"
-  // şikayetinin başlıca nedeni buydu.
+  // Tespit + landmark + recognition (3 model) yükleniyor — bkz. faceQuality.js.
+  // Bu üçü birlikte önceki bir sürümde de 2GiB gerektirmişti (1GiB'de model +
+  // selfie tensörleriyle OOM oluyordu). minInstances:1 ile soğuk başlangıç
+  // (model yeniden yükleme) gecikmesi ortadan kaldırıldı.
   {
     secrets: [FAL_KEY],
     region: "europe-west1",
-    memory: "1GiB",
+    memory: "2GiB",
     timeoutSeconds: 120,
     minInstances: 1,
   },
@@ -367,11 +405,12 @@ exports.prepareReferencePhotos = onCall(
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
-    // Net/tek yüz kapısı + en iyi referansın öne alınması. Seedream referansların
-    // HEPSİNİ kullanır, ama ilk sıradakine daha çok ağırlık verme eğilimindedir;
-    // bu yüzden en net yüzlü foto başa taşınır. Fail-safe: kontrolün KENDİSİ
-    // (tfjs/tespit) hata verirse üretim bloklanmaz, sıra olduğu gibi kalır.
+    // Net/tek yüz kapısı + en iyi referansın öne alınması + kaynak kimlik
+    // vektörü. Fail-safe: kontrolün KENDİSİ (tfjs/tespit) hata verirse üretim
+    // bloklanmaz, sıra olduğu gibi kalır ve refDescriptor null bırakılır
+    // (o durumda falInferenceWebhook'taki kimlik kapısı da devre dışı kalır).
     let orderedRefUrls = refUrls;
+    let refDescriptor = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers);
@@ -395,9 +434,12 @@ exports.prepareReferencePhotos = onCall(
         const best = refUrls[analysis.bestIndex];
         orderedRefUrls = [best, ...refUrls.filter((u) => u !== best)];
       }
+      if (analysis.refDescriptor) {
+        refDescriptor = Array.from(analysis.refDescriptor); // Firestore için düz dizi
+      }
     } catch (e) {
       if (e instanceof HttpsError) throw e;
-      console.error("Yüz kontrolü başarısız (referans sırası korunuyor):", e);
+      console.error("Yüz kontrolü başarısız (kimlik kapısı devre dışı, üretim engellenmiyor):", e);
     }
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
@@ -410,6 +452,7 @@ exports.prepareReferencePhotos = onCall(
       errorMessage: null,
       // Tümü üretime gönderilir (en net olan başta) — bkz. submitStyleJob.
       falRefUrls: orderedRefUrls,
+      ...(refDescriptor ? { refDescriptor } : {}),
     });
 
     // Referans selfie'ler artık gerekmiyor (fal kopyası var).
@@ -512,7 +555,7 @@ exports.startPhotoGeneration = onCall(
       }
       tx.set(walletRef, walletUpdate, { merge: true });
 
-      // merge — prepareReferencePhotos'un yazdığı falRefUrls korunur.
+      // merge — prepareReferencePhotos'un yazdığı falRefUrls/refDescriptor korunur.
       tx.set(jobRef, {
         status: "generating",
         styles,
@@ -571,18 +614,20 @@ exports.startPhotoGeneration = onCall(
 
 /**
  * fal.ai bir chunk'ın (stilin bir parçasının) işi tamamlanınca (webhook)
- * çağrılır. Çıktıyı indirir, kalite kapısından geçirir, geçenleri Storage'a
- * yazar ve iş dokümanını (atomik + idempotent) günceller. Kimlik benzerliği
- * düşükse chunk'ı bir kez otomatik yeniden üretir. Bir stilin TÜM chunk'ları
- * bitince sonuçlar birleştirilir (bkz. finalizeChunk).
+ * çağrılır. Çıktıyı indirir, KİMLİK KAPISINDAN geçirir (job.refDescriptor ile
+ * karşılaştırma — bkz. faceQuality.matchesIdentity), geçemezse chunk'ı
+ * otomatik yeniden üretir. Geçenlere hafif post-processing (film grain +
+ * gerçekçi JPEG sıkıştırma, bkz. postProcess.js) uygulanıp Storage'a yazılır.
+ * Bir stilin TÜM chunk'ları bitince sonuçlar birleştirilir (bkz. finalizeChunk).
  */
 exports.falInferenceWebhook = onRequest(
   {
     secrets: [FAL_KEY], // otomatik yeniden üretim fal'a yeni iş gönderiyor
     region: "europe-west1",
-    // Artık face-api YÜKLENMİYOR (kimlik sadakati PuLID id_weight ile modelin
-    // içinde) — webhook yalnızca sonuç görselini indirip Storage'a yazıyor.
-    memory: "512MiB",
+    // Kimlik kapısı için tespit+landmark+recognition (3 model) yükleniyor —
+    // bkz. faceQuality.js. Bu kombinasyon önceki bir sürümde de 2GiB
+    // gerektirmişti (1GiB'de OOM). sharp (post-processing) hafif.
+    memory: "2GiB",
     timeoutSeconds: 120,
     minInstances: 1,
   },
@@ -672,16 +717,59 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
 
-    // Kimlik sadakati PuLID (id_weight) ile üretimde sağlandığı için çıktı
-    // görsellerini ARTIK ELEMİYORUZ — üretilen her foto saklanır (vaat edilen
-    // stil başına 10 sayısı böylece korunur).
+    // KİMLİK KAPISI: her chunk tam olarak 1 görsel ürettiği için ("num_images:1"),
+    // bu görselin yüzü kaynak selfie'lere (job.refDescriptor) yeterince
+    // benzemiyorsa, o görseli KULLANICIYA HİÇ GÖSTERMEDEN chunk'ı yeniden
+    // üretmeyi dene (bkz. faceQuality.matchesIdentity, maybeRetryChunk).
+    // Fail-safe: refDescriptor yoksa (prepareReferencePhotos'ta hesaplanamadıysa)
+    // ya da kontrolün kendisi hata verirse, filtre uygulanmaz — üretim asla
+    // bu ikincil kapı yüzünden bloklanmaz.
+    let passed = downloaded;
+    if (job.refDescriptor) {
+      try {
+        const { matchesIdentity } = require("./faceQuality");
+        const checked = await Promise.all(downloaded.map(async (d) => {
+          const { match, distance } = await matchesIdentity(d.buf, job.refDescriptor);
+          return { ...d, match, distance };
+        }));
+        passed = checked.filter((d) => d.match);
+        if (passed.length < checked.length) {
+          console.warn(`Kimlik kapısı elendi (style=${styleId}, chunk=${chunkIdx}): ` +
+            checked.map((d) => `${d.match ? "OK" : "RED"}(${d.distance?.toFixed(3)})`).join(", "));
+        }
+      } catch (e) {
+        console.error("Kimlik kontrolü başarısız (filtresiz devam ediliyor):", e);
+        passed = downloaded;
+      }
+    }
+
+    if (passed.length === 0) {
+      // Bu görsel(ler) kimlik eşiğini geçemedi — retry hakkı varsa yeni bir
+      // seed ile aynı sahne/kompozisyonu tekrar dene. Kullanıcı bunu asla
+      // görmez (finalizeChunk'a hiç gitmiyor).
+      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
+        res.status(200).send("yeniden üretiliyor (kimlik eşiği)");
+        return;
+      }
+      // Retry hakkı bitti — bu chunk'ı başarısız say (diğer chunk'lar/stiller
+      // etkilenmez, kısmi başarı mekanizması zaten var).
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
+      res.status(200).send("ok");
+      return;
+    }
+
+    // POST-PROCESSING: hafif film grain + gerçekçi JPEG sıkıştırma (bkz.
+    // postProcess.js) — AI çıktısına özgü "çok temiz" hissi kırar. Fail-safe:
+    // bir görselde hata olursa o görsel orijinal haliyle kaydedilir.
     let photoUrls = [];
     try {
-      photoUrls = await Promise.all(downloaded.map(async ({ i, buf }) => {
+      const { addPhoneCameraTexture } = require("./postProcess");
+      photoUrls = await Promise.all(passed.map(async ({ i, buf }) => {
+        const textured = await addPhoneCameraTexture(buf);
         // chunkIdx dosya adına eklenir — aksi halde farklı chunk'ların aynı
         // "i" indeksli görselleri birbirinin üstüne yazardı.
         const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
-        await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
+        await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
         return `gs://${bucket().name}/${path}`;
       }));
     } catch (e) {
@@ -836,10 +924,12 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         }
         tx.set(walletRef, walletUpdate, { merge: true });
         update.status = "failed";
-        // Bu mesaj, üretilen görsellerin kaynak selfie'lerle kimlik eşleşme
-        // eşiğini (bkz. faceQuality.FACE_MATCH_THRESHOLD) tutturamamasından
-        // gelir — girdi fotoğrafının "bulanık" olmasından değil. Kullanıcıya
-        // gerçek nedeni ve işe yarayan bir öneri sunar.
+        // En olası neden: üretilen görseller kaynak selfie'lerle kimlik eşleşme
+        // eşiğini (bkz. faceQuality.FACE_MATCH_THRESHOLD) tutturamadı ve tüm
+        // retry hakları tükendi (bkz. maybeRetryChunk çağrıları). Teorik olarak
+        // fal API hatası/moderasyon reddi de aynı "tüm chunk'lar failed" sonucuna
+        // yol açabilir — gerçek sebep her zaman Cloud Functions loglarında
+        // (falInferenceWebhook console.error/console.warn satırları) görünür.
         update.errorMessage =
           "Üretilen fotoğraflar yüzünle yeterince eşleşmedi. Farklı ışıkta/açıda " +
           "çekilmiş, yüzünün net ve tek başına göründüğü selfie'lerle tekrar dene.";
