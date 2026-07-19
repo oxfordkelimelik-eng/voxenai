@@ -28,8 +28,9 @@ const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
-// Kullanıcıdan istenen referans foto sayısı (client ile senkron).
-const REFERENCE_PHOTO_COUNT = 3;
+// Kullanıcıdan istenen referans: 3 canlı yüz (ön/sağ/sol) + 1 zorunlu tam boy.
+const REFERENCE_PHOTO_COUNT = 4;
+const FACE_PHOTO_COUNT = 3;
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
 const MAX_CHUNK_RETRIES = 2;
 
@@ -148,10 +149,62 @@ const COMPOSITIONS = [
  * "cildi aç/yaşı küçült" varsayılan eğilimini yazılı ten tonu/yaş bastırıyor.
  * null ise (Gemini çağrısı başarısız olduysa) bu cümle sessizce atlanır.
  */
-function buildPrompt(styleId, variantIdx, identityCaption) {
+// Form alanları (boy/vücut tipi) → kısa İngilizce ipucu. Fotoğraf ÇAKIŞIRSA
+// fotoğraf kazanır — bu metin yalnızca tamamlayıcıdır.
+const BODY_TYPE_HINTS = {
+  slim: "slim / lean build",
+  athletic: "athletic / sporty build",
+  average: "average build",
+  solid: "solid / fuller build",
+};
+const HEIGHT_HINTS = {
+  under160: "under 160 cm",
+  "160-165": "about 160–165 cm",
+  "165-170": "about 165–170 cm",
+  "170-175": "about 170–175 cm",
+  "175-180": "about 175–180 cm",
+  "180-185": "about 180–185 cm",
+  "185-190": "about 185–190 cm",
+  "190+": "190 cm or taller",
+};
+
+function bodyProfileHint(bodyProfile) {
+  if (!bodyProfile || typeof bodyProfile !== "object") return "";
+  const parts = [];
+  const bt = BODY_TYPE_HINTS[bodyProfile.bodyType];
+  const ht = HEIGHT_HINTS[bodyProfile.heightRange];
+  if (bt) parts.push(bt);
+  if (ht) parts.push(ht);
+  if (parts.length === 0) return "";
+  return (
+    "SECONDARY BODY CUE (form answers — use only to fill gaps; if the full-body " +
+    "reference photo contradicts this, ALWAYS trust the photo, never idealise or " +
+    "reshape the body to match the form): " + parts.join(", ") + ".\n\n"
+  );
+}
+
+function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras = {}) {
   const variants = STYLE_SCENES[styleId];
   const scene = variants[variantIdx % variants.length];
   const composition = COMPOSITIONS[variantIdx % COMPOSITIONS.length];
+  const bodyCaption = extras.bodyCaption || null;
+  const wardrobeNote = extras.wardrobeNote || null;
+
+  let bodyBlock = "";
+  if (bodyCaption) {
+    bodyBlock +=
+      "BODY FROM FULL-BODY REFERENCE (primary — match this build, do not idealise): " +
+      bodyCaption + "\n\n";
+  }
+  bodyBlock += bodyProfileHint(bodyProfile);
+
+  let wardrobeBlock = "";
+  if (wardrobeNote) {
+    wardrobeBlock =
+      "WARDROBE / VIBE for this style (keep natural and wearable for THIS person; " +
+      "do not turn into a fashion editorial): " + wardrobeNote + "\n\n";
+  }
+
   return (
     "Photograph this EXACT scene, precisely as described — do not simplify, generalise or substitute " +
     "any part of it: " + scene + ".\n\n" +
@@ -159,7 +212,10 @@ function buildPrompt(styleId, variantIdx, identityCaption) {
     "shape, bone structure, eyes, nose, mouth, jawline, hairline, skin tone and age as the references. " +
     (identityCaption ? `Specifically, this person: ${identityCaption} ` : "") +
     "Do not reshape or reinterpret their face, and do not lighten their skin or make them look younger " +
-    "than the references.\n\n" +
+    "than the references. Match body proportions, shoulder width and overall build to the full-body " +
+    "reference photo when it is present — do not invent a fitter, taller or differently shaped body.\n\n" +
+    bodyBlock +
+    wardrobeBlock +
     "Match the lighting on their face and clothes to the scene's own light source so it reads as one " +
     "real photograph, not a cut-out on a backdrop — but the scene and its exact setting described above " +
     "always take priority over any other consideration.\n\n" +
@@ -290,7 +346,12 @@ async function uploadReferencePhotos(uid, jobId) {
     throw new HttpsError("failed-precondition", "Referans fotoğrafları bulunamadı.");
   }
   const results = await Promise.all(photoFiles.map(async (file, idx) => {
-    const [buf] = await file.download();
+    const [raw] = await file.download();
+
+    // EXIF Orientation'ı piksellere uygula — fal/yüz kapısı yan-ters
+    // referans görmesin (bkz. postProcess.normalizeExifOrientation).
+    const { normalizeExifOrientation } = require("./postProcess");
+    const buf = await normalizeExifOrientation(raw);
 
     // +18/uygunsuz içerik kapısı — fal.ai'ye hiçbir görsel gönderilmeden önce.
     // Vision API'nin kendisi hata verirse fail-open (loglanır, engellenmez);
@@ -334,10 +395,16 @@ async function uploadReferencePhotos(uid, jobId) {
  * ile gönderilir — model kişiyi birden fazla açıdan gördüğü için kimlik
  * sadakati artar. identityCaption -> buildPrompt'a geçilir (bkz. orada).
  */
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls, seed, identityCaption) {
+async function submitStyleJob(
+  uid, jobId, styleId, chunkIdx, referenceImageUrls, seed,
+  identityCaption, bodyProfile, promptExtras = {}
+) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
-    prompt: buildPrompt(styleId, chunkIdx, identityCaption),
+    prompt: buildPrompt(styleId, chunkIdx, identityCaption, bodyProfile, {
+      bodyCaption: promptExtras.bodyCaption || null,
+      wardrobeNote: promptExtras.wardrobeNote || null,
+    }),
     image_urls: referenceImageUrls,
     // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
     aspect_ratio: "3:4", // dikey dating fotoğrafı
@@ -406,7 +473,8 @@ exports.prepareReferencePhotos = onCall(
     secrets: [FAL_KEY, GEMINI_KEY],
     region: "europe-west1",
     memory: "2GiB",
-    timeoutSeconds: 120,
+    // Gemini kimlik + beden + wardrobe paralel; soğuk başlangıçta 120 sn yetmeyebilir.
+    timeoutSeconds: 180,
     minInstances: 1,
   },
   async (request) => {
@@ -414,10 +482,22 @@ exports.prepareReferencePhotos = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
-    const { jobId } = request.data || {};
+    const { jobId, bodyProfile, styles: prepStyles } = request.data || {};
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
+    // Formdan gelen boy/vücut tipi — prompt'ta ikincil ipucu (foto öncelikli).
+    const safeBodyProfile = (bodyProfile && typeof bodyProfile === "object")
+      ? {
+          heightRange: typeof bodyProfile.heightRange === "string" ? bodyProfile.heightRange : null,
+          bodyType: typeof bodyProfile.bodyType === "string" ? bodyProfile.bodyType : null,
+          gender: typeof bodyProfile.gender === "string" ? bodyProfile.gender : null,
+        }
+      : null;
+    // Wardrobe notları için seçilen stiller (opsiyonel; yoksa atlanır).
+    const stylesForWardrobe = Array.isArray(prepStyles)
+      ? prepStyles.filter((s) => typeof s === "string" && STYLE_SCENES[s])
+      : [];
 
     // Referansları indir (+ içerik moderasyonu, bkz. uploadReferencePhotos) ve
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
@@ -433,21 +513,48 @@ exports.prepareReferencePhotos = onCall(
     let faceCropUrl = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
-      const analysis = await analyzeReferences(refBuffers);
-      if (analysis.unclearIndices.length > 0) {
-        // unclearIndices, kullanıcının seçtiği fotoğraf sırasıyla (0-tabanlı)
-        // birebir eşleşir — client'a 1-tabanlı sıra numarası olarak gösterilir.
-        const positions = analysis.unclearIndices.map((i) => i + 1);
+      const analysis = await analyzeReferences(refBuffers, {
+        facePhotoCount: Math.min(FACE_PHOTO_COUNT, refBuffers.length),
+      });
+      // Fotoğraf sırası (0-tabanlı) client'a 1-tabanlı sıra no olarak gösterilir.
+      const posLabel = (indices) => {
+        const positions = indices.map((i) => i + 1);
         const many = positions.length > 1;
         const label = many
           ? `${positions.slice(0, -1).join(", ")}. ve ${positions[positions.length - 1]}. fotoğraflar`
           : `${positions[0]}. fotoğraf`;
+        return { label, many };
+      };
+      if (analysis.unclearIndices.length > 0) {
+        const { label, many } = posLabel(analysis.unclearIndices);
         throw new HttpsError(
           "invalid-argument",
           `${label} net değil, bulanık ya da aşırı pozlanmış olabilir. Lütfen ` +
           `${many ? "bunları" : "bunu"} net, iyi aydınlatılmış, tek kişinin ` +
           "göründüğü selfie ile değiştirip tekrar dene.",
           { unclearPhotoIndices: analysis.unclearIndices }
+        );
+      }
+      // Tam boy karesinde gövde görünmüyor (yakın selfie gönderilmiş).
+      if (analysis.notFullBodyIndices && analysis.notFullBodyIndices.length > 0) {
+        const { label, many } = posLabel(analysis.notFullBodyIndices);
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} tam boy değil — yüz çok yakın, gövden görünmüyor. Lütfen ` +
+          `baştan (en azından belden) aşağısı kadrajda olan, gövdeni gösteren ` +
+          `bir fotoğraf ${many ? "bunlarla" : "bununla"} değiştir.`,
+          { notFullBodyPhotoIndices: analysis.notFullBodyIndices }
+        );
+      }
+      // İki yüz karesi neredeyse aynı açıda — farklı açı iste.
+      if (analysis.duplicateIndices && analysis.duplicateIndices.length > 0) {
+        const { label, many } = posLabel(analysis.duplicateIndices);
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} başka bir kareyle neredeyse aynı açıda görünüyor. Daha iyi ` +
+          `sonuç için ${many ? "bunları" : "bunu"} farklı bir açıdan (ör. hafif ` +
+          `yana dönük) çekip tekrar dene.`,
+          { duplicatePhotoIndices: analysis.duplicateIndices }
         );
       }
       if (analysis.bestIndex != null && refUrls[analysis.bestIndex]) {
@@ -481,15 +588,32 @@ exports.prepareReferencePhotos = onCall(
       orderedRefUrls = [faceCropUrl, ...orderedRefUrls];
     }
 
-    // Kısa kimlik tarifi (Gemini Flash) — görsel + metin sinyali hizalayıp
-    // kimlik sadakatini artırır (bkz. identityCaption.js). Fail-safe: null
-    // dönerse buildPrompt bu cümleyi sessizce atlar.
+    // Gemini ön-işlem (paralel, fail-safe): kimlik + tam boy beden + stil wardrobe.
     let identityCaption = null;
+    let bodyCaption = null;
+    let styleWardrobes = {};
     try {
-      const { describeIdentity } = require("./identityCaption");
-      identityCaption = await describeIdentity(refBuffers);
+      const {
+        describeIdentity,
+        describeBodyBuild,
+        describeStyleWardrobes,
+      } = require("./identityCaption");
+      const faceBuffers = refBuffers.slice(0, FACE_PHOTO_COUNT);
+      const bodyBuffer = refBuffers.length > FACE_PHOTO_COUNT
+        ? refBuffers[refBuffers.length - 1]
+        : null;
+      const [idCap, bodyCap, wardrobes] = await Promise.all([
+        describeIdentity(faceBuffers.length ? faceBuffers : refBuffers),
+        describeBodyBuild(bodyBuffer),
+        stylesForWardrobe.length
+          ? describeStyleWardrobes(refBuffers, stylesForWardrobe)
+          : Promise.resolve({}),
+      ]);
+      identityCaption = idCap;
+      bodyCaption = bodyCap;
+      styleWardrobes = wardrobes || {};
     } catch (e) {
-      console.error("Kimlik tarifi başarısız (caption olmadan devam ediliyor):", e);
+      console.error("Gemini ön-işlem başarısız (caption'sız devam):", e);
     }
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
@@ -504,7 +628,18 @@ exports.prepareReferencePhotos = onCall(
       falRefUrls: orderedRefUrls,
       ...(refDescriptor ? { refDescriptor } : {}),
       ...(identityCaption ? { identityCaption } : {}),
+      ...(bodyCaption ? { bodyCaption } : {}),
+      ...(Object.keys(styleWardrobes).length ? { styleWardrobes } : {}),
+      ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
     });
+
+    // Form beden profilini kullanıcıya özel sakla (sonraki üretimler / analitik).
+    if (safeBodyProfile) {
+      await db.doc(`users/${uid}/private/datingProfile`).set({
+        ...safeBodyProfile,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
 
     // Referans selfie'ler artık gerekmiyor (fal kopyası var).
     await deleteTrainingPhotos(uid, jobId);
@@ -555,7 +690,11 @@ exports.startPhotoGeneration = onCall(
         "Referans fotoğrafları hazır değil. Lütfen baştan tekrar dene."
       );
     }
-    const identityCaption = prepSnap.data().identityCaption || null;
+    const prepData = prepSnap.data();
+    const identityCaption = prepData.identityCaption || null;
+    const bodyProfile = prepData.bodyProfile || null;
+    const bodyCaption = prepData.bodyCaption || null;
+    const styleWardrobes = prepData.styleWardrobes || {};
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
     // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
@@ -622,14 +761,17 @@ exports.startPhotoGeneration = onCall(
     });
 
     try {
-      for (const styleId of styles) {
-        // Stil başına IMAGES_PER_STYLE (5) foto = 5 ayrı istek ("chunk"), her
-        // biri FARKLI bir sahne varyantı (chunk index -> STYLE_SCENES sırası).
-        // İstekler PARALEL gönderilir — sıralı POST loader'ı gereksiz uzatıyordu.
+      // Stiller + chunk'lar paralel (4 stil × 5 = 20 fal işi tek turda).
+      await Promise.all(styles.map(async (styleId) => {
         const submissions = await Promise.all(
           Array.from({ length: IMAGES_PER_STYLE }, async (_, i) => {
             const seed = Math.floor(Math.random() * 2147483647);
-            const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, seed, identityCaption);
+            const falJob = await submitStyleJob(
+              uid, jobId, styleId, i, refUrls, seed, identityCaption, bodyProfile, {
+                bodyCaption,
+                wardrobeNote: styleWardrobes[styleId] || null,
+              }
+            );
             return [String(i), {
               requestId: falJob.request_id,
               photoUrls: [],
@@ -640,12 +782,10 @@ exports.startPhotoGeneration = onCall(
           })
         );
         const chunks = Object.fromEntries(submissions);
-        // Nokta içeren anahtar yerine iç içe nesne — set(merge) bunu derin
-        // birleştirir; "results.styleId" düz alan adı olarak yorumlanmaz.
         await jobRef.set({
           results: { [styleId]: { status: "pending", photoUrls: [], chunks } },
         }, { merge: true });
-      }
+      }));
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
       // Servis kesintisinde (fal bakiye/kilit) kullanıcıya net mesaj + iade.
@@ -862,7 +1002,11 @@ async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef
     // Aynı chunkIdx → aynı sahne varyantı korunur.
     const seed = Math.floor(Math.random() * 2147483647);
     const falJob = await submitStyleJob(
-      uid, jobId, styleId, chunkIdx, refUrls, seed, job.identityCaption || null
+      uid, jobId, styleId, chunkIdx, refUrls, seed,
+      job.identityCaption || null, job.bodyProfile || null, {
+        bodyCaption: job.bodyCaption || null,
+        wardrobeNote: (job.styleWardrobes && job.styleWardrobes[styleId]) || null,
+      }
     );
     await jobRef.set({
       results: {

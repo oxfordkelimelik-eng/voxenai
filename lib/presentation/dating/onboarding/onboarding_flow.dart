@@ -23,10 +23,9 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   int _index = 0;
   bool _blockedUnder18 = false;
 
-  // "1 numaralı tanışma aracı" istatistiği + pasif modül tanıtımları
-  // (Bio & Prompt, Coach & Rizz) kaldırıldı. Sorular sonrası Google/Apple
-  // giriş adımı eklendi → 14 adım.
-  static const int _totalSteps = 14;
+  // Sorular: cinsiyet, yaş, vücut tipi, boy, uygulamalar, eşleşme + auth…
+  // → 16 adım (vücut tipi + boy AI foto üretiminde kullanılır).
+  static const int _totalSteps = 16;
   bool _signedIn = false;
 
   void _next() {
@@ -74,12 +73,14 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       () => _moduleAnalysis(), // 6  — Foto skor analizi tanıtımı (video)
       () => _qGender(answers), // 7
       () => _qAge(answers), // 8
-      () => _qApps(answers), // 9
-      () => _qMatches(answers), // 10
-      () => _authStep(), // 11 — Google/Apple ile giriş (formlar sonrası)
-      () => _beforeAfter(), // 12 — 7 kat fazla eşleşme
-      () => _top1Review(), // 13
-      () => _preparing(), // 14
+      () => _qBodyType(answers), // 9 — AI foto beden ipucu
+      () => _qHeight(answers), // 10 — AI foto boy ipucu
+      () => _qApps(answers), // 11
+      () => _qMatches(answers), // 12
+      () => _authStep(), // 13 — Google/Apple ile giriş (formlar sonrası)
+      () => _beforeAfter(), // 14 — 7 kat fazla eşleşme
+      () => _top1Review(), // 15
+      () => _preparing(), // 16
     ];
 
     return PopScope(
@@ -241,7 +242,60 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     );
   }
 
-  // === EKRAN 9 — Soru: Uygulamalar (çoklu seçim) ===
+  // === Soru: Vücut tipi (AI foto üretiminde ikincil beden ipucu) ===
+  Widget _qBodyType(DatingAnswers a) {
+    const opts = [
+      ['slim', 'İnce'],
+      ['athletic', 'Atletik / sporcu'],
+      ['average', 'Ortalama'],
+      ['solid', 'Dolgun'],
+    ];
+    return _quiz(
+      canContinue: a.bodyType != null,
+      child: _QuizBlock(
+        title: 'Vücut tipin hangisine daha yakın?',
+        subtitle: 'AI fotoğraflarında oranını doğru tutmak için kullanılır.',
+        child: Column(
+          children: [
+            for (final o in opts)
+              _opt(o[1], a.bodyType == o[0],
+                  () => ref.read(datingAnswersProvider.notifier).setBodyType(o[0])),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // === Soru: Boy aralığı ===
+  Widget _qHeight(DatingAnswers a) {
+    const ranges = [
+      ['under160', '160 cm altı'],
+      ['160-165', '160–165 cm'],
+      ['165-170', '165–170 cm'],
+      ['170-175', '170–175 cm'],
+      ['175-180', '175–180 cm'],
+      ['180-185', '180–185 cm'],
+      ['185-190', '185–190 cm'],
+      ['190+', '190 cm ve üzeri'],
+    ];
+    return _quiz(
+      canContinue: a.heightRange != null,
+      child: _QuizBlock(
+        title: 'Boyun hangi aralıkta?',
+        subtitle: 'Tam boy fotoğraflarda oran için kullanılır; fotoğraf her zaman önceliklidir.',
+        child: Column(
+          children: [
+            for (final r in ranges)
+              _opt(r[1], a.heightRange == r[0],
+                  () =>
+                      ref.read(datingAnswersProvider.notifier).setHeightRange(r[0])),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // === Soru: Uygulamalar (çoklu seçim) ===
   Widget _qApps(DatingAnswers a) {
     const apps = [
       'Tinder', 'Bumble', 'Hinge', 'Badoo',

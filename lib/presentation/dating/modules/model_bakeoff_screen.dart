@@ -36,6 +36,7 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
     'nano-banana-pro': ('Nano Banana Pro (ŞU ANKİ)', 0.15),
     'nano-banana': ('Nano Banana', 0.039),
     'seedream-v45': ('Seedream v4.5', 0.04),
+    'gpt-image-2': ('GPT Image 2 (orta kalite)', 0.061),
   };
 
   Future<void> _run() async {
@@ -82,15 +83,22 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Aynı referans fotoğrafların ve aynı prompt sistemiyle 3 modelden '
+            'Aynı referans fotoğrafların ve aynı prompt sistemiyle 4 modelden '
             'birer set (5 foto) üretilir. Hangi fotoğrafın hangi modelden '
-            'geldiği etiketle gösterilir.',
+            'geldiği etiketle gösterilir. Çıktı canlının TAM KOPYASI: kimlik '
+            'kapısı + otomatik retry + telefon kamerası dokusu uygulanır.',
             style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 6),
           const Text(
+            'Kırmızı "kimlik ✗" rozetli kareler kimlik eşiğini geçemedi — '
+            'canlıda bu kareler kullanıcıya gösterilmeden atılırdı.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 6),
+          const Text(
             'Not: Bu test paket bakiyeni HARCAMAZ; ücret doğrudan fal.ai '
-            'hesabından düşer (~1.15 USD).',
+            'hesabından düşer (taban ~1.45 USD; retry ile artabilir).',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(height: 16),
@@ -216,6 +224,9 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
   Widget _tile(Map img, List<String> allUrls) {
     final gs = img['gsUrl'] as String?;
     final chunk = img['chunk'];
+    final retries = (img['retries'] as num?)?.toInt() ?? 0;
+    final identityPassed = img['identityPassed'] as bool?;
+    final dist = (img['identityDistance'] as num?)?.toDouble();
     if (gs == null) {
       return Container(
         color: AppColors.surface,
@@ -252,8 +263,9 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
                     imageUrl: snap.data!, fit: BoxFit.cover);
               },
             ),
-            // Kompozisyon numarası — hangi kadraj/blur reçetesi olduğunu
-            // ayırt etmek için (0=yakın/güçlü blur ... 2=geniş/net).
+            // Kompozisyon numarası (+ retry sayısı) — hangi kadraj/blur
+            // reçetesi (0=yakın/güçlü blur ... 2=geniş/net) ve kaç kez yeniden
+            // üretildiği.
             Positioned(
               left: 4,
               top: 4,
@@ -264,13 +276,38 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
                   color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(5),
                 ),
-                child: Text('#$chunk',
+                child: Text(retries > 0 ? '#$chunk · ${retries}x retry' : '#$chunk',
                     style: const TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
               ),
             ),
+            // Kimlik kapısı rozeti: ✗ = tüm retry'lere rağmen eşiği geçemedi
+            // (canlıda ATILIRDI), ✓ = geçti. null ise kapı yoktu (rozet yok).
+            if (identityPassed != null)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: (identityPassed ? Colors.green : AppColors.error)
+                        .withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    identityPassed
+                        ? 'kimlik ✓${dist != null ? ' ${dist.toStringAsFixed(2)}' : ''}'
+                        : 'kimlik ✗${dist != null ? ' ${dist.toStringAsFixed(2)}' : ''}',
+                    style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

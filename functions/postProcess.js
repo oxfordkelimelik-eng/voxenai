@@ -13,6 +13,16 @@ const sharp = require("sharp");
 // Gerçek telefon kamerası JPEG'lerine yakın kalite. AI çıktıları genelde
 // bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar.
 const JPEG_QUALITY = 86;
+// Referans selfie'ler fal'a gitmeden önce yeniden kodlanırken kullanılan
+// kalite — yön düzeltmesi kimlik sinyalini bozmamalı (yüksek tut).
+const REF_JPEG_QUALITY = 92;
+// Referansın uzun kenarı bu değeri aşarsa küçültülür. Modern telefon
+// fotoğrafları 3000-4000px+ gelir; edit modeli bunları zaten içeride
+// örnekliyor, dolayısıyla 2048px kalite kaybı OLMADAN yükleme süresini
+// (ve fal işlem yükünü) ciddi azaltır. Yüz-crop de bu boyuttan fazlasıyla
+// yeterli çözünürlük alır (bkz. cropFaceRegion — yüz kareleri için yüz
+// kadrajın büyük kısmı). Yalnızca KÜÇÜLTÜR (withoutEnlargement).
+const REF_MAX_DIM = 2048;
 // Grain katmanının opaklığı (0-255). Çok düşük tutulmalı — amaç fark
 // edilmeyen bir doku, göze batan bir efekt değil.
 const GRAIN_ALPHA = 22;
@@ -113,4 +123,26 @@ async function cropFaceRegion(buf, box) {
   }
 }
 
-module.exports = { addPhoneCameraTexture, cropFaceRegion };
+/**
+ * Telefon fotoğraflarının EXIF Orientation bilgisini piksellere uygular
+ * (sharp.rotate() argsız = auto-orient) ve etiketi temizler. Bazı edit
+ * modelleri EXIF'i yok sayıp yan/ters referans görür; bu sessiz bir
+ * yüz-bozulma kaynağıdır. Hata olursa orijinal buffer döner (fail-safe).
+ */
+async function normalizeExifOrientation(buf) {
+  try {
+    return await sharp(buf)
+      .rotate()
+      // Aşırı büyük referansları küçült (bedava yükleme/işlem hızı; kalite
+      // kaybı yok — bkz. REF_MAX_DIM). rotate()'ten SONRA: piksel yönü zaten
+      // düzeltildiği için fit "inside" doğru kenarı ölçer.
+      .resize(REF_MAX_DIM, REF_MAX_DIM, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: REF_JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+  } catch (e) {
+    console.error("EXIF yön normalizasyonu başarısız (orijinal kullanılıyor):", e);
+    return buf;
+  }
+}
+
+module.exports = { addPhoneCameraTexture, cropFaceRegion, normalizeExifOrientation };

@@ -49,3 +49,9 @@ app.*.map.json
 **/*.jks
 **/*.keystore
 .vercel
+
+# iOS imza gizli dosyalari (asla commit edilmemeli)
+*.pem
+ios_private_key.pem
+CertificateSigningRequest.certSigningRequest
+*.certSigningRequest

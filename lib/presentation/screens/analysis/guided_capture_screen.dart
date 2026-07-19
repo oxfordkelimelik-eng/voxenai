@@ -33,12 +33,15 @@ extension on CaptureAngle {
       };
 }
 
-/// Sırayla ön/sağ/sol fotoğrafı, canlı hizalama rehberiyle çeken ekran.
-/// 3 açı da çizgiye "oturmadan" çekim kabul edilmez. Oturunca çerçeve yeşile
-/// döner ve otomatik çeker. Sonuç: [ön, sağ, sol] dosya listesi.
+/// Sırayla açı fotoğraflarını canlı hizalama rehberiyle çeken ekran.
+/// Her açı çizgiye "oturmadan" çekim kabul edilmez. Oturunca çerçeve yeşile
+/// döner (uymuyorsa kırmızı) ve otomatik çeker.
+/// Varsayılan: [ön, sağ, sol]. Tek tam boy için angles: [CaptureAngle.front].
 class GuidedCaptureScreen extends StatefulWidget {
   final CaptureKind kind;
-  const GuidedCaptureScreen({super.key, required this.kind});
+  /// null ise ön/sağ/sol. Tek elemanlı liste = tek kare (ör. tam boy).
+  final List<CaptureAngle>? angles;
+  const GuidedCaptureScreen({super.key, required this.kind, this.angles});
 
   @override
   State<GuidedCaptureScreen> createState() => _GuidedCaptureScreenState();
@@ -46,13 +49,15 @@ class GuidedCaptureScreen extends StatefulWidget {
 
 class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     with WidgetsBindingObserver {
-  static const _angles = [
+  static const _defaultAngles = [
     CaptureAngle.front,
     CaptureAngle.right,
     CaptureAngle.left,
   ];
   // Otomatik çekim öncesi kaç ardışık "hizalı" kare beklenir (~0.8sn).
   static const _requiredStableFrames = 8;
+
+  List<CaptureAngle> get _angles => widget.angles ?? _defaultAngles;
 
   CameraController? _controller;
   List<CameraDescription> _cameras = const [];
@@ -341,12 +346,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     }
   }
 
-  /// Onay ekranında "Kullan" → sıralı [ön, sağ, sol] döndür.
+  /// Onay ekranında "Kullan" → istenen açı sırasıyla dosya listesi döndür.
   void _confirm() {
     Navigator.of(context).pop(<File>[
-      _captured[CaptureAngle.front]!,
-      _captured[CaptureAngle.right]!,
-      _captured[CaptureAngle.left]!,
+      for (final a in _angles) _captured[a]!,
     ]);
   }
 
@@ -486,7 +489,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   }
 
   Widget _buildReview() {
-    const order = [CaptureAngle.front, CaptureAngle.right, CaptureAngle.left];
+    final order = _angles;
     return Container(
       color: Colors.black,
       padding: const EdgeInsets.all(20),
@@ -505,10 +508,12 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             ),
           ),
           const SizedBox(height: 6),
-          const Text(
-            '3 açı hazır. Kullanmadan önce kontrol et.',
+          Text(
+            _angles.length == 1
+                ? 'Fotoğraf hazır. Kullanmadan önce kontrol et.'
+                : '${_angles.length} açı hazır. Kullanmadan önce kontrol et.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white60, fontSize: 13),
+            style: const TextStyle(color: Colors.white60, fontSize: 13),
           ),
           const SizedBox(height: 20),
           Expanded(
@@ -551,8 +556,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
               padding: const EdgeInsets.symmetric(vertical: 15),
             ),
             icon: const Icon(Icons.check_rounded, color: Colors.white),
-            label: const Text('BU 3 FOTOĞRAFI KULLAN',
-                style: TextStyle(
+            label: Text(
+                order.length == 1
+                    ? 'BU FOTOĞRAFI KULLAN'
+                    : 'BU ${order.length} FOTOĞRAFI KULLAN',
+                style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.5)),
@@ -657,7 +665,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             decoration: BoxDecoration(
               color: _aligned
                   ? AppColors.success.withValues(alpha: 0.92)
-                  : Colors.black.withValues(alpha: 0.6),
+                  : const Color(0xFFB71C1C).withValues(alpha: 0.88),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
@@ -666,7 +674,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                 Icon(
                   _aligned
                       ? Icons.check_circle_rounded
-                      : Icons.center_focus_strong_rounded,
+                      : Icons.warning_amber_rounded,
                   color: Colors.white,
                   size: 20,
                 ),
@@ -704,7 +712,10 @@ class _GuidePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final color = aligned ? AppColors.success : Colors.white.withValues(alpha: 0.85);
+    // Yeşil = hizalı / kabul; kırmızı = henüz uymuyor (talimatı takip et).
+    final color = aligned
+        ? AppColors.success
+        : const Color(0xFFFF5252).withValues(alpha: 0.95);
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke

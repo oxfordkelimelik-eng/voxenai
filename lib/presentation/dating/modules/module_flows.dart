@@ -21,6 +21,7 @@ import '../../../core/router/dating_routes.dart';
 import '../../../data/sources/claude_api_service.dart' show PhotoScore;
 import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
+import '../../screens/analysis/guided_capture_screen.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/dating_widgets.dart';
 import '../widgets/shared_widgets.dart';
@@ -109,51 +110,24 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
   return x == null ? [] : [File(x.path)];
 }
 
-// Baş dönüklüğü (yaw) bu dereceden fazlaysa referans reddedilir — üretim
-// modeli aşırı profil açılı bir yüzden sağlam bir kimlik vektörü çıkaramıyor.
-const _maxHeadYawDegrees = 20.0;
-
-/// AI foto üretimi için seçilen referans selfie'lerini doğrular: her
-/// fotoğrafta TAM OLARAK bir yüz, yeterince büyük/net ve fazla dönük olmayan
-/// açıda görünmeli. "Çöp girdi = çöp çıktı" — bulanık, yüzsüz, çoklu-kişili
-/// ya da aşırı profilden bir referans fal.ai'ye gönderilmeden önce burada
-/// elenir. Geçemeyen dosyaların yollarını döner (boşsa hepsi geçti demektir).
-///
-/// NOT: minFaceSize BİLEREK düşük tutuldu (0.03) — kullanıcıdan artık 3
-/// referansın biri TAM BOY olması istendiği için (bkz. UI metni), yüz
-/// kadrajın çok küçük bir kısmını kaplayabilir. Eskiden 0.2'ydi; bu değerle
-/// tam boy fotoğraflar ML Kit tarafından hiç tespit edilemeyip "yüzsüz"
-/// sayılırdı — kendi kendini geçersiz kılan bir çelişkiydi.
-Future<List<String>> _findInvalidReferencePhotos(List<File> files) async {
+/// Tam boy referansta tek yüz olmalı (küçük olabilir). Yaw serbest —
+/// canlı yüz açıları GuidedCaptureScreen'de zaten doğrulanır.
+Future<bool> _isValidBodyReferencePhoto(File file) async {
   final detector = FaceDetector(
     options: FaceDetectorOptions(
       performanceMode: FaceDetectorMode.accurate,
       minFaceSize: 0.03,
     ),
   );
-  final invalid = <String>[];
   try {
-    for (final f in files) {
-      try {
-        final faces =
-            await detector.processImage(InputImage.fromFilePath(f.path));
-        if (faces.length != 1) {
-          invalid.add(f.path);
-          continue;
-        }
-        final yaw = faces.first.headEulerAngleY;
-        if (yaw != null && yaw.abs() > _maxHeadYawDegrees) {
-          invalid.add(f.path);
-        }
-      } catch (_) {
-        // Dosya okunamadı/işlenemedi — güvenli tarafta kal, geçersiz say.
-        invalid.add(f.path);
-      }
-    }
+    final faces =
+        await detector.processImage(InputImage.fromFilePath(file.path));
+    return faces.length == 1;
+  } catch (_) {
+    return false;
   } finally {
     await detector.close();
   }
-  return invalid;
 }
 
 // ============================================================
@@ -170,11 +144,22 @@ enum _AiStage { style, package, loading, result, error, teaser }
 class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   _AiStage _stage = _AiStage.style;
   final Set<String> _styles = {};
-  final List<File> _photos = [];
+  /// Canlı ön / sağ / sol (sıra sabit).
+  final List<File> _facePhotos = [];
+  /// Zorunlu tam boy (kamera veya galeri).
+  File? _bodyPhoto;
   String? _errorMessage;
-  bool _validatingPhotos = false; // seçilen fotoğraflarda yüz kontrolü sürüyor
+  bool _validatingPhotos = false; // tam boy yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
   String? _prepareError; // doğrulama başarısızsa paket adımında gösterilir
+
+  bool get _refsReady =>
+      _facePhotos.length == DatingConfig.faceCaptureCount && _bodyPhoto != null;
+
+  List<File> get _allReferencePhotos => [
+        ..._facePhotos,
+        ?_bodyPhoto,
+      ];
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
@@ -218,8 +203,13 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
   Future<void> _generate() async {
-    if (_photos.length != DatingConfig.referencePhotoCount || _styles.isEmpty) {
-      return;
+    if (!_refsReady || _styles.isEmpty) return;
+
+    var answers = ref.read(datingAnswersProvider);
+    if (answers.bodyType == null || answers.heightRange == null) {
+      final filled = await _ensureBodyProfile();
+      if (!filled || !mounted) return;
+      answers = ref.read(datingAnswersProvider);
     }
 
     // Bakiye/ücretsiz hak yetmiyorsa SUNUCUYA HİÇ GİTME: ne fal.ai kredisi ne
@@ -245,6 +235,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
     final jobId = const Uuid().v4();
     final functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
+    final refs = _allReferencePhotos;
 
     // ---- AŞAMA 1: DOĞRULAMA (loader yok) ----
     setState(() {
@@ -252,14 +243,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _prepareError = null;
     });
     try {
-      for (var i = 0; i < _photos.length; i++) {
+      for (var i = 0; i < refs.length; i++) {
         await FirebaseStorage.instance
             .ref('dating_training/$uid/$jobId/photo_$i.jpg')
-            .putFile(_photos[i]);
+            .putFile(refs[i]);
       }
-      await functions
-          .httpsCallable('prepareReferencePhotos')
-          .call({'jobId': jobId});
+      await functions.httpsCallable('prepareReferencePhotos').call({
+        'jobId': jobId,
+        'styles': _styles.toList(),
+        'bodyProfile': {
+          'heightRange': answers.heightRange,
+          'bodyType': answers.bodyType,
+          'gender': answers.gender,
+        },
+      });
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
       // Fotoğraf kaynaklı hata: paket adımında kal, kullanıcı fotoğrafını
@@ -375,11 +372,217 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     _jobSub?.cancel();
     setState(() {
       _stage = _AiStage.style;
-      _photos.clear();
+      _facePhotos.clear();
+      _bodyPhoto = null;
       _styles.clear();
       _jobData = null;
       _errorMessage = null;
       _preparing = false;
+      _prepareError = null;
+    });
+  }
+
+  /// Eski hesaplarda onboarding'de boy/tip yoksa üretim öncesi bir kez sor.
+  Future<bool> _ensureBodyProfile() async {
+    String? bodyType = ref.read(datingAnswersProvider).bodyType;
+    String? heightRange = ref.read(datingAnswersProvider).heightRange;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setModal) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, 16, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Son bir adım',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 6),
+                const Text(
+                    'Boy ve vücut tipin tam boy fotoğraflarda oran için kullanılır.',
+                    style: TextStyle(
+                        fontSize: 13, color: AppColors.textSecondary)),
+                const SizedBox(height: 14),
+                const Text('Vücut tipi',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final o in const [
+                      ['slim', 'İnce'],
+                      ['athletic', 'Atletik'],
+                      ['average', 'Ortalama'],
+                      ['solid', 'Dolgun'],
+                    ])
+                      ChoiceChip(
+                        label: Text(o[1]),
+                        selected: bodyType == o[0],
+                        onSelected: (_) => setModal(() => bodyType = o[0]),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text('Boy',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final r in const [
+                      ['under160', '<160'],
+                      ['160-165', '160–165'],
+                      ['165-170', '165–170'],
+                      ['170-175', '170–175'],
+                      ['175-180', '175–180'],
+                      ['180-185', '180–185'],
+                      ['185-190', '185–190'],
+                      ['190+', '190+'],
+                    ])
+                      ChoiceChip(
+                        label: Text(r[1]),
+                        selected: heightRange == r[0],
+                        onSelected: (_) => setModal(() => heightRange = r[0]),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                PrimaryButton(
+                  label: 'Kaydet ve devam et',
+                  onPressed: (bodyType != null && heightRange != null)
+                      ? () {
+                          ref
+                              .read(datingAnswersProvider.notifier)
+                              .setBodyType(bodyType!);
+                          ref
+                              .read(datingAnswersProvider.notifier)
+                              .setHeightRange(heightRange!);
+                          Navigator.pop(ctx, true);
+                        }
+                      : null,
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+    return ok == true;
+  }
+
+  Future<void> _captureFaceAngles() async {
+    final files = await Navigator.of(context).push<List<File>>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
+      ),
+    );
+    if (files == null || files.length != DatingConfig.faceCaptureCount) return;
+    if (!mounted) return;
+    setState(() {
+      _facePhotos
+        ..clear()
+        ..addAll(files);
+      _prepareError = null;
+    });
+  }
+
+  Future<void> _pickFullBody() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Tam boy fotoğraf',
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              const Text(
+                  'Başın ve ayakların kadrajda olsun. Tek kişi, dikey çekim.',
+                  style: TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'camera'),
+                icon: const Icon(Icons.photo_camera_outlined,
+                    color: AppColors.gold),
+                label: const Text('Kamerayla çek',
+                    style: TextStyle(color: AppColors.gold)),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'gallery'),
+                icon: const Icon(Icons.photo_library_outlined,
+                    color: AppColors.gold),
+                label: const Text('Galeriden seç',
+                    style: TextStyle(color: AppColors.gold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    File? file;
+    if (choice == 'camera') {
+      final files = await Navigator.of(context).push<List<File>>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const GuidedCaptureScreen(
+            kind: CaptureKind.body,
+            angles: [CaptureAngle.front],
+          ),
+        ),
+      );
+      if (files != null && files.isNotEmpty) file = files.first;
+    } else {
+      final picked =
+          await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (picked != null) file = File(picked.path);
+    }
+    if (file == null || !mounted) return;
+
+    setState(() => _validatingPhotos = true);
+    final ok = await _isValidBodyReferencePhoto(file);
+    if (!mounted) return;
+    setState(() => _validatingPhotos = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Tam boy fotoğrafta net, tek bir yüz görünmeli. Lütfen başka bir '
+            'kare dene (baş ve ayaklar kadrajda olsun).'),
+      ));
+      return;
+    }
+    setState(() {
+      _bodyPhoto = file;
       _prepareError = null;
     });
   }
@@ -901,29 +1104,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ),
           const SizedBox(height: 16),
-          const PhotoQualityGuide(),
-          const SizedBox(height: 16),
-          Text(
-              'Fotoğraflarını yükle (${DatingConfig.referencePhotoCount} net fotoğraf)',
-              style: const TextStyle(
+          const Text(
+              '1) Yüz — canlı çekim (ön / sağ / sol)',
+              style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 4),
-          // Referans çeşitliliği rehberi: tek açıdan/mesafeden 3 foto yerine
-          // yakın+yarım+tam boy karışımı istenir. Edit modelleri tek açıdan
-          // öğrenemiyor; tam boy özellikle önemli çünkü onsuz model vücut
-          // tipini/boyu "uyduruyor" ve "kafası benim, gövdesi başkasının"
-          // hissi veriyor. Bu SADECE bir metin rehberi — hangi fotoğrafın
-          // hangi tür olduğunu otomatik sınıflandırmıyoruz.
           const Text(
-              '1 yakın (yüz net), 1 yarım boy, 1 tam boy fotoğraf seç — '
-              'hepsi aynı açıdan/mesafeden olursa yüzün doğru aktarılma '
-              'ihtimali düşer.',
+              'Tek oturumda kamera açık kalır. Yeşil = hazır, kırmızı = '
+              'talimatı uygula (daha çok çevir / ortala / ışık).',
               style: TextStyle(
                   fontSize: 12, color: AppColors.textSecondary)),
           const SizedBox(height: 10),
-          if (_photos.isEmpty)
+          if (_facePhotos.isEmpty)
             Container(
               height: 90,
               alignment: Alignment.center,
@@ -932,7 +1126,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.borderSubtle),
               ),
-              child: const Text('Henüz fotoğraf seçilmedi',
+              child: const Text('Henüz yüz çekimi yok',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
             )
           else
@@ -940,64 +1134,72 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (int i = 0; i < _photos.length; i++)
+                for (int i = 0; i < _facePhotos.length; i++)
                   _RemovableThumb(
-                    file: _photos[i],
+                    file: _facePhotos[i],
                     onRemove: () => setState(() {
-                      _photos.removeAt(i);
-                      _prepareError = null; // fotoğraf değişti, eski uyarı geçersiz
+                      _facePhotos.clear();
+                      _prepareError = null;
                     }),
                   ),
               ],
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _validatingPhotos
-                ? null
-                : () async {
-                    // Kalan boş slot kadar yeni foto seçilebilir (toplam 5).
-                    final remaining =
-                        DatingConfig.referencePhotoCount - _photos.length;
-                    if (remaining <= 0) return;
-                    final files =
-                        await _pickImages(multi: true, limit: remaining);
-                    if (files.isEmpty) return;
-                    setState(() => _validatingPhotos = true);
-                    final invalid = await _findInvalidReferencePhotos(files);
-                    if (!mounted) return;
-                    setState(() => _validatingPhotos = false);
-                    // Uygunsuzları KULLANICIYA GOSTER (kacinci foto, neden),
-                    // geçerlileri yine de ekle — hepsini birden atma.
-                    final valid =
-                        files.where((f) => !invalid.contains(f.path)).toList();
-                    if (invalid.isNotEmpty) {
-                      final badIndexes = <int>[];
-                      for (int i = 0; i < files.length; i++) {
-                        if (invalid.contains(files[i].path)) {
-                          badIndexes.add(i + 1);
-                        }
-                      }
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        duration: const Duration(seconds: 5),
-                        content: Text(
-                            'Seçtiğin ${badIndexes.length} fotoğraf uygun değil '
-                            '(${badIndexes.join(', ')}. sıradaki): net, tek bir '
-                            'yüz görünmüyor (bulanık, yüzsüz, birden fazla kişi ya '
-                            'da yüz çok yandan/dönük). '
-                            '${valid.isEmpty ? "" : "Uygun olanlar eklendi."}'),
-                      ));
-                    }
-                    if (valid.isEmpty) return;
-                    setState(() {
-                      _prepareError = null; // fotoğraf listesi değişti
-                      for (final f in valid) {
-                        if (_photos.length <
-                            DatingConfig.referencePhotoCount) {
-                          _photos.add(f);
-                        }
-                      }
-                    });
-                  },
+            onPressed: _preparing ? null : _captureFaceAngles,
+            icon: const Icon(Icons.face_retouching_natural,
+                color: AppColors.gold),
+            label: Text(
+                _facePhotos.isEmpty
+                    ? 'Yüz çekimini başlat'
+                    : 'Yüz çekimini tekrarla',
+                style: const TextStyle(color: AppColors.gold)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppColors.borderGold),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          const SizedBox(height: 22),
+          const Text(
+              '2) Tam boy — zorunlu',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          const Text(
+              'Baştan ayağa görünsün. Kamerayla çekebilir veya galeriden seçebilirsin.',
+              style: TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 10),
+          if (_bodyPhoto == null)
+            Container(
+              height: 90,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.borderSubtle),
+              ),
+              child: const Text('Henüz tam boy foto yok',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+            )
+          else
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _RemovableThumb(
+                file: _bodyPhoto!,
+                onRemove: () => setState(() {
+                  _bodyPhoto = null;
+                  _prepareError = null;
+                }),
+              ),
+            ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: (_preparing || _validatingPhotos) ? null : _pickFullBody,
             icon: _validatingPhotos
                 ? const SizedBox(
                     width: 16,
@@ -1005,15 +1207,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: AppColors.gold),
                   )
-                : const Icon(Icons.add_photo_alternate_outlined,
+                : const Icon(Icons.accessibility_new_rounded,
                     color: AppColors.gold),
             label: Text(
                 _validatingPhotos
-                    ? 'Yüzler kontrol ediliyor…'
-                    // Bu akışta seçilen fotoğraflar LİSTEYE EKLENİR (bkz.
-                    // yukarıdaki onPressed — _photos.add), değiştirilmez;
-                    // buton metni davranışla uyuşmalı.
-                    : (_photos.isEmpty ? 'Galeriden Seç' : 'Ekle'),
+                    ? 'Kontrol ediliyor…'
+                    : (_bodyPhoto == null
+                        ? 'Tam boy ekle'
+                        : 'Tam boyu değiştir'),
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
@@ -1049,10 +1250,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           PrimaryButton(
             label:
                 _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
-            onPressed: (_photos.length == DatingConfig.referencePhotoCount &&
-                    !_preparing)
-                ? _generate
-                : null,
+            onPressed: (_refsReady && !_preparing) ? _generate : null,
           ),
           const SizedBox(height: 8),
           Center(

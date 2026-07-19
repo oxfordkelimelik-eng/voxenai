@@ -28,6 +28,12 @@ class DatingAnswers {
   final List<String> apps; // çoklu seçim
   final String? matchesPerDay;
   final String? satisfaction;
+  /// Boy aralığı (cm) — AI foto prompt'unda ikincil beden ipucu.
+  /// Örn. '160-165' | '165-170' | ... | '190+'
+  final String? heightRange;
+  /// Vücut tipi — AI foto prompt'unda ikincil beden ipucu.
+  /// 'slim' | 'athletic' | 'average' | 'solid'
+  final String? bodyType;
 
   const DatingAnswers({
     this.gender,
@@ -35,6 +41,8 @@ class DatingAnswers {
     this.apps = const [],
     this.matchesPerDay,
     this.satisfaction,
+    this.heightRange,
+    this.bodyType,
   });
 
   DatingAnswers copyWith({
@@ -43,6 +51,8 @@ class DatingAnswers {
     List<String>? apps,
     String? matchesPerDay,
     String? satisfaction,
+    String? heightRange,
+    String? bodyType,
   }) =>
       DatingAnswers(
         gender: gender ?? this.gender,
@@ -50,6 +60,8 @@ class DatingAnswers {
         apps: apps ?? this.apps,
         matchesPerDay: matchesPerDay ?? this.matchesPerDay,
         satisfaction: satisfaction ?? this.satisfaction,
+        heightRange: heightRange ?? this.heightRange,
+        bodyType: bodyType ?? this.bodyType,
       );
 
   Map<String, dynamic> toJson() => {
@@ -58,6 +70,8 @@ class DatingAnswers {
         'apps': apps,
         'matchesPerDay': matchesPerDay,
         'satisfaction': satisfaction,
+        'heightRange': heightRange,
+        'bodyType': bodyType,
       };
 
   factory DatingAnswers.fromJson(Map<String, dynamic> j) => DatingAnswers(
@@ -66,6 +80,8 @@ class DatingAnswers {
         apps: (j['apps'] as List?)?.cast<String>() ?? const [],
         matchesPerDay: j['matchesPerDay'] as String?,
         satisfaction: j['satisfaction'] as String?,
+        heightRange: j['heightRange'] as String?,
+        bodyType: j['bodyType'] as String?,
       );
 }
 
@@ -116,6 +132,16 @@ class DatingAnswersNotifier extends StateNotifier<DatingAnswers> {
 
   void setSatisfaction(String v) {
     state = state.copyWith(satisfaction: v);
+    _persist();
+  }
+
+  void setHeightRange(String v) {
+    state = state.copyWith(heightRange: v);
+    _persist();
+  }
+
+  void setBodyType(String v) {
+    state = state.copyWith(bodyType: v);
     _persist();
   }
 }

@@ -290,7 +290,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                       onTap: () => _showModuleInfo(
                         title: 'AI Dating Fotoğrafı',
                         body:
-                            '5 selfie yükle, stil seç. AI yüzünü koruyarak '
+                            'Canlı yüz çekimi + tam boy, stil seç. AI yüzünü koruyarak '
                             'seçtiğin mekân ve tarzda profesyonel fotoğraflar üretir.',
                         bullets: const [
                           'Stile özel arka plan',

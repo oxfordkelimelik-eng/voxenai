@@ -129,7 +129,7 @@ function bufferToTensorScaled(buf) {
  *     (kırpma için — bkz. postProcess.cropFaceRegion).
  *   { ok: false }      → yüz yok, çok küçük, ya da birden fazla yüz.
  */
-async function detectSingleFace(buf) {
+async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
   const faceapi = await ensureModelsLoaded();
   const { tensor, scale } = bufferToTensorScaled(buf);
   try {
@@ -140,7 +140,7 @@ async function detectSingleFace(buf) {
     const [h, w] = tensor.shape;
     const big = faces.filter((f) => {
       const ratio = Math.max(f.box.width / w, f.box.height / h);
-      return ratio >= MIN_FACE_RATIO;
+      return ratio >= minFaceRatio;
     });
     if (big.length !== 1) return { ok: false };
     const b = big[0].box;
@@ -148,10 +148,44 @@ async function detectSingleFace(buf) {
       x: b.x / scale, y: b.y / scale,
       width: b.width / scale, height: b.height / scale,
     };
-    return { ok: true, area: (b.width * b.height) / (w * h), box };
+    // ratio = yüzün kadrajı kaplama oranı (uzun kenar). Tam boy referansın
+    // GERÇEKTEN tam boy olup olmadığını ayırt etmek için kullanılır
+    // (yüz büyükse = yakın selfie, gövde görünmüyor — bkz. analyzeReferences).
+    const ratio = Math.max(b.width / w, b.height / h);
+    return { ok: true, area: (b.width * b.height) / (w * h), ratio, box };
   } finally {
     tensor.dispose();
   }
+}
+
+// Tam boy referansta yüz kadrajın küçük bir kısmıdır — yüz selfie eşiği
+// (MIN_FACE_RATIO) ile reddedilmemeli.
+const MIN_FACE_RATIO_BODY = 0.04;
+// ...ama yüz kadrajın ÜST sınırından da BÜYÜKSE bu tam boy değil, yakın bir
+// selfie/portredir — gövde görünmüyordur, reddet. Kaba oran tahmini:
+// tam boy yüz ~0.13, bel üstü ~0.28, baş-omuz selfie ~0.5. 0.35 bel üstünü
+// (ve daha genişini) kabul eder, baş-omuz yakın çekimi eler. Client tarafı
+// (GuidedCaptureScreen pose kontrolü) asıl "ayaklar kadrajda mı"yı tutuyor;
+// bu sunucu kapısı yalnızca "sadece yüz gönderilmiş" durumunu yakalar.
+const MAX_FACE_RATIO_BODY = 0.35;
+// Açı çeşitliliği kapısı: iki YÜZ karesinin kimlik vektörü birbirine bu
+// mesafeden yakınsa neredeyse aynı kare/açı sayılır (kullanıcı ör. 3 kez
+// cepheden çekmiş) — farklı açı kimlik sadakatini artırır. MUHAFAZAKÂR:
+// vektör mesafesi kimliği ölçer, açıyı değil (aynı kişinin farklı açıları da
+// yakın çıkabilir) → yalnızca neredeyse-aynı kareleri yakalamak için düşük
+// tutuldu (yanlış-red riski). Gerçek veriyle KALİBRE EDİLMEDİ; canlı çekim
+// zaten yaw ile açı çeşitliliğini dayattığı için bu bir güvenlik ağıdır.
+const DEDUP_MIN_DISTANCE = 0.25;
+
+// İki 128-boyut descriptor arasındaki öklid mesafesi (faceapi'ye async
+// erişim gerekmeden — dedup senkron çalışsın).
+function euclideanDistanceLocal(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i];
+    sum += d * d;
+  }
+  return Math.sqrt(sum);
 }
 
 /**
@@ -216,40 +250,42 @@ async function descriptorFromBuffer(buf) {
 }
 
 /**
- * 3 referans selfie'yi analiz eder. Döner:
- *   unclearIndices:  net/tek yüz kontrolünü VEYA bulanıklık/aşırı pozlama
- *                     kontrolünü geçemeyen fotoğrafların 0-tabanlı indeksleri
- *                     (kullanıcının seçim sırasıyla).
- *   bestIndex:        geçerli fotoğraflar arasında en büyük yüze sahip
- *                     olanın indeksi (üretime gönderilecek referans sırasında
- *                     başa alınır).
- *   bestBox:          bestIndex'teki fotoğrafta yüzün ORİJİNAL piksel
- *                     koordinatlarındaki kutusu — yüz-merkezli ek bir kırpılmış
- *                     referans üretmek için kullanılır (bkz. postProcess.
- *                     cropFaceRegion, falPhotos.prepareReferencePhotos).
- *   refDescriptor:    geçerli referans fotoğraflardan çıkarılan descriptor'ların
- *                     ORTALAMASI (Float32Array) — üretilen her görselin kimlik
- *                     karşılaştırmasında kullanılır. Hiçbir geçerli fotoğraftan
- *                     descriptor çıkarılamazsa null (kimlik kapısı devre dışı
- *                     kalır, fail-safe).
+ * Referans fotoğrafları analiz eder.
+ * Yeni akış: [ön, sağ, sol, tamBoy] — son kare beden referansı (küçük yüz OK).
+ * facePhotoCount (varsayılan 3): ilk N kare yüz; kimlik vektörü tercihen
+ * bunlardan ortalanır. bestIndex/bestBox yüz karelerinden seçilir.
  */
-async function analyzeReferences(buffers) {
+async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
   const unclearIndices = [];
+  const notFullBodyIndices = [];
   let bestIndex = null;
   let bestArea = -1;
   let bestBox = null;
   const descriptors = [];
+  // Sadece YÜZ karelerinin descriptor'ları (index'iyle) — açı dedup için.
+  const faceDescriptors = [];
 
   for (let idx = 0; idx < buffers.length; idx++) {
+    const isBodyRef = idx >= facePhotoCount;
     let detection;
     try {
-      detection = await detectSingleFace(buffers[idx]);
+      detection = await detectSingleFace(buffers[idx], {
+        minFaceRatio: isBodyRef ? MIN_FACE_RATIO_BODY : MIN_FACE_RATIO,
+      });
     } catch {
       unclearIndices.push(idx);
       continue;
     }
     if (!detection.ok) {
       unclearIndices.push(idx);
+      continue;
+    }
+    // Tam boy referansı GERÇEKTEN tam boy mu: yüz kadrajın küçük bir kısmı
+    // olmalı. Yüz üst orandan büyükse bu yakın bir selfie'dir, gövde
+    // görünmüyordur — ayrı bir hata olarak işaretle (mesajı "net değil"den
+    // farklı: kullanıcıya "tam boy ver" demeliyiz).
+    if (isBodyRef && detection.ratio > MAX_FACE_RATIO_BODY) {
+      notFullBodyIndices.push(idx);
       continue;
     }
     // Yüz var ama fotoğrafın genel kalitesi düşükse (bulanık/aşırı pozlanmış)
@@ -265,17 +301,38 @@ async function analyzeReferences(buffers) {
     } catch (e) {
       console.error("Görsel kalite kontrolü başarısız (yalnızca yüz tespiti uygulanıyor):", e);
     }
-    if (detection.area > bestArea) {
+    // Yüz crop / bestIndex: yalnızca yüz karelerinden (tam boy hariç).
+    if (!isBodyRef && detection.area > bestArea) {
       bestArea = detection.area;
       bestIndex = idx;
       bestBox = detection.box;
     }
     try {
       const d = await descriptorFromBuffer(buffers[idx]);
-      if (d) descriptors.push(d);
+      // Kimlik ortalamasına yüz karelerini önceliklendir; beden karesi
+      // düşük çözünürlüklü yüzle ortalamayı bozmasın.
+      if (d && !isBodyRef) {
+        descriptors.push(d);
+        faceDescriptors.push({ idx, d });
+      } else if (d && isBodyRef && descriptors.length === 0) {
+        descriptors.push(d);
+      }
     } catch {
       // Descriptor çıkarılamaması bu referansı net-değil saymaz (tespit zaten
       // geçti) — yalnızca ortalamaya katkısı olmaz.
+    }
+  }
+
+  // Açı çeşitliliği: iki yüz karesi neredeyse aynı açıdaysa ikincisini
+  // işaretle (kullanıcı onu farklı bir açıyla değiştirsin). Muhafazakâr eşik
+  // — bkz. DEDUP_MIN_DISTANCE.
+  const duplicateIndices = [];
+  for (let a = 0; a < faceDescriptors.length; a++) {
+    for (let b = a + 1; b < faceDescriptors.length; b++) {
+      const dist = euclideanDistanceLocal(faceDescriptors[a].d, faceDescriptors[b].d);
+      if (dist < DEDUP_MIN_DISTANCE && !duplicateIndices.includes(faceDescriptors[b].idx)) {
+        duplicateIndices.push(faceDescriptors[b].idx);
+      }
     }
   }
 
@@ -289,7 +346,15 @@ async function analyzeReferences(buffers) {
     refDescriptor = avg;
   }
 
-  return { unclearIndices, bestIndex, bestBox, refDescriptor, totalCount: buffers.length };
+  return {
+    unclearIndices,
+    notFullBodyIndices,
+    duplicateIndices,
+    bestIndex,
+    bestBox,
+    refDescriptor,
+    totalCount: buffers.length,
+  };
 }
 
 /**

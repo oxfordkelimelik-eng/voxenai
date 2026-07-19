@@ -28,9 +28,12 @@ class DatingConfig {
   // functions/falPhotos.js IMAGES_PER_STYLE ile EL İLE senkron tutulmalı.
   static const int photosPerSet = 5; // tek üretimde/stilde çıkan foto sayısı
 
-  // AI foto üretimi için kullanıcıdan istenen referans fotoğraf sayısı.
+  // AI foto üretimi referansları:
+  //   3 canlı yüz (ön / sağ / sol) + 1 zorunlu tam boy.
   // functions/falPhotos.js REFERENCE_PHOTO_COUNT ile senkron.
-  static const int referencePhotoCount = 3;
+  static const int faceCaptureCount = 3;
+  static const int bodyPhotoCount = 1;
+  static const int referencePhotoCount = faceCaptureCount + bodyPhotoCount; // 4
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç

@@ -76,7 +76,7 @@ class DatingSettingsScreen extends ConsumerWidget {
           // functions/modelBakeoff.js silinmeli.
           _section('GELİŞTİRİCİ (geçici)'),
           _tile(Icons.science_outlined, 'Model Karşılaştırma Testi',
-              subtitle: '3 modelden 5\'er foto üretir (~\$1.15, paket harcamaz)',
+              subtitle: '4 modelden 5\'er foto üretir (~\$1.45, paket harcamaz)',
               onTap: () => context.push(DatingRoutes.modelBakeoff)),
 
           const SizedBox(height: 24),
