@@ -3,6 +3,8 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { admin, db, bucket } = require("./_shared");
 
+const { GEMINI_KEY } = require("./identityCaption");
+
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 // Üretim modeli: Nano Banana Pro (edit) — Google'ın gerçekçilik odaklı edit
@@ -52,13 +54,13 @@ const STYLE_SCENES = {
   elegance: [
     "Mid-step through the lobby of a boutique hotel, adjusting a cuff and glancing off-camera with a relaxed half-smile, wearing a well-cut charcoal blazer over an open white shirt. Behind: a marble reception desk, warm brass lamps, and a tall arched window spilling soft late-afternoon light across the floor",
     "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, laughing at something just out of frame. Behind: backlit shelves of bottles, low pendant lights, a bartender blurred mid-motion",
-    "Crossing a European city street at golden hour in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: blurred shopfronts, warm low sun flaring between buildings, out-of-focus passers-by",
+    "Crossing a European city street under flat overcast daylight in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: blurred shopfronts, grey even light, out-of-focus passers-by",
     "Standing at the railing of a rooftop terrace at dusk in a light grey suit with the collar open, one hand resting on the rail, easy natural smile. Behind: glass towers with lit windows against a deep blue evening sky",
     "Pausing in a quiet art gallery, hands in pockets, head turned to study a painting with a thoughtful expression, wearing a fine black turtleneck. Behind: white walls, large framed artworks, soft even ceiling light",
   ],
   athletic: [
     "Resting between sets on a gym bench, forearms on knees, catching breath and looking up with a slight grin, wearing a fitted training t-shirt damp with sweat. Behind: racks of weights, mirrors and machines under natural overhead light",
-    "Mid-stride on an outdoor running track at sunrise, breath visible in cool air, focused expression, wearing technical running gear. Behind: empty stadium seating and a low warm sun casting long shadows",
+    "Mid-stride on an outdoor running track under flat grey morning light, breath visible in cool air, focused expression, wearing technical running gear. Behind: empty stadium seating under an overcast sky",
     "Wrapping hands with tape in a worn boxing gym, head down in concentration then glancing up, wearing a loose tank top. Behind: hanging heavy bags, exposed brick and dusty window light from the left",
     "Stopping on a forest hiking trail to look back over one shoulder with an open smile, wearing technical outerwear and a small backpack. Behind: tall trees with dappled sunlight breaking through the canopy",
     "Holding a basketball on one hip on an outdoor court in late afternoon, mid-conversation, relaxed and smiling. Behind: chain-link fencing, painted court lines and apartment blocks in warm side light",
@@ -85,9 +87,9 @@ const STYLE_SCENES = {
     "Standing outside a venue at night under a street lamp, checking a phone then looking up, smart casual outfit. Behind: a brick wall, warm light spill from a doorway and soft bokeh from traffic",
   ],
   beach: [
-    "Standing barefoot on wet sand at golden hour, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves, a low warm sun and a long empty shoreline",
+    "Standing barefoot on wet sand under bright, slightly hazy midday sun, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves and a long empty shoreline",
     "Walking out of the shallows, running a hand back through wet hair, laughing, wearing swim shorts. Behind: bright midday sea, foam and sunlit water",
-    "Sitting on weathered wooden beach steps with forearms on knees, relaxed and looking off to the side, wearing a light shirt. Behind: palm fronds, dune grass and warm late-afternoon light",
+    "Sitting on weathered wooden beach steps with forearms on knees, relaxed and looking off to the side, wearing a light shirt, under flat overcast beach light. Behind: palm fronds and dune grass under a grey sky",
     "Leaning on the bamboo counter of a thatched beach bar with a cold drink, mid-conversation, wearing a casual short-sleeve shirt. Behind: the open sea framed by the bar's roof and hanging lights",
     "Standing on dark coastal rocks with a plain t-shirt, arms loose, watching the swell with an unguarded expression. Behind: sea spray, deep blue water and a clean horizon under natural daylight",
   ],
@@ -96,7 +98,7 @@ const STYLE_SCENES = {
     "Leaning back against the front of a sports car in an underground car park, arms loosely crossed, calm and direct, wearing a dark jacket. Behind: concrete pillars and dramatic overhead lighting pooling on the floor",
     "Standing at the open door of a car parked on a mountain road, one foot on the sill, looking out at the view then back to the lens. Behind: a sweeping valley, winding road and clear bright daylight",
     "Mid-motion closing a car door outside a modern glass building in daytime, glancing up with an easy smile, wearing a well-fitted coat. Behind: reflective glass, city reflections and clean daylight",
-    "Sitting on the sill of an open car door at a scenic overlook at sunset, elbows on knees, quietly taking in the view. Behind: a warm low sun, a wide landscape and long golden light",
+    "Sitting on the sill of an open car door at a scenic overlook under flat midday light, elbows on knees, quietly taking in the view. Behind: a wide landscape under a plain bright sky",
   ],
 };
 
@@ -139,8 +141,14 @@ const COMPOSITIONS = [
  * variantIdx AYNI ZAMANDA kompozisyonu seçer (bkz. COMPOSITIONS) — sahne
  * içeriği stile göre, kompozisyon (kadraj/mesafe/blur) chunk index'e göre
  * değişir. Böylece 5 foto hem farklı ortamlarda hem farklı çekim tarzlarında.
+ *
+ * identityCaption (opsiyonel): Gemini Flash'in referans fotoğraflara bakıp
+ * çıkardığı kısa fiziksel tarif (bkz. identityCaption.js). Görsel + metin
+ * sinyali hizalandığında kimlik sadakati ölçülebilir artıyor; ayrıca modelin
+ * "cildi aç/yaşı küçült" varsayılan eğilimini yazılı ten tonu/yaş bastırıyor.
+ * null ise (Gemini çağrısı başarısız olduysa) bu cümle sessizce atlanır.
  */
-function buildPrompt(styleId, variantIdx) {
+function buildPrompt(styleId, variantIdx, identityCaption) {
   const variants = STYLE_SCENES[styleId];
   const scene = variants[variantIdx % variants.length];
   const composition = COMPOSITIONS[variantIdx % COMPOSITIONS.length];
@@ -149,22 +157,27 @@ function buildPrompt(styleId, variantIdx) {
     "any part of it: " + scene + ".\n\n" +
     "The person in the reference images must be placed into this scene, fully recognisable: same face " +
     "shape, bone structure, eyes, nose, mouth, jawline, hairline, skin tone and age as the references. " +
-    "Do not reshape or reinterpret their face.\n\n" +
+    (identityCaption ? `Specifically, this person: ${identityCaption} ` : "") +
+    "Do not reshape or reinterpret their face, and do not lighten their skin or make them look younger " +
+    "than the references.\n\n" +
     "Match the lighting on their face and clothes to the scene's own light source so it reads as one " +
     "real photograph, not a cut-out on a backdrop — but the scene and its exact setting described above " +
     "always take priority over any other consideration.\n\n" +
     "FRAMING: " + composition + " The environment must stay clearly visible and identifiable around " +
     "them — never a blank or plain backdrop.\n\n" +
-    "CRAFT: this must read as one specific, unrepeatable moment captured on an ordinary phone or " +
-    "consumer camera, not a polished editorial shoot. Include real imperfections: natural skin " +
-    "texture with visible pores, faint blemishes or uneven tone in places, natural facial asymmetry, " +
-    "flyaway hairs out of place, slightly uneven or off-guard expression, a little sensor noise/grain " +
-    "in shadow areas, realistic fabric creases, and imperfect everyday framing (not perfectly level or " +
-    "centred). Natural available light with realistic, sometimes slightly mixed colour temperature, " +
+    "CRAFT: this is a candid photo taken by a friend on an ordinary phone and posted to Instagram — " +
+    "unremarkable, a little imperfectly framed, NOT a professional or editorial photoshoot. Include " +
+    "real imperfections: natural skin texture with visible pores, faint blemishes or uneven tone in " +
+    "places, natural facial asymmetry, flyaway hairs out of place, a slightly unposed or off-guard " +
+    "expression, a little sensor noise/grain in shadow areas, realistic fabric creases, the top of the " +
+    "head slightly cropped or the subject not quite centred, a faintly tilted horizon. Ordinary, " +
+    "imperfect background details appropriate to the location — not an artificially tidy or curated " +
+    "scene. Natural available light with realistic, sometimes slightly mixed colour temperature, " +
     "true-to-life (not boosted) colour and contrast.\n\n" +
     "AVOID: airbrushed or plastic skin, beauty-filter smoothing, studio-perfect lighting, oversaturated " +
     "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, a stiff posed mannequin " +
-    "stance, blank studio backdrop, text, watermark, distorted hands."
+    "stance, a perfectly clean/curated backdrop, professional editorial photography look, text, " +
+    "watermark, distorted hands."
   );
 }
 
@@ -317,19 +330,23 @@ async function uploadReferencePhotos(uid, jobId) {
  * (chunk 0..4 -> STYLE_SCENES[style][0..4]). Böylece bir stildeki 5 foto
  * birbirinin kopyası değil, 5 farklı gerçek ortam olur.
  *
- * Kullanıcının TÜM referans fotoğrafları (3 adet) image_urls ile gönderilir —
- * model kişiyi birden fazla açıdan gördüğü için kimlik sadakati artar.
+ * Kullanıcının TÜM referans fotoğrafları (yüz-crop dahil 4 adet) image_urls
+ * ile gönderilir — model kişiyi birden fazla açıdan gördüğü için kimlik
+ * sadakati artar. identityCaption -> buildPrompt'a geçilir (bkz. orada).
  */
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls, seed) {
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls, seed, identityCaption) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
-    prompt: buildPrompt(styleId, chunkIdx),
+    prompt: buildPrompt(styleId, chunkIdx, identityCaption),
     image_urls: referenceImageUrls,
     // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
     aspect_ratio: "3:4", // dikey dating fotoğrafı
-    // 2K: cilt gözenekleri/saç telleri gibi doğallık veren detaylar 1K'da
-    // "temizlenip" plastikleşiyor.
-    resolution: "2K",
+    // 1K TEST: 2K'nın ürettiği aşırı keskinlik/mikro-detay, "hiperrealist/CGI"
+    // hissinin bir kısmının kaynağı olabilir — telefon fotoğrafları genelde
+    // bu kadar keskin değildir. Sonuç yeterince gerçekçi olmazsa "2K"ya geri
+    // dön (tek satır) ve cilt/saç detayının kaybolup kaybolmadığını gözle
+    // karşılaştır.
+    resolution: "1K",
     num_images: 1,
     output_format: "jpeg",
     seed,
@@ -371,11 +388,12 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, referenceImageUrls,
  * fotoğraf kaynaklı hiçbir uyarı kalmaz — client ancak o zaman üretim
  * loader'ını başlatır ve startPhotoGeneration'ı çağırır.
  *
- * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri ve kaynak
- * kimlik vektörü (refDescriptor — falInferenceWebhook'ta üretim çıktısını
- * doğrulamak için kullanılır) dokümana yazılır; referans selfie'ler
- * Storage'dan silinir (KVKK — biyometrik veri geride bırakılmaz, yalnızca
- * türetilmiş 128 sayılık vektör tutulur).
+ * Başarılıysa işi 'ready' durumunda hazırlar: fal referans URL'leri (+ yüz-
+ * merkezli kırpılmış bir ek referans, en başta), kaynak kimlik vektörü
+ * (refDescriptor) ve kısa bir kimlik tarifi (identityCaption — bkz.
+ * identityCaption.js) dokümana yazılır; referans selfie'ler Storage'dan
+ * silinir (KVKK — biyometrik veri geride bırakılmaz, yalnızca türetilmiş
+ * 128 sayılık vektör ve birkaç cümlelik metin tutulur).
  *
  * data: { jobId: string } -> { ok: true }
  */
@@ -385,7 +403,7 @@ exports.prepareReferencePhotos = onCall(
   // selfie tensörleriyle OOM oluyordu). minInstances:1 ile soğuk başlangıç
   // (model yeniden yükleme) gecikmesi ortadan kaldırıldı.
   {
-    secrets: [FAL_KEY],
+    secrets: [FAL_KEY, GEMINI_KEY],
     region: "europe-west1",
     memory: "2GiB",
     timeoutSeconds: 120,
@@ -405,12 +423,14 @@ exports.prepareReferencePhotos = onCall(
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
-    // Net/tek yüz kapısı + en iyi referansın öne alınması + kaynak kimlik
-    // vektörü. Fail-safe: kontrolün KENDİSİ (tfjs/tespit) hata verirse üretim
-    // bloklanmaz, sıra olduğu gibi kalır ve refDescriptor null bırakılır
-    // (o durumda falInferenceWebhook'taki kimlik kapısı da devre dışı kalır).
+    // Net/tek yüz kapısı (+ bulanıklık/aşırı pozlama) + en iyi referansın
+    // öne alınması + kaynak kimlik vektörü. Fail-safe: kontrolün KENDİSİ
+    // (tfjs/tespit) hata verirse üretim bloklanmaz, sıra olduğu gibi kalır ve
+    // refDescriptor null bırakılır (o durumda falInferenceWebhook'taki kimlik
+    // kapısı da devre dışı kalır).
     let orderedRefUrls = refUrls;
     let refDescriptor = null;
+    let faceCropUrl = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers);
@@ -424,7 +444,7 @@ exports.prepareReferencePhotos = onCall(
           : `${positions[0]}. fotoğraf`;
         throw new HttpsError(
           "invalid-argument",
-          `${label} net değil ya da yüzün yeterince görünmüyor. Lütfen ` +
+          `${label} net değil, bulanık ya da aşırı pozlanmış olabilir. Lütfen ` +
           `${many ? "bunları" : "bunu"} net, iyi aydınlatılmış, tek kişinin ` +
           "göründüğü selfie ile değiştirip tekrar dene.",
           { unclearPhotoIndices: analysis.unclearIndices }
@@ -437,9 +457,39 @@ exports.prepareReferencePhotos = onCall(
       if (analysis.refDescriptor) {
         refDescriptor = Array.from(analysis.refDescriptor); // Firestore için düz dizi
       }
+      // Yüz-merkezli kırpılmış ek referans: en net/en büyük yüzlü fotoğraftan,
+      // yüzü kadrajın baskın öğesi yapan yüksek-çözünürlüklü bir crop üretip
+      // referans listesinin EN BAŞINA ekle (bkz. postProcess.cropFaceRegion).
+      // Edit modellerinde referansın efektif yüz çözünürlüğü kimlik
+      // sadakatiyle doğrudan orantılı. Fail-safe: crop üretilemezse atlanır.
+      if (analysis.bestIndex != null && analysis.bestBox) {
+        try {
+          const { cropFaceRegion } = require("./postProcess");
+          const cropBuf = await cropFaceRegion(refBuffers[analysis.bestIndex], analysis.bestBox);
+          if (cropBuf) {
+            faceCropUrl = await uploadToFalStorage(cropBuf, "ref_face_crop.jpg");
+          }
+        } catch (e) {
+          console.error("Yüz crop referansı yüklenemedi (atlanıyor):", e);
+        }
+      }
     } catch (e) {
       if (e instanceof HttpsError) throw e;
       console.error("Yüz kontrolü başarısız (kimlik kapısı devre dışı, üretim engellenmiyor):", e);
+    }
+    if (faceCropUrl) {
+      orderedRefUrls = [faceCropUrl, ...orderedRefUrls];
+    }
+
+    // Kısa kimlik tarifi (Gemini Flash) — görsel + metin sinyali hizalayıp
+    // kimlik sadakatini artırır (bkz. identityCaption.js). Fail-safe: null
+    // dönerse buildPrompt bu cümleyi sessizce atlar.
+    let identityCaption = null;
+    try {
+      const { describeIdentity } = require("./identityCaption");
+      identityCaption = await describeIdentity(refBuffers);
+    } catch (e) {
+      console.error("Kimlik tarifi başarısız (caption olmadan devam ediliyor):", e);
     }
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
@@ -450,9 +500,10 @@ exports.prepareReferencePhotos = onCall(
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       errorMessage: null,
-      // Tümü üretime gönderilir (en net olan başta) — bkz. submitStyleJob.
+      // Yüz crop'u (varsa) en başta, ardından en net orijinal — bkz. submitStyleJob.
       falRefUrls: orderedRefUrls,
       ...(refDescriptor ? { refDescriptor } : {}),
+      ...(identityCaption ? { identityCaption } : {}),
     });
 
     // Referans selfie'ler artık gerekmiyor (fal kopyası var).
@@ -504,6 +555,7 @@ exports.startPhotoGeneration = onCall(
         "Referans fotoğrafları hazır değil. Lütfen baştan tekrar dene."
       );
     }
+    const identityCaption = prepSnap.data().identityCaption || null;
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
     // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
@@ -555,7 +607,8 @@ exports.startPhotoGeneration = onCall(
       }
       tx.set(walletRef, walletUpdate, { merge: true });
 
-      // merge — prepareReferencePhotos'un yazdığı falRefUrls/refDescriptor korunur.
+      // merge — prepareReferencePhotos'un yazdığı falRefUrls/refDescriptor/
+      // identityCaption korunur.
       tx.set(jobRef, {
         status: "generating",
         styles,
@@ -576,7 +629,7 @@ exports.startPhotoGeneration = onCall(
         const submissions = await Promise.all(
           Array.from({ length: IMAGES_PER_STYLE }, async (_, i) => {
             const seed = Math.floor(Math.random() * 2147483647);
-            const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, seed);
+            const falJob = await submitStyleJob(uid, jobId, styleId, i, refUrls, seed, identityCaption);
             return [String(i), {
               requestId: falJob.request_id,
               photoUrls: [],
@@ -808,7 +861,9 @@ async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef
     // Yeni seed — takılan/başarısız üretimi farklı bir çıktı ile kurtar.
     // Aynı chunkIdx → aynı sahne varyantı korunur.
     const seed = Math.floor(Math.random() * 2147483647);
-    const falJob = await submitStyleJob(uid, jobId, styleId, chunkIdx, refUrls, seed);
+    const falJob = await submitStyleJob(
+      uid, jobId, styleId, chunkIdx, refUrls, seed, job.identityCaption || null
+    );
     await jobRef.set({
       results: {
         [styleId]: {

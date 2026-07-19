@@ -58,4 +58,59 @@ async function addPhoneCameraTexture(buf) {
   }
 }
 
-module.exports = { addPhoneCameraTexture };
+// Kırpma karesi = yüzün en büyük kenarının bu katı. ~2.2, yüzü kadrajın
+// baskın öğesi yapar (saç/çene/boyun bağlamı da korunur — tamamen yüze
+// yapışık bir kırpma modele doğal bir referans gibi görünmüyor).
+const FACE_CROP_MULTIPLIER = 2.2;
+// Kırpma bundan küçükse büyüt (yüksek efektif yüz çözünürlüğü, kimlik
+// sadakatini doğrudan artırıyor — edit modelleri düşük çözünürlüklü yüz
+// referanslarında detayı "uyduruyor").
+const FACE_CROP_TARGET_SIZE = 1024;
+
+/**
+ * Bir görselden, verilen yüz kutusunun (orijinal piksel koordinatlarında
+ * {x,y,width,height}) etrafında kare bir kırpma üretir ve gerekirse büyütür.
+ * Amaç: edit modeline kimlik için YÜKSEK efektif çözünürlüklü, yüzün baskın
+ * olduğu ek bir referans görsel vermek (bkz. falPhotos.prepareReferencePhotos
+ * — bu, üretime gönderilen referans listesinin BAŞINA eklenir).
+ *
+ * Kutu geçersizse veya bir hata olursa null döner — çağıran taraf bu ek
+ * referansı atlar, üretim asla bloklanmaz (fail-safe, diğer tüm ikincil
+ * kalite adımlarıyla aynı felsefe).
+ */
+async function cropFaceRegion(buf, box) {
+  try {
+    const image = sharp(buf);
+    const meta = await image.metadata();
+    const imgW = meta.width, imgH = meta.height;
+    if (!imgW || !imgH) return null;
+
+    const faceSize = Math.max(box.width, box.height);
+    const cropSize = Math.round(faceSize * FACE_CROP_MULTIPLIER);
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    let left = Math.round(cx - cropSize / 2);
+    let top = Math.round(cy - cropSize / 2);
+    let size = cropSize;
+
+    // Görsel sınırlarına kenetle.
+    left = Math.max(0, Math.min(left, imgW - 1));
+    top = Math.max(0, Math.min(top, imgH - 1));
+    size = Math.min(size, imgW - left, imgH - top);
+    if (size <= 0) return null;
+
+    let cropped = image.extract({ left, top, width: size, height: size });
+    if (size < FACE_CROP_TARGET_SIZE) {
+      cropped = cropped.resize(FACE_CROP_TARGET_SIZE, FACE_CROP_TARGET_SIZE, {
+        kernel: "lanczos3",
+      });
+    }
+    return await cropped.jpeg({ quality: 92 }).toBuffer();
+  } catch (e) {
+    console.error("Yüz kırpma başarısız (ek referans atlanıyor):", e);
+    return null;
+  }
+}
+
+module.exports = { addPhoneCameraTexture, cropFaceRegion };

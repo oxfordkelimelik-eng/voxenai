@@ -12,6 +12,18 @@ service cloud.firestore {
         allow read: if request.auth != null && request.auth.uid == userId;
         allow write: if false;
       }
+
+      // İndirme telemetrisi (E.2): hangi stil/sahne varyantının fiilen
+      // galeriye kaydedildiğini kaydeder — para/hak taşımaz, yalnızca
+      // ürün analitiği. Bu yüzden yukarıdaki genel "private" yazma
+      // yasağının İSTİSNASI: client doğrudan CREATE edebilir (kendi
+      // dokümanına). Update/delete yine kapalı — telemetri kaydı sonradan
+      // değiştirilmemeli.
+      match /private/genData/downloads/{docId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null && request.auth.uid == userId;
+        allow update, delete: if false;
+      }
     }
     // Diğer her şey kapalı
     match /{document=**} {

@@ -21,14 +21,31 @@
 //
 // @tensorflow/tfjs-node (native) yerine bilerek saf WASM backend — native
 // derleme Windows'ta ve Cloud Functions'ta kırılgandı; WASM platform bağımsız.
+//
+// GENİŞLETİLMİŞ RED KRİTERLERİ (3. görev): "net/tek yüz" yeterli değil —
+// bulanık (Laplacian varyansı) ve aşırı pozlanmış (histogram clipping)
+// referanslar da elenir. Bunlar "çöp girdi = çöp çıktı"nın somut örnekleri:
+// özellikle ağır beautify/filtre uygulanmış selfie'ler genelde hem aşırı
+// yumuşak (düşük varyans) hem aşırı parlak gelir — bu iki kontrol dolaylı
+// olarak bu selfie'leri de yakalar (özel bir "filtre tespiti" değil, ama
+// pratikte örtüşüyor).
 
 const path = require("path");
+const sharp = require("sharp");
 
 // Yüzün kadrajda kaplaması gereken asgari oran (kenar). Bunun altındaki
 // yüzler "net değil/uzak" sayılır. Aşırı katı olmasın diye gevşek tutuldu.
 const MIN_FACE_RATIO = 0.12;
 // ssd_mobilenetv1 tespit güveni eşiği.
 const MIN_DETECTION_CONFIDENCE = 0.5;
+
+// Laplacian varyansı bu değerin ALTINDAYSA bulanık say. Gerçek kullanıcı
+// fotoğraflarıyla KALİBRE EDİLMEDİ — bilinçli olarak gevşek (az false-positive,
+// yalnızca belirgin bulanıklığı yakalar). Şikayet devam ederse yükselt.
+const BLUR_VARIANCE_MIN = 60;
+// Görselin bu ORANDAN FAZLASI (0-1) neredeyse beyazsa (>250/255) aşırı
+// pozlanmış say. Meşru parlak/backlit selfie'leri elememek için gevşek.
+const OVEREXPOSURE_CLIP_MAX = 0.45;
 
 // Kimlik eşleşme eşiği (öklid mesafesi, düşük = daha benzer). face-api.js'in
 // standart eşiği ~0.6. Biraz gevşetildi çünkü stil/ışık değişince aynı kişi
@@ -67,7 +84,13 @@ async function ensureModelsLoaded() {
 // yeterli ve tensör boyutunu ~25x küçültür.
 const MAX_FACE_DIM = 800;
 
-function bufferToTensor(buf) {
+/**
+ * JPEG buffer'ı tensöre çevirir VE uygulanan küçültme ölçeğini döner
+ * (scale=1 → küçültülmedi). Çağıran taraf, tensör-uzayındaki bir kutuyu
+ * (ör. yüz bounding box) ORİJİNAL görsel piksel koordinatına
+ * `box / scale` ile geri çevirebilir — bkz. detectSingleFace.
+ */
+function bufferToTensorScaled(buf) {
   const tf = require("@tensorflow/tfjs");
   const jpeg = require("jpeg-js");
   const decoded = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 512 });
@@ -78,25 +101,28 @@ function bufferToTensor(buf) {
     rgb[j + 1] = data[i + 1];
     rgb[j + 2] = data[i + 2];
   }
-  return tf.tidy(() => {
+  const longEdge = Math.max(width, height);
+  const scale = longEdge <= MAX_FACE_DIM ? 1 : MAX_FACE_DIM / longEdge;
+  const tensor = tf.tidy(() => {
     const full = tf.tensor3d(rgb, [height, width, 3]);
-    const longEdge = Math.max(width, height);
-    if (longEdge <= MAX_FACE_DIM) return full;
-    const scale = MAX_FACE_DIM / longEdge;
+    if (scale === 1) return full;
     return tf.image
       .resizeBilinear(full, [Math.round(height * scale), Math.round(width * scale)])
       .toInt();
   });
+  return { tensor, scale };
 }
 
 /**
  * Bir JPEG buffer'ında yüz TESPİTİ yapar (tanıma yok). Döner:
- *   { ok: true, area } → kadrajda yeterince büyük TAM OLARAK bir yüz var.
+ *   { ok: true, area, box } → kadrajda yeterince büyük TAM OLARAK bir yüz
+ *     var. box, ORİJİNAL görsel piksel koordinatlarında {x,y,width,height}
+ *     (kırpma için — bkz. postProcess.cropFaceRegion).
  *   { ok: false }      → yüz yok, çok küçük, ya da birden fazla yüz.
  */
 async function detectSingleFace(buf) {
   const faceapi = await ensureModelsLoaded();
-  const tensor = bufferToTensor(buf);
+  const { tensor, scale } = bufferToTensorScaled(buf);
   try {
     const options = new faceapi.SsdMobilenetv1Options({
       minConfidence: MIN_DETECTION_CONFIDENCE,
@@ -109,10 +135,57 @@ async function detectSingleFace(buf) {
     });
     if (big.length !== 1) return { ok: false };
     const b = big[0].box;
-    return { ok: true, area: (b.width * b.height) / (w * h) };
+    const box = {
+      x: b.x / scale, y: b.y / scale,
+      width: b.width / scale, height: b.height / scale,
+    };
+    return { ok: true, area: (b.width * b.height) / (w * h), box };
   } finally {
     tensor.dispose();
   }
+}
+
+/**
+ * Laplacian varyansı (bulanıklık ölçütü — düşük = bulanık) ve aşırı pozlama
+ * (neredeyse-beyaz piksel oranı) hesaplar. Yalnızca referans SEÇİMİNDE
+ * kullanılır (üretim çıktısında değil — çıktının netliği zaten prompt'un
+ * "CRAFT" bölümünde bilinçli olarak kusurlu isteniyor, orayı bulanıklık
+ * kontrolüyle elemek amaca aykırı olurdu).
+ */
+async function assessImageQuality(buf) {
+  const gray = sharp(buf).resize({ width: 600, withoutEnlargement: true }).grayscale();
+
+  const [lap, exposure] = await Promise.all([
+    gray.clone()
+      // Laplacian kenar kernel'i; offset:128 negatif değerlerin 0'a
+      // kırpılıp varyansı yapay düşürmesini önler (varyans sabit ekleme
+      // altında değişmez, yalnızca kırpılmayı engelliyoruz).
+      .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], offset: 128 })
+      .raw()
+      .toBuffer(),
+    gray.clone().threshold(250).raw().toBuffer(),
+  ]);
+
+  let mean = 0;
+  for (let i = 0; i < lap.length; i++) mean += lap[i];
+  mean /= lap.length;
+  let variance = 0;
+  for (let i = 0; i < lap.length; i++) {
+    const d = lap[i] - mean;
+    variance += d * d;
+  }
+  variance /= lap.length;
+
+  let clipped = 0;
+  for (let i = 0; i < exposure.length; i++) if (exposure[i] > 0) clipped++;
+  const clippedFraction = clipped / exposure.length;
+
+  return {
+    blurScore: variance,
+    isBlurry: variance < BLUR_VARIANCE_MIN,
+    clippedFraction,
+    isOverexposed: clippedFraction > OVEREXPOSURE_CLIP_MAX,
+  };
 }
 
 /**
@@ -121,7 +194,7 @@ async function detectSingleFace(buf) {
  */
 async function descriptorFromBuffer(buf) {
   const faceapi = await ensureModelsLoaded();
-  const tensor = bufferToTensor(buf);
+  const { tensor } = bufferToTensorScaled(buf);
   try {
     const result = await faceapi
       .detectSingleFace(tensor)
@@ -135,11 +208,16 @@ async function descriptorFromBuffer(buf) {
 
 /**
  * 3 referans selfie'yi analiz eder. Döner:
- *   unclearIndices:  net/tek yüz kontrolünü geçemeyen fotoğrafların
- *                     0-tabanlı indeksleri (kullanıcının seçim sırasıyla).
+ *   unclearIndices:  net/tek yüz kontrolünü VEYA bulanıklık/aşırı pozlama
+ *                     kontrolünü geçemeyen fotoğrafların 0-tabanlı indeksleri
+ *                     (kullanıcının seçim sırasıyla).
  *   bestIndex:        geçerli fotoğraflar arasında en büyük yüze sahip
  *                     olanın indeksi (üretime gönderilecek referans sırasında
  *                     başa alınır).
+ *   bestBox:          bestIndex'teki fotoğrafta yüzün ORİJİNAL piksel
+ *                     koordinatlarındaki kutusu — yüz-merkezli ek bir kırpılmış
+ *                     referans üretmek için kullanılır (bkz. postProcess.
+ *                     cropFaceRegion, falPhotos.prepareReferencePhotos).
  *   refDescriptor:    geçerli referans fotoğraflardan çıkarılan descriptor'ların
  *                     ORTALAMASI (Float32Array) — üretilen her görselin kimlik
  *                     karşılaştırmasında kullanılır. Hiçbir geçerli fotoğraftan
@@ -150,23 +228,38 @@ async function analyzeReferences(buffers) {
   const unclearIndices = [];
   let bestIndex = null;
   let bestArea = -1;
+  let bestBox = null;
   const descriptors = [];
 
   for (let idx = 0; idx < buffers.length; idx++) {
+    let detection;
     try {
-      const r = await detectSingleFace(buffers[idx]);
-      if (r.ok) {
-        if (r.area > bestArea) {
-          bestArea = r.area;
-          bestIndex = idx;
-        }
-      } else {
-        unclearIndices.push(idx);
-        continue;
-      }
+      detection = await detectSingleFace(buffers[idx]);
     } catch {
       unclearIndices.push(idx);
       continue;
+    }
+    if (!detection.ok) {
+      unclearIndices.push(idx);
+      continue;
+    }
+    // Yüz var ama fotoğrafın genel kalitesi düşükse (bulanık/aşırı pozlanmış)
+    // yine reddedilir — referans, üretimin kalite tavanını belirliyor.
+    // Fail-safe: kalite kontrolünün KENDİSİ hata verirse yalnızca yüz
+    // tespiti şartı uygulanır (bu ikincil kontrol üretimi bloklamaz).
+    try {
+      const quality = await assessImageQuality(buffers[idx]);
+      if (quality.isBlurry || quality.isOverexposed) {
+        unclearIndices.push(idx);
+        continue;
+      }
+    } catch (e) {
+      console.error("Görsel kalite kontrolü başarısız (yalnızca yüz tespiti uygulanıyor):", e);
+    }
+    if (detection.area > bestArea) {
+      bestArea = detection.area;
+      bestIndex = idx;
+      bestBox = detection.box;
     }
     try {
       const d = await descriptorFromBuffer(buffers[idx]);
@@ -187,7 +280,7 @@ async function analyzeReferences(buffers) {
     refDescriptor = avg;
   }
 
-  return { unclearIndices, bestIndex, refDescriptor, totalCount: buffers.length };
+  return { unclearIndices, bestIndex, bestBox, refDescriptor, totalCount: buffers.length };
 }
 
 /**

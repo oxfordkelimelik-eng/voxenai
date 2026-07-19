@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
@@ -108,18 +109,26 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
   return x == null ? [] : [File(x.path)];
 }
 
+// Baş dönüklüğü (yaw) bu dereceden fazlaysa referans reddedilir — üretim
+// modeli aşırı profil açılı bir yüzden sağlam bir kimlik vektörü çıkaramıyor.
+const _maxHeadYawDegrees = 20.0;
+
 /// AI foto üretimi için seçilen referans selfie'lerini doğrular: her
-/// fotoğrafta TAM OLARAK bir yüz, yeterince büyük/net görünür olmalı.
-/// "Çöp girdi = çöp çıktı" — bulanık, yüzsüz veya çoklu-kişili bir referans
-/// fal.ai'ye gönderilmeden önce burada elenir. Geçemeyen dosyaların
-/// yollarını döner (boşsa hepsi geçti demektir).
+/// fotoğrafta TAM OLARAK bir yüz, yeterince büyük/net ve fazla dönük olmayan
+/// açıda görünmeli. "Çöp girdi = çöp çıktı" — bulanık, yüzsüz, çoklu-kişili
+/// ya da aşırı profilden bir referans fal.ai'ye gönderilmeden önce burada
+/// elenir. Geçemeyen dosyaların yollarını döner (boşsa hepsi geçti demektir).
+///
+/// NOT: minFaceSize BİLEREK düşük tutuldu (0.03) — kullanıcıdan artık 3
+/// referansın biri TAM BOY olması istendiği için (bkz. UI metni), yüz
+/// kadrajın çok küçük bir kısmını kaplayabilir. Eskiden 0.2'ydi; bu değerle
+/// tam boy fotoğraflar ML Kit tarafından hiç tespit edilemeyip "yüzsüz"
+/// sayılırdı — kendi kendini geçersiz kılan bir çelişkiydi.
 Future<List<String>> _findInvalidReferencePhotos(List<File> files) async {
   final detector = FaceDetector(
     options: FaceDetectorOptions(
       performanceMode: FaceDetectorMode.accurate,
-      // Yüz, kadrajın en az %20'sini kaplamalı — uzaktan/gruplu fotoğrafları
-      // ve arka plandaki tesadüfi yüzleri eler.
-      minFaceSize: 0.2,
+      minFaceSize: 0.03,
     ),
   );
   final invalid = <String>[];
@@ -128,7 +137,14 @@ Future<List<String>> _findInvalidReferencePhotos(List<File> files) async {
       try {
         final faces =
             await detector.processImage(InputImage.fromFilePath(f.path));
-        if (faces.length != 1) invalid.add(f.path);
+        if (faces.length != 1) {
+          invalid.add(f.path);
+          continue;
+        }
+        final yaw = faces.first.headEulerAngleY;
+        if (yaw != null && yaw.abs() > _maxHeadYawDegrees) {
+          invalid.add(f.path);
+        }
       } catch (_) {
         // Dosya okunamadı/işlenemedi — güvenli tarafta kal, geçersiz say.
         invalid.add(f.path);
@@ -894,11 +910,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 4),
-          Text(
-              'Yüzünün doğru aktarılması için tam '
-              '${DatingConfig.referencePhotoCount} net, farklı açılardan '
-              'fotoğraf gerekir.',
-              style: const TextStyle(
+          // Referans çeşitliliği rehberi: tek açıdan/mesafeden 3 foto yerine
+          // yakın+yarım+tam boy karışımı istenir. Edit modelleri tek açıdan
+          // öğrenemiyor; tam boy özellikle önemli çünkü onsuz model vücut
+          // tipini/boyu "uyduruyor" ve "kafası benim, gövdesi başkasının"
+          // hissi veriyor. Bu SADECE bir metin rehberi — hangi fotoğrafın
+          // hangi tür olduğunu otomatik sınıflandırmıyoruz.
+          const Text(
+              '1 yakın (yüz net), 1 yarım boy, 1 tam boy fotoğraf seç — '
+              'hepsi aynı açıdan/mesafeden olursa yüzün doğru aktarılma '
+              'ihtimali düşer.',
+              style: TextStyle(
                   fontSize: 12, color: AppColors.textSecondary)),
           const SizedBox(height: 10),
           if (_photos.isEmpty)
@@ -960,8 +982,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                         content: Text(
                             'Seçtiğin ${badIndexes.length} fotoğraf uygun değil '
                             '(${badIndexes.join(', ')}. sıradaki): net, tek bir '
-                            'yüz görünmüyor (bulanık, yüzsüz ya da birden fazla '
-                            'kişi). ${valid.isEmpty ? "" : "Uygun olanlar eklendi."}'),
+                            'yüz görünmüyor (bulanık, yüzsüz, birden fazla kişi ya '
+                            'da yüz çok yandan/dönük). '
+                            '${valid.isEmpty ? "" : "Uygun olanlar eklendi."}'),
                       ));
                     }
                     if (valid.isEmpty) return;
@@ -1386,12 +1409,42 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
       }
       await Gal.putImageBytes(Uint8List.fromList(data), album: 'Voxen AI');
       _snack('Fotoğraf galerine kaydedildi ✓');
+      _logDownload(widget.gsUrls[_index]);
     } on GalException catch (e) {
       _snack('Kaydedilemedi: ${e.type.message}', error: true);
     } catch (_) {
       _snack('Fotoğraf kaydedilemedi. Lütfen tekrar dene.', error: true);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  // gs://bucket/dating_results/{uid}/{jobId}/{styleId}_{chunkIdx}_{i}.jpg
+  static final RegExp _resultPathPattern =
+      RegExp(r'dating_results/[^/]+/([^/]+)/([a-z]+)_(\d+)_(\d+)\.jpg$');
+
+  /// Hangi stilin/sahne varyantının (chunk index) gerçekten indirildiğini
+  /// kaydeder — "kullanıcı bunu profiline koyar" kararı, prompt/kompozisyon
+  /// iyileştirmeleri için similarity skorundan çok daha anlamlı bir sinyal.
+  /// Fail-safe: bu SADECE telemetri, hata olursa sessizce yutulur — indirme
+  /// işleminin kendisi zaten tamamlanmış oldu, kullanıcıyı etkilemez.
+  Future<void> _logDownload(String gsUrl) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      final m = _resultPathPattern.firstMatch(gsUrl);
+      if (m == null) return;
+      await FirebaseFirestore.instance
+          .collection('users/$uid/private/genData/downloads')
+          .add({
+        'jobId': m.group(1),
+        'styleId': m.group(2),
+        'chunkIdx': int.tryParse(m.group(3) ?? ''),
+        'imageIdx': int.tryParse(m.group(4) ?? ''),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Sadece telemetri — hata olursa sessizce yut.
     }
   }
 
