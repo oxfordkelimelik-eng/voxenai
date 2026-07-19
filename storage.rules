@@ -14,6 +14,14 @@ service firebase.storage {
       allow write: if false;
     }
 
+    // GEÇİCİ: model A/B karşılaştırma çıktıları (bkz. functions/modelBakeoff.js).
+    // dating_results ile aynı kural: yalnızca Cloud Functions yazar, sahibi
+    // okur. Karşılaştırma bitince bu blok ve ilgili kod silinmeli.
+    match /dating_bakeoff/{userId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }
