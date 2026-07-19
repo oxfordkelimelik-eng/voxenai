@@ -48,11 +48,20 @@ const BLUR_VARIANCE_MIN = 60;
 const OVEREXPOSURE_CLIP_MAX = 0.45;
 
 // Kimlik eşleşme eşiği (öklid mesafesi, düşük = daha benzer). face-api.js'in
-// standart eşiği ~0.6. Biraz gevşetildi çünkü stil/ışık değişince aynı kişi
-// 0.55-0.65 aralığına düşebiliyor; aşırı katı olursa çoğu üretim gereksiz
-// yere elenip retry bütçesini tüketir. YÜZ HÂLÂ ÇOK BOZUK geliyorsa bu
-// değeri DÜŞÜR (ör. 0.55) — daha az toleranslı olur.
-const FACE_MATCH_THRESHOLD = 0.6;
+// standart eşiği ~0.6, ama bu modelin (2018, face-api.js recognition net)
+// belgelenmiş bir zayıflığı var: yanlış-red oranı modern modellere (ör.
+// ArcFace/buffalo_l) göre yüksek — yani GERÇEKTE aynı kişi olan üretimleri
+// bile gereksiz yere "eşleşmedi" sayıp retry'ye gönderiyor. ArcFace'e geçmek
+// Cloud Functions'ta ek risk (native/WASM ONNX, ~190MB model, soğuk başlangıç
+// — bkz. proje notları) taşıdığı için önce BEDAVA olan bu ayarı deniyoruz:
+// eşik 0.60 -> 0.63 gevşetildi. Stil/ışık değişince aynı kişi zaten
+// 0.55-0.65 aralığına düşebiliyordu; bu değişiklik yalnızca daha önce
+// sınırda reddedilen gerçek-eşleşmeleri kabul etmeyi hedefliyor.
+// KALİBRASYON NOTU: bu değer gerçek kullanıcı verisiyle kalibre edilmedi,
+// tahmini bir ayardır. Üretimde hâlâ yüz bozukluğu şikayeti gelirse DÜŞÜR
+// (ör. 0.58) — daha az toleranslı olur. Retry'lerin çoğu boşa gidiyorsa
+// (yüz aslında doğru ama sürekli eleniyorsa) daha da YÜKSELT (ör. 0.66).
+const FACE_MATCH_THRESHOLD = 0.63;
 
 let _initPromise = null;
 let _faceapi = null;
