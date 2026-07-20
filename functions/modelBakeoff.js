@@ -214,7 +214,7 @@ exports.runModelBakeoff = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Giriş gerekli.");
     const uid = request.auth.uid;
-    const { jobId, style = "elegance" } = request.data || {};
+    const { jobId, style = "elegance", runId: clientRunId } = request.data || {};
 
     // jobId verilmezse EN SON referansı olan işi kendisi bulur — böylece
     // kullanıcının Firestore'dan elle jobId kopyalaması gerekmez.
@@ -275,7 +275,12 @@ exports.runModelBakeoff = onCall(
     // canlı sistemle birebir aynı prompt gitmeli.
     const { buildPromptForBakeoff, IMAGES_PER_STYLE_FOR_BAKEOFF } = require("./falPhotos");
 
-    const runId = `bakeoff_${Date.now()}`;
+    // runId'yi client verirse onu kullan — böylece client callable kopsa/timeout
+    // olsa bile bu id'den Firestore'daki sonucu okuyup gösterebilir (para boşa
+    // gitmez). Verilmezse kendimiz üretiriz (geriye dönük uyumlu).
+    const runId = (typeof clientRunId === "string" && clientRunId.trim())
+      ? clientRunId.trim()
+      : `bakeoff_${Date.now()}`;
 
     // TÜM (model x chunk) kombinasyonları PARALEL çalıştırılır (4 model x 5
     // chunk = 20 eşzamanlı istek). Önceden sırayla (20 kez sıra sıra) çalışıyordu

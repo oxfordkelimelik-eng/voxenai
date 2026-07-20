@@ -54,8 +54,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     CaptureAngle.right,
     CaptureAngle.left,
   ];
-  // Otomatik çekim öncesi kaç ardışık "hizalı" kare beklenir (~0.8sn).
-  static const _requiredStableFrames = 8;
+  // Otomatik çekim öncesi kaç ardışık "hizalı" kare beklenir. Yüksek tutuldu:
+  // kullanıcı doğru açı + iyi ışıkta STABİL kalmadan çekmesin. Düşük değer
+  // (eski 8) dönerken anlık geçen açıda ya da titrek karede tetikliyordu.
+  static const _requiredStableFrames = 15;
 
   List<CaptureAngle> get _angles => widget.angles ?? _defaultAngles;
 
@@ -226,21 +228,24 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final yaw = f.headEulerAngleY ?? 0; // sağ+/sol- (yaklaşık)
     final roll = f.headEulerAngleZ ?? 0;
 
-    if (wRatio < 0.30) return (false, 'Biraz yaklaş');
-    if (wRatio > 0.85) return (false, 'Biraz uzaklaş');
-    if ((cx - 0.5).abs() > 0.16) return (false, 'Yüzü yatay ortala');
-    if (cy < 0.22 || cy > 0.68) return (false, 'Yüzü dikey ortala');
-    if (roll.abs() > 15) return (false, 'Başını dik tut');
+    // Yüz ovale tam otursun: mesafe + ortalama toleransları sıkı tutuldu.
+    if (wRatio < 0.34) return (false, 'Biraz yaklaş');
+    if (wRatio > 0.80) return (false, 'Biraz uzaklaş');
+    if ((cx - 0.5).abs() > 0.13) return (false, 'Yüzü yatay ortala');
+    if (cy < 0.25 || cy > 0.62) return (false, 'Yüzü dikey ortala');
+    if (roll.abs() > 12) return (false, 'Başını dik tut');
 
     switch (_angle) {
       case CaptureAngle.front:
-        if (yaw.abs() > 12) return (false, 'Dümdüz kameraya bak');
+        if (yaw.abs() > 10) return (false, 'Dümdüz kameraya bak');
       case CaptureAngle.right:
-        if (yaw < 15) return (false, 'Başını daha SAĞA çevir');
-        if (yaw > 55) return (false, 'Biraz geri dön');
+        // Net bir sağ profil için BELİRGİN dönüş şart — dönerken anlık geçen
+        // küçük açıda (15°) çekmesin, kullanıcı tam dönene kadar beklesin.
+        if (yaw < 25) return (false, 'Başını daha SAĞA çevir');
+        if (yaw > 55) return (false, 'Biraz geri dön (fazla döndün)');
       case CaptureAngle.left:
-        if (yaw > -15) return (false, 'Başını daha SOLA çevir');
-        if (yaw < -55) return (false, 'Biraz geri dön');
+        if (yaw > -25) return (false, 'Başını daha SOLA çevir');
+        if (yaw < -55) return (false, 'Biraz geri dön (fazla döndün)');
     }
     return (true, 'Hizalandı');
   }
@@ -379,15 +384,39 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   static const double _sharpnessThreshold = 45.0;
 
   /// Kaba ışık + netlik kalitesi kontrolü — kötü ışıkta veya bulanık karede
-  /// çekimi engeller. Android (nv21) ilk düzlem Y (parlaklık) verisidir;
-  /// iOS'ta atlanır.
+  /// çekimi engeller. HER İKİ PLATFORMDA da parlaklık kontrol edilir
+  /// (önceki sürümde iOS tamamen atlanıyordu → iPhone'da kötü ışıkta bile
+  /// çekiyordu). Netlik yalnızca Android'de (Y düzleminden ucuz hesaplanır).
   (bool, String) _checkQuality(CameraImage image) {
-    if (!Platform.isAndroid || image.planes.isEmpty) return (true, '');
+    if (image.planes.isEmpty) return (true, '');
+
+    // Parlaklık alt/üst sınırları — ışığa dikkat için biraz sıkı tutuldu.
+    const darkMin = 62; // altı = çok karanlık
+    const brightMax = 225; // üstü = aşırı parlak/patlamış
+
+    if (Platform.isIOS) {
+      // bgra8888: her piksel 4 bayt (B, G, R, A). Kaba luma örneklemesi
+      // (~her 160. bayt = her 40 pikselde bir). Netlik iOS'ta atlanır.
+      final b = image.planes.first.bytes;
+      if (b.length < 4) return (true, '');
+      int sum = 0, count = 0;
+      for (int i = 0; i + 2 < b.length; i += 160) {
+        sum += (b[i] * 11 + b[i + 1] * 59 + b[i + 2] * 30) ~/ 100;
+        count++;
+      }
+      if (count == 0) return (true, '');
+      final avg = sum / count;
+      if (avg < darkMin) return (false, 'Ortam çok karanlık — ışığa geç');
+      if (avg > brightMax) return (false, 'Çok parlak — ışığı azalt');
+      return (true, '');
+    }
+
+    if (!Platform.isAndroid) return (true, '');
+    // Android nv21: ilk düzlem Y (parlaklık). Parlaklık + netlik tek geçişte.
     final y = image.planes.first.bytes;
     final width = image.width;
     if (y.isEmpty || width < 2) return (true, '');
 
-    // Parlaklık + netlik tek geçişte örneklenir (~her 37. bayt).
     int sum = 0;
     int count = 0;
     double gradSq = 0;
@@ -405,8 +434,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     if (count == 0) return (true, '');
 
     final avg = sum / count;
-    if (avg < 55) return (false, 'Ortam çok karanlık — ışığa geç');
-    if (avg > 225) return (false, 'Çok parlak — ışığı azalt');
+    if (avg < darkMin) return (false, 'Ortam çok karanlık — ışığa geç');
+    if (avg > brightMax) return (false, 'Çok parlak — ışığı azalt');
 
     if (gradCount > 0) {
       final sharpness = gradSq / gradCount;
