@@ -7,6 +7,18 @@ const { GEMINI_KEY } = require("./identityCaption");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
+// Senkron (webhook'suz) fal endpoint — face swap için (kısa iş, webhook içinde
+// bloklamak sorun değil).
+const FAL_SYNC_BASE = "https://fal.run";
+// FACE SWAP modeli. İKİ AŞAMALI ÜRETİM'in 2. aşaması: GEN_MODEL sahneyi + kişiyi
+// üretir, sonra bu model kullanıcının GERÇEK yüzünü o sahnenin üstüne yerleştirir
+// — böylece kimlik/göz/ifade sorunları yapısal olarak çözülür (model yüzü sıfırdan
+// sentezlemez, gerçek yüz piksellerini kullanır).
+// NOT: fal bu endpoint'i "deprecated" işaretledi ama hâlâ çağrılabilir ($0.05).
+// Fail-safe: swap başarısız olursa ham üretim kullanılır (aşağıda), yani endpoint
+// kaldırılsa bile uygulama çökmez — sadece swap devre dışı kalır. Kaldırılırsa
+// buradan Segmind faceswap-v4 gibi bir alternatife geçilebilir.
+const FACE_SWAP_MODEL = "easel-ai/advanced-face-swap";
 // Üretim modeli: Nano Banana Pro (edit) — GPT Image 2 denemesi geri alındı
 // (bkz. MODEL GEÇMİŞİ madde 6): "auto" image_size ile bile netlik/arka plan/
 // göz sorunları düzelmedi, nano-banana-pro'ya geri dönüldü.
@@ -443,6 +455,48 @@ async function uploadReferencePhotos(uid, jobId) {
  * ile gönderilir — model kişiyi birden fazla açıdan gördüğü için kimlik
  * sadakati artar. identityCaption -> buildPrompt'a geçilir (bkz. orada).
  */
+// Form gender ('male'|'female'|'na'|null) -> easel-ai gender_0 (zorunlu alan).
+// 'na'/null nötr 'non-binary'ye eşlenir (swap kalitesini en az etkileyen güvenli
+// varsayılan).
+function genderForSwap(bodyProfile) {
+  const g = bodyProfile && bodyProfile.gender;
+  return g === "male" || g === "female" ? g : "non-binary";
+}
+
+/**
+ * Kullanıcının gerçek yüzünü (faceUrl) üretilen sahnenin (targetUrl) üstüne
+ * yerleştirir. Senkron fal.run çağrısı. Döner: swap'lenmiş görselin URL'i, ya da
+ * herhangi bir hata/başarısızlıkta null (FAIL-SAFE — çağıran taraf o zaman ham
+ * üretimi kullanır; endpoint kaldırılsa bile üretim bloklanmaz).
+ */
+async function faceSwap(faceUrl, targetUrl, gender) {
+  try {
+    const resp = await fetch(`${FAL_SYNC_BASE}/${FACE_SWAP_MODEL}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${FAL_KEY.value()}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        face_image_0: faceUrl,
+        gender_0: gender,
+        target_image: targetUrl,
+        workflow_type: "user_hair", // kullanıcının gerçek saçı korunsun
+        upscale: true,
+      }),
+    });
+    if (!resp.ok) {
+      console.error(`face swap başarısız: ${resp.status} ${(await resp.text()).slice(0, 200)}`);
+      return null;
+    }
+    const json = await resp.json();
+    return json?.image?.url || null;
+  } catch (e) {
+    console.error("face swap hata (ham üretim kullanılacak):", e.message || e);
+    return null;
+  }
+}
+
 async function submitStyleJob(
   uid, jobId, styleId, chunkIdx, referenceImageUrls, seed,
   identityCaption, bodyProfile, promptExtras = {}
@@ -671,6 +725,10 @@ exports.prepareReferencePhotos = onCall(
       errorMessage: null,
       // Yüz crop'u (varsa) en başta, ardından en net orijinal — bkz. submitStyleJob.
       falRefUrls: orderedRefUrls,
+      // Face swap kaynağı: ilk kare = ön yüz (çekim sırası ön/sağ/sol/tamboy).
+      // Swap cepheden en iyi çalıştığı için ön kareyi kullanıyoruz (bkz.
+      // falInferenceWebhook + faceSwap). fal CDN kopyası; Storage silinse de kalır.
+      ...(refUrls[0] ? { primaryFaceUrl: refUrls[0] } : {}),
       ...(refDescriptor ? { refDescriptor } : {}),
       ...(identityCaption ? { identityCaption } : {}),
       ...(bodyCaption ? { bodyCaption } : {}),
@@ -936,10 +994,20 @@ exports.falInferenceWebhook = onRequest(
       res.status(200).send("ok");
       return;
     }
+    // FACE SWAP (2. aşama): üretilen sahnenin üstüne kullanıcının GERÇEK yüzünü
+    // yerleştir. img.url zaten fal CDN'de public bir URL — doğrudan target_image
+    // olarak geçilebilir, yeniden yüklemeye gerek yok. Fail-safe: primaryFaceUrl
+    // yoksa (eski iş) ya da swap null dönerse ham üretim görseli kullanılır.
+    const swapGender = genderForSwap(job.bodyProfile);
     let downloaded = [];
     try {
       downloaded = await Promise.all(images.map(async (img, i) => {
-        const imgResp = await fetch(img.url);
+        let sourceUrl = img.url;
+        if (job.primaryFaceUrl) {
+          const swappedUrl = await faceSwap(job.primaryFaceUrl, img.url, swapGender);
+          if (swappedUrl) sourceUrl = swappedUrl;
+        }
+        const imgResp = await fetch(sourceUrl);
         if (!imgResp.ok) throw new Error(`indirilemedi: ${imgResp.status}`);
         const buf = Buffer.from(await imgResp.arrayBuffer());
         return { i, buf };
