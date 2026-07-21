@@ -228,6 +228,12 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "if the scene text above describes one — a neutral, calm or naturally reserved expression is " +
     "correct if that is what the references show. Only give them a smile if they are already smiling " +
     "in some of the reference photos.\n\n" +
+    "GAZE: both eyes must look in the SAME, coherent direction, consistent with the described pose — " +
+    "never cross-eyed, misaligned, wall-eyed or wandering, and never one eye looking at the camera " +
+    "while the other looks elsewhere. If the scene has them looking at the camera/lens, both eyes " +
+    "converge naturally on it; if looking away, at an object, or off-frame, both eyes point together " +
+    "in that same direction with a natural, believable gaze — never a blank, unfocused or dead-eyed " +
+    "stare.\n\n" +
     "PROPORTIONS: the head must be a REALISTIC, anatomically correct size relative to the rest of the " +
     "body — on a normal adult, the head is roughly one-seventh to one-eighth of their total standing " +
     "height, and shoulder width is roughly two to three head-widths. One of the reference photos is a " +
@@ -241,9 +247,13 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "light source so they look genuinely PRESENT in that place — not a cut-out pasted onto a backdrop " +
     "— but the scene and its exact setting described above always take priority over any other " +
     "consideration.\n\n" +
-    "FRAMING: " + composition + " The environment must stay clearly visible, sharp and identifiable " +
-    "around them — never a blank or plain backdrop, and the background is NEVER blurred, soft-focused " +
-    "or bokeh — it stays in crisp, natural focus in every single photo.\n\n" +
+    "FRAMING: " + composition + " The environment must stay clearly visible, detailed and identifiable " +
+    "around them — never a blank or plain backdrop. This is an ordinary phone photo, not an artistic " +
+    "portrait-mode shot, so avoid any heavy, artistic background blur or bokeh that hides the location. " +
+    "But do NOT force an unnatural, uniform, forensic sharpness across the whole frame either — the " +
+    "background must look like a REAL place with real depth (foreground, midground, distance), with " +
+    "the same kind of natural, ordinary depth and light falloff a real phone camera produces, never a " +
+    "flat backdrop or a cutout pasted behind the subject.\n\n" +
     "CRAFT: this is a candid photo taken by a friend on an ordinary phone and posted to Instagram — " +
     "unremarkable, a little imperfectly framed, NOT a professional or editorial photoshoot. Keep the " +
     "person's skin natural and non-airbrushed (do not smooth, beautify or plasticise it) but do NOT " +
@@ -258,8 +268,9 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, exaggerated skin blemishes " +
     "or facial asymmetry not present in the references, artificially enlarged, brightened, lightened or " +
     "overly symmetrical eyes (\"anime eye\" look) — eye size, shape and colour must match the reference " +
-    "photos exactly, a forced smile or expression not present in the references, a stiff posed " +
-    "mannequin stance, ANY background blur/bokeh/soft-focus, a perfectly clean/curated backdrop, " +
+    "photos exactly, misaligned or wandering eye gaze, a forced smile or expression not present in the " +
+    "references, a stiff posed mannequin stance, heavy artistic background blur/bokeh that hides the " +
+    "location, a flat/fake-looking backdrop with no real depth, a perfectly clean/curated backdrop, " +
     "professional editorial photography look, text, watermark, distorted hands."
   );
 }

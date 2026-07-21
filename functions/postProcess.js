@@ -11,8 +11,12 @@
 const sharp = require("sharp");
 
 // Gerçek telefon kamerası JPEG'lerine yakın kalite. AI çıktıları genelde
-// bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar.
-const JPEG_QUALITY = 86;
+// bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar. 86 -> 90:
+// GPT Image 2 "medium" kalite katmanı zaten nano-banana-pro'dan daha az
+// detaylı/keskin çıkıyor olabilir; üstüne 86 gibi belirgin bir sıkıştırma
+// eklemek "netlik düşük" şikayetini büyütüyor olabilir — 90 hâlâ "temiz AI"
+// hissini kırıyor ama gereksiz ek netlik kaybı eklemiyor.
+const JPEG_QUALITY = 90;
 // Referans selfie'ler fal'a gitmeden önce yeniden kodlanırken kullanılan
 // kalite — yön düzeltmesi kimlik sinyalini bozmamalı (yüksek tut).
 const REF_JPEG_QUALITY = 92;
