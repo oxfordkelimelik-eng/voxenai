@@ -49,10 +49,10 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
       _facePhotos.length == DatingConfig.faceCaptureCount && _bodyPhoto != null;
 
   // Kod tarafındaki model kimliği -> ekranda gösterilecek ad + birim fiyat.
+  // İlk turda 4 model denendi; nano-banana ve seedream zayıf çıktığı için
+  // kapsam bu ikisine indirildi.
   static const _labels = {
     'nano-banana-pro': ('Nano Banana Pro (ŞU ANKİ)', 0.15),
-    'nano-banana': ('Nano Banana', 0.039),
-    'seedream-v45': ('Seedream v4.5', 0.04),
     'gpt-image-2': ('GPT Image 2 (orta kalite)', 0.061),
   };
 
@@ -255,22 +255,24 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Aynı referans fotoğrafların ve aynı prompt sistemiyle 4 modelden '
-            'birer set (5 foto) üretilir. Hangi fotoğrafın hangi modelden '
-            'geldiği etiketle gösterilir. Çıktı canlının TAM KOPYASI: kimlik '
-            'kapısı + otomatik retry + telefon kamerası dokusu uygulanır.',
+            'Aynı referans fotoğrafların ve aynı prompt sistemiyle 2 modelden '
+            '(Nano Banana Pro + GPT Image 2) birer set (5 foto) üretilir. '
+            'Hangi fotoğrafın hangi modelden geldiği etiketle gösterilir. '
+            'Çıktı canlının TAM KOPYASI: kimlik kapısı + otomatik retry + '
+            'telefon kamerası dokusu uygulanır.',
             style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 6),
           const Text(
             'Kırmızı "kimlik ✗" rozetli kareler kimlik eşiğini geçemedi — '
-            'canlıda bu kareler kullanıcıya gösterilmeden atılırdı.',
+            'canlıda bu kareler kullanıcıya gösterilmeden atılırdı. Hata alan '
+            'bir kareye dokunursan gerçek hata mesajını görürsün.',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(height: 6),
           const Text(
             'Not: Bu test paket bakiyeni HARCAMAZ; ücret doğrudan fal.ai '
-            'hesabından düşer (taban ~1.45 USD; retry ile artabilir).',
+            'hesabından düşer (taban ~1.05 USD; retry ile artabilir).',
             style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(height: 20),
@@ -494,13 +496,39 @@ class _ModelBakeoffScreenState extends ConsumerState<ModelBakeoffScreen> {
     final identityPassed = img['identityPassed'] as bool?;
     final dist = (img['identityDistance'] as num?)?.toDouble();
     if (gs == null) {
-      return Container(
-        color: AppColors.surface,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.all(6),
-        child: Text('#$chunk\nhata',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 10, color: AppColors.error)),
+      // Gerçek fal hatasını göster (ör. "422 ..." şema hatası) — önceden
+      // sadece "hata" yazıyordu, teşhis için asıl mesaj lazım.
+      final errorText = (img['error'] as String?) ?? 'bilinmeyen hata';
+      return GestureDetector(
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text('#$chunk hata detayı',
+                style: const TextStyle(color: AppColors.textPrimary)),
+            content: SingleChildScrollView(
+              child: SelectableText(errorText,
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Kapat'),
+              ),
+            ],
+          ),
+        ),
+        child: Container(
+          color: AppColors.surface,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(6),
+          child: Text('#$chunk\n$errorText',
+              textAlign: TextAlign.center,
+              maxLines: 5,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 9, color: AppColors.error)),
+        ),
       );
     }
     return Material(

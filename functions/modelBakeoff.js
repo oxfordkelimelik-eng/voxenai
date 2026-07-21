@@ -19,8 +19,8 @@
 //             ve Firestore users/{uid}/private/genData/bakeoffs/{runId}
 //
 // BU ARAÇ BAKİYE DÜŞMEZ ve kullanıcının normal foto akışını etkilemez —
-// ödeme senin fal.ai hesabından doğrudan gider. Taban ~$1.45 (4 model x 5
-// foto = 20 görsel) AMA çıktı artık canlının TAM KOPYASI: kimlik kapısı +
+// ödeme senin fal.ai hesabından doğrudan gider. Taban ~$1.05 (2 model x 5
+// foto = 10 görsel) AMA çıktı artık canlının TAM KOPYASI: kimlik kapısı +
 // otomatik retry (max 2) + telefon kamerası dokusu uygulanıyor. Kimlik
 // eşiğini geçemeyen kareler yeniden üretildiği için maliyet deneme sayısına
 // göre değişir (en kötü ~3 kat) — döndürülen estimatedCostUsd GERÇEK
@@ -33,8 +33,10 @@ const { admin, db, bucket } = require("./_shared");
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_BASE = "https://fal.run"; // senkron endpoint (webhook yok — test aracı)
 
-// Karşılaştırılacak modeller. Her birinin girdi şeması FARKLI olduğu için
-// input'u model bazında kuran bir fonksiyon tutuluyor.
+// Karşılaştırılacak modeller. İlk turda 4 model denendi (nano-banana-pro,
+// nano-banana, seedream-v4.5, gpt-image-2); nano-banana ve seedream sonuçta
+// zayıf çıktı verdiği için kapsam bu ikisine indirildi. Her birinin girdi
+// şeması FARKLI olduğu için input'u model bazında kuran bir fonksiyon tutuluyor.
 const CANDIDATES = [
   {
     id: "nano-banana-pro",
@@ -49,36 +51,6 @@ const CANDIDATES = [
       output_format: "jpeg",
       seed,
       safety_tolerance: "4",
-    }),
-  },
-  {
-    id: "nano-banana",
-    endpoint: "fal-ai/nano-banana/edit",
-    pricePerImage: 0.039,
-    buildInput: (prompt, urls, seed) => ({
-      prompt,
-      image_urls: urls,
-      aspect_ratio: "3:4",
-      num_images: 1,
-      output_format: "jpeg",
-      seed,
-      safety_tolerance: "4",
-    }),
-  },
-  {
-    id: "seedream-v45",
-    endpoint: "fal-ai/bytedance/seedream/v4.5/edit",
-    pricePerImage: 0.04,
-    // Seedream: aspect_ratio/resolution YOK, image_size var. 3:4 dikey için
-    // özel boyut (izin verilen aralık 1920-4096).
-    buildInput: (prompt, urls, seed) => ({
-      prompt,
-      image_urls: urls,
-      image_size: { width: 1920, height: 2560 },
-      num_images: 1,
-      max_images: 1,
-      seed,
-      enable_safety_checker: false,
     }),
   },
   {
@@ -153,6 +125,7 @@ async function generateWithGate(candidate, prompt, urls, seed, refDescriptor, ma
   let attemptSeed = seed;
   let lastFailBuf = null;
   let lastFailDistance = null;
+  let lastError = null;
   let attemptsMade = 0;
 
   for (let attempt = 0; attempt <= BAKEOFF_MAX_RETRIES; attempt++) {
@@ -162,7 +135,9 @@ async function generateWithGate(candidate, prompt, urls, seed, refDescriptor, ma
     attemptSeed = Math.floor(Math.random() * 2147483647);
 
     if (!raw.ok) {
-      // Üretim hatası — canlıda da retry tetiklenir.
+      // Üretim hatası — GERÇEK sebebi sakla (ör. "422 ..." şema hatası); tüm
+      // denemeler tükenirse bu kaybolmasın, arayüzde görünsün.
+      lastError = raw.error;
       continue;
     }
     // Kimlik kapısı yok / hatalı → filtresiz kabul (canlı fail-safe).
@@ -193,13 +168,17 @@ async function generateWithGate(candidate, prompt, urls, seed, refDescriptor, ma
   if (lastFailBuf) {
     return { ok: true, buf: lastFailBuf, distance: lastFailDistance, retries: BAKEOFF_MAX_RETRIES, passedIdentity: false, attemptsMade };
   }
-  return { ok: false, error: "tüm denemeler başarısız (üretim)", attemptsMade };
+  return {
+    ok: false,
+    error: lastError || "tüm denemeler başarısız (üretim)",
+    attemptsMade,
+  };
 }
 
 /**
  * data: { jobId: string, style?: string }
  * Belirtilen (hazırlanmış) işin referanslarıyla, her aday modelden 5 foto
- * (5 farklı kompozisyon) üretir. Toplam 4 model x 5 = 20 görsel.
+ * (5 farklı kompozisyon) üretir. Toplam 2 model x 5 = 10 görsel.
  */
 exports.runModelBakeoff = onCall(
   {
@@ -282,8 +261,8 @@ exports.runModelBakeoff = onCall(
       ? clientRunId.trim()
       : `bakeoff_${Date.now()}`;
 
-    // TÜM (model x chunk) kombinasyonları PARALEL çalıştırılır (4 model x 5
-    // chunk = 20 eşzamanlı istek). Önceden sırayla (20 kez sıra sıra) çalışıyordu
+    // TÜM (model x chunk) kombinasyonları PARALEL çalıştırılır (2 model x 5
+    // chunk = 10 eşzamanlı istek). Önceden sırayla (20 kez sıra sıra) çalışıyordu
     // — 540 saniyelik zaman aşımına yaklaşıyordu ve gereksiz yavaştı; her
     // istek bağımsız olduğu için paralelleştirmenin hiçbir sakıncası yok.
     const tasks = [];

@@ -144,13 +144,22 @@ async function describeStyleWardrobes(buffers, styleIds) {
 
     const prompt =
       "You are styling dating-app photos for the SAME person shown in the reference images. " +
-      "For EACH style id below, write ONE short wardrobe + vibe note (max 25 words) that fits " +
-      "THIS person's apparent age, gender presentation, and body — realistic clothes someone " +
-      "like them would actually wear on a phone camera, NOT a fashion editorial or costume.\n\n" +
+      "These photos need to catch a woman's attention while she swipes through profiles, so " +
+      "styling matters — where it fits the style, lean toward looking polished, put-together " +
+      "and a touch upscale (quality-looking fabric, well-fitted cuts, subtle signs of taste or " +
+      "success) rather than sloppy or low-effort. This matters MOST for styles about elegance, " +
+      "old-money refinement, prestige/cars or a night out — for those, allow visible signs of " +
+      "class, style or quiet wealth (a good watch, tailored fit, a nice coat, a well-kept car) " +
+      "where natural. For more casual styles (athletic, travel, beach) keep it realistic and " +
+      "unpretentious, but still make sure the person looks their best, clean and confident — " +
+      "never careless. For EACH style id below, write ONE short wardrobe + vibe note (max 25 " +
+      "words) that fits THIS person's apparent age, gender presentation, and body — realistic " +
+      "clothes someone like them would actually wear and own, NOT a fashion editorial or costume.\n\n" +
       "Styles:\n" + styleList + "\n\n" +
-      "Rules: no beauty fluff; no 'make them hotter'; keep it natural and wearable; if unsure, " +
-      "prefer simple casual clothes. Return ONLY valid JSON object mapping style id to string, " +
-      "no markdown fences, no extra keys. Example: {\"elegance\":\"navy blazer over white shirt, relaxed\"}";
+      "Rules: no beauty fluff about their face/body; no 'make them hotter'; this is about " +
+      "clothing/props/setting only. Keep it natural and wearable, never costume-like. Return " +
+      "ONLY valid JSON object mapping style id to string, no markdown fences, no extra keys. " +
+      "Example: {\"elegance\":\"tailored navy blazer, crisp white shirt, subtle watch, relaxed confidence\"}";
 
     // Yüz + tam boy sinyali için en fazla 2 yüz + 1 beden (varsa son kare).
     const picks = [];

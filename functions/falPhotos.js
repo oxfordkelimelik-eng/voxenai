@@ -54,8 +54,8 @@ const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
 const STYLE_SCENES = {
   elegance: [
     "Mid-step through the lobby of a boutique hotel, adjusting a cuff and glancing off-camera with a relaxed half-smile, wearing a well-cut charcoal blazer over an open white shirt. Behind: a marble reception desk, warm brass lamps, and a tall arched window spilling soft late-afternoon light across the floor",
-    "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, laughing at something just out of frame. Behind: backlit shelves of bottles, low pendant lights, a bartender blurred mid-motion",
-    "Crossing a European city street under flat overcast daylight in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: blurred shopfronts, grey even light, out-of-focus passers-by",
+    "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, laughing at something just out of frame. Behind: backlit shelves of bottles, low pendant lights, a bartender clearly visible mid-motion",
+    "Crossing a European city street under flat overcast daylight in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: shopfronts and passers-by, all clearly visible and in sharp focus, grey even light",
     "Standing at the railing of a rooftop terrace at dusk in a light grey suit with the collar open, one hand resting on the rail, easy natural smile. Behind: glass towers with lit windows against a deep blue evening sky",
     "Pausing in a quiet art gallery, hands in pockets, head turned to study a painting with a thoughtful expression, wearing a fine black turtleneck. Behind: white walls, large framed artworks, soft even ceiling light",
   ],
@@ -81,21 +81,21 @@ const STYLE_SCENES = {
     "At the head of a classic dining room table, mid-conversation with a warm expression, wearing a crisp tailored shirt with sleeves rolled. Behind: antique furniture, framed pictures and light from a tall sash window",
   ],
   nightout: [
-    "At the counter of a dim cocktail bar, turning toward the camera mid-laugh with a drink in hand, wearing a dark shirt with the top button open. Behind: warm amber light, blurred bottles and glowing pendant lamps",
-    "On a rooftop bar at night, leaning back against the railing with a relaxed grin, wearing a well-fitted jacket. Behind: a wide spread of out-of-focus city lights and a dark skyline",
-    "Walking a neon-lit street at night, hands in jacket pockets, glancing sideways with a half-smile, wearing a leather jacket. Behind: glowing signs reflected in wet pavement and passing headlights",
-    "At a busy restaurant table, mid-conversation and gesturing with one hand, genuine laughter, wearing a casual button-up. Behind: warm string lights, other diners softly blurred and candles on tables",
-    "Standing outside a venue at night under a street lamp, checking a phone then looking up, smart casual outfit. Behind: a brick wall, warm light spill from a doorway and soft bokeh from traffic",
+    "At the counter of a dim cocktail bar, turning toward the camera mid-laugh with a drink in hand, wearing a dark shirt with the top button open. Behind: warm amber light, bottles on shelves and glowing pendant lamps, all clearly visible",
+    "On a rooftop bar at night, leaning back against the railing with a relaxed grin, wearing a well-fitted jacket. Behind: a wide spread of city lights and a dark skyline, sharp and clearly visible",
+    "Walking a neon-lit street at night, hands in jacket pockets, glancing sideways with a half-smile, wearing a leather jacket. Behind: glowing signs reflected in wet pavement and passing headlights, all in sharp focus",
+    "At a busy restaurant table, mid-conversation and gesturing with one hand, genuine laughter, wearing a casual button-up. Behind: warm string lights, other diners clearly visible and candles on tables",
+    "Standing outside a venue at night under a street lamp, checking a phone then looking up, smart casual outfit. Behind: a brick wall, warm light spill from a doorway and passing traffic, all clearly visible",
   ],
   beach: [
-    "Standing barefoot on wet sand under bright, slightly hazy midday sun, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves and a long empty shoreline",
+    "Standing barefoot on wet sand under bright midday sun, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves and a long empty shoreline, clear and sharp",
     "Walking out of the shallows, running a hand back through wet hair, laughing, wearing swim shorts. Behind: bright midday sea, foam and sunlit water",
     "Sitting on weathered wooden beach steps with forearms on knees, relaxed and looking off to the side, wearing a light shirt, under flat overcast beach light. Behind: palm fronds and dune grass under a grey sky",
     "Leaning on the bamboo counter of a thatched beach bar with a cold drink, mid-conversation, wearing a casual short-sleeve shirt. Behind: the open sea framed by the bar's roof and hanging lights",
     "Standing on dark coastal rocks with a plain t-shirt, arms loose, watching the swell with an unguarded expression. Behind: sea spray, deep blue water and a clean horizon under natural daylight",
   ],
   car: [
-    "Standing beside a dark luxury sedan on a city street in the evening, one hand on the roof, turning toward the camera with a relaxed expression, wearing a smart jacket. Behind: warm street lighting, shopfronts and soft traffic bokeh",
+    "Standing beside a dark luxury sedan on a city street in the evening, one hand on the roof, turning toward the camera with a relaxed expression, wearing a smart jacket. Behind: warm street lighting, shopfronts and passing traffic, all clearly visible and in sharp focus",
     "Leaning back against the front of a sports car in an underground car park, arms loosely crossed, calm and direct, wearing a dark jacket. Behind: concrete pillars and dramatic overhead lighting pooling on the floor",
     "Standing at the open door of a car parked on a mountain road, one foot on the sill, looking out at the view then back to the lens. Behind: a sweeping valley, winding road and clear bright daylight",
     "Mid-motion closing a car door outside a modern glass building in daytime, glancing up with an easy smile, wearing a well-fitted coat. Behind: reflective glass, city reflections and clean daylight",
@@ -110,24 +110,28 @@ const STYLE_SCENES = {
 // arka plan bulanık, bazısı geniş ve her şey net, bazısı ön planda bir nesne
 // var vb.). Bu, "hepsi aynı formülde" görünüp set hâlinde yapay durma
 // sorununu hedefler.
+// HİÇBİR kompozisyonda arka plan bulanıklaştırılmaz — hepsi baştan sona NET.
+// Çeşitlilik yalnızca kadraj/mesafe/açıdan gelir (blur'dan değil).
 const COMPOSITIONS = [
-  // 0: Yakın omuz üstü, güçlü arka plan bulanıklığı — klasik "portre" karesi.
-  "Tight head-and-shoulders framing, the subject fills most of the frame, shallow depth of " +
-  "field with the background strongly out of focus (like a portrait lens at f/1.8).",
-  // 1: Bel boyu, orta bulanıklık, hafif merkez dışı.
-  "Waist-up framing, the subject positioned slightly off-centre, background moderately soft " +
-  "but its shapes and colours still readable (like f/2.8).",
+  // 0: Yakın omuz üstü — arka plan yine net/okunur.
+  "Tight head-and-shoulders framing, the subject fills most of the frame, the background " +
+  "stays fully sharp and clearly visible behind them (like a phone camera's deep focus, no " +
+  "background blur at all).",
+  // 1: Bel boyu, hafif merkez dışı, arka plan net.
+  "Waist-up framing, the subject positioned slightly off-centre, the background sharp and " +
+  "clearly readable — every shape, colour and detail behind them stays in focus.",
   // 2: Geniş/tam boy, kişi küçük, sahne baskın, tamamen net — "ortam fotoğrafı".
   "Wide environmental shot where the subject is a smaller element within the frame rather than " +
-  "filling it — the whole scene stays in sharp focus from near to far (like a wide-angle lens at " +
-  "f/8), the location itself is as much the subject as the person.",
-  // 3: Orta mesafe, kenarda, kadrajın önünde bir şey var (gerçek derinlik hissi).
+  "filling it — the whole scene stays in sharp focus from near to far, the location itself is " +
+  "as much the subject as the person.",
+  // 3: Orta mesafe, kenarda, kadrajın önünde bir şey var — o da net.
   "Medium-distance shot, the subject positioned toward one side of the frame with open space on " +
-  "the other side, something genuinely sits in the near foreground and is softly out of focus at " +
-  "the very edge of the frame (a railing, a plant, a doorway, a shoulder), moderate background blur.",
-  // 4: Gündelik, hafif eğik açı — "arkadaşın telefonla çektiği" hissi.
+  "the other side, something genuinely sits in the near foreground (a railing, a plant, a " +
+  "doorway, a shoulder) and is JUST as sharp and in focus as the subject and the background.",
+  // 4: Gündelik, hafif eğik açı — arka plan yine net.
   "Casual close-range framing from a slightly informal handheld angle, as if a friend quickly " +
-  "raised their phone — not perfectly centred or level, light natural background blur.",
+  "raised their phone — not perfectly centred or level, but the background stays fully sharp " +
+  "and clearly visible, no blur.",
 ];
 
 /**
@@ -140,8 +144,9 @@ const COMPOSITIONS = [
  * üretilmesine yol açtı; SCENE ile rekabet eden metin azaltıldı).
  *
  * variantIdx AYNI ZAMANDA kompozisyonu seçer (bkz. COMPOSITIONS) — sahne
- * içeriği stile göre, kompozisyon (kadraj/mesafe/blur) chunk index'e göre
- * değişir. Böylece 5 foto hem farklı ortamlarda hem farklı çekim tarzlarında.
+ * içeriği stile göre, kompozisyon (yalnızca kadraj/mesafe/açı — ASLA blur)
+ * chunk index'e göre değişir. Böylece 5 foto hem farklı ortamlarda hem farklı
+ * çekim tarzlarında, ama arka plan HER ZAMAN net.
  *
  * identityCaption (opsiyonel): Gemini Flash'in referans fotoğraflara bakıp
  * çıkardığı kısa fiziksel tarif (bkz. identityCaption.js). Görsel + metin
@@ -212,28 +217,41 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "shape, bone structure, eyes, nose, mouth, jawline, hairline, skin tone and age as the references. " +
     (identityCaption ? `Specifically, this person: ${identityCaption} ` : "") +
     "Do not reshape or reinterpret their face, and do not lighten their skin or make them look younger " +
-    "than the references. Match body proportions, shoulder width and overall build to the full-body " +
-    "reference photo when it is present — do not invent a fitter, taller or differently shaped body.\n\n" +
+    "than the references. Their skin tone must be perfectly consistent across face, neck, hands and any " +
+    "other visible skin — no colour or tone shift between face and body, as if lit by the same light. " +
+    "Match body proportions, shoulder width and overall build to the full-body reference photo when it " +
+    "is present — do not invent a fitter, taller or differently shaped body.\n\n" +
+    "EXPRESSION: look at the person's actual resting expression in the reference photos and preserve " +
+    "it. If they are not smiling in the references, do NOT force a smile, grin or laugh onto them even " +
+    "if the scene text above describes one — a neutral, calm or naturally reserved expression is " +
+    "correct if that is what the references show. Only give them a smile if they are already smiling " +
+    "in some of the reference photos.\n\n" +
     bodyBlock +
     wardrobeBlock +
-    "Match the lighting on their face and clothes to the scene's own light source so it reads as one " +
-    "real photograph, not a cut-out on a backdrop — but the scene and its exact setting described above " +
-    "always take priority over any other consideration.\n\n" +
-    "FRAMING: " + composition + " The environment must stay clearly visible and identifiable around " +
-    "them — never a blank or plain backdrop.\n\n" +
+    "Match the lighting, shadows and colour temperature on their face and clothes to the scene's own " +
+    "light source so they look genuinely PRESENT in that place — not a cut-out pasted onto a backdrop " +
+    "— but the scene and its exact setting described above always take priority over any other " +
+    "consideration.\n\n" +
+    "FRAMING: " + composition + " The environment must stay clearly visible, sharp and identifiable " +
+    "around them — never a blank or plain backdrop, and the background is NEVER blurred, soft-focused " +
+    "or bokeh — it stays in crisp, natural focus in every single photo.\n\n" +
     "CRAFT: this is a candid photo taken by a friend on an ordinary phone and posted to Instagram — " +
-    "unremarkable, a little imperfectly framed, NOT a professional or editorial photoshoot. Include " +
-    "real imperfections: natural skin texture with visible pores, faint blemishes or uneven tone in " +
-    "places, natural facial asymmetry, flyaway hairs out of place, a slightly unposed or off-guard " +
-    "expression, a little sensor noise/grain in shadow areas, realistic fabric creases, the top of the " +
-    "head slightly cropped or the subject not quite centred, a faintly tilted horizon. Ordinary, " +
-    "imperfect background details appropriate to the location — not an artificially tidy or curated " +
-    "scene. Natural available light with realistic, sometimes slightly mixed colour temperature, " +
-    "true-to-life (not boosted) colour and contrast.\n\n" +
+    "unremarkable, a little imperfectly framed, NOT a professional or editorial photoshoot. Keep the " +
+    "person's skin natural and non-airbrushed (do not smooth, beautify or plasticise it) but do NOT " +
+    "invent blemishes, spots, uneven tone or facial asymmetry that isn't already visible in the " +
+    "reference photos — the face should look like a normal, unedited phone photo of THIS exact person, " +
+    "not an exaggerated or distressed version of them. Other natural, non-facial imperfections are " +
+    "welcome: flyaway hairs out of place, a slightly unposed or off-guard expression, a little sensor " +
+    "noise/grain in shadow areas, realistic fabric creases, the top of the head slightly cropped or the " +
+    "subject not quite centred, a faintly tilted horizon. Natural available light with realistic, " +
+    "sometimes slightly mixed colour temperature, true-to-life (not boosted) colour and contrast.\n\n" +
     "AVOID: airbrushed or plastic skin, beauty-filter smoothing, studio-perfect lighting, oversaturated " +
-    "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, a stiff posed mannequin " +
-    "stance, a perfectly clean/curated backdrop, professional editorial photography look, text, " +
-    "watermark, distorted hands."
+    "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, exaggerated skin blemishes " +
+    "or facial asymmetry not present in the references, artificially enlarged, brightened, lightened or " +
+    "overly symmetrical eyes (\"anime eye\" look) — eye size, shape and colour must match the reference " +
+    "photos exactly, a forced smile or expression not present in the references, a stiff posed " +
+    "mannequin stance, ANY background blur/bokeh/soft-focus, a perfectly clean/curated backdrop, " +
+    "professional editorial photography look, text, watermark, distorted hands."
   );
 }
 
