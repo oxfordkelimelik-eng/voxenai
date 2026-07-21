@@ -9,7 +9,4 @@ class DatingRoutes {
   static const String hub = '/hub'; // giriş sonrası modül merkezi
   static const String settings = '/settings'; // gizlilik + hesap
   static const String module = '/module'; // /module/:id
-  // GEÇİCİ geliştirici aracı — model A/B karşılaştırması. Test bitince
-  // bu rota, ModelBakeoffScreen ve functions/modelBakeoff.js silinmeli.
-  static const String modelBakeoff = '/dev/model-bakeoff';
 }

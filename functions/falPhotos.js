@@ -1238,12 +1238,3 @@ exports.cleanupStuckGenJobs = onSchedule(
     }
   }
 );
-
-// ============================================================
-// GEÇİCİ: model karşılaştırma (A/B) aracı için dışa açılan yardımcılar.
-// modelBakeoff.js bunları kullanarak canlı sistemle BİREBİR AYNI prompt'u
-// üretir — testin adil olması için şart. Bakeoff bittiğinde modelBakeoff.js
-// ile birlikte bu blok da SİLİNMELİ.
-// ============================================================
-exports.buildPromptForBakeoff = buildPrompt;
-exports.IMAGES_PER_STYLE_FOR_BAKEOFF = IMAGES_PER_STYLE;

@@ -70,15 +70,6 @@ class DatingSettingsScreen extends ConsumerWidget {
               danger: true,
               onTap: () => _confirmDelete(context, ref)),
 
-          // GEÇİCİ GELİŞTİRİCİ ARACI — model A/B karşılaştırması.
-          // Karşılaştırma bitip bir modele karar verilince BU BLOK,
-          // ModelBakeoffScreen, DatingRoutes.modelBakeoff rotası ve
-          // functions/modelBakeoff.js silinmeli.
-          _section('GELİŞTİRİCİ (geçici)'),
-          _tile(Icons.science_outlined, 'Model Karşılaştırma Testi',
-              subtitle: '4 modelden 5\'er foto üretir (~\$1.45, paket harcamaz)',
-              onTap: () => context.push(DatingRoutes.modelBakeoff)),
-
           const SizedBox(height: 24),
           const Center(
             child: Text('VOXEN AI · v1.0.0',

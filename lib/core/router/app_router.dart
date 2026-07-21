@@ -5,7 +5,6 @@ import '../../presentation/dating/onboarding/onboarding_flow.dart';
 import '../../presentation/dating/modules/modules_showcase.dart';
 import '../../presentation/dating/modules/module_hub.dart';
 import '../../presentation/dating/modules/module_screen.dart';
-import '../../presentation/dating/modules/model_bakeoff_screen.dart';
 import '../../presentation/dating/paywall/paywall_screen.dart';
 import '../../presentation/dating/paywall/login_screen.dart';
 import '../../presentation/dating/settings/dating_settings_screen.dart';
@@ -94,11 +93,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: DatingRoutes.settings,
         builder: (c, s) => const DatingSettingsScreen(),
-      ),
-      // GEÇİCİ geliştirici aracı — model A/B karşılaştırması (test bitince sil)
-      GoRoute(
-        path: DatingRoutes.modelBakeoff,
-        builder: (c, s) => const ModelBakeoffScreen(),
       ),
     ],
   );
