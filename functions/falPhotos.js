@@ -244,6 +244,10 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "or framing as a scale reference, and do NOT enlarge the head to match it. Scale the head strictly " +
     "against the body proportions shown in the full-body reference photo; the head must never look " +
     "oversized, bobble-headed or disproportionate to the shoulders and body in the final image.\n\n" +
+    "SINGLE PERSON: this exact person must appear EXACTLY ONCE in the photo. Do not duplicate their " +
+    "face or likeness onto anyone else in the scene — any other people in the background (passers-by, " +
+    "other diners, other gym-goers, etc.) must be different, unrelated people, generic and not this " +
+    "person's face. Do not create a mirror or reflection of them elsewhere in the frame either.\n\n" +
     bodyBlock +
     wardrobeBlock +
     "Match the lighting, shadows and colour temperature on their face and clothes to the scene's own " +
@@ -274,7 +278,10 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "photos exactly, misaligned or wandering eye gaze, ANY smile, grin, laugh or visible teeth, a stiff " +
     "posed mannequin stance, heavy artistic background blur/bokeh that hides the " +
     "location, a flat/fake-looking backdrop with no real depth, a perfectly clean/curated backdrop, " +
-    "professional editorial photography look, text, watermark, distorted hands."
+    "professional editorial photography look, this person's face duplicated onto anyone else in the " +
+    "scene, garbled or illegible fake text/lettering on any sign, menu, screen, watch face, book cover " +
+    "or packaging visible in the frame (leave such surfaces blank, blurred-plain or genuinely readable " +
+    "rather than inventing gibberish characters), overlaid UI text, watermark, distorted hands."
   );
 }
 
