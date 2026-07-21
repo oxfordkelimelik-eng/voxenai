@@ -7,9 +7,9 @@ const { GEMINI_KEY } = require("./identityCaption");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-// Üretim modeli: GPT Image 2 (edit, orta kalite) — 4 model bakeoff testinde
-// (nano-banana-pro, nano-banana, seedream-v4.5, gpt-image-2) en doğal/en az
-// yapay sonucu bu verdi; ana akışa buradan geçirildi.
+// Üretim modeli: Nano Banana Pro (edit) — GPT Image 2 denemesi geri alındı
+// (bkz. MODEL GEÇMİŞİ madde 6): "auto" image_size ile bile netlik/arka plan/
+// göz sorunları düzelmedi, nano-banana-pro'ya geri dönüldü.
 //
 // MODEL GEÇMİŞİ (aynı hatayı tekrarlamamak için):
 //  1) nano-banana-2/edit  → arka planlar gerçekçi değildi.
@@ -17,16 +17,19 @@ const FAL_QUEUE_BASE = "https://queue.fal.run";
 //     plastik görünüm; id_weight sahneyi ezdiğinden arka plan hiç oluşmuyordu.
 //  3) seedream/v5/pro/edit→ arka plan oluştu ama "kişi ön planda, arka plan
 //     arkada" katmanlı/yapıştırma hissi sürdü.
-//  4) nano-banana-pro/edit → gerçekçilik odaklıydı ama bakeoff'ta gpt-image-2
-//     kadar doğal bulunmadı ($0.15/foto, en pahalısıydı).
-//  5) openai/gpt-image-2/edit (orta kalite, şu an) → bakeoff'ta beğenildi,
-//     ayrıca $0.061/foto ile nano-banana-pro'dan ucuz.
+//  4) nano-banana-pro/edit → gerçekçilik odaklı, bakeoff'ta iyi ama gpt-image-2
+//     kadar doğal bulunmamıştı ($0.15/foto, en pahalısı).
+//  5) openai/gpt-image-2/edit → bakeoff'ta (yanlışlıkla auto'ya düşen eski
+//     şemayla) beğenilmişti; ana akışta doğru şema + "portrait_4_3" preset'iyle
+//     test edilince netlik/arka plan/göz bozuldu; "auto"ya dönülünce de DÜZELMEDİ.
+//  6) nano-banana-pro/edit (şu an, GERİ DÖNÜŞ) → GPT Image 2 canlı akışta genel
+//     olarak tatmin etmedi, madde 4'teki modele geri dönüldü.
 //
 // ÖNEMLİ SINIR: bunların hepsi "edit" ailesidir ve kişiyi korunacak bir nesne
 // olarak ele alır — bu yüzden bir miktar katman/yapıştırma hissi yapısaldır.
 // Bunu kökten çözmenin yolu kullanıcıya özel LoRA eğitimidir (kişi sahneyle
 // birlikte sıfırdan üretilir); maliyet/bekleme nedeniyle şimdilik seçilmedi.
-const GEN_MODEL = "openai/gpt-image-2/edit";
+const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -223,11 +226,11 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "other visible skin — no colour or tone shift between face and body, as if lit by the same light. " +
     "Match body proportions, shoulder width and overall build to the full-body reference photo when it " +
     "is present — do not invent a fitter, taller or differently shaped body.\n\n" +
-    "EXPRESSION: look at the person's actual resting expression in the reference photos and preserve " +
-    "it. If they are not smiling in the references, do NOT force a smile, grin or laugh onto them even " +
-    "if the scene text above describes one — a neutral, calm or naturally reserved expression is " +
-    "correct if that is what the references show. Only give them a smile if they are already smiling " +
-    "in some of the reference photos.\n\n" +
+    "EXPRESSION: the person must NOT smile, grin, laugh or show teeth in this photo, or in ANY of the " +
+    "photos in this set — no exceptions, even if the scene text above describes smiling, laughing or " +
+    "grinning, and even if they are smiling in some of the reference photos. Give them a neutral, calm, " +
+    "closed-mouth, naturally reserved expression instead — serious or thoughtful is correct, a slight " +
+    "closed-mouth ease is fine, but never an open smile, grin or laugh.\n\n" +
     "GAZE: both eyes must look in the SAME, coherent direction, consistent with the described pose — " +
     "never cross-eyed, misaligned, wall-eyed or wandering, and never one eye looking at the camera " +
     "while the other looks elsewhere. If the scene has them looking at the camera/lens, both eyes " +
@@ -268,8 +271,8 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, exaggerated skin blemishes " +
     "or facial asymmetry not present in the references, artificially enlarged, brightened, lightened or " +
     "overly symmetrical eyes (\"anime eye\" look) — eye size, shape and colour must match the reference " +
-    "photos exactly, misaligned or wandering eye gaze, a forced smile or expression not present in the " +
-    "references, a stiff posed mannequin stance, heavy artistic background blur/bokeh that hides the " +
+    "photos exactly, misaligned or wandering eye gaze, ANY smile, grin, laugh or visible teeth, a stiff " +
+    "posed mannequin stance, heavy artistic background blur/bokeh that hides the " +
     "location, a flat/fake-looking backdrop with no real depth, a perfectly clean/curated backdrop, " +
     "professional editorial photography look, text, watermark, distorted hands."
   );
@@ -444,26 +447,17 @@ async function submitStyleJob(
       wardrobeNote: promptExtras.wardrobeNote || null,
     }),
     image_urls: referenceImageUrls,
-    // GPT Image 2 GERÇEK şeması (fal.ai resmi dokümantasyonu doğrulandı):
-    // aspect_ratio/resolution/safety_tolerance YOK — image_size (obje/preset),
-    // quality, num_images, output_format var. Önceki sürümde yanlışlıkla
-    // "size" (string) kullanılmıştı — bu isim şemada YOK, muhtemelen sessizce
-    // yok sayılıp varsayılana (image_size: auto, quality: high) düşüyordu.
-    //
-    // image_size: "auto" — GERİ ALINDI. "portrait_4_3" preset'i DENENMEDEN
-    // varsayımla seçilmişti ("native çözünürlük kovası daha iyi olur"
-    // varsayımı). Kullanıcının beğendiği ilk GPT Image 2 testi aslında YANLIŞ
-    // parametre adıyla ("size") çalışmıştı — bu isim şemada yok, sessizce yok
-    // sayılıp fal.ai'nin kendi varsayılanına (image_size: auto) düşüyordu.
-    // "portrait_4_3"e geçince netlik/arka plan/göz üçü BİRDEN bozuldu — aynı
-    // anda üç farklı belirti tek kaynağı işaret ediyor: auto, bu modelde
-    // portrait_4_3'ten daha iyi çalışıyor. Değiştirmeden önce mutlaka tekrar
-    // test et.
-    image_size: "auto",
-    quality: "medium", // istenen kalite katmanı ($0.061/foto) — artık GERÇEKTEN uygulanıyor
+    // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
+    aspect_ratio: "3:4", // dikey dating fotoğrafı
+    // 1K: 2K'nın ürettiği aşırı keskinlik/mikro-detay "hiperrealist/CGI"
+    // hissine yol açabiliyordu — telefon fotoğrafları bu kadar keskin değil.
+    resolution: "1K",
     num_images: 1,
     output_format: "jpeg",
     seed,
+    // 1 = en katı, 6 = en gevşek. Girdi zaten Vision SafeSearch'ten geçti;
+    // burada katı bir eşik meşru portrelerde boş sonuç üretiyordu.
+    safety_tolerance: "4",
   };
   const resp = await fetch(
     `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
