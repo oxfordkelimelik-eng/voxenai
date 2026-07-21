@@ -61,12 +61,22 @@ const CANDIDATES = [
     // orta katmanla başlıyoruz (webte gördüğün "ucuz" izlenimi muhtemelen
     // düşük kaliteden; yüksek kalite şu anki nano-banana-pro'dan bile pahalı).
     pricePerImage: 0.061,
-    // GPT Image 2 şeması: aspect_ratio/resolution YOK; size preset + quality var.
+    // GPT Image 2 GERÇEK şeması (fal.ai resmi dokümantasyonu doğrulandı):
+    // aspect_ratio/resolution/safety_tolerance YOK. ÖNCEKİ SÜRÜM YANLIŞTI:
+    // "size" (string) şemada yok — muhtemelen sessizce yok sayılıp
+    // varsayılana (image_size: auto, quality: high — yani gerçekte "orta"
+    // değil "yüksek" kalite ve daha yüksek maliyetle) düşüyordu. Doğru isim:
+    // image_size (obje/preset) + quality + num_images + output_format.
+    //
+    // image_size PRESET (özel {width,height} DEĞİL, bkz. falPhotos.js aynı
+    // gerekçe): modelin native çözünürlük kovası, rastgele boyut zorlamıyor.
     buildInput: (prompt, urls, seed) => ({
       prompt,
       image_urls: urls,
-      size: "768x1024", // en yakın 3:4 dikey preset
+      image_size: "portrait_4_3", // dikey dating fotoğrafı için en yakın preset
       quality: "medium",
+      num_images: 1,
+      output_format: "jpeg",
       seed,
     }),
   },

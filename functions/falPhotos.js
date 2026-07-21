@@ -7,9 +7,9 @@ const { GEMINI_KEY } = require("./identityCaption");
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
-// Üretim modeli: Nano Banana Pro (edit) — Google'ın gerçekçilik odaklı edit
-// modeli. Kullanıcının GERÇEK fotoğraflarını referans alıp (image_urls) o
-// kişiyi yeni bir sahnede yeniden fotoğraflar.
+// Üretim modeli: GPT Image 2 (edit, orta kalite) — 4 model bakeoff testinde
+// (nano-banana-pro, nano-banana, seedream-v4.5, gpt-image-2) en doğal/en az
+// yapay sonucu bu verdi; ana akışa buradan geçirildi.
 //
 // MODEL GEÇMİŞİ (aynı hatayı tekrarlamamak için):
 //  1) nano-banana-2/edit  → arka planlar gerçekçi değildi.
@@ -17,14 +17,16 @@ const FAL_QUEUE_BASE = "https://queue.fal.run";
 //     plastik görünüm; id_weight sahneyi ezdiğinden arka plan hiç oluşmuyordu.
 //  3) seedream/v5/pro/edit→ arka plan oluştu ama "kişi ön planda, arka plan
 //     arkada" katmanlı/yapıştırma hissi sürdü.
-//  4) nano-banana-pro/edit (şu an) → gerçekçilik odaklı; 3. maddedeki katman
-//     hissini azaltıp azaltmadığı ÖLÇÜLECEK.
+//  4) nano-banana-pro/edit → gerçekçilik odaklıydı ama bakeoff'ta gpt-image-2
+//     kadar doğal bulunmadı ($0.15/foto, en pahalısıydı).
+//  5) openai/gpt-image-2/edit (orta kalite, şu an) → bakeoff'ta beğenildi,
+//     ayrıca $0.061/foto ile nano-banana-pro'dan ucuz.
 //
 // ÖNEMLİ SINIR: bunların hepsi "edit" ailesidir ve kişiyi korunacak bir nesne
 // olarak ele alır — bu yüzden bir miktar katman/yapıştırma hissi yapısaldır.
 // Bunu kökten çözmenin yolu kullanıcıya özel LoRA eğitimidir (kişi sahneyle
 // birlikte sıfırdan üretilir); maliyet/bekleme nedeniyle şimdilik seçilmedi.
-const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
+const GEN_MODEL = "openai/gpt-image-2/edit";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -226,6 +228,13 @@ function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras =
     "if the scene text above describes one — a neutral, calm or naturally reserved expression is " +
     "correct if that is what the references show. Only give them a smile if they are already smiling " +
     "in some of the reference photos.\n\n" +
+    "PROPORTIONS: the head must be a REALISTIC, anatomically correct size relative to the rest of the " +
+    "body — on a normal adult, the head is roughly one-seventh to one-eighth of their total standing " +
+    "height, and shoulder width is roughly two to three head-widths. One of the reference photos is a " +
+    "tightly cropped close-up of the face for identity detail only — do NOT use that crop's zoom level " +
+    "or framing as a scale reference, and do NOT enlarge the head to match it. Scale the head strictly " +
+    "against the body proportions shown in the full-body reference photo; the head must never look " +
+    "oversized, bobble-headed or disproportionate to the shoulders and body in the final image.\n\n" +
     bodyBlock +
     wardrobeBlock +
     "Match the lighting, shadows and colour temperature on their face and clothes to the scene's own " +
@@ -424,20 +433,22 @@ async function submitStyleJob(
       wardrobeNote: promptExtras.wardrobeNote || null,
     }),
     image_urls: referenceImageUrls,
-    // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
-    aspect_ratio: "3:4", // dikey dating fotoğrafı
-    // 1K TEST: 2K'nın ürettiği aşırı keskinlik/mikro-detay, "hiperrealist/CGI"
-    // hissinin bir kısmının kaynağı olabilir — telefon fotoğrafları genelde
-    // bu kadar keskin değildir. Sonuç yeterince gerçekçi olmazsa "2K"ya geri
-    // dön (tek satır) ve cilt/saç detayının kaybolup kaybolmadığını gözle
-    // karşılaştır.
-    resolution: "1K",
+    // GPT Image 2 GERÇEK şeması (fal.ai resmi dokümantasyonu doğrulandı):
+    // aspect_ratio/resolution/safety_tolerance YOK — image_size (obje/preset),
+    // quality, num_images, output_format var. Önceki sürümde yanlışlıkla
+    // "size" (string) kullanılmıştı — bu isim şemada YOK, muhtemelen sessizce
+    // yok sayılıp varsayılana (image_size: auto, quality: high) düşüyordu.
+    //
+    // image_size PRESET (özel {width,height} DEĞİL): modelin kendi native
+    // çözünürlük kovalarından biri — rastgele bir özel boyut (ör. 768x1024)
+    // modelin optimize olmadığı bir noktayı zorlayıp ince artefaktlara yol
+    // açabilir; preset hem doğru dikey (3:4) oranı hem muhtemelen daha
+    // yüksek/daha "doğru" bir çözünürlüğü garantiler.
+    image_size: "portrait_4_3", // dikey dating fotoğrafı için en yakın preset
+    quality: "medium", // istenen kalite katmanı ($0.061/foto) — artık GERÇEKTEN uygulanıyor
     num_images: 1,
     output_format: "jpeg",
     seed,
-    // 1 = en katı, 6 = en gevşek. Girdi zaten Vision SafeSearch'ten geçti;
-    // burada katı bir eşik meşru portrelerde boş sonuç üretiyordu.
-    safety_tolerance: "4",
   };
   const resp = await fetch(
     `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
