@@ -450,12 +450,16 @@ async function submitStyleJob(
     // "size" (string) kullanılmıştı — bu isim şemada YOK, muhtemelen sessizce
     // yok sayılıp varsayılana (image_size: auto, quality: high) düşüyordu.
     //
-    // image_size PRESET (özel {width,height} DEĞİL): modelin kendi native
-    // çözünürlük kovalarından biri — rastgele bir özel boyut (ör. 768x1024)
-    // modelin optimize olmadığı bir noktayı zorlayıp ince artefaktlara yol
-    // açabilir; preset hem doğru dikey (3:4) oranı hem muhtemelen daha
-    // yüksek/daha "doğru" bir çözünürlüğü garantiler.
-    image_size: "portrait_4_3", // dikey dating fotoğrafı için en yakın preset
+    // image_size: "auto" — GERİ ALINDI. "portrait_4_3" preset'i DENENMEDEN
+    // varsayımla seçilmişti ("native çözünürlük kovası daha iyi olur"
+    // varsayımı). Kullanıcının beğendiği ilk GPT Image 2 testi aslında YANLIŞ
+    // parametre adıyla ("size") çalışmıştı — bu isim şemada yok, sessizce yok
+    // sayılıp fal.ai'nin kendi varsayılanına (image_size: auto) düşüyordu.
+    // "portrait_4_3"e geçince netlik/arka plan/göz üçü BİRDEN bozuldu — aynı
+    // anda üç farklı belirti tek kaynağı işaret ediyor: auto, bu modelde
+    // portrait_4_3'ten daha iyi çalışıyor. Değiştirmeden önce mutlaka tekrar
+    // test et.
+    image_size: "auto",
     quality: "medium", // istenen kalite katmanı ($0.061/foto) — artık GERÇEKTEN uygulanıyor
     num_images: 1,
     output_format: "jpeg",
