@@ -52,7 +52,17 @@ const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen va
 const REFERENCE_PHOTO_COUNT = 4;
 const FACE_PHOTO_COUNT = 3;
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
-const MAX_CHUNK_RETRIES = 2;
+// 0 = HİÇ RETRY YOK (bilinçli tercih): kimlik-kapısı reddi, indirme hatası ya
+// da kayıt hatası — hangi sebeple olursa olsun chunk tek denemede başarısız
+// olursa doğrudan finalizeChunk({failed:true}) ile sonlandırılır. Amaç: bir
+// chunk için ASLA birden fazla nano-banana-pro üretim ücreti ödenmemesi —
+// önceki değer (2) "en kötü ihtimalde 3 kat maliyet" riskini taşıyordu
+// (bkz. 2026-07-22 kredi-yakma olayı). Maliyet artık foto başına en fazla
+// 1 nano-banana-pro + 1 face-swap denemesiyle sınırlı; karşılığında bazı
+// fotoğraflar (özellikle kimlik eşiğini ilk seferde tutturamayanlar) artık
+// otomatik kurtarılmadan başarısız sayılabilir — paket kredisi mevcut iade
+// mantığıyla (bkz. finalizeChunk) yine de geri verilir.
+const MAX_CHUNK_RETRIES = 0;
 
 // Bu fonksiyonların gerçek public URL'i (fal.ai webhook hedefi).
 const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
