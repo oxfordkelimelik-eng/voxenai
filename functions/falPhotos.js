@@ -1087,6 +1087,21 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
 
+    // FACE SWAP başarısız olup downloaded boş kaldıysa RETRY YAPILMAZ — bilerek.
+    // Kimlik-kapısı reddinin aksine (yeni seed farklı/geçerli bir yüz üretebilir),
+    // swap başarısızlığı genelde fal.ai swap altyapısının o an sorunlu/kapalı
+    // olmasından kaynaklanır (bkz. 2026-07-22 olayı: "fetch failed" ile saatlerce
+    // sürekli başarısız oldu). Yeni bir nano-banana-pro üretimi bu durumu
+    // DÜZELTMEZ, sadece anlamsız yere ekstra üretim maliyeti (kredi) yakar.
+    // Bu yüzden burada chunk DOĞRUDAN başarısız sayılır — job/stil seviyesindeki
+    // mevcut otomatik iade (finalizeChunk) yine de devreye girer.
+    if (downloaded.length === 0) {
+      console.error(`face swap başarısız (retry yapılmadan chunk başarısız sayılıyor): style=${styleId}, chunk=${chunkIdx}`);
+      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
+      res.status(200).send("ok");
+      return;
+    }
+
     // KİMLİK KAPISI: her chunk tam olarak 1 görsel ürettiği için ("num_images:1"),
     // bu görselin yüzü kaynak selfie'lere (job.refDescriptor) yeterince
     // benzemiyorsa, o görseli KULLANICIYA HİÇ GÖSTERMEDEN chunk'ı yeniden
