@@ -463,37 +463,86 @@ function genderForSwap(bodyProfile) {
   return g === "male" || g === "female" ? g : "non-binary";
 }
 
+// Eşzamanlı face-swap çağrısını sınırlar (bkz. faceSwapQueue). fal.ai bu
+// endpoint için "concurrent requests limit of 10" uyguluyor — mimarimiz 20
+// chunk'ı (4 stil x 5) paralel ürettiği için bu limit aşılıyordu ve HER swap
+// 429 ile başarısız olup ham görsele düşüyordu (kullanıcı hiçbir zaman
+// swap'lenmiş foto görmedi — "hiçbir fark yok" şikayetinin kök nedeni buydu).
+// 10'un altında tutmak için 4'e sabitlendi — bu kuyruk PROCESS-İÇİ olduğundan
+// (Cloud Functions yük altında 2. bir instance açarsa o da kendi kuyruğunu
+// çalıştırır) toplamın 10'u aşmaması için bilerek düşük tutuldu; 429 yine de
+// gelirse retry (aşağıda) devreye girer.
+const FACE_SWAP_MAX_CONCURRENCY = 4;
+let _faceSwapActive = 0;
+const _faceSwapWaitQueue = [];
+
+function acquireFaceSwapSlot() {
+  if (_faceSwapActive < FACE_SWAP_MAX_CONCURRENCY) {
+    _faceSwapActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => _faceSwapWaitQueue.push(resolve));
+}
+
+function releaseFaceSwapSlot() {
+  const next = _faceSwapWaitQueue.shift();
+  if (next) next();
+  else _faceSwapActive--;
+}
+
 /**
  * Kullanıcının gerçek yüzünü (faceUrl) üretilen sahnenin (targetUrl) üstüne
  * yerleştirir. Senkron fal.run çağrısı. Döner: swap'lenmiş görselin URL'i, ya da
  * herhangi bir hata/başarısızlıkta null (FAIL-SAFE — çağıran taraf o zaman ham
  * üretimi kullanır; endpoint kaldırılsa bile üretim bloklanmaz).
+ *
+ * Eşzamanlılık kuyruğu (acquireFaceSwapSlot) + 429'da backoff'lu retry (max 3
+ * deneme) ile fal'ın "concurrent requests limit" hatasına karşı korunur.
  */
 async function faceSwap(faceUrl, targetUrl, gender) {
+  await acquireFaceSwapSlot();
   try {
-    const resp = await fetch(`${FAL_SYNC_BASE}/${FACE_SWAP_MODEL}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Key ${FAL_KEY.value()}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        face_image_0: faceUrl,
-        gender_0: gender,
-        target_image: targetUrl,
-        workflow_type: "user_hair", // kullanıcının gerçek saçı korunsun
-        upscale: true,
-      }),
-    });
-    if (!resp.ok) {
-      console.error(`face swap başarısız: ${resp.status} ${(await resp.text()).slice(0, 200)}`);
-      return null;
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const resp = await fetch(`${FAL_SYNC_BASE}/${FACE_SWAP_MODEL}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Key ${FAL_KEY.value()}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            face_image_0: faceUrl,
+            gender_0: gender,
+            target_image: targetUrl,
+            workflow_type: "user_hair", // kullanıcının gerçek saçı korunsun
+            upscale: true,
+          }),
+        });
+        if (resp.status === 429 && attempt < maxAttempts) {
+          // Eşzamanlılık limiti — kısa süre sonra diğer istekler biteceği için
+          // artan bekleme ile tekrar dene (1s, 2s).
+          await new Promise((r) => setTimeout(r, attempt * 1000));
+          continue;
+        }
+        if (!resp.ok) {
+          console.error(`face swap başarısız (deneme ${attempt}): ${resp.status} ${(await resp.text()).slice(0, 200)}`);
+          return null;
+        }
+        const json = await resp.json();
+        return json?.image?.url || null;
+      } catch (e) {
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, attempt * 1000));
+          continue;
+        }
+        console.error("face swap hata (ham üretim kullanılacak):", e.message || e);
+        return null;
+      }
     }
-    const json = await resp.json();
-    return json?.image?.url || null;
-  } catch (e) {
-    console.error("face swap hata (ham üretim kullanılacak):", e.message || e);
     return null;
+  } finally {
+    releaseFaceSwapSlot();
   }
 }
 
