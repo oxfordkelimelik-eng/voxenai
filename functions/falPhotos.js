@@ -83,53 +83,158 @@ const FUNCTIONS_BASE = "https://europe-west1-rise-up-9235f.cloudfunctions.net";
 // ana yakalanmış izlenimi, fotoğrafı "çekilmiş" gösteren şeydir.
 const STYLE_SCENES = {
   elegance: [
-    "Mid-step through the lobby of a boutique hotel, adjusting a cuff and glancing off-camera with a relaxed half-smile, wearing a well-cut charcoal blazer over an open white shirt. Behind: a marble reception desk, warm brass lamps, and a tall arched window spilling soft late-afternoon light across the floor",
-    "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, laughing at something just out of frame. Behind: backlit shelves of bottles, low pendant lights, a bartender clearly visible mid-motion",
+    "Mid-step through the lobby of a boutique hotel, adjusting a cuff and glancing off-camera with a calm, composed expression, wearing a well-cut charcoal blazer over an open white shirt. Behind: a marble reception desk, warm brass lamps, and a tall arched window spilling soft late-afternoon light across the floor",
+    "Leaning on one forearm at the marble counter of a dimly lit restaurant bar, holding a glass of wine, quietly amused at something just out of frame, a closed-mouth ease. Behind: backlit shelves of bottles, low pendant lights, a bartender clearly visible mid-motion",
     "Crossing a European city street under flat overcast daylight in a tailored camel coat, hands in pockets, calm and unposed, looking slightly away from the lens. Behind: shopfronts and passers-by, all clearly visible and in sharp focus, grey even light",
-    "Standing at the railing of a rooftop terrace at dusk in a light grey suit with the collar open, one hand resting on the rail, easy natural smile. Behind: glass towers with lit windows against a deep blue evening sky",
+    "Standing at the railing of a rooftop terrace at dusk in a light grey suit with the collar open, one hand resting on the rail, a calm, unreadable expression. Behind: glass towers with lit windows against a deep blue evening sky",
     "Pausing in a quiet art gallery, hands in pockets, head turned to study a painting with a thoughtful expression, wearing a fine black turtleneck. Behind: white walls, large framed artworks, soft even ceiling light",
+    "Waiting at a polished hotel bar counter, one hand resting on a folded newspaper, glancing toward the door with quiet composure, wearing a fitted navy suit jacket. Behind: dark wood panelling, a row of backlit spirit bottles and a low chandelier",
+    "Standing at a tall window in a private members' club, one hand in a trouser pocket, looking out at the street below with a steady gaze, wearing a fine merino jumper. Behind: heavy velvet curtains, leather armchairs and a low fireplace glow",
+    "Walking through a marble-floored arcade of high-end shopfronts, glancing at a window display with mild interest, wearing a tailored overcoat. Behind: warm shop lighting, polished stone columns and reflections in the glass",
+    "Seated at a small table on a quiet café terrace, turning a coffee cup with two fingers, looking out at the street with a calm, distant expression, wearing a crisp open-collar shirt. Behind: wrought-iron chairs, striped awnings and soft midday light",
+    "Standing in the doorway of an old opera house foyer, adjusting a cufflink, glancing up at the ornate ceiling, wearing a charcoal three-piece suit. Behind: gilded mouldings, a sweeping staircase and warm gallery lighting",
+    "Standing at the floor-to-ceiling window of a penthouse living room, holding a crystal tumbler, looking out over the city at night, wearing a fine dark polo. Behind: a skyline of lit towers, a low designer sofa and soft interior lamps",
+    "Examining a painting in a private art auction preview room, hands clasped behind the back, studying the canvas closely, wearing a tailored grey suit. Behind: spotlit artworks, a hushed gallery floor and a discreet price card",
+    "Leaning on a grand piano in a five-star hotel lounge, glancing toward the pianist, wearing a fine black dinner jacket. Behind: velvet seating, low gold lighting and a wall of aged mirrors",
+    "Pausing at the top of private jet boarding steps, glancing back over one shoulder, wearing a fine wool overcoat. Behind: the aircraft's open door, a stretch of tarmac and a soft evening sky",
+    "Standing at the edge of a rooftop infinity pool at a five-star hotel, drink in hand, looking out at the skyline, wearing swim shorts and an open shirt. Behind: the pool's mirrored surface and a dense city view beyond",
+    "Walking through the marble atrium of a grand hotel, glancing up at a suspended chandelier, wearing a tailored navy suit. Behind: a central fountain, gold-trimmed columns and a sweeping reception desk",
+    "Standing still in a couture tailor's fitting room, arms slightly raised as a jacket is pinned, glancing at the mirror, wearing a half-finished bespoke suit. Behind: bolts of fine fabric, a large gilt mirror and warm studio light",
+    "Leaning over a glass display case in a high-end watch boutique, examining a timepiece, wearing a tailored blazer. Behind: illuminated cabinets of watches and a discreet, minimal shop interior",
+    "Standing in a grand hotel ballroom before an event, adjusting a bow tie, glancing toward the entrance, wearing a black-tie dinner suit. Behind: rows of set tables, tall windows and elaborate ceiling mouldings",
+    "Seated in the private terrace of an exclusive members' club, one arm along the back of a chair, looking out over a manicured park, wearing a fine linen jacket. Behind: topiary hedges, wrought-iron furniture and soft afternoon light",
   ],
   athletic: [
-    "Resting between sets on a gym bench, forearms on knees, catching breath and looking up with a slight grin, wearing a fitted training t-shirt damp with sweat. Behind: racks of weights, mirrors and machines under natural overhead light",
+    "Resting between sets on a gym bench, forearms on knees, catching breath and looking up with quiet focus, wearing a fitted training t-shirt damp with sweat. Behind: racks of weights, mirrors and machines under natural overhead light",
     "Mid-stride on an outdoor running track under flat grey morning light, breath visible in cool air, focused expression, wearing technical running gear. Behind: empty stadium seating under an overcast sky",
     "Wrapping hands with tape in a worn boxing gym, head down in concentration then glancing up, wearing a loose tank top. Behind: hanging heavy bags, exposed brick and dusty window light from the left",
-    "Stopping on a forest hiking trail to look back over one shoulder with an open smile, wearing technical outerwear and a small backpack. Behind: tall trees with dappled sunlight breaking through the canopy",
-    "Holding a basketball on one hip on an outdoor court in late afternoon, mid-conversation, relaxed and smiling. Behind: chain-link fencing, painted court lines and apartment blocks in warm side light",
+    "Stopping on a forest hiking trail to look back over one shoulder with calm satisfaction, wearing technical outerwear and a small backpack. Behind: tall trees with dappled sunlight breaking through the canopy",
+    "Holding a basketball on one hip on an outdoor court in late afternoon, mid-conversation, relaxed and focused. Behind: chain-link fencing, painted court lines and apartment blocks in warm side light",
+    "Climbing a steep rock face on an outdoor bouldering wall, chalk dust on the hands, concentrating on the next hold, wearing fitted climbing gear. Behind: other coloured routes on the rock and a cluster of climbers waiting below",
+    "Cycling along a riverside path in the early morning, upright on the bars, glancing ahead with steady focus, wearing a fitted cycling jacket. Behind: a calm river, a low bridge and mist rising off the water",
+    "Doing a resistance-band stretch on an outdoor track infield, one leg extended, looking down in concentration, wearing training shorts and a vest. Behind: a running track, distant floodlights and a cloudy sky",
+    "Paddling a kayak on a calm lake at dawn, oar mid-stroke, looking toward the far shore with quiet effort, wearing a fitted rash guard. Behind: still water, low mist and pine-covered hills",
+    "Standing at a chin-up bar in an outdoor calisthenics park, chalk on the hands, pausing between sets with steady breathing, wearing a fitted tank top. Behind: metal bars, rubber flooring and other people training in the distance",
+    "Pausing mid-serve on a private tennis court at a country club, racquet resting on the shoulder, wearing fitted tennis whites. Behind: manicured clay courts, a clubhouse veranda and neatly trimmed hedges",
+    "Standing at the rooftop gym of a luxury hotel, towel over one shoulder, looking out at the skyline between sets, wearing fitted training gear. Behind: floor-to-ceiling glass, city towers and modern equipment",
+    "Stretching on the open deck of a private yacht at sunrise, one arm overhead, looking out at the calm water, wearing swim shorts. Behind: polished teak decking, coiled rope and open sea",
+    "Walking down a fairway at a private golf club, club resting on the shoulder, glancing toward the next hole, wearing a fitted polo and trousers. Behind: manicured greens, tall trees and a distant clubhouse",
+    "Mid-rally on a padel court at an upscale sports club, paddle raised, focused on the ball, wearing fitted sportswear. Behind: glass court walls, other members watching and clean modern lighting",
+    "Pausing on an alpine ski slope, goggles pushed up, looking out at the mountain range, wearing a fitted ski jacket. Behind: fresh snow, a chairlift line and distant peaks under bright daylight",
+    "Climbing out of a private villa pool after a morning lap, one hand on the tiled edge, wearing swim trunks. Behind: a long infinity pool, manicured gardens and a modern villa facade",
+    "Standing beside a polo pony at the edge of a field, helmet under one arm, adjusting a glove, wearing polo whites. Behind: a manicured polo field, parked cars and a marquee in the distance",
+    "Warming up in an equestrian arena, one hand on the horse's bridle, focused expression, wearing riding boots and a fitted jacket. Behind: raked sand, white rails and a stable block beyond",
+    "Chalking up at a modern glass-walled bouldering gym, studying the wall before a climb, wearing fitted climbing gear. Behind: colourful holds, skylights and other climbers in soft focus distance",
   ],
   traveller: [
     "Walking a narrow cobbled street in an old European town, looking up at the buildings with genuine curiosity, wearing a casual jacket with a bag slung across the body. Behind: weathered stone facades, cafe awnings and shuttered windows under soft overcast light",
-    "Standing at a mountain viewpoint with a light outdoor jacket, wind in the hair, quietly taking in the view with a small satisfied smile. Behind: a wide valley falling away to layered blue peaks in clear daylight",
-    "On a coastal cliff path with a linen shirt moving in the breeze, one hand shielding the eyes from the sun, laughing. Behind: open sea, a long horizon line and scattered white clouds",
+    "Standing at a mountain viewpoint with a light outdoor jacket, wind in the hair, quietly taking in the view with calm focus. Behind: a wide valley falling away to layered blue peaks in clear daylight",
+    "On a coastal cliff path with a linen shirt moving in the breeze, one hand shielding the eyes from the sun, looking out at the horizon. Behind: open sea, a long horizon line and scattered white clouds",
     "Browsing a stall in a busy street market, mid-gesture talking to the vendor, wearing a simple casual shirt. Behind: colourful hanging goods, crates of produce and warm dappled afternoon light",
     "Sitting on the wooden deck of a boat with sunglasses pushed up on the head, one arm over the rail, easy unposed expression. Behind: a working harbour, moored sailboats and bright reflected water",
+    "Studying a paper map at a train station platform, glancing up at the departures board, wearing a canvas jacket with a daypack. Behind: an old iron platform roof, a waiting train and scattered travellers",
+    "Walking across a stone bridge in an old town at dusk, pausing to look down at the water, wearing a light scarf and jacket. Behind: lit windows along the riverbank and reflections on the water",
+    "Standing at the rail of a ferry deck, hair moving in the wind, watching the coastline pass, wearing a windbreaker. Behind: open water, distant cliffs and a trailing wake",
+    "Wandering through a spice market, examining a stall of dried goods with interest, wearing a loose linen shirt. Behind: hanging sacks, colourful spices and shafts of light through a canvas roof",
+    "Resting on a low stone wall along a hiking trail, adjusting a boot lace, looking out at the landscape, wearing hiking trousers and a light jacket. Behind: rolling hills, a dirt path and scattered wildflowers",
+    "Sitting in a first-class airport lounge, coffee cup in hand, looking out at the tarmac through a tall window, wearing a smart travel jacket. Behind: leather armchairs, soft lighting and parked aircraft beyond the glass",
+    "Standing at the bow of a private yacht sailing near a rocky coastline, wind in the hair, looking ahead, wearing a light linen shirt. Behind: turquoise water, distant cliffs and a clear sky",
+    "Standing at the edge of an infinity pool at a five-star seaside resort, looking out at the horizon where pool meets sea, wearing swim shorts. Behind: sun loungers, palm trees and a calm ocean",
+    "Walking through the courtyard of a historic palazzo hotel, glancing up at the surrounding balconies, wearing a linen suit jacket. Behind: a central fountain, potted citrus trees and warm stone archways",
+    "Standing on a helicopter viewing platform, hair blown by the rotor wash, looking out at a mountain range, wearing a fitted flight jacket. Behind: the helicopter, distant peaks and clear sky",
+    "Seated by the window of a luxury train carriage, one arm on the sill, watching the landscape pass, wearing a fine knit sweater. Behind: polished wood panelling, brass fittings and blurred countryside outside the glass",
+    "Standing beside a fire pit at a desert luxury camp at dusk, hands in pockets, looking out at the dunes, wearing a light desert-toned jacket. Behind: a plush tent, scattered lanterns and a darkening sky",
+    "Standing on the terrace of a private Mediterranean villa, one hand on the stone balustrade, looking out at the sea, wearing a linen shirt. Behind: bougainvillea, terracotta tiles and a bright blue coastline",
+    "Standing on the deck of a safari lodge at golden hour, binoculars in hand, looking out over the plain, wearing khaki safari wear. Behind: a thatched lodge roof, wooden decking and a wide savanna",
+    "Standing at a rooftop bar of a boutique hotel in an old city, glancing out over the rooftops, wearing a light linen jacket. Behind: terracotta rooftops, church domes and a warm evening sky",
   ],
   oldmoney: [
     "Settled into a worn leather armchair in a wood-panelled library, a book resting on one knee, looking up mid-thought, wearing a cream cable-knit sweater. Behind: floor-to-ceiling bookshelves and the warm pool of a brass reading lamp",
-    "Standing on the stone terrace of a countryside estate with a hand in one pocket, turning toward the camera with a relaxed smile, wearing a navy blazer over a polo. Behind: a manicured lawn, mature oak trees and soft morning haze",
+    "Standing on the stone terrace of a countryside estate with a hand in one pocket, turning toward the camera with calm ease, wearing a navy blazer over a polo. Behind: a manicured lawn, mature oak trees and soft morning haze",
     "On a wooden yacht club dock, coiling a rope, glancing up with an unhurried expression, wearing a light sweater over a collared shirt. Behind: moored boats, masts and calm water under clear daylight",
     "Beside weathered stable doors, resting a hand on the timber, calm and at ease, wearing a quilted jacket. Behind: a paddock, white fencing and long grass in soft natural daylight",
     "At the head of a classic dining room table, mid-conversation with a warm expression, wearing a crisp tailored shirt with sleeves rolled. Behind: antique furniture, framed pictures and light from a tall sash window",
+    "Walking a gravel path through a walled kitchen garden, examining a row of plants, wearing a waxed jacket over a jumper. Behind: espaliered fruit trees, a greenhouse and weathered brick walls",
+    "Standing at a tack room doorway, cleaning a bridle with a cloth, glancing out toward the paddock, wearing a quilted gilet. Behind: rows of hanging leather tack and a dusty wooden interior",
+    "Seated on the steps of a country house porch, a spaniel resting nearby, looking out at the drive, wearing corduroy trousers and a knit jumper. Behind: climbing ivy, a gravel drive and parked estate cars",
+    "Leaning on a five-bar gate at the edge of a field, one boot on the rail, surveying the land, wearing a flat cap and tweed jacket. Behind: rolling farmland and a distant tree line",
+    "Standing in a wood-panelled billiard room, chalking a cue, glancing toward the window light, wearing a fine v-neck sweater. Behind: a green baize table, mounted trophies and heavy curtains",
+    "Standing in the gravel driveway of a château, one hand on a vintage car's wing, looking back toward the house, wearing a tweed jacket. Behind: an ivy-covered stone facade and tall windows",
+    "Sitting alone in a private chapel on a family estate, hands resting on a pew, looking toward the stained glass, wearing a dark wool coat. Behind: worn stone arches and soft coloured light",
+    "Standing in a formal drawing room beneath a crystal chandelier, one hand resting on a mantelpiece, wearing a fine tweed suit. Behind: gilt-framed portraits, silk drapes and antique furniture",
+    "Crouching in a stone wine cellar of a country estate, examining a dust-covered bottle by candlelight, wearing a rolled-sleeve shirt. Behind: racks of aging bottles and arched brick ceilings",
+    "Standing pitch-side at a polo match with a glass of champagne, watching the play, wearing a linen blazer. Behind: a manicured polo field, parked vintage cars and marquees",
+    "Descending a grand staircase in a manor house, one hand on the banister, looking down toward the hall, wearing a fine dinner jacket. Behind: oil portraits, a checkered marble floor and tall arched windows",
+    "Seated at a leather-topped desk in a private study, spinning an antique globe, wearing a cable-knit sweater. Behind: floor-to-ceiling bookshelves and a tall sash window with garden views",
+    "Standing on the dock of a rowing club boathouse at dawn, coiling a line, looking out over still water, wearing a quarter-zip jumper. Behind: wooden boat racks and mist rising off the river",
+    "Standing at the entrance of a formal garden maze, hand resting on a clipped hedge, looking down one of the paths, wearing a waxed jacket. Behind: manicured box hedges and a distant folly",
+    "Sitting by the fire in a hunting lodge great room, glass in hand, looking into the flames, wearing a heavy wool sweater. Behind: mounted antlers, worn leather sofas and a stone fireplace",
   ],
   nightout: [
-    "At the counter of a dim cocktail bar, turning toward the camera mid-laugh with a drink in hand, wearing a dark shirt with the top button open. Behind: warm amber light, bottles on shelves and glowing pendant lamps, all clearly visible",
-    "On a rooftop bar at night, leaning back against the railing with a relaxed grin, wearing a well-fitted jacket. Behind: a wide spread of city lights and a dark skyline, sharp and clearly visible",
-    "Walking a neon-lit street at night, hands in jacket pockets, glancing sideways with a half-smile, wearing a leather jacket. Behind: glowing signs reflected in wet pavement and passing headlights, all in sharp focus",
-    "At a busy restaurant table, mid-conversation and gesturing with one hand, genuine laughter, wearing a casual button-up. Behind: warm string lights, other diners clearly visible and candles on tables",
+    "At the counter of a dim cocktail bar, turning toward the camera mid-conversation with a drink in hand, wearing a dark shirt with the top button open. Behind: warm amber light, bottles on shelves and glowing pendant lamps, all clearly visible",
+    "On a rooftop bar at night, leaning back against the railing with quiet confidence, wearing a well-fitted jacket. Behind: a wide spread of city lights and a dark skyline, sharp and clearly visible",
+    "Walking a neon-lit street at night, hands in jacket pockets, glancing sideways with calm focus, wearing a leather jacket. Behind: glowing signs reflected in wet pavement and passing headlights, all in sharp focus",
+    "At a busy restaurant table, mid-conversation and gesturing with one hand, engaged and animated, wearing a casual button-up. Behind: warm string lights, other diners clearly visible and candles on tables",
     "Standing outside a venue at night under a street lamp, checking a phone then looking up, smart casual outfit. Behind: a brick wall, warm light spill from a doorway and passing traffic, all clearly visible",
+    "Queuing outside a club entrance at night, hands in coat pockets, glancing down the street, wearing a dark overcoat. Behind: a lit marquee sign, a short queue and wet pavement reflections",
+    "Leaning against a taxi at the kerb late at night, waiting, glancing back toward a venue doorway, wearing a fitted blazer. Behind: passing headlights, a lit shopfront and a damp street",
+    "At a rooftop lounge table, pouring a drink for someone off-frame, wearing an open-collar shirt. Behind: string lights, low sofas and a hazy city skyline at dusk",
+    "Walking down a set of stone steps from a hillside bar, one hand on the rail, looking ahead, wearing a dark casual jacket. Behind: warm lantern light and a view of the city below",
+    "Standing at a jazz club entrance, checking a coat into a cloakroom window, wearing a dark suit without a tie. Behind: a velvet rope, dim signage and a glimpse of the stage lighting inside",
+    "Standing at a VIP table in an upscale nightclub, glass raised slightly, looking out at the dance floor, wearing a fitted black shirt. Behind: laser lights, a bottle service setup and a crowded floor beyond the rope",
+    "Standing at a casino table at night, chips stacked in hand, watching the dealer, wearing a dark tailored blazer. Behind: green felt tables, low gold lighting and blurred figures at neighbouring tables",
+    "Leaning on a rooftop champagne bar rail at night, glass in hand, looking out over the illuminated city, wearing a fine dark suit jacket. Behind: a dense skyline and strings of warm lights",
+    "Standing in a private karaoke lounge, microphone loosely in hand, glancing toward friends off-frame, wearing an open-collar shirt. Behind: velvet booths, coloured mood lighting and a screen glow",
+    "Standing at the hidden entrance of a speakeasy-style bar, knocking on a plain door, wearing a dark overcoat. Behind: a dim alley, a small brass plaque and a single bulb overhead",
+    "Sitting at a five-star hotel bar late at night, glass in hand, glancing toward the entrance, wearing a fitted dinner shirt. Behind: backlit marble, rows of premium spirits and low pendant lighting",
+    "Standing on a yacht party deck at night, drink in hand, looking out at the city lights across the water, wearing a linen shirt open at the collar. Behind: string lights, deck furniture and a glittering shoreline",
+    "Leaning against a velvet banquette in an art-deco cocktail lounge, glass in hand, looking toward the bar, wearing a fitted suit. Behind: geometric brass fittings, mirrored walls and warm low lighting",
+    "Standing at the unmarked doorway of an exclusive members-only lounge, being greeted by a host, wearing a dark tailored coat. Behind: a discreet brass sign, soft interior glow and a doorman's silhouette",
+    "Standing on a penthouse party balcony at night, drink in hand, looking out over the illuminated skyline, wearing an open-collar shirt. Behind: string lights, low furniture and a dense city view",
   ],
   beach: [
-    "Standing barefoot on wet sand under bright midday sun, an open linen shirt catching the breeze, looking out toward the water with a calm smile. Behind: breaking waves and a long empty shoreline, clear and sharp",
-    "Walking out of the shallows, running a hand back through wet hair, laughing, wearing swim shorts. Behind: bright midday sea, foam and sunlit water",
+    "Standing barefoot on wet sand under bright midday sun, an open linen shirt catching the breeze, looking out toward the water with calm focus. Behind: breaking waves and a long empty shoreline, clear and sharp",
+    "Walking out of the shallows, running a hand back through wet hair, looking out at the horizon, wearing swim shorts. Behind: bright midday sea, foam and sunlit water",
     "Sitting on weathered wooden beach steps with forearms on knees, relaxed and looking off to the side, wearing a light shirt, under flat overcast beach light. Behind: palm fronds and dune grass under a grey sky",
     "Leaning on the bamboo counter of a thatched beach bar with a cold drink, mid-conversation, wearing a casual short-sleeve shirt. Behind: the open sea framed by the bar's roof and hanging lights",
     "Standing on dark coastal rocks with a plain t-shirt, arms loose, watching the swell with an unguarded expression. Behind: sea spray, deep blue water and a clean horizon under natural daylight",
+    "Carrying a surfboard under one arm walking up from the shoreline, looking back at the waves, wearing board shorts. Behind: distant surfers in the water and a bright open sky",
+    "Sitting cross-legged on a beach towel adjusting a watch strap, looking down in concentration, wearing swim shorts. Behind: scattered beach umbrellas and sunbathers in the distance",
+    "Rinsing off at an outdoor beach shower, hand raised to the water, glancing toward the sea, wearing swim shorts. Behind: weathered wooden shower stalls and a glimpse of the beach",
+    "Walking along a boardwalk at golden hour, one hand trailing along the rail, looking out at the sunset, wearing a loose shirt over trunks. Behind: dune grass, a wooden walkway and the sun low over the water",
+    "Standing at the edge of a beach volleyball court brushing sand off the hands, watching play resume, wearing athletic shorts. Behind: a sand court, a net and a few other players",
+    "Sitting under a private cabana at a five-star beach resort, adjusting a sunglasses strap, looking out at the sea, wearing swim shorts. Behind: white curtains, a daybed and turquoise water",
+    "Standing on the deck of an overwater bungalow, looking down through the glass floor panel at the reef below, wearing swim shorts. Behind: thatched roofing and a clear lagoon stretching to the horizon",
+    "Sitting at the edge of a beach club infinity pool, legs in the water, looking out toward the sea beyond the pool's edge, wearing swim trunks. Behind: sun loungers, a pool bar and a bright horizon",
+    "Standing on the swimming platform of a yacht anchored near a beach, about to step down into the water, wearing swim shorts. Behind: the yacht's stern, clear shallow water and a sandy shoreline",
+    "Leaning on a bar stool at a sunset beach bar at a luxury resort, drink in hand, looking out at the horizon, wearing a linen shirt. Behind: tiki torches, thatched roofing and an orange sunset sky",
+    "Standing on a private island dock at dusk, bag over one shoulder, looking back toward a waiting boat, wearing rolled linen trousers. Behind: turquoise shallows, a wooden dock and palm silhouettes",
+    "Standing on the terrace of a beachfront villa, coffee in hand, looking out at the sea over an infinity edge, wearing a light robe over swimwear. Behind: a private pool, palm trees and open ocean",
+    "Standing on the trampoline net of a catamaran sailing near shore, one hand on a rope, looking out at the coastline, wearing swim shorts. Behind: taut sails, blue water and a distant beach",
+    "Reclining on a daybed beside a resort spa pool, adjusting a towel, looking toward the water, wearing swim shorts. Behind: tropical planting, a quiet infinity pool and soft midday light",
+    "Standing on the tender boat approaching shore from a superyacht, hand on the rail, looking toward the beach ahead, wearing swim shorts and an open shirt. Behind: the anchored superyacht and a stretch of white sand",
   ],
   car: [
     "Standing beside a dark luxury sedan on a city street in the evening, one hand on the roof, turning toward the camera with a relaxed expression, wearing a smart jacket. Behind: warm street lighting, shopfronts and passing traffic, all clearly visible and in sharp focus",
     "Leaning back against the front of a sports car in an underground car park, arms loosely crossed, calm and direct, wearing a dark jacket. Behind: concrete pillars and dramatic overhead lighting pooling on the floor",
     "Standing at the open door of a car parked on a mountain road, one foot on the sill, looking out at the view then back to the lens. Behind: a sweeping valley, winding road and clear bright daylight",
-    "Mid-motion closing a car door outside a modern glass building in daytime, glancing up with an easy smile, wearing a well-fitted coat. Behind: reflective glass, city reflections and clean daylight",
+    "Mid-motion closing a car door outside a modern glass building in daytime, glancing up with calm composure, wearing a well-fitted coat. Behind: reflective glass, city reflections and clean daylight",
     "Sitting on the sill of an open car door at a scenic overlook under flat midday light, elbows on knees, quietly taking in the view. Behind: a wide landscape under a plain bright sky",
+    "Wiping down the bonnet of a classic car in a private garage, focused on the work, wearing a rolled-sleeve shirt. Behind: tool racks, other stored cars and warm workshop lighting",
+    "Standing at a fuel station at night, replacing the nozzle, glancing at the car, wearing a dark jacket. Behind: bright canopy lighting and a quiet forecourt",
+    "Checking a tyre pressure gauge crouched beside a parked car on a gravel driveway, wearing casual trousers and a jumper. Behind: a country house facade and parked vehicles",
+    "Adjusting the wing mirror of a car parked on a coastal road, glancing at the sea beyond, wearing a light jacket. Behind: cliffside road, guardrail and open ocean",
+    "Sitting in the driver's seat with the door open, one foot out, tying a shoelace before setting off, wearing a smart casual outfit. Behind: an underground car park and rows of parked cars",
+    "Standing on a supercar showroom floor, hand resting on a bonnet, looking down the row of cars, wearing a tailored blazer. Behind: polished concrete, dramatic spotlighting and gleaming paintwork",
+    "Standing at a five-star hotel valet stand, handing over a set of keys, wearing a smart overcoat. Behind: a grand entrance, a red carpet and a line of luxury cars",
+    "Standing in a private garage collection, running a hand along a classic car's fender, wearing a rolled-sleeve shirt. Behind: rows of vintage and modern cars under warm gallery lighting",
+    "Crouching in a race track pit lane, checking a tyre, wearing a fitted racing jacket. Behind: a parked race car, pit equipment and empty grandstands",
+    "Standing beside a car on the lawn of a concours d'elegance, polishing cloth in hand, wearing a smart casual blazer. Behind: rows of immaculate classic cars and marquee tents",
+    "Standing beside a sports car at a mountain pass hairpin turn, looking out at the view before getting in, wearing a fitted jacket. Behind: a winding road, guardrails and layered mountain ridges",
+    "Standing in a marina car park beside a convertible, sea breeze in the hair, looking toward the boats, wearing a light linen shirt. Behind: rows of yacht masts and sparkling water",
+    "Standing at the starting line of a vintage car rally, adjusting driving gloves, wearing a period-style driving jacket. Behind: a row of classic cars, checkered flags and a small crowd",
+    "Standing on a private airstrip beside a car with a jet parked behind, glancing back toward the aircraft, wearing a tailored coat. Behind: open tarmac, the private jet and a clear sky",
+    "Standing under the porte-cochère of a grand hotel as a chauffeur holds the car door, wearing a fine suit. Behind: uniformed staff, an ornate entrance canopy and warm evening light",
   ],
 };
 
@@ -163,6 +268,49 @@ const COMPOSITIONS = [
   "raised their phone — not perfectly centred or level, but the background stays fully sharp " +
   "and clearly visible, no blur.",
 ];
+
+// Bir string'den deterministik sayısal tohum üretir (kripto amaçlı değil,
+// sadece çeşitlilik seçimi için basit bir hash — bkz. pickScene).
+function seedFromString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+// mulberry32 — basit, hızlı, deterministik PRNG.
+function mulberry32(seed) {
+  let a = seed;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Bir stilin sahne havuzundan (stil başına 20 varyant) jobId+styleId'e göre
+ * DETERMİNİSTİK ama İŞE ÖZGÜ karışık bir sıra üretir. Aynı iş içindeki 5
+ * chunk (variantIdx 0-4) bu karışık sıradan İLK 5'i alır — set içinde hiç
+ * tekrar olmaz. Farklı bir iş (farklı jobId) aynı stili seçse bile FARKLI
+ * bir alt küme/sıra kullanır — böylece aynı stili tekrar tekrar test etmek
+ * artık hep aynı 5 arka planı vermez (bkz. "arka planları hep aynı
+ * üretiyorsun" şikayeti — kök neden buydu: eskiden sabit ilk-5 seçilirdi).
+ */
+function pickScene(styleId, jobId, variantIdx) {
+  const pool = STYLE_SCENES[styleId];
+  const seed = seedFromString(`${jobId}:${styleId}`);
+  const rand = mulberry32(seed);
+  const order = pool.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return pool[order[variantIdx % order.length]];
+}
 
 /**
  * Edit modeline verilen tam talimat. ÖNCELİK SIRASI bilinçli: model uzun
@@ -218,9 +366,8 @@ function bodyProfileHint(bodyProfile) {
   );
 }
 
-function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras = {}) {
-  const variants = STYLE_SCENES[styleId];
-  const scene = variants[variantIdx % variants.length];
+function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras = {}, jobId = "") {
+  const scene = pickScene(styleId, jobId, variantIdx);
   const composition = COMPOSITIONS[variantIdx % COMPOSITIONS.length];
   const bodyCaption = extras.bodyCaption || null;
   const wardrobeNote = extras.wardrobeNote || null;
@@ -568,7 +715,7 @@ async function submitStyleJob(
     prompt: buildPrompt(styleId, chunkIdx, identityCaption, bodyProfile, {
       bodyCaption: promptExtras.bodyCaption || null,
       wardrobeNote: promptExtras.wardrobeNote || null,
-    }),
+    }, jobId),
     image_urls: referenceImageUrls,
     // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
     aspect_ratio: "3:4", // dikey dating fotoğrafı
