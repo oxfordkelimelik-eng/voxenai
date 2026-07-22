@@ -15,9 +15,12 @@ const FAL_SYNC_BASE = "https://fal.run";
 // — böylece kimlik/göz/ifade sorunları yapısal olarak çözülür (model yüzü sıfırdan
 // sentezlemez, gerçek yüz piksellerini kullanır).
 // NOT: fal bu endpoint'i "deprecated" işaretledi ama hâlâ çağrılabilir ($0.05).
-// Fail-safe: swap başarısız olursa ham üretim kullanılır (aşağıda), yani endpoint
-// kaldırılsa bile uygulama çökmez — sadece swap devre dışı kalır. Kaldırılırsa
-// buradan Segmind faceswap-v4 gibi bir alternatife geçilebilir.
+// Kaldırılırsa buradan Segmind faceswap-v4 gibi bir alternatife geçilebilir.
+// DAVRANIŞ: swap başarısız olursa görsel HAM haliyle KULLANILMAZ — kimlik
+// kapısını geçemeyen görsel gibi elenir, retry hakkı varsa tekrar denenir,
+// yoksa chunk/stil başarısız sayılıp paket kredisi otomatik iade edilir
+// (bkz. falInferenceWebhook + finalizeChunk). Kullanıcı asla kendi yüzü
+// olmayan bir fotoğraf görmez.
 const FACE_SWAP_MODEL = "easel-ai/advanced-face-swap";
 // Üretim modeli: Nano Banana Pro (edit) — GPT Image 2 denemesi geri alındı
 // (bkz. MODEL GEÇMİŞİ madde 6): "auto" image_size ile bile netlik/arka plan/
@@ -1045,22 +1048,34 @@ exports.falInferenceWebhook = onRequest(
     }
     // FACE SWAP (2. aşama): üretilen sahnenin üstüne kullanıcının GERÇEK yüzünü
     // yerleştir. img.url zaten fal CDN'de public bir URL — doğrudan target_image
-    // olarak geçilebilir, yeniden yüklemeye gerek yok. Fail-safe: primaryFaceUrl
-    // yoksa (eski iş) ya da swap null dönerse ham üretim görseli kullanılır.
+    // olarak geçilebilir, yeniden yüklemeye gerek yok.
+    //
+    // ÖNEMLİ: swap başarısız olursa görsel HAM (swap'siz) haliyle KULLANILMAZ —
+    // null döner ve aşağıda filtrelenir. Bu görsel, tıpkı kimlik kapısını
+    // geçemeyen bir görsel gibi "passed" listesine hiç girmez; mevcut
+    // retry/finalizeChunk/iade mantığı (aşağıdaki "passed.length === 0" bloğu)
+    // aynen devreye girer — kullanıcı asla kendi yüzü olmayan bir fotoğraf
+    // görmez ve tüm retry hakları tükenirse o chunk/stil başarısız sayılıp
+    // paket kredisi otomatik iade edilir (bkz. finalizeChunk).
     const swapGender = genderForSwap(job.bodyProfile);
     let downloaded = [];
     try {
-      downloaded = await Promise.all(images.map(async (img, i) => {
+      const attempts = await Promise.all(images.map(async (img, i) => {
         let sourceUrl = img.url;
         if (job.primaryFaceUrl) {
           const swappedUrl = await faceSwap(job.primaryFaceUrl, img.url, swapGender);
-          if (swappedUrl) sourceUrl = swappedUrl;
+          if (!swappedUrl) {
+            console.error(`face swap başarısız — görsel elendi (style=${styleId}, chunk=${chunkIdx}), swap'siz gösterilmeyecek`);
+            return null;
+          }
+          sourceUrl = swappedUrl;
         }
         const imgResp = await fetch(sourceUrl);
         if (!imgResp.ok) throw new Error(`indirilemedi: ${imgResp.status}`);
         const buf = Buffer.from(await imgResp.arrayBuffer());
         return { i, buf };
       }));
+      downloaded = attempts.filter(Boolean);
     } catch (e) {
       console.error("Sonuç görseli indirme hatası:", e);
       if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
