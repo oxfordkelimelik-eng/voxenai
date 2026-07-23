@@ -366,94 +366,77 @@ function bodyProfileHint(bodyProfile) {
   );
 }
 
-function buildPrompt(styleId, variantIdx, identityCaption, bodyProfile, extras = {}, jobId = "") {
-  const scene = pickScene(styleId, jobId, variantIdx);
-  const composition = COMPOSITIONS[variantIdx % COMPOSITIONS.length];
-  const bodyCaption = extras.bodyCaption || null;
-  const wardrobeNote = extras.wardrobeNote || null;
-
+/**
+ * EDIT prompt'u: image_urls[0] = TABAN görsel (sahne + jenerik kişi), sonraki
+ * görseller = kullanıcının referansları. Görev: arka planı/sahneyi/pozu/ışığı/
+ * kadrajı AYNEN koru, SADECE kadrajdaki kişiyi kullanıcıya dönüştür — yüz +
+ * TEN RENGİ + VÜCUT/KİLO dahil. Bu bir face-swap DEĞİL (o sadece yüz yapar);
+ * tam kişi-değişimi edit'i. Arka plan piksel-birebir korunmaz ama edit modeli
+ * gerçek taban pikselini gördüğü için metinden üretmeye göre çok daha sadık.
+ */
+function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
   let bodyBlock = "";
   if (bodyCaption) {
     bodyBlock +=
-      "BODY FROM FULL-BODY REFERENCE (primary — match this build, do not idealise): " +
+      "REFERENCE BODY (match this build/weight, do not idealise or slim down): " +
       bodyCaption + "\n\n";
   }
   bodyBlock += bodyProfileHint(bodyProfile);
 
-  let wardrobeBlock = "";
-  if (wardrobeNote) {
-    wardrobeBlock =
-      "WARDROBE / VIBE for this style (keep natural and wearable for THIS person; " +
-      "do not turn into a fashion editorial): " + wardrobeNote + "\n\n";
-  }
-
   return (
-    "Photograph this EXACT scene, precisely as described — do not simplify, generalise or substitute " +
-    "any part of it: " + scene + ".\n\n" +
-    "The person in the reference images must be placed into this scene, fully recognisable: same face " +
-    "shape, bone structure, eyes, nose, mouth, jawline, hairline, skin tone and age as the references. " +
-    (identityCaption ? `Specifically, this person: ${identityCaption} ` : "") +
-    "Do not reshape or reinterpret their face, and do not lighten their skin or make them look younger " +
-    "than the references. Their skin tone must be perfectly consistent across face, neck, hands and any " +
-    "other visible skin — no colour or tone shift between face and body, as if lit by the same light. " +
-    "Match body proportions, shoulder width and overall build to the full-body reference photo when it " +
-    "is present — do not invent a fitter, taller or differently shaped body.\n\n" +
-    "EXPRESSION: the person must NOT smile, grin, laugh or show teeth in this photo, or in ANY of the " +
-    "photos in this set — no exceptions, even if the scene text above describes smiling, laughing or " +
-    "grinning, and even if they are smiling in some of the reference photos. Give them a neutral, calm, " +
-    "closed-mouth, naturally reserved expression instead — serious or thoughtful is correct, a slight " +
-    "closed-mouth ease is fine, but never an open smile, grin or laugh.\n\n" +
-    "GAZE: both eyes must look in the SAME, coherent direction, consistent with the described pose — " +
-    "never cross-eyed, misaligned, wall-eyed or wandering, and never one eye looking at the camera " +
-    "while the other looks elsewhere. If the scene has them looking at the camera/lens, both eyes " +
-    "converge naturally on it; if looking away, at an object, or off-frame, both eyes point together " +
-    "in that same direction with a natural, believable gaze — never a blank, unfocused or dead-eyed " +
-    "stare.\n\n" +
-    "PROPORTIONS: the head must be a REALISTIC, anatomically correct size relative to the rest of the " +
-    "body — on a normal adult, the head is roughly one-seventh to one-eighth of their total standing " +
-    "height, and shoulder width is roughly two to three head-widths. One of the reference photos is a " +
-    "tightly cropped close-up of the face for identity detail only — do NOT use that crop's zoom level " +
-    "or framing as a scale reference, and do NOT enlarge the head to match it. Scale the head strictly " +
-    "against the body proportions shown in the full-body reference photo; the head must never look " +
-    "oversized, bobble-headed or disproportionate to the shoulders and body in the final image.\n\n" +
-    "SINGLE PERSON: this exact person must appear EXACTLY ONCE in the photo. Do not duplicate their " +
-    "face or likeness onto anyone else in the scene — any other people in the background (passers-by, " +
-    "other diners, other gym-goers, etc.) must be different, unrelated people, generic and not this " +
-    "person's face. Do not create a mirror or reflection of them elsewhere in the frame either.\n\n" +
+    "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
+    "The OTHER images are reference photos of a DIFFERENT specific real person (the target person).\n\n" +
+    "TASK: reproduce the BASE PHOTO keeping its background, environment, location, furniture, objects, " +
+    "lighting, colours, camera angle, framing, composition and body pose EXACTLY the same — do " +
+    "NOT move, redesign, regenerate or reinterpret the background or the scene in any way. ONLY change the " +
+    "PERSON so they become the TARGET person from the reference images.\n\n" +
+    "CLOTHING AND ACCESSORIES STAY IDENTICAL — this is strict and non-negotiable: every clothing item, " +
+    "its exact colour, pattern, cut and fit; every accessory including glasses/sunglasses, jewellery " +
+    "(necklaces, rings, bracelets, earrings), watches, hats, belts, bags and shoes must remain PIXEL-FOR-" +
+    "PIXEL the same as in the BASE PHOTO. Do not add, remove, resize, recolour or restyle ANY clothing " +
+    "item or accessory, and do not let the target person's reference photos influence what they wear — " +
+    "their reference photos are for FACE, SKIN TONE and BODY BUILD only, never for outfit or accessories. " +
+    "The ONLY three things that change from the base photo are: the face, the skin tone/colour, and the " +
+    "body height/weight/build. Everything else (scene, pose, outfit, accessories) is identical to the base.\n\n" +
+    "REPLACE THE PERSON'S FACE, SKIN AND BODY — not their clothing. The output person must match the " +
+    "TARGET reference person's: face, head shape, bone structure, eyes, nose, mouth, jawline, hairline and " +
+    "hair; and CRUCIALLY their SKIN TONE AND COLOUR and their BODY BUILD, WEIGHT, height, size and " +
+    "proportions. " +
+    "If the base person's skin colour is different from the target person, change it COMPLETELY to the " +
+    "target person's skin colour across face, neck, arms, hands and every visible area of skin — do not " +
+    "leave the base person's original skin colour anywhere. If the target person is heavier, slimmer, " +
+    "taller, shorter or a different build than the base person, RESHAPE the body (torso, shoulders, waist, " +
+    "limbs, face fullness) to match the target person's real body, height and weight — do NOT keep the " +
+    "base person's physique, and resize their existing clothing to fit the new body naturally (same " +
+    "garments, adjusted fit — never different garments). The final result must look like the TARGET " +
+    "person genuinely standing in the base photo's exact scene and pose, wearing the exact same outfit " +
+    "and accessories as the base person. " +
+    (identityCaption ? `The target person: ${identityCaption} ` : "") +
+    "\n\n" +
     bodyBlock +
-    wardrobeBlock +
-    "Match the lighting, shadows and colour temperature on their face and clothes to the scene's own " +
-    "light source so they look genuinely PRESENT in that place — not a cut-out pasted onto a backdrop " +
-    "— but the scene and its exact setting described above always take priority over any other " +
-    "consideration.\n\n" +
-    "FRAMING: " + composition + " The environment must stay clearly visible, detailed and identifiable " +
-    "around them — never a blank or plain backdrop. This is an ordinary phone photo, not an artistic " +
-    "portrait-mode shot, so avoid any heavy, artistic background blur or bokeh that hides the location. " +
-    "But do NOT force an unnatural, uniform, forensic sharpness across the whole frame either — the " +
-    "background must look like a REAL place with real depth (foreground, midground, distance), with " +
-    "the same kind of natural, ordinary depth and light falloff a real phone camera produces, never a " +
-    "flat backdrop or a cutout pasted behind the subject.\n\n" +
-    "CRAFT: this is a candid photo taken by a friend on an ordinary phone and posted to Instagram — " +
-    "unremarkable, a little imperfectly framed, NOT a professional or editorial photoshoot. Keep the " +
-    "person's skin natural and non-airbrushed (do not smooth, beautify or plasticise it) but do NOT " +
-    "invent blemishes, spots, uneven tone or facial asymmetry that isn't already visible in the " +
-    "reference photos — the face should look like a normal, unedited phone photo of THIS exact person, " +
-    "not an exaggerated or distressed version of them. Other natural, non-facial imperfections are " +
-    "welcome: flyaway hairs out of place, a slightly unposed or off-guard expression, a little sensor " +
-    "noise/grain in shadow areas, realistic fabric creases, the top of the head slightly cropped or the " +
-    "subject not quite centred, a faintly tilted horizon. Natural available light with realistic, " +
-    "sometimes slightly mixed colour temperature, true-to-life (not boosted) colour and contrast.\n\n" +
-    "AVOID: airbrushed or plastic skin, beauty-filter smoothing, studio-perfect lighting, oversaturated " +
-    "or HDR colour, CGI/3D-render look, a symmetrical or idealised AI face, exaggerated skin blemishes " +
-    "or facial asymmetry not present in the references, artificially enlarged, brightened, lightened or " +
-    "overly symmetrical eyes (\"anime eye\" look) — eye size, shape and colour must match the reference " +
-    "photos exactly, misaligned or wandering eye gaze, ANY smile, grin, laugh or visible teeth, a stiff " +
-    "posed mannequin stance, heavy artistic background blur/bokeh that hides the " +
-    "location, a flat/fake-looking backdrop with no real depth, a perfectly clean/curated backdrop, " +
-    "professional editorial photography look, this person's face duplicated onto anyone else in the " +
-    "scene, garbled or illegible fake text/lettering on any sign, menu, screen, watch face, book cover " +
-    "or packaging visible in the frame (leave such surfaces blank, blurred-plain or genuinely readable " +
-    "rather than inventing gibberish characters), overlaid UI text, watermark, distorted hands."
+    "Skin tone must be perfectly consistent across the whole body — face, neck, arms and hands all the " +
+    "same colour, as if it is really their skin, no patchwork of old and new skin colour.\n\n" +
+    "EXPRESSION: the target person must NOT smile, grin, laugh or show teeth — no exceptions, even if the " +
+    "base person is smiling and even if they are smiling in some reference photos. Give a neutral, calm, " +
+    "closed-mouth, naturally reserved expression (serious or thoughtful is correct).\n\n" +
+    "GAZE: both eyes must look in the SAME coherent direction (matching the base pose) — never cross-eyed, " +
+    "misaligned, wall-eyed or wandering, never a blank dead-eyed stare.\n\n" +
+    "PROPORTIONS: keep the head a realistic, anatomically correct size relative to the body (about one " +
+    "seventh to one eighth of standing height). One reference image is a tight face crop for identity " +
+    "detail only — do NOT copy its zoom/scale; scale the head to the body in the base pose. The head must " +
+    "never look oversized or bobble-headed.\n\n" +
+    "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
+    "in the scene; any background people stay different, generic, unrelated people.\n\n" +
+    "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural non-" +
+    "airbrushed skin with real texture, but do NOT invent blemishes or facial asymmetry not present in " +
+    "the references. True-to-life (not boosted) colour and contrast, natural available light.\n\n" +
+    "AVOID: airbrushed or plastic skin, beauty-filter smoothing, CGI/3D-render look, a symmetrical or " +
+    "idealised AI face, artificially enlarged/brightened/overly-symmetrical eyes, misaligned eye gaze, " +
+    "ANY smile/grin/laugh/visible teeth, changing or regenerating the background, keeping the base " +
+    "person's original skin colour or body shape, ANY change to clothing, outfit, glasses, jewellery, " +
+    "watches, hats, belts, bags or shoes compared to the base photo, copying the target reference " +
+    "person's clothing or accessories onto the output, garbled or illegible fake text on signs/screens/" +
+    "menus, watermark, distorted hands, extra or duplicated limbs."
   );
 }
 
@@ -755,22 +738,27 @@ async function faceSwap(faceUrl, targetUrl, gender) {
   }
 }
 
-// Bir chunk için FACE SWAP işini fal KUYRUĞUNA gönderir (webhook'lu). Taban
-// görselin (templateUrl) üstüne kullanıcının yüzünü (faceUrl) yerleştirir;
-// arka plan/vücut/poz tabandan korunur. İş bitince fal, falInferenceWebhook'u
-// çağırır (bkz. orada: indir + kimlik kapısı + texture + kaydet). Kuyruk
-// eşzamanlılığı fal tarafında yönetilir (10 limitine takılmaz — sync değil).
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, faceUrl, templateUrl, gender) {
+// Bir chunk için KİŞİ-DEĞİŞİMİ EDIT işini fal KUYRUĞUNA gönderir (webhook'lu).
+// image_urls[0] = taban görsel (sahne + jenerik kişi), sonraki görseller =
+// kullanıcının referansları. nano-banana-pro/edit, buildEditPrompt talimatıyla
+// arka planı koruyup kadrajdaki kişiyi kullanıcıya dönüştürür (yüz + TEN RENGİ +
+// KİLO/VÜCUT dahil — face-swap'in yapamadığı tam kişi değişimi). İş bitince fal
+// webhook'u çağırır (indir + kimlik kapısı + texture + kaydet).
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
-    face_image_0: faceUrl,
-    gender_0: gender,
-    target_image: templateUrl,
-    workflow_type: "user_hair", // kullanıcının gerçek saçı korunsun
-    upscale: true,
+    prompt: buildEditPrompt(identityCaption, bodyCaption, bodyProfile),
+    // İLK sıra taban (düzenlenecek sahne), sonrası kullanıcı referansları (kimlik).
+    image_urls: [templateUrl, ...refUrls],
+    aspect_ratio: "3:4", // dikey dating fotoğrafı (tabanlar da 3:4 olmalı)
+    resolution: "1K",
+    num_images: 1,
+    output_format: "jpeg",
+    seed: Math.floor(Math.random() * 2147483647),
+    safety_tolerance: "4",
   };
   const resp = await fetch(
-    `${FAL_QUEUE_BASE}/${FACE_SWAP_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+    `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
     {
       method: "POST",
       headers: {
@@ -786,7 +774,7 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, faceUrl, templateUr
       console.error(`fal.ai servis kesintisi (submit): ${resp.status} ${txt.slice(0, 160)}`);
       throw new HttpsError("unavailable", FAL_SERVICE_DOWN_MSG);
     }
-    throw new HttpsError("internal", `fal.ai face-swap gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
+    throw new HttpsError("internal", `fal.ai edit gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
   }
   return await resp.json(); // { request_id, ... }
 }
@@ -1043,13 +1031,10 @@ exports.startPhotoGeneration = onCall(
       );
     }
     const prepData = prepSnap.data();
-    // Face swap kaynağı: kullanıcının ön yüz karesi (prepare'de kaydedildi).
-    const primaryFaceUrl = prepData.primaryFaceUrl || refUrls[0] || null;
-    if (!primaryFaceUrl) {
-      throw new HttpsError("failed-precondition", "Yüz referansı hazır değil. Lütfen baştan tekrar dene.");
-    }
+    // Kişi-değişimi edit'i için kullanıcı referansları + kimlik/beden metni.
+    const identityCaption = prepData.identityCaption || null;
+    const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
-    const swapGender = genderForSwap(bodyProfile);       // easel gender_0 (male/female/non-binary)
     const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
     const bodyType = bodyProfile.bodyType || null;
 
@@ -1142,7 +1127,7 @@ exports.startPhotoGeneration = onCall(
           picked.map(async (file, i) => {
             const templateUrl = await signedDownloadUrl(file);
             const falJob = await submitStyleJob(
-              uid, jobId, styleId, i, primaryFaceUrl, templateUrl, swapGender
+              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile
             );
             return [String(i), {
               requestId: falJob.request_id,
