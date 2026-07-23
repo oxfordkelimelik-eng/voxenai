@@ -552,6 +552,55 @@ async function signedDownloadUrl(file) {
     `/o/${encodedPath}?alt=media&token=${token}`;
 }
 
+// ============================================================
+// FACE SWAP TABAN GÖRSEL HAVUZU
+// ============================================================
+// Kullanıcı Firebase Storage'daki bu klasörlere AI ÜRETİMİ jenerik taslak
+// fotoğraflar yükler (GERÇEK kişi DEĞİL — catfish + telif + mağaza politikası
+// riski). Üretimde nano-banana-pro yerine bu tabanların üstüne kullanıcının
+// yüzü swap'lenir; arka plan/vücut/poz tabandan aynen korunur.
+//
+// KLASÖR YAPISI (fallback: en spesifikten en genele — istediğin kadar granüler
+// yükleyebilirsin, hepsi çalışır):
+//   dating_templates/{styleId}/{gender}/{bodyType}/*.jpg   (en spesifik)
+//   dating_templates/{styleId}/{gender}/*.jpg
+//   dating_templates/{styleId}/*.jpg                        (en genel)
+// styleId: elegance|athletic|traveller|oldmoney|nightout|beach|car
+// gender:  male|female|na (form cevabı)   bodyType: slim|athletic|average|solid
+const TEMPLATE_ROOT = "dating_templates";
+
+// Bir stil için taban görsel dosyalarını bulur (fallback zinciriyle). Döner:
+// Storage File[] (boşsa []).
+async function listTemplateFiles(styleId, gender, bodyType) {
+  const prefixes = [];
+  if (gender && bodyType) prefixes.push(`${TEMPLATE_ROOT}/${styleId}/${gender}/${bodyType}/`);
+  if (gender) prefixes.push(`${TEMPLATE_ROOT}/${styleId}/${gender}/`);
+  prefixes.push(`${TEMPLATE_ROOT}/${styleId}/`);
+  for (const prefix of prefixes) {
+    const [found] = await bucket().getFiles({ prefix });
+    const imgs = found.filter(
+      (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name)
+    );
+    if (imgs.length > 0) return imgs;
+  }
+  return [];
+}
+
+// jobId+styleId'e göre DETERMİNİSTİK ama işe-özgü karışık sıra üretir; tam
+// `count` dosya döner (havuz count'tan azsa döngüsel tekrar). Farklı iş (jobId)
+// aynı stili seçse bile FARKLI alt küme/sıra alır — arka plan tekrarını önler
+// (bkz. pickScene ile aynı desen).
+function pickTemplatesFromPool(files, jobId, styleId, count) {
+  const order = files.map((_, i) => i);
+  const rand = mulberry32(seedFromString(`${jobId}:${styleId}:tpl`));
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const shuffled = order.map((i) => files[i]);
+  return Array.from({ length: count }, (_, i) => shuffled[i % shuffled.length]);
+}
+
 /**
  * Referans selfie'lerini Storage'dan okur, fal.ai CDN'e (veya imzalı GCS
  * URL'sine) yükler. Döner: { urls: string[], buffers: Buffer[] }
@@ -706,31 +755,22 @@ async function faceSwap(faceUrl, targetUrl, gender) {
   }
 }
 
-async function submitStyleJob(
-  uid, jobId, styleId, chunkIdx, referenceImageUrls, seed,
-  identityCaption, bodyProfile, promptExtras = {}
-) {
+// Bir chunk için FACE SWAP işini fal KUYRUĞUNA gönderir (webhook'lu). Taban
+// görselin (templateUrl) üstüne kullanıcının yüzünü (faceUrl) yerleştirir;
+// arka plan/vücut/poz tabandan korunur. İş bitince fal, falInferenceWebhook'u
+// çağırır (bkz. orada: indir + kimlik kapısı + texture + kaydet). Kuyruk
+// eşzamanlılığı fal tarafında yönetilir (10 limitine takılmaz — sync değil).
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, faceUrl, templateUrl, gender) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const input = {
-    prompt: buildPrompt(styleId, chunkIdx, identityCaption, bodyProfile, {
-      bodyCaption: promptExtras.bodyCaption || null,
-      wardrobeNote: promptExtras.wardrobeNote || null,
-    }, jobId),
-    image_urls: referenceImageUrls,
-    // Nano Banana Pro şeması: image_size YOK, aspect_ratio + resolution var.
-    aspect_ratio: "3:4", // dikey dating fotoğrafı
-    // 1K: 2K'nın ürettiği aşırı keskinlik/mikro-detay "hiperrealist/CGI"
-    // hissine yol açabiliyordu — telefon fotoğrafları bu kadar keskin değil.
-    resolution: "1K",
-    num_images: 1,
-    output_format: "jpeg",
-    seed,
-    // 1 = en katı, 6 = en gevşek. Girdi zaten Vision SafeSearch'ten geçti;
-    // burada katı bir eşik meşru portrelerde boş sonuç üretiyordu.
-    safety_tolerance: "4",
+    face_image_0: faceUrl,
+    gender_0: gender,
+    target_image: templateUrl,
+    workflow_type: "user_hair", // kullanıcının gerçek saçı korunsun
+    upscale: true,
   };
   const resp = await fetch(
-    `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+    `${FAL_QUEUE_BASE}/${FACE_SWAP_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
     {
       method: "POST",
       headers: {
@@ -746,7 +786,7 @@ async function submitStyleJob(
       console.error(`fal.ai servis kesintisi (submit): ${resp.status} ${txt.slice(0, 160)}`);
       throw new HttpsError("unavailable", FAL_SERVICE_DOWN_MSG);
     }
-    throw new HttpsError("internal", `fal.ai iş gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
+    throw new HttpsError("internal", `fal.ai face-swap gönderimi başarısız: ${resp.status} ${txt.slice(0, 120)}`);
   }
   return await resp.json(); // { request_id, ... }
 }
@@ -1003,10 +1043,31 @@ exports.startPhotoGeneration = onCall(
       );
     }
     const prepData = prepSnap.data();
-    const identityCaption = prepData.identityCaption || null;
-    const bodyProfile = prepData.bodyProfile || null;
-    const bodyCaption = prepData.bodyCaption || null;
-    const styleWardrobes = prepData.styleWardrobes || {};
+    // Face swap kaynağı: kullanıcının ön yüz karesi (prepare'de kaydedildi).
+    const primaryFaceUrl = prepData.primaryFaceUrl || refUrls[0] || null;
+    if (!primaryFaceUrl) {
+      throw new HttpsError("failed-precondition", "Yüz referansı hazır değil. Lütfen baştan tekrar dene.");
+    }
+    const bodyProfile = prepData.bodyProfile || {};
+    const swapGender = genderForSwap(bodyProfile);       // easel gender_0 (male/female/non-binary)
+    const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
+    const bodyType = bodyProfile.bodyType || null;
+
+    // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç. Bir stilin havuzu boşsa net
+    // hata (kredi harcanmadan) — kullanıcı o stile taslak yüklemeli.
+    const templatesByStyle = {};
+    for (const styleId of styles) {
+      const files = await listTemplateFiles(styleId, folderGender, bodyType);
+      if (files.length === 0) {
+        throw new HttpsError(
+          "failed-precondition",
+          `"${styleId}" stili için taban görsel yok. Firebase Storage'da ` +
+          `${TEMPLATE_ROOT}/${styleId}/ klasörüne (veya {gender}/{bodyType} alt ` +
+          `klasörlerine) AI ile üretilmiş taslak görseller yükle.`
+        );
+      }
+      templatesByStyle[styleId] = pickTemplatesFromPool(files, jobId, styleId, IMAGES_PER_STYLE);
+    }
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
     // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
@@ -1073,23 +1134,21 @@ exports.startPhotoGeneration = onCall(
     });
 
     try {
-      // Stiller + chunk'lar paralel (4 stil × 5 = 20 fal işi tek turda).
+      // Stiller + chunk'lar paralel: her chunk = 1 face-swap işi (taban görsel
+      // üstüne kullanıcının yüzü). Kuyruğa gönderiliyor, webhook sonuçlandırıyor.
       await Promise.all(styles.map(async (styleId) => {
+        const picked = templatesByStyle[styleId];
         const submissions = await Promise.all(
-          Array.from({ length: IMAGES_PER_STYLE }, async (_, i) => {
-            const seed = Math.floor(Math.random() * 2147483647);
+          picked.map(async (file, i) => {
+            const templateUrl = await signedDownloadUrl(file);
             const falJob = await submitStyleJob(
-              uid, jobId, styleId, i, refUrls, seed, identityCaption, bodyProfile, {
-                bodyCaption,
-                wardrobeNote: styleWardrobes[styleId] || null,
-              }
+              uid, jobId, styleId, i, primaryFaceUrl, templateUrl, swapGender
             );
             return [String(i), {
               requestId: falJob.request_id,
               photoUrls: [],
               status: "pending",
               retries: 0,
-              seed,
             }];
           })
         );
@@ -1190,70 +1249,33 @@ exports.falInferenceWebhook = onRequest(
       return;
     }
 
-    // Çıktıları paralel indir.
-    const images = req.body?.payload?.images || [];
+    // Kuyruğa giden iş = FACE SWAP (bkz. submitStyleJob). Dönen payload
+    // swap'lenmiş görseli taşır. easel-ai TEKİL { image: {...} } döndürür;
+    // nano-banana döneminden kalan { images: [...] } biçimini de defansif
+    // destekle (yanlış parse'da chunk fail-safe biter, sonsuz döngü YOK çünkü
+    // MAX_CHUNK_RETRIES=0).
+    const payload = req.body?.payload || {};
+    const images = Array.isArray(payload.images) && payload.images.length
+      ? payload.images
+      : (payload.image && payload.image.url ? [payload.image] : []);
     if (images.length === 0) {
       console.error(`fal.ai OK döndü ama görsel yok (style=${styleId}, chunk=${chunkIdx}):`,
-        JSON.stringify(req.body?.payload || {}).slice(0, 300));
-      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
-        res.status(200).send("yeniden üretiliyor");
-        return;
-      }
+        JSON.stringify(payload).slice(0, 400));
       await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
     }
-    // FACE SWAP (2. aşama): üretilen sahnenin üstüne kullanıcının GERÇEK yüzünü
-    // yerleştir. img.url zaten fal CDN'de public bir URL — doğrudan target_image
-    // olarak geçilebilir, yeniden yüklemeye gerek yok.
-    //
-    // ÖNEMLİ: swap başarısız olursa görsel HAM (swap'siz) haliyle KULLANILMAZ —
-    // null döner ve aşağıda filtrelenir. Bu görsel, tıpkı kimlik kapısını
-    // geçemeyen bir görsel gibi "passed" listesine hiç girmez; mevcut
-    // retry/finalizeChunk/iade mantığı (aşağıdaki "passed.length === 0" bloğu)
-    // aynen devreye girer — kullanıcı asla kendi yüzü olmayan bir fotoğraf
-    // görmez ve tüm retry hakları tükenirse o chunk/stil başarısız sayılıp
-    // paket kredisi otomatik iade edilir (bkz. finalizeChunk).
-    const swapGender = genderForSwap(job.bodyProfile);
+    // Swap zaten kuyrukta yapıldı — burada sadece indir (webhook'ta ek swap YOK).
     let downloaded = [];
     try {
-      const attempts = await Promise.all(images.map(async (img, i) => {
-        let sourceUrl = img.url;
-        if (job.primaryFaceUrl) {
-          const swappedUrl = await faceSwap(job.primaryFaceUrl, img.url, swapGender);
-          if (!swappedUrl) {
-            console.error(`face swap başarısız — görsel elendi (style=${styleId}, chunk=${chunkIdx}), swap'siz gösterilmeyecek`);
-            return null;
-          }
-          sourceUrl = swappedUrl;
-        }
-        const imgResp = await fetch(sourceUrl);
+      downloaded = await Promise.all(images.map(async (img, i) => {
+        const imgResp = await fetch(img.url);
         if (!imgResp.ok) throw new Error(`indirilemedi: ${imgResp.status}`);
         const buf = Buffer.from(await imgResp.arrayBuffer());
         return { i, buf };
       }));
-      downloaded = attempts.filter(Boolean);
     } catch (e) {
       console.error("Sonuç görseli indirme hatası:", e);
-      if (await maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
-        res.status(200).send("yeniden üretiliyor");
-        return;
-      }
-      await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
-      res.status(200).send("ok");
-      return;
-    }
-
-    // FACE SWAP başarısız olup downloaded boş kaldıysa RETRY YAPILMAZ — bilerek.
-    // Kimlik-kapısı reddinin aksine (yeni seed farklı/geçerli bir yüz üretebilir),
-    // swap başarısızlığı genelde fal.ai swap altyapısının o an sorunlu/kapalı
-    // olmasından kaynaklanır (bkz. 2026-07-22 olayı: "fetch failed" ile saatlerce
-    // sürekli başarısız oldu). Yeni bir nano-banana-pro üretimi bu durumu
-    // DÜZELTMEZ, sadece anlamsız yere ekstra üretim maliyeti (kredi) yakar.
-    // Bu yüzden burada chunk DOĞRUDAN başarısız sayılır — job/stil seviyesindeki
-    // mevcut otomatik iade (finalizeChunk) yine de devreye girer.
-    if (downloaded.length === 0) {
-      console.error(`face swap başarısız (retry yapılmadan chunk başarısız sayılıyor): style=${styleId}, chunk=${chunkIdx}`);
       await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
       res.status(200).send("ok");
       return;
@@ -1337,46 +1359,15 @@ exports.falInferenceWebhook = onRequest(
 );
 
 /**
- * Bir chunk için yeniden üretim hakkı varsa aynı boyutta yeni fal işi
- * kuyruğa alır. Döner: true = yeniden kuyruğa alındı (finalize etme).
+ * Chunk retry — ARTIK DEVRE DIŞI (MAX_CHUNK_RETRIES=0, tek deneme politikası,
+ * bkz. o sabitin açıklaması). Her zaman false döner: başarısız chunk doğrudan
+ * finalizeChunk({failed}) ile sonlandırılır, paket kredisi iade edilir. Retry
+ * yeniden bir face-swap işi başlatmak demektir ve swap altyapısı o an sorunlu
+ * ise sadece boşa kredi yakar (bkz. 2026-07-22 olayı). İmza korunuyor ki
+ * çağıran taraflar değişmesin.
  */
-async function maybeRetryChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef) {
-  const retries = chunk?.retries || 0;
-  const refUrls = job.falRefUrls;
-  if (retries >= MAX_CHUNK_RETRIES || !Array.isArray(refUrls) || refUrls.length === 0) {
-    return false;
-  }
-  try {
-    // Yeni seed — takılan/başarısız üretimi farklı bir çıktı ile kurtar.
-    // Aynı chunkIdx → aynı sahne varyantı korunur.
-    const seed = Math.floor(Math.random() * 2147483647);
-    const falJob = await submitStyleJob(
-      uid, jobId, styleId, chunkIdx, refUrls, seed,
-      job.identityCaption || null, job.bodyProfile || null, {
-        bodyCaption: job.bodyCaption || null,
-        wardrobeNote: (job.styleWardrobes && job.styleWardrobes[styleId]) || null,
-      }
-    );
-    await jobRef.set({
-      results: {
-        [styleId]: {
-          chunks: {
-            [chunkIdx]: {
-              requestId: falJob.request_id,
-              photoUrls: [],
-              status: "pending",
-              retries: retries + 1,
-              seed,
-            },
-          },
-        },
-      },
-    }, { merge: true });
-    return true;
-  } catch (e) {
-    console.error("Otomatik chunk yeniden üretimi başlatılamadı:", e);
-    return false;
-  }
+async function maybeRetryChunk() {
+  return false;
 }
 
 /**
