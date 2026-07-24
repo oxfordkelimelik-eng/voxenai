@@ -202,10 +202,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// AŞAMA 2 — ÜRETİM (loader burada başlar): doğrulama geçtiyse loader gösterilir
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
-  /// modelId: null ise sunucu varsayılanı (nano-banana-pro) kullanılır.
+  /// modelId: null ise sunucu varsayılanı (fal.ai nano-banana-pro) kullanılır.
   /// 'gpt-image-2' verilirse "Fotoğraflarımı Oluştur (GPT2)" butonundan
-  /// çağrılır — aynı akış (referans doğrulama + taban görsel seçimi), sadece
-  /// startPhotoGeneration'a hangi fal modelinin kullanılacağı bildirilir.
+  /// çağrılır — artık fal.ai sarmalaması DEĞİL, sunucu tarafında DOĞRUDAN
+  /// OpenAI'nin kendi API'sine gidiyor (bkz. falPhotos.js runOpenAiDirectChunk).
+  /// Client tarafı aynı: referans doğrulama + taban görsel seçimi akışı değişmedi.
   Future<void> _generate({String? modelId}) async {
     if (!_refsReady || _styles.isEmpty) return;
 

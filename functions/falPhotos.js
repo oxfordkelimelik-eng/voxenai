@@ -45,15 +45,9 @@ const FACE_SWAP_MODEL = "easel-ai/advanced-face-swap";
 // Bunu kökten çözmenin yolu kullanıcıya özel LoRA eğitimidir (kişi sahneyle
 // birlikte sıfırdan üretilir); maliyet/bekleme nedeniyle şimdilik seçilmedi.
 const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
-// GPT Image 2 — ana akışta kullanıcının isteğiyle nano-banana-pro'nun ALTERNATİFİ
-// olarak sunulacak ("Fotoğraflarımı Oluştur (GPT2)" butonu). Aynı taban+referans+
-// buildEditPrompt akışını kullanır, sadece fal endpoint'i ve girdi şeması farklı.
-const GPT_IMAGE_MODEL = "openai/gpt-image-2/edit";
 
-// Desteklenen üretim modelleri — client startPhotoGeneration'a "model" alanıyla
-// hangisini seçtiğini bildirir (bkz. exports.startPhotoGeneration). Her modelin
-// girdi şeması FARKLI olduğu için (bkz. yukarıdaki MODEL GEÇMİŞİ notları) bu
-// fark tek yerde izole edildi — submitStyleJob ikisini de aynı şekilde çağırır.
+// Desteklenen fal.ai üretim modelleri — client startPhotoGeneration'a "model"
+// alanıyla hangisini seçtiğini bildirir (bkz. exports.startPhotoGeneration).
 const MODEL_CATALOG = {
   "nano-banana-pro": {
     endpoint: GEN_MODEL,
@@ -68,24 +62,22 @@ const MODEL_CATALOG = {
       safety_tolerance: "4",
     }),
   },
-  "gpt-image-2": {
-    endpoint: GPT_IMAGE_MODEL,
-    // GERÇEK şema (fal.ai resmi dokümantasyonu doğrulandı): aspect_ratio/
-    // resolution/safety_tolerance YOK. image_size: "auto" — "portrait_4_3"
-    // preset'i canlıda netlik/arka plan/göz sorunu yaratmıştı (bkz. MODEL
-    // GEÇMİŞİ madde 5); "auto" bilinen en iyi durum.
-    buildInput: (prompt, imageUrls, seed) => ({
-      prompt,
-      image_urls: imageUrls,
-      image_size: "auto",
-      quality: "medium",
-      num_images: 1,
-      output_format: "jpeg",
-      seed,
-    }),
-  },
 };
 const DEFAULT_MODEL_ID = "nano-banana-pro";
+
+// "Fotoğraflarımı Oluştur (GPT2)" butonu artık fal.ai SARMALAMASI değil,
+// OpenAI'nin KENDİ API'sine DOĞRUDAN gidiyor (bkz. generateWithOpenAI).
+// Sebep (2026-07-24 gerçek test): fal.ai üzerinden openai/gpt-image-2/edit
+// canlıda netlik/arka plan/göz sorunları yaşatmıştı; doğrudan OpenAI
+// api.openai.com/v1/images/edits ile yapılan MANUEL testte (aynı taban +
+// gerçek kullanıcı referansı) sonuç ÇOK daha iyiydi: ten rengi tüm vücutta
+// tutarlı dönüştü (patchwork yok), yüz makul benzerlikte, arka plan/poz/
+// kıyafet neredeyse birebir korundu, moderasyon reddetmedi. Senkron API
+// (webhook yok) — bu yüzden fal'ın submit+webhook akışından TAMAMEN ayrı,
+// kendi senkron yürütme yoluna sahip (bkz. runOpenAiDirectChunk).
+const OPENAI_MODEL_ID = "gpt-image-2";
+const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
+const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -822,6 +814,109 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrl
 }
 
 /**
+ * OpenAI'nin KENDİ images/edits endpoint'ine doğrudan senkron istek atar.
+ * fal.ai'nin aksine SUNUCU görsel URL'i değil, ham görsel BAYTLARINI
+ * multipart/form-data ile bekliyor — bu yüzden her imageUrl önce indirilir.
+ * Döner: PNG buffer, ya da (moderasyon reddi/hata/429 dahil tüm durumlarda)
+ * null — FAIL-SAFE, çağıran taraf null'da chunk'ı retry'siz başarısız sayar
+ * (bkz. runOpenAiDirectChunk, MAX_CHUNK_RETRIES=0 politikasıyla tutarlı).
+ */
+async function generateWithOpenAI(prompt, imageUrls) {
+  try {
+    const buffers = await Promise.all(imageUrls.map(async (url) => {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`referans indirilemedi: ${r.status}`);
+      return Buffer.from(await r.arrayBuffer());
+    }));
+
+    const form = new FormData();
+    form.append("model", OPENAI_MODEL_ID);
+    form.append("prompt", prompt);
+    form.append("quality", "medium"); // maliyet/kalite dengesi (bkz. yukarıdaki not)
+    buffers.forEach((buf, i) => {
+      form.append("image[]", new Blob([buf], { type: "image/jpeg" }), `ref_${i}.jpg`);
+    });
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const resp = await fetch(OPENAI_IMAGE_EDIT_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${OPENAI_KEY.value()}` },
+        body: form,
+      });
+      if (resp.status === 429 && attempt < maxAttempts) {
+        // OpenAI eşzamanlılık/oran limiti — kısa bekleyip tekrar dene (bkz.
+        // face-swap'te yaşadığımız aynı 429 dersi, bkz. faceSwap()).
+        await new Promise((r) => setTimeout(r, attempt * 1500));
+        continue;
+      }
+      const json = await resp.json();
+      if (!resp.ok || json.error) {
+        console.error(`OpenAI images/edits başarısız (deneme ${attempt}): ${resp.status} ${JSON.stringify(json.error || json).slice(0, 300)}`);
+        return null;
+      }
+      const b64 = json?.data?.[0]?.b64_json;
+      if (!b64) {
+        console.error("OpenAI images/edits OK ama görsel yok:", JSON.stringify(json).slice(0, 300));
+        return null;
+      }
+      return Buffer.from(b64, "base64");
+    }
+    return null;
+  } catch (e) {
+    console.error("OpenAI images/edits hata:", e.message || e);
+    return null;
+  }
+}
+
+/**
+ * Bir chunk'ın TAM yaşam döngüsünü SENKRON olarak yürütür (OpenAI doğrudan
+ * yolu — webhook YOK, fal'ın submit+webhook akışının aksine). startPhotoGeneration
+ * içinde çağrılır. Kimlik kapısı + texture + kaydet + finalizeChunk hepsi burada;
+ * webhook'taki mantıkla AYNI kurallar (retry yok, MAX_CHUNK_RETRIES=0 — bkz. o
+ * sabitin açıklaması) tekrar uygulanıyor çünkü bu iki yol asla aynı chunk için
+ * birlikte çalışmıyor, kod paylaşımı yerine bilinçli olarak ayrı tutuldu (fal
+ * webhook'u dış bir HTTP isteği, bu ise doğrudan senkron çağrı zinciri).
+ */
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef) {
+  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  const buf = await generateWithOpenAI(prompt, [templateUrl, ...refUrls]);
+  if (!buf) {
+    await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
+    return;
+  }
+
+  // KİMLİK KAPISI — webhook'taki ile birebir aynı eşik/mantık.
+  let passed = true;
+  if (refDescriptor) {
+    try {
+      const { matchesIdentity } = require("./faceQuality");
+      const { match } = await matchesIdentity(buf, refDescriptor);
+      passed = match;
+    } catch (e) {
+      console.error("OpenAI yolu kimlik kontrolü başarısız (filtresiz devam):", e);
+      passed = true;
+    }
+  }
+  if (!passed) {
+    console.error(`OpenAI yolu: kimlik kapısı reddetti (retry yok): style=${styleId}, chunk=${chunkIdx}`);
+    await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
+    return;
+  }
+
+  try {
+    const { addPhoneCameraTexture } = require("./postProcess");
+    const textured = await addPhoneCameraTexture(buf);
+    const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_0.jpg`;
+    await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
+    await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
+  } catch (e) {
+    console.error("OpenAI yolu: sonuç kaydetme hatası:", e);
+    await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
+  }
+}
+
+/**
  * ADIM 1/2 — DOĞRULAMA. Kullanıcı 3 referans selfie'sini Storage'a yükledikten
  * sonra, HENÜZ HİÇBİR KREDİ/BAKİYE HARCANMADAN ve fal.ai'ye hiçbir üretim işi
  * gönderilmeden çağrılır. Fotoğrafla ilgili TÜM kapılar burada çalışır:
@@ -1039,7 +1134,16 @@ exports.prepareReferencePhotos = onCall(
  * data: { styles: string[], jobId: string } -> { jobId }
  */
 exports.startPhotoGeneration = onCall(
-  { secrets: [FAL_KEY], region: "europe-west1", memory: "512MiB", timeoutSeconds: 180 },
+  // OpenAI doğrudan yolu (bkz. runOpenAiDirectChunk) bu fonksiyonun İÇİNDE
+  // senkron olarak tamamlanıyor (webhook yok) — kimlik kapısı için tfjs/
+  // face-api yükleniyor (2GiB gerektiriyor, bkz. faceQuality.js diğer
+  // kullanımları) ve OpenAI üretimi + olası 429 backoff'ları zaman alabilir.
+  {
+    secrets: [FAL_KEY, OPENAI_KEY],
+    region: "europe-west1",
+    memory: "2GiB",
+    timeoutSeconds: 540,
+  },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -1053,9 +1157,10 @@ exports.startPhotoGeneration = onCall(
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
     }
-    // "Fotoğraflarımı Oluştur (GPT2)" butonu bu alanı 'gpt-image-2' gönderir;
-    // birinci buton hiç göndermez -> varsayılan nano-banana-pro.
-    if (model !== undefined && !MODEL_CATALOG[model]) {
+    // "Fotoğraflarımı Oluştur (GPT2)" butonu bu alanı 'gpt-image-2' gönderir
+    // (artık fal değil, DOĞRUDAN OpenAI — bkz. OPENAI_MODEL_ID); birinci buton
+    // hiç göndermez -> varsayılan nano-banana-pro.
+    if (model !== undefined && !MODEL_CATALOG[model] && model !== OPENAI_MODEL_ID) {
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
     }
     const modelId = model || DEFAULT_MODEL_ID;
@@ -1083,6 +1188,7 @@ exports.startPhotoGeneration = onCall(
     const identityCaption = prepData.identityCaption || null;
     const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
+    const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
     const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
     const bodyType = bodyProfile.bodyType || null;
 
@@ -1167,30 +1273,56 @@ exports.startPhotoGeneration = onCall(
       }, { merge: true });
     });
 
+    const useOpenAiDirect = modelId === OPENAI_MODEL_ID;
+
     try {
-      // Stiller + chunk'lar paralel: her chunk = 1 face-swap işi (taban görsel
-      // üstüne kullanıcının yüzü). Kuyruğa gönderiliyor, webhook sonuçlandırıyor.
-      await Promise.all(styles.map(async (styleId) => {
-        const picked = templatesByStyle[styleId];
-        const submissions = await Promise.all(
-          picked.map(async (file, i) => {
+      if (useOpenAiDirect) {
+        // OPENAI DOĞRUDAN YOLU — webhook YOK. Her chunk için önce 'pending'
+        // kaydı yazılır (finalizeChunk'ın idempotent guard'ı bunu bekliyor —
+        // bkz. finalizeChunk), SONRA üretim TAM OLARAK burada, senkron
+        // bekleniyor (webhook'un yapacağı işi runOpenAiDirectChunk yapıyor).
+        // Fonksiyon bu Promise.all bitmeden dönmez — bkz. onCall timeoutSeconds.
+        await Promise.all(styles.map(async (styleId) => {
+          const picked = templatesByStyle[styleId];
+          const initialChunks = Object.fromEntries(
+            picked.map((_, i) => [String(i), { photoUrls: [], status: "pending", retries: 0 }])
+          );
+          await jobRef.set({
+            results: { [styleId]: { status: "pending", photoUrls: [], chunks: initialChunks } },
+          }, { merge: true });
+
+          await Promise.all(picked.map(async (file, i) => {
             const templateUrl = await signedDownloadUrl(file);
-            const falJob = await submitStyleJob(
-              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId
+            await runOpenAiDirectChunk(
+              uid, jobId, styleId, i, templateUrl, refUrls,
+              identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef
             );
-            return [String(i), {
-              requestId: falJob.request_id,
-              photoUrls: [],
-              status: "pending",
-              retries: 0,
-            }];
-          })
-        );
-        const chunks = Object.fromEntries(submissions);
-        await jobRef.set({
-          results: { [styleId]: { status: "pending", photoUrls: [], chunks } },
-        }, { merge: true });
-      }));
+          }));
+        }));
+      } else {
+        // fal.ai YOLU — submit hızlı döner, webhook sonuçlandırıyor.
+        await Promise.all(styles.map(async (styleId) => {
+          const picked = templatesByStyle[styleId];
+          const submissions = await Promise.all(
+            picked.map(async (file, i) => {
+              const templateUrl = await signedDownloadUrl(file);
+              const falJob = await submitStyleJob(
+                uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId
+              );
+              return [String(i), {
+                requestId: falJob.request_id,
+                photoUrls: [],
+                status: "pending",
+                retries: 0,
+              }];
+            })
+          );
+          const chunks = Object.fromEntries(submissions);
+          await jobRef.set({
+            results: { [styleId]: { status: "pending", photoUrls: [], chunks } },
+          }, { merge: true });
+        }));
+      }
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
       // Servis kesintisinde (fal bakiye/kilit) kullanıcıya net mesaj + iade.
