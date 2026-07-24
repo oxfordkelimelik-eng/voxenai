@@ -480,6 +480,48 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
   );
 }
 
+/**
+ * GPT2 (doğrudan OpenAI) yolu için MİNİMAL prompt — buildEditPrompt'a HİÇ
+ * dokunmuyor, ayrı ve bağımsız (nano-banana-pro'yu etkilemez).
+ *
+ * GEREKÇE (2026-07-24, kullanıcı testi): manuel testte 2 basit görsel + tek
+ * cümlelik bir talimat ("bu kişinin yüzünü değiştir") ChatGPT'de mükemmel
+ * çalışmıştı. Production'da nano-banana-pro'nun ~1000 kelimelik, 15+ maddelik
+ * AVOID listesi içeren prompt'unu ve 6 referans görseli aynen kullanınca sonuç
+ * kötüleşti. Bu fonksiyon o manuel teste bilinçli olarak YAKLAŞIYOR:
+ *  - identityCaption metni YOK (görseller zaten kimliği taşıyor, metin
+ *    tekrarı gereksiz uzunluk + olası çelişki kaynağıydı).
+ *  - GAZE / PROPORTIONS / SINGLE PERSON blokları YOK — bunlar nano-banana-
+ *    pro'nun SIFIRDAN SAHNE ÜRETME modunda görülen artefaktlar içindi; taban
+ *    fotoğraf düzenlenirken (sahne zaten var) bu sorunlar hiç görülmedi.
+ *  - Uzun AVOID listesi YOK — sadece gerçekten tekrar eden şikayetler (ten
+ *    patchwork, zorla gülümseme, yüzü yeniden yorumlama) kısa cümlelere
+ *    sıkıştırıldı.
+ * Sonuç yetersiz kalırsa BURAYA, tek tek, gerçekten gözlemlenen soruna göre
+ * madde eklenmeli — baştan her ihtimale karşı doldurmak yerine.
+ */
+function buildEditPromptSimple(bodyCaption, bodyProfile) {
+  let bodyBlock = "";
+  if (bodyCaption) {
+    bodyBlock = `Match this body build and weight (do not idealise or slim down): ${bodyCaption}. `;
+  }
+  bodyBlock += bodyProfileHint(bodyProfile);
+
+  return (
+    "The first image is the base photo. The other image(s) show a different real person — the target " +
+    "person. Replace the person in the base photo with the target person: use their exact face, skin " +
+    "tone and body build/weight/height, resizing the SAME clothing to fit them naturally. Keep the base " +
+    "photo's background, location, lighting, pose, camera angle, clothing and accessories EXACTLY the " +
+    "same — do not change or regenerate anything except the person themselves.\n\n" +
+    "Skin tone must be applied consistently to the target person's ENTIRE body — face, neck, arms, " +
+    "hands, legs — never leave any part of the body in the base person's original skin colour.\n\n" +
+    bodyBlock +
+    "Keep the target person's own natural expression from their reference photo — do not add a smile, " +
+    "grin or laugh that isn't already there. Keep their face exactly as it looks in their reference " +
+    "photo, without reinterpreting, beautifying or restyling it."
+  );
+}
+
 function styleUnitsFor(styleCount) {
   return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
 }
@@ -878,9 +920,15 @@ async function generateWithOpenAI(prompt, imageUrls) {
  * birlikte çalışmıyor, kod paylaşımı yerine bilinçli olarak ayrı tutuldu (fal
  * webhook'u dış bir HTTP isteği, bu ise doğrudan senkron çağrı zinciri).
  */
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef) {
-  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
-  const buf = await generateWithOpenAI(prompt, [templateUrl, ...refUrls]);
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, bodyCaption, bodyProfile, refDescriptor, jobRef) {
+  const prompt = buildEditPromptSimple(bodyCaption, bodyProfile);
+  // SADECE 3 görsel (taban + en iyi yüz + tam boy) — 6 değil. refUrls sırası
+  // prepareReferencePhotos'ta sabit: [0]=yüz-crop/en iyi yüz (en yüksek kimlik
+  // sadakati), [son]=tam boy (bestIndex her zaman yüz karelerinden seçildiği
+  // için tam boy asla öne alınmaz, sırası hep en sonda kalır — bkz. analyzeReferences).
+  const bestFaceUrl = refUrls[0];
+  const bodyRefUrl = refUrls[refUrls.length - 1];
+  const buf = await generateWithOpenAI(prompt, [templateUrl, bestFaceUrl, bodyRefUrl]);
   if (!buf) {
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
     return;
@@ -1295,7 +1343,7 @@ exports.startPhotoGeneration = onCall(
             const templateUrl = await signedDownloadUrl(file);
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, templateUrl, refUrls,
-              identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef
+              bodyCaption, bodyProfile, refDescriptor, jobRef
             );
           }));
         }));
