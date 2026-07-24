@@ -57,11 +57,15 @@ const OVEREXPOSURE_CLIP_MAX = 0.45;
 // eşik 0.60 -> 0.63 gevşetildi. Stil/ışık değişince aynı kişi zaten
 // 0.55-0.65 aralığına düşebiliyordu; bu değişiklik yalnızca daha önce
 // sınırda reddedilen gerçek-eşleşmeleri kabul etmeyi hedefliyor.
-// KALİBRASYON NOTU: bu değer gerçek kullanıcı verisiyle kalibre edilmedi,
-// tahmini bir ayardır. Üretimde hâlâ yüz bozukluğu şikayeti gelirse DÜŞÜR
-// (ör. 0.58) — daha az toleranslı olur. Retry'lerin çoğu boşa gidiyorsa
-// (yüz aslında doğru ama sürekli eleniyorsa) daha da YÜKSELT (ör. 0.66).
-const FACE_MATCH_THRESHOLD = 0.63;
+// KALİBRASYON NOTU: bu değer gerçek kullanıcı verisiyle kalibre edilmedi.
+// 2026-07-23 GERÇEK VERİ (edit mimarisi, elegance): sınırda iyi yüzler
+// RED(0.648) ve RED(0.758) ile eleniyordu — 5 fotodan 2'si boşuna kaybolup
+// kullanıcı 3 foto alıyordu (retry=0). Eşik 0.63 -> 0.70: 0.648 gibi sınırda-
+// kabul edilebilir yüzler geçer, 0.758 gibi açıkça yanlış yüzler yine reddedilir.
+// Asıl çözüm buildEditPrompt'taki güçlendirilmiş yüz-sadakati (mesafeler zaten
+// düşmeli); bu eşik yalnızca sınır kayıplarını azaltıyor. Yüz benzemiyor
+// şikayeti sürerse DÜŞÜR (0.66), hâlâ foto kaybı varsa YÜKSELT (0.74).
+const FACE_MATCH_THRESHOLD = 0.70;
 
 let _initPromise = null;
 let _faceapi = null;
