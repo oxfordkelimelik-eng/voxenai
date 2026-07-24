@@ -45,6 +45,47 @@ const FACE_SWAP_MODEL = "easel-ai/advanced-face-swap";
 // Bunu kökten çözmenin yolu kullanıcıya özel LoRA eğitimidir (kişi sahneyle
 // birlikte sıfırdan üretilir); maliyet/bekleme nedeniyle şimdilik seçilmedi.
 const GEN_MODEL = "fal-ai/nano-banana-pro/edit";
+// GPT Image 2 — ana akışta kullanıcının isteğiyle nano-banana-pro'nun ALTERNATİFİ
+// olarak sunulacak ("Fotoğraflarımı Oluştur (GPT2)" butonu). Aynı taban+referans+
+// buildEditPrompt akışını kullanır, sadece fal endpoint'i ve girdi şeması farklı.
+const GPT_IMAGE_MODEL = "openai/gpt-image-2/edit";
+
+// Desteklenen üretim modelleri — client startPhotoGeneration'a "model" alanıyla
+// hangisini seçtiğini bildirir (bkz. exports.startPhotoGeneration). Her modelin
+// girdi şeması FARKLI olduğu için (bkz. yukarıdaki MODEL GEÇMİŞİ notları) bu
+// fark tek yerde izole edildi — submitStyleJob ikisini de aynı şekilde çağırır.
+const MODEL_CATALOG = {
+  "nano-banana-pro": {
+    endpoint: GEN_MODEL,
+    buildInput: (prompt, imageUrls, seed) => ({
+      prompt,
+      image_urls: imageUrls,
+      aspect_ratio: "3:4",
+      resolution: "1K",
+      num_images: 1,
+      output_format: "jpeg",
+      seed,
+      safety_tolerance: "4",
+    }),
+  },
+  "gpt-image-2": {
+    endpoint: GPT_IMAGE_MODEL,
+    // GERÇEK şema (fal.ai resmi dokümantasyonu doğrulandı): aspect_ratio/
+    // resolution/safety_tolerance YOK. image_size: "auto" — "portrait_4_3"
+    // preset'i canlıda netlik/arka plan/göz sorunu yaratmıştı (bkz. MODEL
+    // GEÇMİŞİ madde 5); "auto" bilinen en iyi durum.
+    buildInput: (prompt, imageUrls, seed) => ({
+      prompt,
+      image_urls: imageUrls,
+      image_size: "auto",
+      quality: "medium",
+      num_images: 1,
+      output_format: "jpeg",
+      seed,
+    }),
+  },
+};
+const DEFAULT_MODEL_ID = "nano-banana-pro";
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -409,10 +450,13 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "single piece of visible skin in the photo — face, neck, ears, chest, shoulders, arms, forearms, " +
     "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. It is a SERIOUS " +
     "ERROR to change only the face while leaving the arms, hands, legs or any other body part the base " +
-    "person's original skin colour. If the base person is dark-skinned and the target is light-skinned " +
-    "(or vice versa), recolour the ENTIRE body, limb by limb, to the target's skin tone — check the arms " +
-    "and legs specifically. The result must have ONE consistent skin colour everywhere, never a patchwork " +
-    "of two different skin colours on the same person.\n\n" +
+    "person's original skin colour. This applies to EVERY case regardless of how large or subtle the tone " +
+    "difference is — whether the base person is much darker or much lighter than the target, or the " +
+    "difference is more subtle (e.g. medium, olive, tan, or any other intermediate tone) — always recolour " +
+    "the ENTIRE body, limb by limb, to match the target's EXACT skin tone precisely, never an approximation " +
+    "or a tone partway between the base and the target. Check the arms and legs specifically. The result " +
+    "must have ONE consistent skin colour everywhere, never a patchwork of two different skin colours on " +
+    "the same person.\n\n" +
     "BODY: match the target person's real build, weight and height. If they are heavier, slimmer, taller " +
     "or shorter than the base person, reshape the body accordingly and resize the SAME clothing to fit " +
     "naturally. Keep the body anatomically whole and coherent — correct number of arms, legs, hands and " +
@@ -748,21 +792,15 @@ async function faceSwap(faceUrl, targetUrl, gender) {
 // arka planı koruyup kadrajdaki kişiyi kullanıcıya dönüştürür (yüz + TEN RENGİ +
 // KİLO/VÜCUT dahil — face-swap'in yapamadığı tam kişi değişimi). İş bitince fal
 // webhook'u çağırır (indir + kimlik kapısı + texture + kaydet).
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile) {
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId = DEFAULT_MODEL_ID) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
-  const input = {
-    prompt: buildEditPrompt(identityCaption, bodyCaption, bodyProfile),
-    // İLK sıra taban (düzenlenecek sahne), sonrası kullanıcı referansları (kimlik).
-    image_urls: [templateUrl, ...refUrls],
-    aspect_ratio: "3:4", // dikey dating fotoğrafı (tabanlar da 3:4 olmalı)
-    resolution: "1K",
-    num_images: 1,
-    output_format: "jpeg",
-    seed: Math.floor(Math.random() * 2147483647),
-    safety_tolerance: "4",
-  };
+  const model = MODEL_CATALOG[modelId] || MODEL_CATALOG[DEFAULT_MODEL_ID];
+  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  const seed = Math.floor(Math.random() * 2147483647);
+  // İLK sıra taban (düzenlenecek sahne), sonrası kullanıcı referansları (kimlik).
+  const input = model.buildInput(prompt, [templateUrl, ...refUrls], seed);
   const resp = await fetch(
-    `${FAL_QUEUE_BASE}/${GEN_MODEL}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+    `${FAL_QUEUE_BASE}/${model.endpoint}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
     {
       method: "POST",
       headers: {
@@ -1007,7 +1045,7 @@ exports.startPhotoGeneration = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
-    const { styles, jobId } = request.data || {};
+    const { styles, jobId, model } = request.data || {};
     if (!Array.isArray(styles) || styles.length === 0 || !jobId) {
       throw new HttpsError("invalid-argument", "styles ve jobId zorunlu.");
     }
@@ -1015,6 +1053,12 @@ exports.startPhotoGeneration = onCall(
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
     }
+    // "Fotoğraflarımı Oluştur (GPT2)" butonu bu alanı 'gpt-image-2' gönderir;
+    // birinci buton hiç göndermez -> varsayılan nano-banana-pro.
+    if (model !== undefined && !MODEL_CATALOG[model]) {
+      throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
+    }
+    const modelId = model || DEFAULT_MODEL_ID;
 
     const walletRef = db.doc(`users/${uid}/private/wallet`);
     const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
@@ -1119,6 +1163,7 @@ exports.startPhotoGeneration = onCall(
         errorMessage: null,
         packUnitsCharged: unitsToCharge,
         usedFreeTier,
+        model: modelId, // hangi model kullanıldı — izleme/karşılaştırma için
       }, { merge: true });
     });
 
@@ -1131,7 +1176,7 @@ exports.startPhotoGeneration = onCall(
           picked.map(async (file, i) => {
             const templateUrl = await signedDownloadUrl(file);
             const falJob = await submitStyleJob(
-              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile
+              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId
             );
             return [String(i), {
               requestId: falJob.request_id,

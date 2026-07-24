@@ -202,7 +202,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// AŞAMA 2 — ÜRETİM (loader burada başlar): doğrulama geçtiyse loader gösterilir
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
-  Future<void> _generate() async {
+  /// modelId: null ise sunucu varsayılanı (nano-banana-pro) kullanılır.
+  /// 'gpt-image-2' verilirse "Fotoğraflarımı Oluştur (GPT2)" butonundan
+  /// çağrılır — aynı akış (referans doğrulama + taban görsel seçimi), sadece
+  /// startPhotoGeneration'a hangi fal modelinin kullanılacağı bildirilir.
+  Future<void> _generate({String? modelId}) async {
     if (!_refsReady || _styles.isEmpty) return;
 
     var answers = ref.read(datingAnswersProvider);
@@ -289,9 +293,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
 
     try {
-      await functions
-          .httpsCallable('startPhotoGeneration')
-          .call({'styles': _styles.toList(), 'jobId': jobId});
+      await functions.httpsCallable('startPhotoGeneration').call({
+        'styles': _styles.toList(),
+        'jobId': jobId,
+        'model': ?modelId,
+      });
 
       if (!mounted) return;
       _listenToJob(uid, jobId);
@@ -1251,6 +1257,28 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             label:
                 _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
             onPressed: (_refsReady && !_preparing) ? _generate : null,
+          ),
+          const SizedBox(height: 10),
+          // Model karşılaştırması için ikinci seçenek — aynı akış (referans
+          // doğrulama + taban görsel), yalnızca fal.ai üretim modeli farklı.
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton(
+              onPressed: (_refsReady && !_preparing)
+                  ? () => _generate(modelId: 'gpt-image-2')
+                  : null,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.borderSubtle),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
+              ),
+              child: const Text('Fotoğraflarımı Oluştur (GPT2)',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+            ),
           ),
           const SizedBox(height: 8),
           Center(
