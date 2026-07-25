@@ -70,10 +70,17 @@ const MODEL_CATALOG = {
   // sonuç verdiğini gösterdi; kullanıcı bu sürüme dönülmesini istedi.
   "gpt-image-2": {
     endpoint: "fal-ai/gpt-image-2/edit",
+    // DÜZELTME (2026-07-26): image_size STRING "1024x1024" DEĞİL — fal.ai bu
+    // endpoint'te sadece enum (square_hd/square/portrait_4_3/portrait_16_9/
+    // landscape_4_3/landscape_16_9/auto) ya da {width,height} NESNESİ kabul
+    // ediyor. String göndermek fal.ai'de 422 ("Unexpected status code: 422")
+    // ile ANINDA reddediliyordu — gerçek üretim hiç başlamıyordu, sadece tüm
+    // chunk'lar hemen başarısız olup genel "yüzünle eşleşmedi" mesajına
+    // düşüyordu (asıl sebep kimlikle alakasız, saf şema hatasıydı).
     buildInput: (prompt, imageUrls, seed) => ({
       prompt,
       image_urls: imageUrls,
-      image_size: "1024x1024",
+      image_size: { width: 1024, height: 1024 },
       seed,
     }),
   },
