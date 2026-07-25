@@ -54,10 +54,14 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     CaptureAngle.right,
     CaptureAngle.left,
   ];
-  // Otomatik çekim öncesi kaç ardışık "hizalı" kare beklenir. Yüksek tutuldu:
-  // kullanıcı doğru açı + iyi ışıkta STABİL kalmadan çekmesin. Düşük değer
-  // (eski 8) dönerken anlık geçen açıda ya da titrek karede tetikliyordu.
-  static const _requiredStableFrames = 15;
+  // Otomatik çekim öncesi hizalı kalınması gereken GERÇEK süre (kare sayısı
+  // DEĞİL — kare işleme hızı cihaza göre değiştiği için "N kare" ölçüsü bazı
+  // cihazlarda saniyenin çok altında dolup "hemen çekiyor" hissi veriyordu).
+  // Süre bazlı şart cihazdan bağımsız olarak kullanıcının gerçekten ~1 sn
+  // sabit + doğru açıda kalmasını garanti eder.
+  static const _requiredStableDuration = Duration(milliseconds: 1100);
+  // Göz açıklık eşiği — bu değerin altı "kapalı/kısık göz" sayılır.
+  static const _eyeOpenThreshold = 0.4;
 
   List<CaptureAngle> get _angles => widget.angles ?? _defaultAngles;
 
@@ -75,7 +79,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   bool _isCapturing = false; // fotoğraf alınıyor mu (akış durur)
   bool _reviewing = false; // 3 açı bitti, onay ekranı gösteriliyor
   bool _aligned = false;
-  int _stableFrames = 0;
+  DateTime? _stableSince; // hizalanmanın başladığı an (süre bazlı bekleme için)
+  // Onay ekranından "sadece bu açıyı yeniden çek" ile girildiyse true — çekim
+  // bitince akışın geri kalanına geçmeden direkt onay ekranına döner.
+  bool _retakeSingle = false;
   String _hint = 'Kamera hazırlanıyor…';
   String? _error;
 
@@ -89,7 +96,9 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       _faceDetector = FaceDetector(
         options: FaceDetectorOptions(
           performanceMode: FaceDetectorMode.fast,
-          enableClassification: false,
+          // Göz açıklık olasılığı (leftEyeOpenProbability/rightEyeOpenProbability)
+          // için gerekli — "gözlerini aç" kontrolü bunu kullanıyor.
+          enableClassification: true,
           enableLandmarks: false,
           minFaceSize: 0.15,
         ),
@@ -174,7 +183,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       final (qualityOk, qualityHint) = _checkQuality(image);
       if (!qualityOk) {
         if (!mounted) return;
-        _stableFrames = 0;
+        _stableSince = null;
         setState(() {
           _aligned = false;
           _hint = qualityHint;
@@ -194,14 +203,17 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       }
 
       if (!mounted) return;
+      final now = DateTime.now();
       if (aligned) {
-        _stableFrames++;
+        _stableSince ??= now;
       } else {
-        _stableFrames = 0;
+        _stableSince = null;
       }
-      final nowAligned = _stableFrames >= _requiredStableFrames;
+      final stableFor =
+          _stableSince == null ? Duration.zero : now.difference(_stableSince!);
+      final nowAligned = stableFor >= _requiredStableDuration;
       setState(() {
-        _aligned = _stableFrames > 0;
+        _aligned = aligned;
         _hint = nowAligned ? 'Sabit dur…' : hint;
       });
       if (nowAligned) {
@@ -228,16 +240,18 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final yaw = f.headEulerAngleY ?? 0; // sağ+/sol- (yaklaşık)
     final roll = f.headEulerAngleZ ?? 0;
 
-    // Yüz ovale tam otursun: mesafe + ortalama toleransları sıkı tutuldu.
-    if (wRatio < 0.34) return (false, 'Biraz yaklaş');
-    if (wRatio > 0.80) return (false, 'Biraz uzaklaş');
-    if ((cx - 0.5).abs() > 0.13) return (false, 'Yüzü yatay ortala');
-    if (cy < 0.25 || cy > 0.62) return (false, 'Yüzü dikey ortala');
-    if (roll.abs() > 12) return (false, 'Başını dik tut');
+    // Yüz TAM ovalin içine otursun: mesafe + ortalama toleransları önceki
+    // sürümden DAHA SIKI tutuldu (kullanıcı geri bildirimi: yüz tam
+    // ortalanmadan/oval'e girmeden çekiyordu).
+    if (wRatio < 0.40) return (false, 'Biraz yaklaş, yüzün ovali doldursun');
+    if (wRatio > 0.75) return (false, 'Biraz uzaklaş');
+    if ((cx - 0.5).abs() > 0.09) return (false, 'Yüzü tam ovalin içine ortala');
+    if (cy < 0.30 || cy > 0.56) return (false, 'Yüzü tam ovalin içine ortala');
+    if (roll.abs() > 9) return (false, 'Başını dik tut');
 
     switch (_angle) {
       case CaptureAngle.front:
-        if (yaw.abs() > 10) return (false, 'Dümdüz kameraya bak');
+        if (yaw.abs() > 8) return (false, 'Dümdüz kameraya bak');
       case CaptureAngle.right:
         // Net bir sağ profil için BELİRGİN dönüş şart — dönerken anlık geçen
         // küçük açıda (15°) çekmesin, kullanıcı tam dönene kadar beklesin.
@@ -246,6 +260,15 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       case CaptureAngle.left:
         if (yaw > -25) return (false, 'Başını daha SOLA çevir');
         if (yaw < -55) return (false, 'Biraz geri dön (fazla döndün)');
+    }
+
+    // Canlı/uyanık bir kare için gözler açık olmalı — kapalı/kısık gözle
+    // (blink anı) çekim yapılmasın.
+    final leftEye = f.leftEyeOpenProbability;
+    final rightEye = f.rightEyeOpenProbability;
+    if ((leftEye != null && leftEye < _eyeOpenThreshold) ||
+        (rightEye != null && rightEye < _eyeOpenThreshold)) {
+      return (false, 'Gözlerini aç');
     }
     return (true, 'Hizalandı');
   }
@@ -326,6 +349,15 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       final shot = await c.takePicture();
       _captured[_angle] = File(shot.path);
 
+      if (_retakeSingle) {
+        // Sadece bu açı yeniden çekiliyordu (onay ekranından) — diğer
+        // açılara dokunmadan direkt onay ekranına geri dön.
+        _retakeSingle = false;
+        if (!mounted) return;
+        setState(() => _reviewing = true);
+        return;
+      }
+
       if (_angleIndex >= _angles.length - 1) {
         // Hepsi tamam → onay ekranına geç (akış zaten durdu)
         if (!mounted) return;
@@ -336,7 +368,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       setState(() {
         _angleIndex++;
         _aligned = false;
-        _stableFrames = 0;
+        _stableSince = null;
         _hint = widget.kind == CaptureKind.face
             ? _angle.faceHint()
             : _angle.bodyHint();
@@ -358,13 +390,34 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     ]);
   }
 
+  /// Onay ekranında tek bir açıya dokunulunca: SADECE o açı silinip yeniden
+  /// çekilir, diğer açılar (zaten kabul edilmiş) korunur — kullanıcı "1'i
+  /// beğenmedim" derse üçünü baştan çekmek zorunda kalmasın.
+  Future<void> _retakeAngle(CaptureAngle a) async {
+    setState(() {
+      _retakeSingle = true;
+      _angleIndex = _angles.indexOf(a);
+      _captured.remove(a);
+      _reviewing = false;
+      _aligned = false;
+      _stableSince = null;
+      _hint = widget.kind == CaptureKind.face
+          ? _angle.faceHint()
+          : _angle.bodyHint();
+    });
+    final c = _controller;
+    if (c != null && c.value.isInitialized && !c.value.isStreamingImages) {
+      await c.startImageStream(_onFrame);
+    }
+  }
+
   /// Onay ekranında "Baştan çek" → sıfırla ve akışı yeniden başlat.
   Future<void> _restart() async {
     setState(() {
       _captured.clear();
       _angleIndex = 0;
       _aligned = false;
-      _stableFrames = 0;
+      _stableSince = null;
       _reviewing = false;
       _hint = widget.kind == CaptureKind.face
           ? _angle.faceHint()
@@ -540,7 +593,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
           Text(
             _angles.length == 1
                 ? 'Fotoğraf hazır. Kullanmadan önce kontrol et.'
-                : '${_angles.length} açı hazır. Kullanmadan önce kontrol et.',
+                : '${_angles.length} açı hazır. Beğenmediğine dokun, sadece '
+                    'onu yeniden çek.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white60, fontSize: 13),
           ),
@@ -556,12 +610,32 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: AspectRatio(
-                              aspectRatio: 3 / 4,
-                              child: Image.file(_captured[a]!,
-                                  fit: BoxFit.cover),
+                          GestureDetector(
+                            onTap: () => _retakeAngle(a),
+                            child: Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: AspectRatio(
+                                    aspectRatio: 3 / 4,
+                                    child: Image.file(_captured[a]!,
+                                        fit: BoxFit.cover),
+                                  ),
+                                ),
+                                Positioned(
+                                  right: 4,
+                                  bottom: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(5),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.65),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.refresh_rounded,
+                                        color: Colors.white, size: 16),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -613,11 +687,20 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   }
 
   Widget _buildTopBar() {
+    // Yüz çekiminde arka plan artık BEYAZ (ring-light) — beyaz metin/ikon
+    // görünmez olmasın diye tüm üst bar koyu, yarı saydam bir kapsül içine
+    // alındı. Vücut çekiminde de (siyah karartma üstünde) zarar vermez.
     return Positioned(
       top: 8,
       left: 8,
       right: 8,
-      child: Column(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
         children: [
           Row(
             children: [
@@ -677,6 +760,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             }),
           ),
         ],
+        ),
       ),
     );
   }
@@ -723,9 +807,19 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Çizgiye oturunca otomatik çekilir',
-            style: TextStyle(color: Colors.white60, fontSize: 12),
+          // Yüz modunda arka plan BEYAZ (ring-light) olduğu için düz beyaz
+          // metin görünmez olur — koyu kapsül içine alındı.
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Text(
+              'Çizgiye oturunca otomatik çekilir',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           ),
         ],
       ),
@@ -750,18 +844,25 @@ class _GuidePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.5;
 
-    // Kadraj dışını karart
-    final overlay = Paint()..color = Colors.black.withValues(alpha: 0.35);
-    canvas.drawRect(Offset.zero & size, overlay);
-
     if (kind == CaptureKind.face) {
       final rect = Rect.fromCenter(
         center: Offset(size.width / 2, size.height * 0.42),
         width: size.width * 0.62,
         height: size.height * 0.42,
       );
+      // Oval DIŞINDAKİ tüm alan TAM BEYAZ dolduruluyor (siyah karartma
+      // DEĞİL) — telefon ekranının kendisi gece çekimde yüze ışık veren bir
+      // "ring light" gibi çalışsın.
+      final outer = Path()..addRect(Offset.zero & size);
+      final ovalHole = Path()..addOval(rect);
+      final ring = Path.combine(PathOperation.difference, outer, ovalHole);
+      canvas.drawPath(ring, Paint()..color = Colors.white);
       canvas.drawOval(rect, paint);
     } else {
+      // Vücut çekiminde ışık halkası gerekmiyor — kadraj dışını klasik
+      // şekilde karart.
+      final overlay = Paint()..color = Colors.black.withValues(alpha: 0.35);
+      canvas.drawRect(Offset.zero & size, overlay);
       _drawBodySilhouette(canvas, size, paint);
     }
   }
