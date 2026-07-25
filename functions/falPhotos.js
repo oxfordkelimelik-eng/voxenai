@@ -62,19 +62,32 @@ const MODEL_CATALOG = {
       safety_tolerance: "4",
     }),
   },
+  // GERİ EKLENDİ (2026-07-25, gerçek test): "Fotoğraflarımı Oluştur (GPT2)"
+  // butonu kısa süreliğine doğrudan OpenAI API'sine bağlanmıştı (bkz.
+  // generateWithOpenAI/runOpenAiDirectChunk, hâlâ kodda duruyor ama şu an
+  // KULLANILMIYOR — bkz. useOpenAiDirect). Gerçek fal.ai fatura kaydı
+  // (fal-ai/gpt-image-2/edit, image_size 1024x1024) 5 fotoğrafın 4'ünde iyi
+  // sonuç verdiğini gösterdi; kullanıcı bu sürüme dönülmesini istedi.
+  "gpt-image-2": {
+    endpoint: "fal-ai/gpt-image-2/edit",
+    buildInput: (prompt, imageUrls, seed) => ({
+      prompt,
+      image_urls: imageUrls,
+      image_size: "1024x1024",
+      seed,
+    }),
+  },
 };
 const DEFAULT_MODEL_ID = "nano-banana-pro";
 
-// "Fotoğraflarımı Oluştur (GPT2)" butonu artık fal.ai SARMALAMASI değil,
-// OpenAI'nin KENDİ API'sine DOĞRUDAN gidiyor (bkz. generateWithOpenAI).
-// Sebep (2026-07-24 gerçek test): fal.ai üzerinden openai/gpt-image-2/edit
-// canlıda netlik/arka plan/göz sorunları yaşatmıştı; doğrudan OpenAI
-// api.openai.com/v1/images/edits ile yapılan MANUEL testte (aynı taban +
-// gerçek kullanıcı referansı) sonuç ÇOK daha iyiydi: ten rengi tüm vücutta
-// tutarlı dönüştü (patchwork yok), yüz makul benzerlikte, arka plan/poz/
-// kıyafet neredeyse birebir korundu, moderasyon reddetmedi. Senkron API
-// (webhook yok) — bu yüzden fal'ın submit+webhook akışından TAMAMEN ayrı,
-// kendi senkron yürütme yoluna sahip (bkz. runOpenAiDirectChunk).
+// "Fotoğraflarımı Oluştur (GPT2)" butonu doğrudan OpenAI API'sine DE
+// gidebiliyor (bkz. generateWithOpenAI/runOpenAiDirectChunk) — ama bu yol şu
+// an DEVRE DIŞI (bkz. useOpenAiDirect = false, exports.startPhotoGeneration
+// içinde). Sebep: fal.ai üzerinden openai/gpt-image-2/edit + buildEditPrompt
+// kombinasyonu gerçek testte (2026-07-25) 5 fotoğrafın 4'ünde iyi sonuç
+// verdi; direct-OpenAI + sade prompt sürümü ise henüz gerçek veride
+// denenmedi. Kod SİLİNMEDİ — ileride tekrar karşılaştırma istenirse
+// useOpenAiDirect tekrar `modelId === OPENAI_MODEL_ID` yapılabilir.
 const OPENAI_MODEL_ID = "gpt-image-2";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
@@ -437,7 +450,9 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "unmistakably be the SAME person as in the reference photos, recognisable at a glance. Make only the " +
     "tiny, minimal adjustment needed to fit the base photo's head angle and lighting — do NOT reinterpret, " +
     "redraw, beautify, slim, age, symmetrise, or in any way restyle their face, and do NOT change their " +
-    "facial expression. If in doubt, stay closer to the reference face, not further.\n\n" +
+    "facial expression. If in doubt, stay closer to the reference face, not further. Do NOT blend, " +
+    "average or merge the base photo's original person's facial features into the result — the output " +
+    "face must be 100% the target person's face, never a mix of the two faces.\n\n" +
     "SKIN COLOUR — WHOLE BODY, NO EXCEPTIONS: the target person's skin colour must be applied to EVERY " +
     "single piece of visible skin in the photo — face, neck, ears, chest, shoulders, arms, forearms, " +
     "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. It is a SERIOUS " +
@@ -448,7 +463,9 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "the ENTIRE body, limb by limb, to match the target's EXACT skin tone precisely, never an approximation " +
     "or a tone partway between the base and the target. Check the arms and legs specifically. The result " +
     "must have ONE consistent skin colour everywhere, never a patchwork of two different skin colours on " +
-    "the same person.\n\n" +
+    "the same person. Before finishing, re-check every visible limb one by one — if the legs, feet, arms " +
+    "or hands still show ANY trace of the base person's original skin tone, that is a failure and must be " +
+    "corrected before the image is final.\n\n" +
     "BODY: match the target person's real build, weight and height. If they are heavier, slimmer, taller " +
     "or shorter than the base person, reshape the body accordingly and resize the SAME clothing to fit " +
     "naturally. Keep the body anatomically whole and coherent — correct number of arms, legs, hands and " +
@@ -1198,9 +1215,10 @@ exports.startPhotoGeneration = onCall(
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
     }
     // "Fotoğraflarımı Oluştur (GPT2)" butonu bu alanı 'gpt-image-2' gönderir
-    // (artık fal değil, DOĞRUDAN OpenAI — bkz. OPENAI_MODEL_ID); birinci buton
-    // hiç göndermez -> varsayılan nano-banana-pro.
-    if (model !== undefined && !MODEL_CATALOG[model] && model !== OPENAI_MODEL_ID) {
+    // (MODEL_CATALOG'da fal-ai/gpt-image-2/edit'e karşılık gelir — bkz.
+    // useOpenAiDirect'in neden false olduğuna dair not); birinci buton hiç
+    // göndermez -> varsayılan nano-banana-pro.
+    if (model !== undefined && !MODEL_CATALOG[model]) {
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
     }
     const modelId = model || DEFAULT_MODEL_ID;
@@ -1318,7 +1336,10 @@ exports.startPhotoGeneration = onCall(
       }, { merge: true });
     });
 
-    const useOpenAiDirect = modelId === OPENAI_MODEL_ID;
+    // DEVRE DIŞI (2026-07-25): direct-OpenAI koda hâlâ dokunulmadı ama GPT2
+    // butonu gerçek test sonucuna göre fal-ai/gpt-image-2/edit'e (MODEL_CATALOG)
+    // geri döndürüldü — bkz. OPENAI_MODEL_ID tanımının üstündeki not.
+    const useOpenAiDirect = false;
 
     try {
       if (useOpenAiDirect) {
