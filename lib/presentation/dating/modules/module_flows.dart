@@ -294,7 +294,18 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
 
     try {
-      await functions.httpsCallable('startPhotoGeneration').call({
+      await functions
+          .httpsCallable(
+            'startPhotoGeneration',
+            options: HttpsCallableOptions(
+              // GPT2 (OpenAI direct) yolu senkron çalışıyor ve tüm fotoğraflar
+              // bitene kadar dönmüyor (bkz. falPhotos.js runOpenAiDirectChunk) —
+              // istemci timeout'u sunucudaki timeoutSeconds (540s) ile eşleşmeli,
+              // yoksa sunucu hâlâ üretirken istemci "deadline-exceeded" fırlatıyor.
+              timeout: const Duration(seconds: 540),
+            ),
+          )
+          .call({
         'styles': _styles.toList(),
         'jobId': jobId,
         'model': ?modelId,
