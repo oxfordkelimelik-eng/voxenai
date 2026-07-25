@@ -484,41 +484,34 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
  * GPT2 (doğrudan OpenAI) yolu için MİNİMAL prompt — buildEditPrompt'a HİÇ
  * dokunmuyor, ayrı ve bağımsız (nano-banana-pro'yu etkilemez).
  *
- * GEREKÇE (2026-07-24, kullanıcı testi): manuel testte 2 basit görsel + tek
- * cümlelik bir talimat ("bu kişinin yüzünü değiştir") ChatGPT'de mükemmel
- * çalışmıştı. Production'da nano-banana-pro'nun ~1000 kelimelik, 15+ maddelik
- * AVOID listesi içeren prompt'unu ve 6 referans görseli aynen kullanınca sonuç
- * kötüleşti. Bu fonksiyon o manuel teste bilinçli olarak YAKLAŞIYOR:
- *  - identityCaption metni YOK (görseller zaten kimliği taşıyor, metin
- *    tekrarı gereksiz uzunluk + olası çelişki kaynağıydı).
- *  - GAZE / PROPORTIONS / SINGLE PERSON blokları YOK — bunlar nano-banana-
- *    pro'nun SIFIRDAN SAHNE ÜRETME modunda görülen artefaktlar içindi; taban
- *    fotoğraf düzenlenirken (sahne zaten var) bu sorunlar hiç görülmedi.
- *  - Uzun AVOID listesi YOK — sadece gerçekten tekrar eden şikayetler (ten
- *    patchwork, zorla gülümseme, yüzü yeniden yorumlama) kısa cümlelere
- *    sıkıştırıldı.
- * Sonuç yetersiz kalırsa BURAYA, tek tek, gerçekten gözlemlenen soruna göre
- * madde eklenmeli — baştan her ihtimale karşı doldurmak yerine.
+ * GEREKÇE (2026-07-25, kullanıcı testi): kullanıcı ChatGPT'nin kendi arayüzüne
+ * SADECE 2 fotoğraf (kendi fotoğrafı + hedef foto) atıp tek cümlelik bir
+ * talimatla ("bu ikisini değiştir") çok iyi sonuç alıyor. Önceki sürüm (3
+ * görsel + çok maddeli İngilizce paragraf) hâlâ o kaliteyi yakalayamadı — bu
+ * fonksiyon tek bir kısa talimata indirildi, sadece gerçekten gözlemlenmiş iki
+ * soruna (ten rengi sadece yüzde kalması, zorla gülümseme) karşı birer kısa
+ * ek cümle bırakıldı. Sonuç yetersiz kalırsa BURAYA, tek tek, gerçekten
+ * gözlemlenen soruna göre madde eklenmeli — baştan her ihtimale karşı
+ * doldurmak yerine.
  */
 function buildEditPromptSimple(bodyCaption, bodyProfile) {
-  let bodyBlock = "";
-  if (bodyCaption) {
-    bodyBlock = `Match this body build and weight (do not idealise or slim down): ${bodyCaption}. `;
-  }
-  bodyBlock += bodyProfileHint(bodyProfile);
+  const bodyBits = [];
+  if (bodyCaption) bodyBits.push(bodyCaption);
+  const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
+  const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
+  if (bt) bodyBits.push(bt);
+  if (ht) bodyBits.push(ht);
+  const bodyNote = bodyBits.length
+    ? ` Match this body build (do not idealise or slim down): ${bodyBits.join(", ")}.`
+    : "";
 
   return (
-    "The first image is the base photo. The other image(s) show a different real person — the target " +
-    "person. Replace the person in the base photo with the target person: use their exact face, skin " +
-    "tone and body build/weight/height, resizing the SAME clothing to fit them naturally. Keep the base " +
-    "photo's background, location, lighting, pose, camera angle, clothing and accessories EXACTLY the " +
-    "same — do not change or regenerate anything except the person themselves.\n\n" +
-    "Skin tone must be applied consistently to the target person's ENTIRE body — face, neck, arms, " +
-    "hands, legs — never leave any part of the body in the base person's original skin colour.\n\n" +
-    bodyBlock +
-    "Keep the target person's own natural expression from their reference photo — do not add a smile, " +
-    "grin or laugh that isn't already there. Keep their face exactly as it looks in their reference " +
-    "photo, without reinterpreting, beautifying or restyling it."
+    "Replace the person in the first photo with the person in the second photo: same face, same body " +
+    "build and height, and their skin tone applied evenly to their whole body (not just the face)." +
+    bodyNote +
+    " Keep everything else in the first photo exactly the same — background, pose, lighting, clothing, " +
+    "accessories, camera angle. Keep the second person's own natural expression; don't add a smile, " +
+    "grin or laugh that isn't already there."
   );
 }
 
@@ -874,7 +867,7 @@ async function generateWithOpenAI(prompt, imageUrls) {
     const form = new FormData();
     form.append("model", OPENAI_MODEL_ID);
     form.append("prompt", prompt);
-    form.append("quality", "medium"); // maliyet/kalite dengesi (bkz. yukarıdaki not)
+    form.append("quality", "high"); // ChatGPT'nin kendi arayüzündeki sonuca yaklaşmak için (bkz. runOpenAiDirectChunk)
     buffers.forEach((buf, i) => {
       form.append("image[]", new Blob([buf], { type: "image/jpeg" }), `ref_${i}.jpg`);
     });
@@ -920,15 +913,14 @@ async function generateWithOpenAI(prompt, imageUrls) {
  * birlikte çalışmıyor, kod paylaşımı yerine bilinçli olarak ayrı tutuldu (fal
  * webhook'u dış bir HTTP isteği, bu ise doğrudan senkron çağrı zinciri).
  */
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, bodyCaption, bodyProfile, refDescriptor, jobRef) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, userPhotoUrl, bodyCaption, bodyProfile, refDescriptor, jobRef) {
   const prompt = buildEditPromptSimple(bodyCaption, bodyProfile);
-  // SADECE 3 görsel (taban + en iyi yüz + tam boy) — 6 değil. refUrls sırası
-  // prepareReferencePhotos'ta sabit: [0]=yüz-crop/en iyi yüz (en yüksek kimlik
-  // sadakati), [son]=tam boy (bestIndex her zaman yüz karelerinden seçildiği
-  // için tam boy asla öne alınmaz, sırası hep en sonda kalır — bkz. analyzeReferences).
-  const bestFaceUrl = refUrls[0];
-  const bodyRefUrl = refUrls[refUrls.length - 1];
-  const buf = await generateWithOpenAI(prompt, [templateUrl, bestFaceUrl, bodyRefUrl]);
+  // SADECE 2 görsel (taban + kullanıcının DOĞAL/kırpılmamış fotoğrafı) — kullanıcının
+  // ChatGPT'ye manuel attığı "kendi fotom + hedef foto" ikilisiyle birebir aynı.
+  // Bilinçli olarak yüz-crop (faceCropUrl) KULLANILMIYOR: o kırpılmış kare doğal bir
+  // fotoğraf değil, modele yapay/parçalı bir görüntü veriyordu — bkz. userPhotoUrl'nin
+  // startPhotoGeneration'da nasıl seçildiği (primaryFaceUrl = orijinal, kırpılmamış kare).
+  const buf = await generateWithOpenAI(prompt, [templateUrl, userPhotoUrl]);
   if (!buf) {
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
     return;
@@ -1237,6 +1229,11 @@ exports.startPhotoGeneration = onCall(
     const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
     const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
+    // GPT2 (OpenAI direct) yolu için: kullanıcının DOĞAL, kırpılmamış ön yüz fotoğrafı
+    // (bkz. prepareReferencePhotos — primaryFaceUrl = orijinal refUrls[0], faceCropUrl
+    // eklenmeden ÖNCEKİ hâli). refUrls (falRefUrls) yerine bunu kullanıyoruz çünkü
+    // orası crop edilmiş yapay bir kare olabiliyor.
+    const primaryFaceUrl = prepData.primaryFaceUrl || refUrls[refUrls.length - 1] || refUrls[0];
     const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
     const bodyType = bodyProfile.bodyType || null;
 
@@ -1342,7 +1339,7 @@ exports.startPhotoGeneration = onCall(
           await Promise.all(picked.map(async (file, i) => {
             const templateUrl = await signedDownloadUrl(file);
             await runOpenAiDirectChunk(
-              uid, jobId, styleId, i, templateUrl, refUrls,
+              uid, jobId, styleId, i, templateUrl, primaryFaceUrl,
               bodyCaption, bodyProfile, refDescriptor, jobRef
             );
           }));
