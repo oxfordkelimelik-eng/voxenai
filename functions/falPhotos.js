@@ -65,22 +65,28 @@ const MODEL_CATALOG = {
   // GERİ EKLENDİ (2026-07-25, gerçek test): "Fotoğraflarımı Oluştur (GPT2)"
   // butonu kısa süreliğine doğrudan OpenAI API'sine bağlanmıştı (bkz.
   // generateWithOpenAI/runOpenAiDirectChunk, hâlâ kodda duruyor ama şu an
-  // KULLANILMIYOR — bkz. useOpenAiDirect). Gerçek fal.ai fatura kaydı
-  // (fal-ai/gpt-image-2/edit, image_size 1024x1024) 5 fotoğrafın 4'ünde iyi
-  // sonuç verdiğini gösterdi; kullanıcı bu sürüme dönülmesini istedi.
+  // KULLANILMIYOR — bkz. useOpenAiDirect). Gerçek fal.ai fatura kaydı 5
+  // fotoğrafın 4'ünde iyi sonuç verdiğini gösterdi; kullanıcı bu sürüme
+  // dönülmesini istedi.
+  //
+  // ÖNEMLİ (2026-07-26 düzeltme): bu girdiyi ilk geri eklediğimde şemayı git
+  // GEÇMİŞİNE BAKMADAN, sadece fal.ai fatura panelindeki görünümden tahmin
+  // ederek yazmıştım (endpoint "fal-ai/gpt-image-2/edit", image_size
+  // "1024x1024" string) — İKİSİ DE YANLIŞTI, her istek fal.ai'de anında 422
+  // ("Unexpected status code: 422") ile reddediliyordu. Aşağıdaki şema commit
+  // 38e16f6'dan (bu girdinin direct-OpenAI'a geçilirken kaldırıldığı an)
+  // GERİ ALINARAK birebir kopyalandı — o an bu TAM OLARAK canlıda çalışan,
+  // gerçek kullanıcı verisiyle doğrulanmış son hâldi. Tahmin YERİNE önce
+  // `git log -p -- functions/falPhotos.js` ile eski hâle bakılmalıydı.
   "gpt-image-2": {
-    endpoint: "fal-ai/gpt-image-2/edit",
-    // DÜZELTME (2026-07-26): image_size STRING "1024x1024" DEĞİL — fal.ai bu
-    // endpoint'te sadece enum (square_hd/square/portrait_4_3/portrait_16_9/
-    // landscape_4_3/landscape_16_9/auto) ya da {width,height} NESNESİ kabul
-    // ediyor. String göndermek fal.ai'de 422 ("Unexpected status code: 422")
-    // ile ANINDA reddediliyordu — gerçek üretim hiç başlamıyordu, sadece tüm
-    // chunk'lar hemen başarısız olup genel "yüzünle eşleşmedi" mesajına
-    // düşüyordu (asıl sebep kimlikle alakasız, saf şema hatasıydı).
+    endpoint: "openai/gpt-image-2/edit",
     buildInput: (prompt, imageUrls, seed) => ({
       prompt,
       image_urls: imageUrls,
-      image_size: { width: 1024, height: 1024 },
+      image_size: "auto",
+      quality: "medium",
+      num_images: 1,
+      output_format: "jpeg",
       seed,
     }),
   },
