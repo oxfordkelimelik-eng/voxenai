@@ -488,25 +488,40 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "EXPRESSION: reproduce the target person's OWN natural expression from their reference photos — do " +
     "not change it. Do NOT invent or add an open smile, grin or laugh that is not present in their " +
     "reference photos, and equally do not force a stiff neutral face if their references are not neutral. " +
-    "Keep whatever calm, natural expression they actually have.\n\n" +
+    "Keep whatever calm, natural expression they actually have. The eyes, eyelids, mouth, lips and micro-" +
+    "expressions must sit coherently together and look ALIVE and confident — awake, alert, attractive and " +
+    "self-assured (a subtle, cool, magazine-portrait vibe), never sleepy, drowsy, vacant, awkward or " +
+    "lifeless.\n\n" +
     "GAZE: both eyes look in the SAME coherent direction (matching the base pose) — never cross-eyed, " +
-    "misaligned, wall-eyed or wandering, never a blank dead-eyed stare.\n\n" +
+    "misaligned, wall-eyed or wandering, never a blank dead-eyed stare. Eyes fully open, clear and " +
+    "sharp with natural catch-light, both pupils and irises well defined.\n\n" +
+    "HEAD POSE: the head is held upright and straight, naturally aligned with the neck and shoulders — " +
+    "not tilted, drooping, slumped or leaning. A confident, well-balanced head position.\n\n" +
     "PROPORTIONS: keep the head a realistic, anatomically correct size relative to the body. One " +
     "reference image is a tight face crop for identity detail only — do NOT copy its zoom/scale; scale " +
     "the head to the body in the base pose. The head must never look oversized or bobble-headed.\n\n" +
     "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
     "in the scene; any background people stay different, generic, unrelated people.\n\n" +
-    "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural non-" +
-    "airbrushed skin with real texture, but do NOT invent blemishes or facial asymmetry not present in " +
-    "the references. True-to-life (not boosted) colour and contrast, natural available light.\n\n" +
+    "LIGHTING: light the face beautifully and flatteringly — clean, even, well-exposed skin with a " +
+    "natural healthy glow, soft flattering key light on the face, no harsh shadows across the eyes or " +
+    "nose, no muddy/dull/greyish or underexposed face, no blown-out highlights. The face should read " +
+    "bright, clear and clean while the light direction and colour temperature still match the base " +
+    "scene. Keep it realistic, not an obvious studio flash.\n\n" +
+    "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
+    "real texture (a light, clean retouch is fine, but NOT a plastic airbrush), and do NOT invent " +
+    "blemishes or facial asymmetry not present in the references. True-to-life colour and contrast, " +
+    "natural available light.\n\n" +
     "AVOID: reinterpreting or restyling the target's face, making the face look like a different or only-" +
     "similar person, airbrushed or plastic skin, beauty-filter smoothing, CGI/3D-render look, a " +
     "symmetrical or idealised AI face, changing the target's expression, adding an invented smile/laugh, " +
-    "changing or regenerating the background, keeping the base person's original skin colour ANYWHERE on " +
-    "the body (especially arms/hands/legs), a two-tone patchwork of skin colours, keeping the base " +
-    "person's body shape, ANY change to clothing, outfit, glasses, jewellery, watches, hats, belts, bags " +
-    "or shoes compared to the base photo, copying the target reference person's clothing onto the output, " +
-    "garbled fake text on signs/screens, watermark, distorted hands, extra/missing/duplicated limbs."
+    "sleepy/drowsy/half-closed eyes, a vacant or lifeless stare, mismatched or incoherent eyes/mouth/" +
+    "expression, a tilted/drooping/leaning head, a dull/muddy/underexposed or unevenly lit face, harsh " +
+    "shadows or blown-out highlights on the face, changing or regenerating the background, keeping the " +
+    "base person's original skin colour ANYWHERE on the body (especially arms/hands/legs), a two-tone " +
+    "patchwork of skin colours, keeping the base person's body shape, ANY change to clothing, outfit, " +
+    "glasses, jewellery, watches, hats, belts, bags or shoes compared to the base photo, copying the " +
+    "target reference person's clothing onto the output, garbled fake text on signs/screens, watermark, " +
+    "distorted hands, extra/missing/duplicated limbs."
   );
 }
 

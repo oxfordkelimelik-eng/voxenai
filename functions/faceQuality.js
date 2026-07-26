@@ -164,14 +164,18 @@ async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
 
 // Tam boy referansta yüz kadrajın küçük bir kısmıdır — yüz selfie eşiği
 // (MIN_FACE_RATIO) ile reddedilmemeli.
-const MIN_FACE_RATIO_BODY = 0.04;
+// GEVŞETİLDİ (2026-07-26 kullanıcı geri bildirimi: "boydan seçtiğimiz
+// fotoğrafı sürekli reddediyor"): uzaktan çekilmiş gerçek tam boy karelerde
+// yüz çok küçük kalıp 0.04 altında tespit edilemiyordu → 0.015'e düşürüldü.
+const MIN_FACE_RATIO_BODY = 0.015;
 // ...ama yüz kadrajın ÜST sınırından da BÜYÜKSE bu tam boy değil, yakın bir
 // selfie/portredir — gövde görünmüyordur, reddet. Kaba oran tahmini:
-// tam boy yüz ~0.13, bel üstü ~0.28, baş-omuz selfie ~0.5. 0.35 bel üstünü
-// (ve daha genişini) kabul eder, baş-omuz yakın çekimi eler. Client tarafı
+// tam boy yüz ~0.13, bel üstü ~0.28, baş-omuz selfie ~0.5. Eşik 0.35 -> 0.45:
+// bel/kalça üstü kadrajları da (yüz biraz daha büyük görünse de) kabul eder,
+// yalnızca gerçekten baş-omuz yakın çekimini eler. Client tarafı
 // (GuidedCaptureScreen pose kontrolü) asıl "ayaklar kadrajda mı"yı tutuyor;
 // bu sunucu kapısı yalnızca "sadece yüz gönderilmiş" durumunu yakalar.
-const MAX_FACE_RATIO_BODY = 0.35;
+const MAX_FACE_RATIO_BODY = 0.45;
 // Açı çeşitliliği kapısı: iki YÜZ karesinin kimlik vektörü birbirine bu
 // mesafeden yakınsa neredeyse aynı kare/açı sayılır (kullanıcı ör. 3 kez
 // cepheden çekmiş) — farklı açı kimlik sadakatini artırır. MUHAFAZAKÂR:

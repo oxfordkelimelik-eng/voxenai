@@ -113,16 +113,21 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
 /// Tam boy referansta tek yüz olmalı (küçük olabilir). Yaw serbest —
 /// canlı yüz açıları GuidedCaptureScreen'de zaten doğrulanır.
 Future<bool> _isValidBodyReferencePhoto(File file) async {
+  // GEVŞETİLDİ (2026-07-26): uzaktan çekilmiş gerçek tam boy karelerde yüz çok
+  // küçük kalıp minFaceSize:0.03 ile tespit edilemiyor, foto boşuna
+  // reddediliyordu. Eşik 0.03 -> 0.01. Ayrıca "tam olarak 1 yüz" katı şartı
+  // yerine "en az 1 yüz" (arkada geçen kişiler yüzünden ret olmasın) — asıl
+  // tek-yüz/+18 kontrolü sunucudaki prepareReferencePhotos'ta zaten var.
   final detector = FaceDetector(
     options: FaceDetectorOptions(
       performanceMode: FaceDetectorMode.accurate,
-      minFaceSize: 0.03,
+      minFaceSize: 0.01,
     ),
   );
   try {
     final faces =
         await detector.processImage(InputImage.fromFilePath(file.path));
-    return faces.length == 1;
+    return faces.isNotEmpty;
   } catch (_) {
     return false;
   } finally {
@@ -202,11 +207,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// AŞAMA 2 — ÜRETİM (loader burada başlar): doğrulama geçtiyse loader gösterilir
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
-  /// modelId: null ise sunucu varsayılanı (fal.ai nano-banana-pro) kullanılır.
-  /// 'gpt-image-2' verilirse "Fotoğraflarımı Oluştur (GPT2)" butonundan
-  /// çağrılır — artık fal.ai sarmalaması DEĞİL, sunucu tarafında DOĞRUDAN
-  /// OpenAI'nin kendi API'sine gidiyor (bkz. falPhotos.js runOpenAiDirectChunk).
-  /// Client tarafı aynı: referans doğrulama + taban görsel seçimi akışı değişmedi.
+  /// modelId: tek "Fotoğraflarımı Oluştur" butonu 'gpt-image-2' gönderir
+  /// (arka planda fal-ai/gpt-image-2/edit — kullanıcıya model adı gösterilmez).
+  /// null verilirse sunucu varsayılanı (nano-banana-pro) kullanılır.
   Future<void> _generate({String? modelId}) async {
     if (!_refsReady || _styles.isEmpty) return;
 
@@ -505,18 +508,107 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   }
 
   Future<void> _captureFaceAngles() async {
-    final files = await Navigator.of(context).push<List<File>>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
+    // Kamera (rehberli canlı açı çekimi) VEYA galeriden seçim — test kolaylığı
+    // için galeri de destekleniyor.
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Yüz fotoğrafları',
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              Text(
+                  'Önden ve iki yandan ${DatingConfig.faceCaptureCount} kare. '
+                  'Rehberli çekim en iyi sonucu verir; galeriden de seçebilirsin.',
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'camera'),
+                icon: const Icon(Icons.photo_camera_outlined,
+                    color: AppColors.gold),
+                label: const Text('Rehberli çekim (kamera)',
+                    style: TextStyle(color: AppColors.gold)),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'gallery'),
+                icon: const Icon(Icons.photo_library_outlined,
+                    color: AppColors.gold),
+                label: Text('Galeriden ${DatingConfig.faceCaptureCount} foto seç',
+                    style: const TextStyle(color: AppColors.gold)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
-    if (files == null || files.length != DatingConfig.faceCaptureCount) return;
+    if (choice == null || !mounted) return;
+
+    if (choice == 'camera') {
+      final files = await Navigator.of(context).push<List<File>>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
+        ),
+      );
+      if (files == null || files.length != DatingConfig.faceCaptureCount) return;
+      if (!mounted) return;
+      setState(() {
+        _facePhotos
+          ..clear()
+          ..addAll(files);
+        _prepareError = null;
+      });
+      return;
+    }
+
+    // Galeri: tam olarak faceCaptureCount adet foto seçilmeli. Canlı açı
+    // doğrulaması yapılamaz (kayıtlı fotoğraf), ama her karede tek net yüz
+    // olduğu hafifçe kontrol edilir — kalan +18/tek-yüz kapıları sunucudaki
+    // prepareReferencePhotos'ta zaten çalışıyor.
+    final picked =
+        await _pickImages(multi: true, limit: DatingConfig.faceCaptureCount);
     if (!mounted) return;
+    if (picked.length != DatingConfig.faceCaptureCount) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Tam olarak ${DatingConfig.faceCaptureCount} fotoğraf seçmelisin '
+            '(önden ve iki yandan).'),
+      ));
+      return;
+    }
+    setState(() => _validatingPhotos = true);
+    for (final f in picked) {
+      final ok = await _isValidBodyReferencePhoto(f);
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _validatingPhotos = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Seçtiğin fotoğraflardan birinde net, tek bir yüz görünmüyor. '
+              'Lütfen yüzün belirgin göründüğü kareler seç.'),
+        ));
+        return;
+      }
+    }
     setState(() {
+      _validatingPhotos = false;
       _facePhotos
         ..clear()
-        ..addAll(files);
+        ..addAll(picked);
       _prepareError = null;
     });
   }
@@ -1164,13 +1256,23 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _preparing ? null : _captureFaceAngles,
-            icon: const Icon(Icons.face_retouching_natural,
-                color: AppColors.gold),
+            onPressed:
+                (_preparing || _validatingPhotos) ? null : _captureFaceAngles,
+            icon: _validatingPhotos
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.gold),
+                  )
+                : const Icon(Icons.face_retouching_natural,
+                    color: AppColors.gold),
             label: Text(
-                _facePhotos.isEmpty
-                    ? 'Yüz çekimini başlat'
-                    : 'Yüz çekimini tekrarla',
+                _validatingPhotos
+                    ? 'Fotoğraflar kontrol ediliyor…'
+                    : _facePhotos.isEmpty
+                        ? 'Yüz çekimini başlat'
+                        : 'Yüz çekimini tekrarla',
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
@@ -1265,32 +1367,15 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
             const SizedBox(height: 12),
           ],
+          // TEK BUTON: "Fotoğraflarımı Oluştur" → arka planda gpt-image-2
+          // (fal-ai/gpt-image-2/edit) çalışır. Kullanıcıya model adı
+          // gösterilmez; eski ayrı "(GPT2)" butonu kaldırıldı.
           PrimaryButton(
             label:
                 _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
-            onPressed: (_refsReady && !_preparing) ? _generate : null,
-          ),
-          const SizedBox(height: 10),
-          // Model karşılaştırması için ikinci seçenek — aynı akış (referans
-          // doğrulama + taban görsel), yalnızca fal.ai üretim modeli farklı.
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: OutlinedButton(
-              onPressed: (_refsReady && !_preparing)
-                  ? () => _generate(modelId: 'gpt-image-2')
-                  : null,
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.borderSubtle),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-              ),
-              child: const Text('Fotoğraflarımı Oluştur (GPT2)',
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary)),
-            ),
+            onPressed: (_refsReady && !_preparing)
+                ? () => _generate(modelId: 'gpt-image-2')
+                : null,
           ),
           const SizedBox(height: 8),
           Center(
