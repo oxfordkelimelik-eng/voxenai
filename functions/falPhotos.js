@@ -497,6 +497,10 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "or shorter than the base person, reshape the body accordingly and resize the SAME clothing to fit " +
     "naturally. Keep the body anatomically whole and coherent — correct number of arms, legs, hands and " +
     "fingers, natural joints and proportions, nothing merged, missing, duplicated or distorted.\n\n" +
+    "TATTOOS / SKIN MARKINGS: do NOT invent or add any tattoos, and do NOT keep the base person's " +
+    "tattoos. The target person's skin only has a tattoo if it is clearly visible in THEIR OWN reference " +
+    "photos. If their references show no tattoos, the output skin must be completely clean with no " +
+    "tattoos anywhere. If the base photo's person has tattoos but the target does not, remove them.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     bodyBlock +
     "EXPRESSION: reproduce the target person's OWN natural expression from their reference photos — do " +
@@ -513,11 +517,15 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "permanent, identity-defining features (moles, freckles, scars, beard, wrinkles) — do NOT flatten " +
     "the face into a plastic, waxy, over-airbrushed mask, and do NOT make it look shinier, lighter or " +
     "more radiant than the references.\n\n" +
-    "GAZE: the eyes must look in EXACTLY the same direction as the person in the BASE photo is looking — " +
-    "copy the base subject's gaze direction and head orientation precisely (if the base person looks " +
-    "into the camera, look into the camera; if they look off to the side or away, look the same way). " +
-    "Both eyes aligned and coherent — never cross-eyed, wall-eyed or wandering, never a blank dead-eyed " +
-    "stare. Eyes clear and sharp with natural catch-light, both pupils and irises well defined.\n\n" +
+    "GAZE (critical — get this right): the eyes must look in EXACTLY the same direction as the person in " +
+    "the BASE photo is looking. This is decided ONLY by the base photo, NEVER by the target's reference " +
+    "photos — ignore where the person looks in their selfies. First determine where the base subject is " +
+    "looking (straight into the camera, or off to a specific side, up, down or away), then make the " +
+    "output eyes and irises point in that SAME direction. If the base person looks into the lens, the " +
+    "output looks into the lens; if the base person looks away to the left, the output looks away to the " +
+    "left. Both eyes aligned and coherent — never cross-eyed, wall-eyed or wandering, never a blank " +
+    "dead-eyed stare. Eyes clear and sharp with natural catch-light, both pupils and irises well " +
+    "defined.\n\n" +
     "HEAD POSE: keep the head at the SAME orientation and angle as the person in the base photo, but " +
     "held upright and firmly, naturally connected to and aligned with the neck and shoulders — the head " +
     "must sit correctly on the neck with no gap, seam, mismatch, floating or pasted-on look where the " +
@@ -528,9 +536,12 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "the nose, cheekbones, jaw, chin, brow and the spacing of the features must stay correct and " +
     "consistent for that same person from any angle. Rotating the view must NOT stretch, flatten, warp, " +
     "widen or distort the face or change who the person is.\n\n" +
-    "PROPORTIONS: keep the head a realistic, anatomically correct size relative to the body. One " +
-    "reference image is a tight face crop for identity detail only — do NOT copy its zoom/scale; scale " +
-    "the head to the body in the base pose. The head must never look oversized or bobble-headed.\n\n" +
+    "HEAD SIZE (match the base): the head must be the SAME size and take up the SAME proportion of the " +
+    "body as the head of the person already in the BASE photo — keep the exact head-to-body ratio and " +
+    "the exact head position/scale from the base photo. Do NOT enlarge the head. The close-up face " +
+    "reference photos are zoomed-in for identity detail ONLY — never use their zoom level as a size " +
+    "reference. Occupy the same head area as the base subject. The head must never look oversized, " +
+    "bobble-headed or too big for the shoulders and body.\n\n" +
     "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
     "in the scene; any background people stay different, generic, unrelated people.\n\n" +
     "LIGHTING (strict): the face's skin colour and tone must look IDENTICAL to the reference photos — " +
@@ -549,7 +560,10 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "filter smoothing, CGI/3D-render look, a symmetrical or idealised AI face, changing the target's " +
     "expression, adding an invented smile/laugh, a tilted/drooping/leaning head, a head that floats, is " +
     "pasted on or does not join the " +
-    "neck cleanly, a gaze pointing somewhere different from the base subject's gaze, a face that is " +
+    "neck cleanly, an oversized/bobble-head or a head bigger than the base subject's head, a head-to-body " +
+    "ratio different from the base photo, adding tattoos not present in the target's references, keeping " +
+    "the base person's tattoos, a gaze pointing somewhere different from the base subject's gaze, copying " +
+    "the gaze direction from the target's selfies instead of the base photo, a face that is " +
     "stretched/warped/distorted or changes structure when turned to an angle or profile, leaving obvious " +
     "acne/blemishes/spots/blotches on the face, a dull/muddy/underexposed or unevenly lit face, harsh " +
     "shadows or blown-out highlights on the face, an artificially glowing/glossy/shiny/luminous/lit-up " +
