@@ -444,7 +444,12 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
 
   return (
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
-    "The OTHER images are reference photos of a DIFFERENT specific real person (the target person).\n\n" +
+    "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
+    "Among these reference photos, the LAST one is a distant, full-body photo — use it ONLY to judge " +
+    "the target person's body build, height and weight; their face in that photo is too small/distant " +
+    "to be reliable, so COMPLETELY IGNORE it for facial structure. ALL the OTHER reference photos " +
+    "(every one except the base photo and that last full-body one) are close-up views of the target's " +
+    "face — these, and ONLY these, are the source of truth for their facial identity and structure.\n\n" +
     "TASK: reproduce the BASE PHOTO keeping its background, environment, location, furniture, objects, " +
     "lighting, colours, camera angle, framing, composition and body pose EXACTLY the same — do " +
     "NOT move, redesign, regenerate or reinterpret the background or the scene in any way. ONLY change the " +
@@ -457,15 +462,24 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "their reference photos are for FACE, SKIN TONE and BODY BUILD only, never for outfit or accessories. " +
     "The ONLY three things that change from the base photo are: the face, the skin tone/colour, and the " +
     "body height/weight/build. Everything else (scene, pose, outfit, accessories) is identical to the base.\n\n" +
-    "FACE FIDELITY (most important): copy the TARGET person's face EXACTLY as it appears in their " +
-    "reference photos — identical facial features, identical bone structure, eyes, nose, mouth, lips, " +
-    "jawline, eyebrows, hairline and hair, and their SAME natural expression. This must clearly and " +
-    "unmistakably be the SAME person as in the reference photos, recognisable at a glance. Make only the " +
-    "tiny, minimal adjustment needed to fit the base photo's head angle and lighting — do NOT reinterpret, " +
-    "redraw, beautify, slim, age, symmetrise, or in any way restyle their face, and do NOT change their " +
-    "facial expression. If in doubt, stay closer to the reference face, not further. Do NOT blend, " +
-    "average or merge the base photo's original person's facial features into the result — the output " +
-    "face must be 100% the target person's face, never a mix of the two faces.\n\n" +
+    "FACE FIDELITY (most important): copy the TARGET person's face EXACTLY as it appears in their CLOSE-" +
+    "UP FACE reference photos (never the distant full-body one) — identical facial features, identical " +
+    "bone structure, eyes, nose, mouth, lips, jawline, eyebrows, hairline and hair, and their SAME " +
+    "natural expression. This must clearly and unmistakably be the SAME person as in the reference " +
+    "photos, recognisable at a glance. Make only the tiny, minimal adjustment needed to fit the base " +
+    "photo's head angle and lighting — do NOT reinterpret, redraw, beautify, slim, age, symmetrise, or " +
+    "in any way restyle their face, and do NOT change their facial expression. If in doubt, stay closer " +
+    "to the reference face, not further. Do NOT blend, average or merge the base photo's original " +
+    "person's facial features into the result — the output face must be 100% the target person's face, " +
+    "never a mix of the two faces.\n\n" +
+    "IMPERFECT SELFIE ANGLES: some of the close-up face references may have been taken from a slightly " +
+    "awkward angle or position by the user themselves — this is normal and expected. Do NOT copy any " +
+    "lens/perspective distortion, stretching or odd proportions caused by that awkward camera angle. " +
+    "Instead, reconstruct the person's TRUE, well-formed, undistorted facial structure — correctly " +
+    "shaped eyes, lips, nose and jawline as they really are — while still keeping their exact identity. " +
+    "The result must be the same recognisable person in every one of the photos generated for them, " +
+    "with consistent, unchanging facial structure from photo to photo — never a slightly different face " +
+    "each time.\n\n" +
     "SKIN COLOUR — WHOLE BODY, NO EXCEPTIONS: the target person's skin colour must be applied to EVERY " +
     "single piece of visible skin in the photo — face, neck, ears, chest, shoulders, arms, forearms, " +
     "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. It is a SERIOUS " +
@@ -494,11 +508,13 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "lifeless. EXCEPTION for squinting: if the person's eyes look very narrow or squinted in the " +
     "references, you MAY open them slightly so they look awake and natural — but only a little, keeping " +
     "the same eye shape and identity, matching the base photo's lighting and mood.\n\n" +
-    "FACE SMOOTHNESS: gently clean up distracting skin flaws on the FACE — remove temporary blemishes, " +
-    "spots, harsh acne, razor bumps, obvious pores clogging, blotchy patches and stray noise — so the " +
-    "skin looks clean, smooth and healthy. Keep it natural: preserve real skin texture and the person's " +
+    "FACE SMOOTHNESS: gently clean up distracting TEMPORARY skin flaws on the FACE only — remove " +
+    "blemishes, spots, harsh acne, razor bumps and stray noise. This is a small cleanup, NOT a " +
+    "brightening or glow effect — the skin's colour and tone must stay exactly as dark/light as the " +
+    "reference photos, only cleaner. Keep it natural: preserve real skin texture and the person's " +
     "permanent, identity-defining features (moles, freckles, scars, beard, wrinkles) — do NOT flatten " +
-    "the face into a plastic, waxy, over-airbrushed mask.\n\n" +
+    "the face into a plastic, waxy, over-airbrushed mask, and do NOT make it look shinier, lighter or " +
+    "more radiant than the references.\n\n" +
     "GAZE: the eyes must look in EXACTLY the same direction as the person in the BASE photo is looking — " +
     "copy the base subject's gaze direction and head orientation precisely (if the base person looks " +
     "into the camera, look into the camera; if they look off to the side or away, look the same way). " +
@@ -519,16 +535,16 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "the head to the body in the base pose. The head must never look oversized or bobble-headed.\n\n" +
     "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
     "in the scene; any background people stay different, generic, unrelated people.\n\n" +
-    "LIGHTING: the face must keep the target person's TRUE, NATURAL skin colour and tone exactly as in " +
-    "their reference photos — do NOT brighten, whiten, lighten, add glow/sheen, or make the skin look " +
-    "shiny, glossy or luminous. Only fix genuinely BAD lighting: no harsh shadows across the eyes or " +
-    "nose, no muddy/dull/greyish or so underexposed the face is hard to see, no blown-out highlights. " +
-    "Otherwise match the light direction, intensity and colour temperature of the base scene exactly — " +
-    "the face should look like it is standing in that same real light, not lit separately or enhanced.\n\n" +
+    "LIGHTING (strict): the face's skin colour and tone must look IDENTICAL to the reference photos — " +
+    "as if no extra light was added at all. Absolutely do NOT brighten, whiten, lighten, glow, shine, " +
+    "shimmer or add any radiance, sheen or luminous quality to the skin — the face must NOT look lit-up, " +
+    "highlighted or enhanced compared to the rest of the scene. The ONLY lighting fix allowed is removing " +
+    "genuinely BAD lighting: harsh shadows across the eyes or nose, or the face being so dark it is hard " +
+    "to see. Otherwise the face must sit under the exact same light direction, intensity and colour as " +
+    "the rest of the base scene, with no separate or extra light on it.\n\n" +
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
-    "real texture (a light, clean retouch is fine, but NOT a plastic airbrush), and do NOT invent " +
-    "blemishes or facial asymmetry not present in the references. True-to-life colour and contrast, " +
-    "natural available light.\n\n" +
+    "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
+    "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
     "AVOID: reinterpreting or restyling the target's face, making the face look like a different or only-" +
     "similar person, airbrushed or plastic skin, beauty-filter smoothing, CGI/3D-render look, a " +
     "symmetrical or idealised AI face, changing the target's expression, adding an invented smile/laugh, " +
@@ -537,7 +553,9 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "neck cleanly, a gaze pointing somewhere different from the base subject's gaze, a face that is " +
     "stretched/warped/distorted or changes structure when turned to an angle or profile, leaving obvious " +
     "acne/blemishes/spots/blotches on the face, a dull/muddy/underexposed or unevenly lit face, harsh " +
-    "shadows or blown-out highlights on the face, changing or regenerating the background, keeping the " +
+    "shadows or blown-out highlights on the face, an artificially glowing/glossy/shiny/luminous/lit-up " +
+    "face, skin that looks brighter or whiter than the reference photos, using the distant full-body " +
+    "reference photo's face for facial structure, changing or regenerating the background, keeping the " +
     "base person's original skin colour ANYWHERE on the body (especially arms/hands/legs), a two-tone " +
     "patchwork of skin colours, keeping the base person's body shape, ANY change to clothing, outfit, " +
     "glasses, jewellery, watches, hats, belts, bags or shoes compared to the base photo, copying the " +
