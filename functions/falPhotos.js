@@ -491,12 +491,29 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "Keep whatever calm, natural expression they actually have. The eyes, eyelids, mouth, lips and micro-" +
     "expressions must sit coherently together and look ALIVE and confident — awake, alert, attractive and " +
     "self-assured (a subtle, cool, magazine-portrait vibe), never sleepy, drowsy, vacant, awkward or " +
-    "lifeless.\n\n" +
-    "GAZE: both eyes look in the SAME coherent direction (matching the base pose) — never cross-eyed, " +
-    "misaligned, wall-eyed or wandering, never a blank dead-eyed stare. Eyes fully open, clear and " +
-    "sharp with natural catch-light, both pupils and irises well defined.\n\n" +
-    "HEAD POSE: the head is held upright and straight, naturally aligned with the neck and shoulders — " +
-    "not tilted, drooping, slumped or leaning. A confident, well-balanced head position.\n\n" +
+    "lifeless. EXCEPTION for squinting: if the person's eyes look very narrow or squinted in the " +
+    "references, you MAY open them slightly so they look awake and natural — but only a little, keeping " +
+    "the same eye shape and identity, matching the base photo's lighting and mood.\n\n" +
+    "FACE SMOOTHNESS: gently clean up distracting skin flaws on the FACE — remove temporary blemishes, " +
+    "spots, harsh acne, razor bumps, obvious pores clogging, blotchy patches and stray noise — so the " +
+    "skin looks clean, smooth and healthy. Keep it natural: preserve real skin texture and the person's " +
+    "permanent, identity-defining features (moles, freckles, scars, beard, wrinkles) — do NOT flatten " +
+    "the face into a plastic, waxy, over-airbrushed mask.\n\n" +
+    "GAZE: the eyes must look in EXACTLY the same direction as the person in the BASE photo is looking — " +
+    "copy the base subject's gaze direction and head orientation precisely (if the base person looks " +
+    "into the camera, look into the camera; if they look off to the side or away, look the same way). " +
+    "Both eyes aligned and coherent — never cross-eyed, wall-eyed or wandering, never a blank dead-eyed " +
+    "stare. Eyes clear and sharp with natural catch-light, both pupils and irises well defined.\n\n" +
+    "HEAD POSE: keep the head at the SAME orientation and angle as the person in the base photo, but " +
+    "held upright and firmly, naturally connected to and aligned with the neck and shoulders — the head " +
+    "must sit correctly on the neck with no gap, seam, mismatch, floating or pasted-on look where the " +
+    "head meets the neck. Not tilted, drooping, slumped or leaning. A confident, well-balanced head " +
+    "position.\n\n" +
+    "FACE STRUCTURE UNDER ROTATION: when the head is turned or seen at an angle (three-quarter or " +
+    "profile), keep the person's true 3D facial STRUCTURE intact — the real shape and proportions of " +
+    "the nose, cheekbones, jaw, chin, brow and the spacing of the features must stay correct and " +
+    "consistent for that same person from any angle. Rotating the view must NOT stretch, flatten, warp, " +
+    "widen or distort the face or change who the person is.\n\n" +
     "PROPORTIONS: keep the head a realistic, anatomically correct size relative to the body. One " +
     "reference image is a tight face crop for identity detail only — do NOT copy its zoom/scale; scale " +
     "the head to the body in the base pose. The head must never look oversized or bobble-headed.\n\n" +
@@ -515,7 +532,10 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "similar person, airbrushed or plastic skin, beauty-filter smoothing, CGI/3D-render look, a " +
     "symmetrical or idealised AI face, changing the target's expression, adding an invented smile/laugh, " +
     "sleepy/drowsy/half-closed eyes, a vacant or lifeless stare, mismatched or incoherent eyes/mouth/" +
-    "expression, a tilted/drooping/leaning head, a dull/muddy/underexposed or unevenly lit face, harsh " +
+    "expression, a tilted/drooping/leaning head, a head that floats, is pasted on or does not join the " +
+    "neck cleanly, a gaze pointing somewhere different from the base subject's gaze, a face that is " +
+    "stretched/warped/distorted or changes structure when turned to an angle or profile, leaving obvious " +
+    "acne/blemishes/spots/blotches on the face, a dull/muddy/underexposed or unevenly lit face, harsh " +
     "shadows or blown-out highlights on the face, changing or regenerating the background, keeping the " +
     "base person's original skin colour ANYWHERE on the body (especially arms/hands/legs), a two-tone " +
     "patchwork of skin colours, keeping the base person's body shape, ANY change to clothing, outfit, " +
