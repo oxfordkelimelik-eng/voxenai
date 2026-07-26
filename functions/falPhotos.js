@@ -473,13 +473,13 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "person's facial features into the result — the output face must be 100% the target person's face, " +
     "never a mix of the two faces.\n\n" +
     "IMPERFECT SELFIE ANGLES: some of the close-up face references may have been taken from a slightly " +
-    "awkward angle or position by the user themselves — this is normal and expected. Do NOT copy any " +
-    "lens/perspective distortion, stretching or odd proportions caused by that awkward camera angle. " +
-    "Instead, reconstruct the person's TRUE, well-formed, undistorted facial structure — correctly " +
-    "shaped eyes, lips, nose and jawline as they really are — while still keeping their exact identity. " +
-    "The result must be the same recognisable person in every one of the photos generated for them, " +
-    "with consistent, unchanging facial structure from photo to photo — never a slightly different face " +
-    "each time.\n\n" +
+    "awkward angle by the user themselves — this is normal. You may gently correct ONLY the obvious " +
+    "wide-angle lens/perspective distortion (e.g. a nose that looks bulged because the phone was very " +
+    "close), but do this by the smallest amount possible and NEVER as an excuse to redesign the face. " +
+    "The person's actual facial structure — the real shape and size of their eyes, lips, nose, " +
+    "cheekbones and jaw — must stay EXACTLY as in the references. Do NOT beautify or 'improve' it. The " +
+    "result must be the SAME recognisable person, with the SAME face, in every photo generated for them " +
+    "— consistent and unchanging from photo to photo, never a slightly different or prettier face.\n\n" +
     "SKIN COLOUR — WHOLE BODY, NO EXCEPTIONS: the target person's skin colour must be applied to EVERY " +
     "single piece of visible skin in the photo — face, neck, ears, chest, shoulders, arms, forearms, " +
     "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. It is a SERIOUS " +
@@ -502,12 +502,10 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "EXPRESSION: reproduce the target person's OWN natural expression from their reference photos — do " +
     "not change it. Do NOT invent or add an open smile, grin or laugh that is not present in their " +
     "reference photos, and equally do not force a stiff neutral face if their references are not neutral. " +
-    "Keep whatever calm, natural expression they actually have. The eyes, eyelids, mouth, lips and micro-" +
-    "expressions must sit coherently together and look ALIVE and confident — awake, alert, attractive and " +
-    "self-assured (a subtle, cool, magazine-portrait vibe), never sleepy, drowsy, vacant, awkward or " +
-    "lifeless. EXCEPTION for squinting: if the person's eyes look very narrow or squinted in the " +
-    "references, you MAY open them slightly so they look awake and natural — but only a little, keeping " +
-    "the same eye shape and identity, matching the base photo's lighting and mood.\n\n" +
+    "Keep whatever calm, natural expression they actually have. The exact shape of the eyes, eyelids, " +
+    "mouth and lips must stay IDENTICAL to the reference photos — do NOT restyle, enlarge, narrow, lift " +
+    "or reshape them to look more 'attractive', 'awake' or 'confident'. Their real eye and lip shape IS " +
+    "their identity; changing it makes it a different person.\n\n" +
     "FACE SMOOTHNESS: gently clean up distracting TEMPORARY skin flaws on the FACE only — remove " +
     "blemishes, spots, harsh acne, razor bumps and stray noise. This is a small cleanup, NOT a " +
     "brightening or glow effect — the skin's colour and tone must stay exactly as dark/light as the " +
@@ -546,10 +544,11 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
     "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
     "AVOID: reinterpreting or restyling the target's face, making the face look like a different or only-" +
-    "similar person, airbrushed or plastic skin, beauty-filter smoothing, CGI/3D-render look, a " +
-    "symmetrical or idealised AI face, changing the target's expression, adding an invented smile/laugh, " +
-    "sleepy/drowsy/half-closed eyes, a vacant or lifeless stare, mismatched or incoherent eyes/mouth/" +
-    "expression, a tilted/drooping/leaning head, a head that floats, is pasted on or does not join the " +
+    "similar person, changing the shape or size of the eyes/lips/nose/jaw, enlarging or opening the eyes " +
+    "beyond the references, prettifying or beautifying the face, airbrushed or plastic skin, beauty-" +
+    "filter smoothing, CGI/3D-render look, a symmetrical or idealised AI face, changing the target's " +
+    "expression, adding an invented smile/laugh, a tilted/drooping/leaning head, a head that floats, is " +
+    "pasted on or does not join the " +
     "neck cleanly, a gaze pointing somewhere different from the base subject's gaze, a face that is " +
     "stretched/warped/distorted or changes structure when turned to an angle or profile, leaving obvious " +
     "acne/blemishes/spots/blotches on the face, a dull/muddy/underexposed or unevenly lit face, harsh " +
