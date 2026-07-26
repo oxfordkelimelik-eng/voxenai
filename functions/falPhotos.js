@@ -1570,10 +1570,11 @@ exports.falInferenceWebhook = onRequest(
     // ya da kontrolün kendisi hata verirse, filtre uygulanmaz — üretim asla
     // bu ikincil kapı yüzünden bloklanmaz.
     let passed = downloaded;
+    let checked = null;
     if (job.refDescriptor) {
       try {
         const { matchesIdentity } = require("./faceQuality");
-        const checked = await Promise.all(downloaded.map(async (d) => {
+        checked = await Promise.all(downloaded.map(async (d) => {
           const { match, distance } = await matchesIdentity(d.buf, job.refDescriptor);
           return { ...d, match, distance };
         }));
@@ -1585,10 +1586,25 @@ exports.falInferenceWebhook = onRequest(
       } catch (e) {
         console.error("Kimlik kontrolü başarısız (filtresiz devam ediliyor):", e);
         passed = downloaded;
+        checked = null;
       }
     }
 
     if (passed.length === 0) {
+      // "Yüz bulunamadı" (distance:null — descriptorFromBuffer üretilen karede
+      // hiç yüz bulamadı) GERÇEK bir kimlik uyuşmazlığından (ölçülebilir bir
+      // mesafe var ama eşiği geçemedi) AYRI ele alınır: bu durumda BİR KEZ
+      // yeniden denenir (bkz. maybeRetryNoFaceChunk) — nadir bir üretim
+      // hatası (ör. profile dönük kompozisyon), kimlik riski taşımıyor.
+      // Genel MAX_CHUNK_RETRIES=0 politikası (maybeRetryChunk, hep false
+      // döner) gerçek kimlik uyuşmazlığında hâlâ geçerli.
+      const allNoFace = Array.isArray(checked) && checked.length > 0 &&
+        checked.every((d) => d.distance == null);
+      if (allNoFace &&
+          await maybeRetryNoFaceChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef)) {
+        res.status(200).send("yeniden üretiliyor (yüz bulunamadı)");
+        return;
+      }
       // Bu görsel(ler) kimlik eşiğini geçemedi — retry hakkı varsa yeni bir
       // seed ile aynı sahne/kompozisyonu tekrar dene. Kullanıcı bunu asla
       // görmez (finalizeChunk'a hiç gitmiyor).
@@ -1649,6 +1665,74 @@ exports.falInferenceWebhook = onRequest(
  */
 async function maybeRetryChunk() {
   return false;
+}
+
+/**
+ * "Yüz bulunamadı" (matchesIdentity distance:null — üretilen karede hiç yüz
+ * algılanamadı) durumuna özel, SINIRLI (chunk başına EN FAZLA 1 kez) yeniden
+ * deneme. maybeRetryChunk'tan (genel politika, hep false) BİLİNÇLİ olarak
+ * AYRI tutuldu:
+ *  - Bu gerçek bir kimlik uyuşmazlığı DEĞİL, nadir bir üretim artefaktı (ör.
+ *    kişi profile/yana dönük üretilmiş, yüz kadraj dışı kalmış) — modelin
+ *    kimliği YANLIŞ tanıdığı değil, HİÇ tanıyamadığı durum.
+ *  - Kredi riski SINIRLI ve ÖNGÖRÜLEBİLİR: chunk başına en fazla 1 ek üretim
+ *    ücreti (~$0.05-0.15), `noFaceRetried` bayrağıyla sonsuz döngü imkansız
+ *    (bkz. 2026-07-22 kredi yakma olayı — o olayda sınırsız/kontrolsüz retry
+ *    vardı, bu FARKLI: tek seferlik, tek hata türüne özel).
+ * Firestore'daki chunk kaydı templateUrl SAKLAMIYOR — taban görsel,
+ * pickTemplatesFromPool'un jobId+styleId'den türeyen DETERMİNİSTİK
+ * tohumlaması sayesinde burada yeniden hesaplanıyor (aynı girdiyle her zaman
+ * aynı dosya/sırayı üretir).
+ */
+async function maybeRetryNoFaceChunk(uid, jobId, styleId, chunkIdx, chunk, job, jobRef) {
+  if (chunk.noFaceRetried) return false; // hakkı zaten kullanılmış
+
+  // Idempotency: webhook aynı isteği birden çok kez gönderebilir — bayrağı
+  // transaction içinde TEK sefer işaretle, aynı anda iki retry tetiklenmesin.
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(jobRef);
+    if (!snap.exists) return false;
+    const d = snap.data();
+    const c = d.results?.[styleId]?.chunks?.[chunkIdx];
+    if (!c || c.noFaceRetried || c.status === "done" || c.status === "failed") {
+      return false;
+    }
+    tx.set(jobRef, {
+      results: { [styleId]: { chunks: { [chunkIdx]: { ...c, noFaceRetried: true } } } },
+    }, { merge: true });
+    return true;
+  });
+  if (!claimed) return false;
+
+  try {
+    const folderGender = job.bodyProfile?.gender || null;
+    const bodyType = job.bodyProfile?.bodyType || null;
+    const files = await listTemplateFiles(styleId, folderGender, bodyType);
+    const picked = pickTemplatesFromPool(files, jobId, styleId, IMAGES_PER_STYLE);
+    const file = picked[Number(chunkIdx)];
+    const refUrls = job.falRefUrls;
+    if (!file || !Array.isArray(refUrls) || refUrls.length === 0) {
+      console.error(`Yüz-bulunamadı retry: taban görsel/referans yeniden kurulamadı (style=${styleId}, chunk=${chunkIdx})`);
+      return false;
+    }
+    const templateUrl = await signedDownloadUrl(file);
+    const modelId = job.model || DEFAULT_MODEL_ID;
+    const falJob = await submitStyleJob(
+      uid, jobId, styleId, chunkIdx, templateUrl, refUrls,
+      job.identityCaption || null, job.bodyCaption || null, job.bodyProfile || {}, modelId
+    );
+    await jobRef.set({
+      results: { [styleId]: { chunks: { [chunkIdx]: {
+        ...chunk, noFaceRetried: true, requestId: falJob.request_id,
+        status: "pending", photoUrls: [],
+      } } } },
+    }, { merge: true });
+    console.warn(`Yüz-bulunamadı retry tetiklendi (style=${styleId}, chunk=${chunkIdx}), yeni requestId=${falJob.request_id}`);
+    return true;
+  } catch (e) {
+    console.error("Yüz-bulunamadı retry'i başarısız (chunk düşürülüyor):", e);
+    return false;
+  }
 }
 
 /**
