@@ -62,22 +62,15 @@ const MODEL_CATALOG = {
       safety_tolerance: "4",
     }),
   },
-  // GERİ EKLENDİ (2026-07-25, gerçek test): "Fotoğraflarımı Oluştur (GPT2)"
-  // butonu kısa süreliğine doğrudan OpenAI API'sine bağlanmıştı (bkz.
-  // generateWithOpenAI/runOpenAiDirectChunk, hâlâ kodda duruyor ama şu an
-  // KULLANILMIYOR — bkz. useOpenAiDirect). Gerçek fal.ai fatura kaydı 5
-  // fotoğrafın 4'ünde iyi sonuç verdiğini gösterdi; kullanıcı bu sürüme
-  // dönülmesini istedi.
-  //
-  // ÖNEMLİ (2026-07-26 düzeltme): bu girdiyi ilk geri eklediğimde şemayı git
-  // GEÇMİŞİNE BAKMADAN, sadece fal.ai fatura panelindeki görünümden tahmin
-  // ederek yazmıştım (endpoint "fal-ai/gpt-image-2/edit", image_size
-  // "1024x1024" string) — İKİSİ DE YANLIŞTI, her istek fal.ai'de anında 422
-  // ("Unexpected status code: 422") ile reddediliyordu. Aşağıdaki şema commit
-  // 38e16f6'dan (bu girdinin direct-OpenAI'a geçilirken kaldırıldığı an)
-  // GERİ ALINARAK birebir kopyalandı — o an bu TAM OLARAK canlıda çalışan,
-  // gerçek kullanıcı verisiyle doğrulanmış son hâldi. Tahmin YERİNE önce
-  // `git log -p -- functions/falPhotos.js` ile eski hâle bakılmalıydı.
+  // NOT (2026-07-27): bu fal-wrapped "gpt-image-2" girdisi ARTIK
+  // KULLANILMIYOR (bkz. useOpenAiDirect — tek buton artık doğrudan OpenAI'ye
+  // gidiyor) ama SİLİNMEDİ. Kısa geçmiş: doğrudan OpenAI -> bu fal yoluna
+  // dönüldü (gerçek testte 5 fotoğrafın 4'ü iyiydi) -> şeması bir kez yanlış
+  // tahmin edilip 422 hatasına yol açtı, commit 38e16f6'dan doğru şemayla geri
+  // alındı -> şimdi tekrar doğrudan OpenAI'ye dönüldü (bkz. OPENAI_MODEL_ID
+  // tanımının altındaki not) çünkü artık AYNI kapsamlı prompt + AYNI iki
+  // katmanlı kalite kapısını kullanıyor, moderasyon/kalite riski kalmadı.
+  // İleride tekrar fal'a dönmek istenirse bu girdi hazır bekliyor.
   "gpt-image-2": {
     endpoint: "openai/gpt-image-2/edit",
     buildInput: (prompt, imageUrls, seed) => ({
@@ -93,14 +86,14 @@ const MODEL_CATALOG = {
 };
 const DEFAULT_MODEL_ID = "nano-banana-pro";
 
-// "Fotoğraflarımı Oluştur (GPT2)" butonu doğrudan OpenAI API'sine DE
-// gidebiliyor (bkz. generateWithOpenAI/runOpenAiDirectChunk) — ama bu yol şu
-// an DEVRE DIŞI (bkz. useOpenAiDirect = false, exports.startPhotoGeneration
-// içinde). Sebep: fal.ai üzerinden openai/gpt-image-2/edit + buildEditPrompt
-// kombinasyonu gerçek testte (2026-07-25) 5 fotoğrafın 4'ünde iyi sonuç
-// verdi; direct-OpenAI + sade prompt sürümü ise henüz gerçek veride
-// denenmedi. Kod SİLİNMEDİ — ileride tekrar karşılaştırma istenirse
-// useOpenAiDirect tekrar `modelId === OPENAI_MODEL_ID` yapılabilir.
+// "Fotoğraflarımı Oluştur" (tek buton) artık DOĞRUDAN OpenAI API'sine gidiyor
+// (bkz. generateWithOpenAI/runOpenAiDirectChunk, useOpenAiDirect = true).
+// runOpenAiDirectChunk artık buildEditPromptSimple DEĞİL, fal yoluyla AYNI
+// kapsamlı buildEditPrompt'u ve AYNI referans setini (crop hariç tüm
+// selfie'ler + tam boy) kullanıyor — artık iki yol arasında PROMPT/GÖRSEL
+// FARKI yok, sadece hangi API'ye gidildiği farklı. fal-wrapped "gpt-image-2"
+// MODEL_CATALOG girdisi SİLİNMEDİ (yukarıda) — geri dönmek istenirse
+// useOpenAiDirect `false` yapılabilir.
 const OPENAI_MODEL_ID = "gpt-image-2";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
@@ -1094,40 +1087,65 @@ async function assessOutputWithVision(buf) {
  * birlikte çalışmıyor, kod paylaşımı yerine bilinçli olarak ayrı tutuldu (fal
  * webhook'u dış bir HTTP isteği, bu ise doğrudan senkron çağrı zinciri).
  */
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, userPhotoUrl, bodyCaption, bodyProfile, refDescriptor, jobRef) {
-  const prompt = buildEditPromptSimple(bodyCaption, bodyProfile);
-  // SADECE 2 görsel (taban + kullanıcının DOĞAL/kırpılmamış fotoğrafı) — kullanıcının
-  // ChatGPT'ye manuel attığı "kendi fotom + hedef foto" ikilisiyle birebir aynı.
-  // Bilinçli olarak yüz-crop (faceCropUrl) KULLANILMIYOR: o kırpılmış kare doğal bir
-  // fotoğraf değil, modele yapay/parçalı bir görüntü veriyordu — bkz. userPhotoUrl'nin
-  // startPhotoGeneration'da nasıl seçildiği (primaryFaceUrl = orijinal, kırpılmamış kare).
-  const buf = await generateWithOpenAI(prompt, [templateUrl, userPhotoUrl]);
-  if (!buf) {
-    await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
-    return;
+// Chunk başına en fazla deneme (ilk + kalite-tetikli 1 retry) — fal
+// webhook'undaki maybeRetryBadChunk ile AYNI "1 kez yeniden dene" politikası.
+// Firestore bayrağı GEREKMİYOR (fal'daki gibi async/webhook re-entry riski
+// yok — bu tek bir senkron çağrı zinciri, döngü aynı fonksiyon içinde).
+const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
+
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef) {
+  // ARTIK buildEditPromptSimple DEĞİL — fal yolunun aynı, kapsamlı, çok
+  // turluk kullanıcı testiyle olgunlaşmış buildEditPrompt'u kullanıyor (yüz
+  // şekli/dudak/kaş/kafa boyutu/bakış/dövme/ışık kuralları dahil hepsi).
+  // GÖRSELLER de fal yoluyla AYNI: [taban, ...tüm referanslar (crop hariç,
+  // son eleman tam boy)] — artık 2 değil, fal'ın gönderdiği kadar görsel.
+  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  const imageUrls = [templateUrl, ...refUrls];
+
+  let finalBuf = null;
+  for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
+    const buf = await generateWithOpenAI(prompt, imageUrls);
+    if (!buf) {
+      if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+      break;
+    }
+
+    // KALİTE KAPISI — fal webhook'uyla BİREBİR AYNI iki katman: önce kimlik+
+    // netlik+kafa oranı (assessOutputFace), sonra onu geçenler için Vision
+    // AI (assessOutputWithVision) — yüz şekli/dudak deformasyonu gibi
+    // matematikle ölçülemeyen bozuklukları yakalar.
+    if (refDescriptor) {
+      try {
+        const { assessOutputFace } = require("./faceQuality");
+        const q = await assessOutputFace(buf, refDescriptor);
+        if (!q.ok) {
+          console.warn(`OpenAI yolu: kalite kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[${q.reason}](${q.distance != null ? q.distance.toFixed(3) : "null"})`);
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        }
+        const natural = await assessOutputWithVision(buf);
+        if (!natural) {
+          console.warn(`OpenAI yolu: Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        }
+      } catch (e) {
+        console.error("OpenAI yolu kalite kontrolü başarısız (filtresiz devam):", e);
+      }
+    }
+
+    finalBuf = buf;
+    break;
   }
 
-  // KİMLİK KAPISI — webhook'taki ile birebir aynı eşik/mantık.
-  let passed = true;
-  if (refDescriptor) {
-    try {
-      const { matchesIdentity } = require("./faceQuality");
-      const { match } = await matchesIdentity(buf, refDescriptor);
-      passed = match;
-    } catch (e) {
-      console.error("OpenAI yolu kimlik kontrolü başarısız (filtresiz devam):", e);
-      passed = true;
-    }
-  }
-  if (!passed) {
-    console.error(`OpenAI yolu: kimlik kapısı reddetti (retry yok): style=${styleId}, chunk=${chunkIdx}`);
+  if (!finalBuf) {
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { failed: true });
     return;
   }
 
   try {
     const { addPhoneCameraTexture } = require("./postProcess");
-    const textured = await addPhoneCameraTexture(buf);
+    const textured = await addPhoneCameraTexture(finalBuf);
     const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_0.jpg`;
     await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
@@ -1204,7 +1222,6 @@ exports.prepareReferencePhotos = onCall(
     // kapısı da devre dışı kalır).
     let orderedRefUrls = refUrls;
     let refDescriptor = null;
-    let faceCropUrl = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers, {
@@ -1258,28 +1275,18 @@ exports.prepareReferencePhotos = onCall(
       if (analysis.refDescriptor) {
         refDescriptor = Array.from(analysis.refDescriptor); // Firestore için düz dizi
       }
-      // Yüz-merkezli kırpılmış ek referans: en net/en büyük yüzlü fotoğraftan,
-      // yüzü kadrajın baskın öğesi yapan yüksek-çözünürlüklü bir crop üretip
-      // referans listesinin EN BAŞINA ekle (bkz. postProcess.cropFaceRegion).
-      // Edit modellerinde referansın efektif yüz çözünürlüğü kimlik
-      // sadakatiyle doğrudan orantılı. Fail-safe: crop üretilemezse atlanır.
-      if (analysis.bestIndex != null && analysis.bestBox) {
-        try {
-          const { cropFaceRegion } = require("./postProcess");
-          const cropBuf = await cropFaceRegion(refBuffers[analysis.bestIndex], analysis.bestBox);
-          if (cropBuf) {
-            faceCropUrl = await uploadToFalStorage(cropBuf, "ref_face_crop.jpg");
-          }
-        } catch (e) {
-          console.error("Yüz crop referansı yüklenemedi (atlanıyor):", e);
-        }
-      }
+      // NOT (2026-07-27): daha önce burada en net yüzden kırpılmış ek bir
+      // referans (faceCropUrl, postProcess.cropFaceRegion) üretilip listenin
+      // başına ekleniyordu. KALDIRILDI — kırpılmış kare doğal bir fotoğraf
+      // değil, modele yapay/parçalı bir görüntü veriyordu ve model bunun
+      // zoom seviyesini yanlışlıkla ölçek referansı sanıp kafayı büyütme gibi
+      // artefaktlara yol açabiliyordu (bkz. OpenAI-direct yolunda aynı
+      // sebeple primaryFaceUrl'in zaten crop KULLANMAMASI). Artık HER İKİ
+      // üretim yolu da (fal + OpenAI-direct) SADECE kullanıcının orijinal,
+      // kırpılmamış fotoğraflarını (orderedRefUrls) kullanıyor.
     } catch (e) {
       if (e instanceof HttpsError) throw e;
       console.error("Yüz kontrolü başarısız (kimlik kapısı devre dışı, üretim engellenmiyor):", e);
-    }
-    if (faceCropUrl) {
-      orderedRefUrls = [faceCropUrl, ...orderedRefUrls];
     }
 
     // Gemini ön-işlem (paralel, fail-safe): kimlik + tam boy beden + stil wardrobe.
@@ -1378,10 +1385,10 @@ exports.startPhotoGeneration = onCall(
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
     }
-    // "Fotoğraflarımı Oluştur (GPT2)" butonu bu alanı 'gpt-image-2' gönderir
-    // (MODEL_CATALOG'da fal-ai/gpt-image-2/edit'e karşılık gelir — bkz.
-    // useOpenAiDirect'in neden false olduğuna dair not); birinci buton hiç
-    // göndermez -> varsayılan nano-banana-pro.
+    // Tek buton bu alanı 'gpt-image-2' gönderir -> useOpenAiDirect=true,
+    // doğrudan OpenAI'ye gider (bkz. OPENAI_MODEL_ID tanımı). MODEL_CATALOG
+    // içindeki "gpt-image-2" girdisi (fal-wrapped, artık kullanılmıyor) bu
+    // kontrolü zaten geçirdiği için ayrıca eklemeye gerek yok.
     if (model !== undefined && !MODEL_CATALOG[model]) {
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
     }
@@ -1411,11 +1418,6 @@ exports.startPhotoGeneration = onCall(
     const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
     const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
-    // GPT2 (OpenAI direct) yolu için: kullanıcının DOĞAL, kırpılmamış ön yüz fotoğrafı
-    // (bkz. prepareReferencePhotos — primaryFaceUrl = orijinal refUrls[0], faceCropUrl
-    // eklenmeden ÖNCEKİ hâli). refUrls (falRefUrls) yerine bunu kullanıyoruz çünkü
-    // orası crop edilmiş yapay bir kare olabiliyor.
-    const primaryFaceUrl = prepData.primaryFaceUrl || refUrls[refUrls.length - 1] || refUrls[0];
     const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
     const bodyType = bodyProfile.bodyType || null;
 
@@ -1500,10 +1502,14 @@ exports.startPhotoGeneration = onCall(
       }, { merge: true });
     });
 
-    // DEVRE DIŞI (2026-07-25): direct-OpenAI koda hâlâ dokunulmadı ama GPT2
-    // butonu gerçek test sonucuna göre fal-ai/gpt-image-2/edit'e (MODEL_CATALOG)
-    // geri döndürüldü — bkz. OPENAI_MODEL_ID tanımının üstündeki not.
-    const useOpenAiDirect = false;
+    // TEKRAR AÇILDI (2026-07-27): tek "Fotoğraflarımı Oluştur" butonu artık
+    // fal.ai SARMALAMASI değil, doğrudan OpenAI'nin kendi API'sine gidiyor
+    // (bkz. runOpenAiDirectChunk — artık kapsamlı buildEditPrompt + fal
+    // yoluyla AYNI referans seti + AYNI iki katmanlı kalite kapısını
+    // kullanıyor). MODEL_CATALOG'daki "gpt-image-2" (fal-ai/gpt-image-2/edit)
+    // girdisi SİLİNMEDİ, sadece kullanılmıyor — geri dönmek istenirse bu
+    // satır `false` yapılabilir.
+    const useOpenAiDirect = modelId === OPENAI_MODEL_ID;
 
     try {
       if (useOpenAiDirect) {
@@ -1524,7 +1530,7 @@ exports.startPhotoGeneration = onCall(
           await Promise.all(picked.map(async (file, i) => {
             const templateUrl = await signedDownloadUrl(file);
             await runOpenAiDirectChunk(
-              uid, jobId, styleId, i, templateUrl, primaryFaceUrl,
+              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption,
               bodyCaption, bodyProfile, refDescriptor, jobRef
             );
           }));
