@@ -1017,6 +1017,74 @@ async function generateWithOpenAI(prompt, imageUrls) {
   }
 }
 
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+// Vision kalite kontrol modeli. gpt-4o görsel yargı için güçlü ve uygun
+// maliyetli (kare başına ~$0.01-0.02, düşük detail + kısa çıktı ile).
+const VISION_MODEL = "gpt-4o";
+
+/**
+ * VISION KALİTE KONTROLÜ (ikinci katman): üretilen çıktı karesini gpt-4o
+ * vision'a gönderip yüzün DOĞAL/BOZULMAMIŞ olup olmadığını sorar. Matematiksel
+ * kapı (assessOutputFace: kimlik/netlik/kafa oranı) sayı ile ölçülemeyen ince
+ * deformasyonları (şişmiş/yuvarlaklaşmış yüz, bozuk dudak, çarpık öğeler,
+ * anlamsız koyu leke) yakalayamıyor — bu katman tam onları hedefler.
+ *
+ * Döner: true = kabul (doğal görünüyor), false = REDDET (bozuk — yeniden
+ * üretilmeli). FAIL-SAFE: API hatası / belirsiz cevap / kota → true döner
+ * (Vision katmanı ASLA iyi bir kareyi hata yüzünden elemez; yalnızca AÇIKÇA
+ * bozuk dediğinde reddeder). Böylece bu katman çökse bile üretim durmaz,
+ * sadece matematiksel kapıya geri düşer.
+ */
+async function assessOutputWithVision(buf) {
+  try {
+    const b64 = buf.toString("base64");
+    const prompt =
+      "You are a strict photo quality checker for AI-generated portrait photos. " +
+      "Look ONLY at the main person's face and body. Is the face natural and " +
+      "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
+      "see any of: a puffed/swollen/rounded/melted face, warped or distorted lips, " +
+      "mouth, eyes or nose, an unnaturally rectangular/stretched face, mismatched " +
+      "or asymmetric features that look wrong, an unexplained dark blotch or smudge " +
+      "on the face, a head that looks pasted on or wrongly sized, or generally a " +
+      "face that looks deformed/uncanny. Accept (good) if the face looks like a " +
+      "normal, natural real photo of a person, even if not perfect. " +
+      "Answer with ONLY one word: GOOD or BAD.";
+    const resp = await fetch(OPENAI_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_KEY.value()}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: VISION_MODEL,
+        max_tokens: 3,
+        temperature: 0,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}`, detail: "low" } },
+          ],
+        }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error(`Vision kalite kontrolü HTTP ${resp.status} — fail-safe kabul`);
+      return true;
+    }
+    const json = await resp.json();
+    const answer = (json?.choices?.[0]?.message?.content || "").trim().toUpperCase();
+    if (answer.startsWith("BAD")) return false;
+    if (answer.startsWith("GOOD")) return true;
+    // Belirsiz cevap → fail-safe kabul.
+    console.warn(`Vision kalite kontrolü belirsiz cevap ("${answer.slice(0, 40)}") — fail-safe kabul`);
+    return true;
+  } catch (e) {
+    console.error("Vision kalite kontrolü hata (fail-safe kabul):", e.message || e);
+    return true;
+  }
+}
+
 /**
  * Bir chunk'ın TAM yaşam döngüsünü SENKRON olarak yürütür (OpenAI doğrudan
  * yolu — webhook YOK, fal'ın submit+webhook akışının aksine). startPhotoGeneration
@@ -1514,7 +1582,9 @@ exports.startPhotoGeneration = onCall(
  */
 exports.falInferenceWebhook = onRequest(
   {
-    secrets: [FAL_KEY], // otomatik yeniden üretim fal'a yeni iş gönderiyor
+    // FAL_KEY: otomatik yeniden üretim fal'a yeni iş gönderir.
+    // OPENAI_KEY: Vision AI kalite kontrolü (bkz. assessOutputWithVision).
+    secrets: [FAL_KEY, OPENAI_KEY],
     region: "europe-west1",
     // Kimlik kapısı için tespit+landmark+recognition (3 model) yükleniyor —
     // bkz. faceQuality.js. Bu kombinasyon önceki bir sürümde de 2GiB
@@ -1630,6 +1700,23 @@ exports.falInferenceWebhook = onRequest(
             checked.map((d) => d.ok
               ? `OK(${d.distance?.toFixed(3)})`
               : `RED[${d.reason}](${d.distance?.toFixed(3)})`).join(", "));
+        }
+
+        // İKİNCİ KATMAN — VISION: matematiksel kapıyı geçen kareler gpt-4o
+        // vision'a gönderilip yüzün DOĞAL/bozulmamış olduğu doğrulanır (bkz.
+        // assessOutputWithVision). Maliyet SADECE buraya kadar gelen karelere
+        // ödenir (~$0.01-0.02/kare). Fail-safe: assessOutputWithVision hata
+        // durumunda true döner, iyi kareler asla boşuna elenmez.
+        if (passed.length > 0) {
+          const visionChecked = await Promise.all(passed.map(async (d) => ({
+            d, natural: await assessOutputWithVision(d.buf),
+          })));
+          const visionPassed = visionChecked.filter((v) => v.natural).map((v) => v.d);
+          if (visionPassed.length < passed.length) {
+            console.warn(`Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}): ` +
+              `${passed.length - visionPassed.length}/${passed.length} kare "bozuk" (deforme yüz)`);
+          }
+          passed = visionPassed;
         }
       } catch (e) {
         console.error("Kalite kontrolü başarısız (filtresiz devam ediliyor):", e);
