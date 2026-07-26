@@ -519,11 +519,12 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "the head to the body in the base pose. The head must never look oversized or bobble-headed.\n\n" +
     "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
     "in the scene; any background people stay different, generic, unrelated people.\n\n" +
-    "LIGHTING: light the face beautifully and flatteringly — clean, even, well-exposed skin with a " +
-    "natural healthy glow, soft flattering key light on the face, no harsh shadows across the eyes or " +
-    "nose, no muddy/dull/greyish or underexposed face, no blown-out highlights. The face should read " +
-    "bright, clear and clean while the light direction and colour temperature still match the base " +
-    "scene. Keep it realistic, not an obvious studio flash.\n\n" +
+    "LIGHTING: the face must keep the target person's TRUE, NATURAL skin colour and tone exactly as in " +
+    "their reference photos — do NOT brighten, whiten, lighten, add glow/sheen, or make the skin look " +
+    "shiny, glossy or luminous. Only fix genuinely BAD lighting: no harsh shadows across the eyes or " +
+    "nose, no muddy/dull/greyish or so underexposed the face is hard to see, no blown-out highlights. " +
+    "Otherwise match the light direction, intensity and colour temperature of the base scene exactly — " +
+    "the face should look like it is standing in that same real light, not lit separately or enhanced.\n\n" +
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
     "real texture (a light, clean retouch is fine, but NOT a plastic airbrush), and do NOT invent " +
     "blemishes or facial asymmetry not present in the references. True-to-life colour and contrast, " +
