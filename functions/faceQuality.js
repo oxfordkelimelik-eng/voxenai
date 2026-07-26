@@ -261,6 +261,31 @@ async function descriptorFromBuffer(buf) {
 }
 
 /**
+ * descriptorFromBuffer'ın genişletilmiş hali: kimlik vektörünün YANINDA yüz
+ * kutusunun görsele oranını da döndürür (kafa oransallığı kontrolü için).
+ * Döner: { descriptor, faceRatio } — yüz yoksa null. faceRatio = yüz
+ * kutusunun uzun kenarının görsel uzun kenarına oranı (küçük yüz -> düşük,
+ * bobble-head/oransız büyük kafa -> yüksek).
+ */
+async function descriptorAndBoxFromBuffer(buf) {
+  const faceapi = await ensureModelsLoaded();
+  const { tensor } = bufferToTensorScaled(buf);
+  try {
+    const [h, w] = tensor.shape; // [height, width, 3]
+    const result = await faceapi
+      .detectSingleFace(tensor)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+    if (!result) return null;
+    const box = result.detection.box;
+    const faceRatio = Math.max(box.width / w, box.height / h);
+    return { descriptor: result.descriptor, faceRatio };
+  } finally {
+    tensor.dispose();
+  }
+}
+
+/**
  * Referans fotoğrafları analiz eder.
  * Yeni akış: [ön, sağ, sol, tamBoy] — son kare beden referansı (küçük yüz OK).
  * facePhotoCount (varsayılan 3): ilk N kare yüz; kimlik vektörü tercihen
@@ -384,4 +409,64 @@ async function matchesIdentity(buf, refDescriptor) {
   return { match: distance < FACE_MATCH_THRESHOLD, distance };
 }
 
-module.exports = { analyzeReferences, matchesIdentity, FACE_MATCH_THRESHOLD };
+// Üretilen çıktı karesinin yüzünün, taban SAHNEDEKİ kadrajın makul bir
+// kısmını kaplaması beklenir. Bunun ALTI = yüz ya kadraj dışı ya da
+// tespit güvenilmez; ÜSTÜ = oransız büyük kafa (bobble-head artefaktı).
+const OUTPUT_FACE_RATIO_MIN = 0.05;
+const OUTPUT_FACE_RATIO_MAX = 0.75;
+
+/**
+ * Üretilen çıktı karesi için BİRLEŞİK kalite kapısı (best-of-N seçimi ve
+ * "bozuk kareyi yeniden üret" için): kimlik + netlik + kafa oranı.
+ * Döner: { ok, distance, faceRatio, blurScore, reason }.
+ *  - ok:false + reason: hangi kontrolün elediği (log/teşhis için).
+ *  - distance: kimlik mesafesi (best-of-N sıralaması için de kullanılır;
+ *    yüz yoksa null).
+ * NOT: bu, referans SEÇİMİ değil, ÜRETİM ÇIKTISI kalitesi içindir — bu yüzden
+ * assessImageQuality'nin bulanıklık eşiği (BLUR_VARIANCE_MIN) burada da
+ * yeniden kullanılır (aynı kalibrasyon).
+ */
+async function assessOutputFace(buf, refDescriptor) {
+  const faceapi = await ensureModelsLoaded();
+  let distance = null;
+  let faceRatio = null;
+  let blurScore = null;
+
+  const db = await descriptorAndBoxFromBuffer(buf);
+  if (!db) {
+    return { ok: false, distance: null, faceRatio: null, blurScore: null, reason: "no-face" };
+  }
+  faceRatio = db.faceRatio;
+
+  const ref = refDescriptor instanceof Float32Array
+    ? refDescriptor
+    : Float32Array.from(refDescriptor);
+  distance = faceapi.euclideanDistance(ref, db.descriptor);
+
+  // 1) Kimlik: yüz kullanıcıya benziyor mu?
+  if (distance >= FACE_MATCH_THRESHOLD) {
+    return { ok: false, distance, faceRatio, blurScore, reason: "identity" };
+  }
+  // 2) Kafa oranı: oransız büyük/küçük kafa (bobble-head) artefaktı?
+  if (faceRatio < OUTPUT_FACE_RATIO_MIN || faceRatio > OUTPUT_FACE_RATIO_MAX) {
+    return { ok: false, distance, faceRatio, blurScore, reason: "head-ratio" };
+  }
+  // 3) Netlik: bariz bulanık/eritilmiş yüz? (fail-safe: kontrol hata verirse geç)
+  try {
+    const q = await assessImageQuality(buf);
+    blurScore = q.blurScore;
+    if (q.isBlurry) {
+      return { ok: false, distance, faceRatio, blurScore, reason: "blurry" };
+    }
+  } catch (e) {
+    console.error("assessOutputFace netlik kontrolü başarısız (netlik atlanıyor):", e);
+  }
+  return { ok: true, distance, faceRatio, blurScore, reason: null };
+}
+
+module.exports = {
+  analyzeReferences,
+  matchesIdentity,
+  assessOutputFace,
+  FACE_MATCH_THRESHOLD,
+};
