@@ -34,18 +34,21 @@ const path = require("path");
 const sharp = require("sharp");
 
 // Yüzün kadrajda kaplaması gereken asgari oran (kenar). Bunun altındaki
-// yüzler "net değil/uzak" sayılır. Aşırı katı olmasın diye gevşek tutuldu.
-const MIN_FACE_RATIO = 0.12;
-// ssd_mobilenetv1 tespit güveni eşiği.
-const MIN_DETECTION_CONFIDENCE = 0.5;
+// yüzler "net değil/uzak" sayılır.
+// GEVŞETİLDİ (2026-07-26, "çok zor kabul ediyor" geri bildirimi): 0.12 -> 0.06.
+const MIN_FACE_RATIO = 0.06;
+// ssd_mobilenetv1 tespit güveni eşiği. GEVŞETİLDİ: 0.5 -> 0.35.
+const MIN_DETECTION_CONFIDENCE = 0.35;
 
-// Laplacian varyansı bu değerin ALTINDAYSA bulanık say. Gerçek kullanıcı
-// fotoğraflarıyla KALİBRE EDİLMEDİ — bilinçli olarak gevşek (az false-positive,
-// yalnızca belirgin bulanıklığı yakalar). Şikayet devam ederse yükselt.
-const BLUR_VARIANCE_MIN = 60;
+// Laplacian varyansı bu değerin ALTINDAYSA bulanık say.
+// GEVŞETİLDİ (2026-07-26 kullanıcı geri bildirimi: "iyi çektiğim halde
+// bulanık diyor"): 60 hâlâ gerçek, net telefon selfie'lerini yanlışlıkla
+// reddediyordu — telefon kameralarının doğal (hafif) yumuşatma/ISO gürültü
+// azaltma işlemede varyansı düşürebiliyor. 60 -> 25.
+const BLUR_VARIANCE_MIN = 25;
 // Görselin bu ORANDAN FAZLASI (0-1) neredeyse beyazsa (>250/255) aşırı
-// pozlanmış say. Meşru parlak/backlit selfie'leri elememek için gevşek.
-const OVEREXPOSURE_CLIP_MAX = 0.45;
+// pozlanmış say. GEVŞETİLDİ (2026-07-26): 0.45 -> 0.65.
+const OVEREXPOSURE_CLIP_MAX = 0.65;
 
 // Kimlik eşleşme eşiği (öklid mesafesi, düşük = daha benzer). face-api.js'in
 // standart eşiği ~0.6, ama bu modelin (2018, face-api.js recognition net)

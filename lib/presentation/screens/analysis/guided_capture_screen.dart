@@ -434,7 +434,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   // ============================================================
   // Netlik eşiği: yatay komşu piksel farklarının ortalama karesi bu değerin
   // altındaysa kare bulanık sayılır. Cihaza göre ince ayar gerekebilir.
-  static const double _sharpnessThreshold = 45.0;
+  // GEVŞETİLDİ (2026-07-26, "çok zor kabul ediyor" geri bildirimi): 45 -> 18.
+  static const double _sharpnessThreshold = 18.0;
 
   /// Kaba ışık + netlik kalitesi kontrolü — kötü ışıkta veya bulanık karede
   /// çekimi engeller. HER İKİ PLATFORMDA da parlaklık kontrol edilir
@@ -443,9 +444,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   (bool, String) _checkQuality(CameraImage image) {
     if (image.planes.isEmpty) return (true, '');
 
-    // Parlaklık alt/üst sınırları — ışığa dikkat için biraz sıkı tutuldu.
-    const darkMin = 62; // altı = çok karanlık
-    const brightMax = 225; // üstü = aşırı parlak/patlamış
+    // Parlaklık alt/üst sınırları. GEVŞETİLDİ (2026-07-26): darkMin 62->45,
+    // brightMax 225->240 — "çok zor kabul ediyor" geri bildirimi.
+    const darkMin = 45; // altı = çok karanlık
+    const brightMax = 240; // üstü = aşırı parlak/patlamış
 
     if (Platform.isIOS) {
       // bgra8888: her piksel 4 bayt (B, G, R, A). Kaba luma örneklemesi
