@@ -472,6 +472,17 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "to the reference face, not further. Do NOT blend, average or merge the base photo's original " +
     "person's facial features into the result — the output face must be 100% the target person's face, " +
     "never a mix of the two faces.\n\n" +
+    "FACE SHAPE (do not deform): the overall SHAPE and outline of the face must stay EXACTLY as in the " +
+    "references — same face length-to-width ratio, same jaw and chin shape, same cheek width. If the " +
+    "reference face is oval/narrow/round/square, keep that exact shape. Do NOT round it out, do NOT puff, " +
+    "swell, widen, fatten or inflate the cheeks or jaw, and do NOT stretch or squash it into a more " +
+    "rectangular/boxy or a rounder shape. The bone structure is fixed identity — only the head's angle " +
+    "changes to match the base pose, never the underlying face shape itself.\n\n" +
+    "LIPS AND MOUTH: keep the exact lip shape, thickness, width and outline from the reference photos — " +
+    "the exact same upper and lower lip fullness and the same mouth width. Do NOT thin, plump, widen, " +
+    "reshape or distort the lips. The individual features — eyes, eyebrows, nose and lips — must all " +
+    "stay identical to the selfies; ONLY the gaze/viewing angle may differ to match the base pose, and " +
+    "the person must never look like a different, unfamiliar person.\n\n" +
     "IMPERFECT SELFIE ANGLES: some of the close-up face references may have been taken from a slightly " +
     "awkward angle by the user themselves — this is normal. You may gently correct ONLY the obvious " +
     "wide-angle lens/perspective distortion (e.g. a nose that looks bulged because the phone was very " +
@@ -550,13 +561,18 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "highlighted or enhanced compared to the rest of the scene. The ONLY lighting fix allowed is removing " +
     "genuinely BAD lighting: harsh shadows across the eyes or nose, or the face being so dark it is hard " +
     "to see. Otherwise the face must sit under the exact same light direction, intensity and colour as " +
-    "the rest of the base scene, with no separate or extra light on it.\n\n" +
+    "the rest of the base scene, with no separate or extra light on it. There must be NO unexplained " +
+    "dark blotch, black smudge, dirty patch or hard shadow stuck on the face — facial skin stays clean " +
+    "and evenly toned in the person's real colour.\n\n" +
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
     "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
     "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
     "AVOID: reinterpreting or restyling the target's face, making the face look like a different or only-" +
-    "similar person, changing the shape or size of the eyes/lips/nose/jaw, enlarging or opening the eyes " +
-    "beyond the references, prettifying or beautifying the face, airbrushed or plastic skin, beauty-" +
+    "similar person, changing the shape or size of the eyes/lips/nose/jaw, thinning/plumping/widening or " +
+    "reshaping the lips, enlarging or opening the eyes beyond the references, rounding/puffing/swelling/" +
+    "widening/fattening the face or cheeks, making the face more rectangular/boxy or rounder than the " +
+    "references, changing the face's length-to-width ratio, an unexplained dark patch/shadow/black smudge " +
+    "on the face, prettifying or beautifying the face, airbrushed or plastic skin, beauty-" +
     "filter smoothing, CGI/3D-render look, a symmetrical or idealised AI face, changing the target's " +
     "expression, adding an invented smile/laugh, a tilted/drooping/leaning head, a head that floats, is " +
     "pasted on or does not join the " +
