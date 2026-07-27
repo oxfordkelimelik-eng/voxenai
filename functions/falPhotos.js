@@ -436,6 +436,19 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
   bodyBlock += bodyProfileHint(bodyProfile);
 
   return (
+    "#1 RULE, ABOVE EVERYTHING ELSE — EXACT FACE STRUCTURE: The single most important requirement is " +
+    "that the output face is structurally IDENTICAL to the target person's close-up selfies, feature by " +
+    "feature. Treat the selfies as the exact blueprint and stay as close to them as physically possible " +
+    "— when unsure, always copy the selfie rather than invent. Reproduce with precision: the EXACT nose " +
+    "(its bridge width, length, tip shape and nostrils), the EXACT eyebrows (their thickness, arch shape, " +
+    "length and spacing), the EXACT eyes (their shape, size, slant, spacing and eyelids), the EXACT lips " +
+    "and the EXACT jaw/chin/cheekbone shape. Do NOT redesign, average, beautify, symmetrise or 'improve' " +
+    "any of these. A stranger must be able to place the output and a selfie side by side and see the SAME " +
+    "person's exact face. Only the head's ANGLE and the GAZE direction may change to match the base photo " +
+    "— the underlying facial geometry must not.\n\n" +
+    "#2 RULE — HEAD SIZE: the head must be the same size relative to the body as the person already in " +
+    "the BASE photo. Never enlarge the head or puff/swell the face; a too-big head or bloated face is a " +
+    "failure.\n\n" +
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
     "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
     "Among these reference photos, the LAST one is a distant, full-body photo — use it ONLY to judge " +
@@ -973,7 +986,10 @@ async function generateWithOpenAI(prompt, imageUrls) {
     const form = new FormData();
     form.append("model", OPENAI_MODEL_ID);
     form.append("prompt", prompt);
-    form.append("quality", "high"); // ChatGPT'nin kendi arayüzündeki sonuca yaklaşmak için (bkz. runOpenAiDirectChunk)
+    // MALİYET (2026-07-27 kullanıcı talebi): "high" foto başına ~$0.21 idi,
+    // "medium" ~4x daha ucuz (~$0.05). Kalite kapısı (assessOutputFace +
+    // Vision) bozuk kareleri zaten eliyor; medium'da tanınabilirlik yeterli.
+    form.append("quality", "medium");
     buffers.forEach((buf, i) => {
       form.append("image[]", new Blob([buf], { type: "image/jpeg" }), `ref_${i}.jpg`);
     });
