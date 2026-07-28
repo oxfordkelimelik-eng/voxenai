@@ -436,6 +436,14 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
   bodyBlock += bodyProfileHint(bodyProfile);
 
   return (
+    "#0 RULE — WHICH IMAGE TO EDIT (get this right first): the FIRST image is the ONLY canvas. Your " +
+    "output must be a heavily edited version of THAT FIRST image — same background, same scene, same " +
+    "framing — with only the person changed. The OTHER images (the target person's own selfies/photos) " +
+    "are REFERENCE MATERIAL ONLY — you look at them to copy the person's face/skin/body, but you NEVER " +
+    "output one of them directly or mostly-unedited. If your result looks like an unedited or barely-" +
+    "edited copy of the second, third or any later image, that is a COMPLETE FAILURE — it means you " +
+    "edited the wrong image. Always check: does my output have the FIRST image's background, scene and " +
+    "framing? If not, start over on the first image.\n\n" +
     "#1 RULE, ABOVE EVERYTHING ELSE — EXACT FACE STRUCTURE: The single most important requirement is " +
     "that the output face is structurally IDENTICAL to the target person's close-up selfies, feature by " +
     "feature. Treat the selfies as the exact blueprint and stay as close to them as physically possible " +
@@ -449,6 +457,12 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "#2 RULE — HEAD SIZE: the head must be the same size relative to the body as the person already in " +
     "the BASE photo. Never enlarge the head or puff/swell the face; a too-big head or bloated face is a " +
     "failure.\n\n" +
+    "#3 RULE — GAZE COPIES THE BASE, NEVER THE SELFIES: look at the FIRST image (the base photo) and see " +
+    "exactly where that person's eyes/head are pointing — straight at the camera, or off to a side, up, " +
+    "down or away. The output's eyes must point in that EXACT SAME direction. Completely IGNORE where " +
+    "the person is looking in their own selfies — their selfies are for face/skin/body only, never for " +
+    "gaze direction. A wrong gaze direction (looking somewhere other than where the base photo's person " +
+    "looks) is a failure.\n\n" +
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
     "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
     "Among these reference photos, the LAST one is a distant, full-body photo — use it ONLY to judge " +
@@ -1110,13 +1124,23 @@ async function assessOutputWithVision(buf) {
 const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
 
 async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef) {
-  // ARTIK buildEditPromptSimple DEĞİL — fal yolunun aynı, kapsamlı, çok
-  // turluk kullanıcı testiyle olgunlaşmış buildEditPrompt'u kullanıyor (yüz
-  // şekli/dudak/kaş/kafa boyutu/bakış/dövme/ışık kuralları dahil hepsi).
-  // GÖRSELLER de fal yoluyla AYNI: [taban, ...tüm referanslar (crop hariç,
-  // son eleman tam boy)] — artık 2 değil, fal'ın gönderdiği kadar görsel.
+  // buildEditPromptSimple DEĞİL — fal yolunun aynı, kapsamlı, çok turluk
+  // kullanıcı testiyle olgunlaşmış buildEditPrompt'u kullanıyor.
+  //
+  // GÖRSEL SAYISI (2026-07-27 düzeltme): 5 DEĞİL, 3 görsel — [taban, en iyi
+  // yüz, tam boy]. Gerçek test kanıtı: 5 görsel gönderilince OpenAI bazen
+  // HANGİ görselin "taban/tuval" olduğunu KARIŞTIRIP kullanıcının kendi tam
+  // boy referans fotoğrafını neredeyse hiç değiştirmeden ÇIKTI olarak
+  // döndürdü (taban sahne tamamen yok sayıldı). OpenAI'nin resmi
+  // dokümantasyonu "ilk görsel = düzenlenecek tuval" der ama bu maske
+  // OLMADAN garanti değil — çok sayıda görselle model bunu metinden
+  // çıkarmaya çalışıyor ve güvenilmez. Görsel sayısını azaltmak bu
+  // karışma riskini azaltır (bkz. aşağıdaki #0 KURAL da aynı riske karşı
+  // açık bir uyarı ekliyor).
   const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
-  const imageUrls = [templateUrl, ...refUrls];
+  const bestFaceUrl = refUrls[0];
+  const bodyPhotoUrl = refUrls[refUrls.length - 1];
+  const imageUrls = [templateUrl, bestFaceUrl, bodyPhotoUrl];
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
