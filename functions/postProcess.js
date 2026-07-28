@@ -182,6 +182,12 @@ async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
     const imgW = meta.width, imgH = meta.height;
     if (!imgW || !imgH) return null;
 
+    // NOT (2026-07-29): boyutları 16'nın katına hizalamayı denedim, sonra geri
+    // aldım. gpt-image-2'nin "genişlik/yükseklik 16'ya bölünebilir olmalı"
+    // şartı İSTENEN ÇIKTI boyutu (size parametresi) için geçerli — biz o
+    // parametreyi göndermiyoruz, dolayısıyla GİRDİ görseli için bir zorunluluk
+    // yok. Hizalama karşılığında en-boy oranında ~%2 sapma oluşuyordu; kanıtsız
+    // bir fayda için gerçek bir bozulma kabul edilmedi.
     let cropW = Math.round(imgW / scaleDown);
     let cropH = Math.round(imgH / scaleDown);
     if (cropW < 2 || cropH < 2) return null;
@@ -198,6 +204,7 @@ async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
     let out = sharp(buf).extract({ left, top, width: cropW, height: cropH });
     // Kırpma sonrası piksel sayısı düştü; modele küçük bir tuval vermemek için
     // uzun kenarı TEMPLATE_CROP_LONG_EDGE'e büyüt (zaten büyükse dokunma).
+    // fit:"inside" en-boy oranını AYNEN korur (bkz. yukarıdaki 16-hizalama notu).
     if (Math.max(cropW, cropH) < TEMPLATE_CROP_LONG_EDGE) {
       out = out.resize(TEMPLATE_CROP_LONG_EDGE, TEMPLATE_CROP_LONG_EDGE, {
         fit: "inside",
