@@ -1246,26 +1246,33 @@ const VISION_MODEL = "gpt-4o";
  * ama BAŞKA BİRİNE ait bir yüz bu testten rahatça geçiyordu. Artık iki görsel
  * yan yana gönderiliyor ve gpt-4o insan gibi karşılaştırıyor.
  *
- * referenceImage: kullanıcının referans yüz fotoğrafı — URL (string) ya da
- * Buffer. null/undefined ise kimlik karşılaştırması ATLANIR ve yalnızca
- * eski kalite kontrolü yapılır (geriye dönük güvenli).
+ * referenceImages: kullanıcının referans yüz fotoğraf(lar)ı — tek bir URL/
+ * Buffer ya da DİZİ (3 selfie: ön/sağ/sol). Boş/null ise kimlik
+ * karşılaştırması ATLANIR ve yalnızca eski kalite kontrolü yapılır (geriye
+ * dönük güvenli). ÇOKLU selfie tercih edilir: model kişiyi üç açıdan görünce,
+ * özellikle çıktı yana dönükken kimlik yargısı belirgin şekilde isabetlenir
+ * (üretim tarafındaki "hangisi tuval" karışması riski BURADA YOK — bu bir
+ * sohbet çağrısı, görsel düzenleme değil).
  *
  * Döner: { ok, reason } — ok:false ise reason "identity" | "quality".
  * FAIL-SAFE: API hatası / belirsiz cevap / kota → ok:true (Vision katmanı
  * ASLA iyi bir kareyi hata yüzünden elemez; yalnızca AÇIKÇA reddettiğinde
  * eler). Böylece bu katman çökse bile üretim durmaz.
  */
-async function assessOutputWithVision(buf, referenceImage) {
+async function assessOutputWithVision(buf, referenceImages) {
   try {
     const b64 = buf.toString("base64");
-    const hasRef = referenceImage != null;
+    const refs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
+      .filter((r) => r != null);
+    const hasRef = refs.length > 0;
 
     const prompt = hasRef
       ? ("You are a strict quality checker for AI-generated portrait photos.\n" +
-         "IMAGE 1 is an AI-generated photo. IMAGE 2 is a real reference photo of the person it is " +
-         "supposed to depict.\n\n" +
+         "IMAGE 1 is an AI-generated photo. The REMAINING images are real reference photos of the " +
+         "person it is supposed to depict (taken from different angles: front and sides).\n\n" +
          "Check two things:\n" +
-         "A) IDENTITY — is the person in IMAGE 1 recognisably the SAME person as in IMAGE 2? Compare " +
+         "A) IDENTITY — is the person in IMAGE 1 recognisably the SAME person as in the reference " +
+         "photos? Compare " +
          "the nose shape, eyebrows, eye shape and spacing, lips, jawline, face shape and overall " +
          "impression. Allow for differences in angle, lighting, hairstyle and expression, but the " +
          "underlying facial identity must clearly match. If it looks like a DIFFERENT person, or only " +
@@ -1296,10 +1303,10 @@ async function assessOutputWithVision(buf, referenceImage) {
       { type: "text", text: prompt },
       { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}`, detail: "high" } },
     ];
-    if (hasRef) {
-      const refUrl = Buffer.isBuffer(referenceImage)
-        ? `data:image/jpeg;base64,${referenceImage.toString("base64")}`
-        : referenceImage; // public URL (fal CDN / imzalı Firebase URL)
+    for (const r of refs) {
+      const refUrl = Buffer.isBuffer(r)
+        ? `data:image/jpeg;base64,${r.toString("base64")}`
+        : r; // public URL (fal CDN / imzalı Firebase URL)
       content.push({ type: "image_url", image_url: { url: refUrl, detail: "high" } });
     }
 
@@ -1351,26 +1358,49 @@ async function assessOutputWithVision(buf, referenceImage) {
 const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
 
 /**
+ * refUrls'i yüz kareleri ve tam boy karesi olarak ayırır.
+ * prepareReferencePhotos sırayı garanti ediyor: [en iyi yüz, diğer yüzler...,
+ * tam boy] — bestIndex her zaman yüz karelerinden seçildiği için tam boy
+ * asla öne alınmaz, hep sonda kalır (bkz. analyzeReferences).
+ */
+function splitRefUrls(refUrls) {
+  if (!Array.isArray(refUrls) || refUrls.length === 0) return { faceUrls: [], bodyUrl: null };
+  if (refUrls.length === 1) return { faceUrls: [refUrls[0]], bodyUrl: null };
+  return { faceUrls: refUrls.slice(0, -1), bodyUrl: refUrls[refUrls.length - 1] };
+}
+
+/**
  * Bir denemede ham görseli üretir — MOD'a göre tek atım ya da 3 aşamalı
  * pipeline. Döner: Buffer | null.
  *
- * GÖRSEL SAYISI (2026-07-27 düzeltme, tüm modlarda geçerli): 5 DEĞİL, 3
- * görsel — [taban, en iyi yüz, tam boy]. Gerçek test kanıtı: 5 görsel
- * gönderilince OpenAI bazen HANGİ görselin "taban/tuval" olduğunu KARIŞTIRIP
- * kullanıcının kendi tam boy referans fotoğrafını neredeyse hiç
- * değiştirmeden ÇIKTI olarak döndürdü. OpenAI'nin dokümantasyonu "ilk görsel
- * = tuval" der ama bu maske OLMADAN garanti değil.
+ * GÖRSEL SAYISI GEÇMİŞİ:
+ *  - Başlangıç: [taban, TÜM yüzler, tam boy] (5 görsel).
+ *  - 2026-07-27: 3'e indirildi [taban, en iyi yüz, tam boy] — OpenAI bazen
+ *    HANGİ görselin "taban/tuval" olduğunu karıştırıp kullanıcının kendi tam
+ *    boy fotoğrafını çıktı olarak döndürüyordu.
+ *  - 2026-07-28 (şu an): TEKRAR 3 yüz karesine çıkarıldı. Gerekçe: tek ön
+ *    selfie ile model taban sahnedeki açıyı/bakışı doğru kuramıyordu (önden
+ *    bakması gereken karelerde yana bakan yüzler çıktı). Taban karışması
+ *    riskine karşı artık prompt'un EN BAŞINDA açık bir "#0 KURAL — ilk görsel
+ *    TEK tuvaldir, diğerlerini asla çıktı olarak döndürme" uyarısı var; o
+ *    kural 27 Temmuz'daki indirimle BİRLİKTE eklenmişti, yani koruma
+ *    görsel sayısından bağımsız olarak yerinde duruyor.
  */
 async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx) {
-  const bestFaceUrl = refUrls[0];
-  const bodyPhotoUrl = refUrls[refUrls.length - 1];
+  const { faceUrls, bodyUrl } = splitRefUrls(refUrls);
+  const bestFaceUrl = faceUrls[0];
+  // Tam görsel seti: taban + TÜM yüz açıları + tam boy.
+  const fullSet = [templateUrl, ...faceUrls, ...(bodyUrl ? [bodyUrl] : [])];
 
   if (mode === PHOTO_MODE_STAGED) {
     // MOD 2 — 3 AŞAMALI PIPELINE. Her aşamanın çıktısı bir sonrakinin TUVALİ.
     // Maliyet 3x; ara aşama çıktıları Storage'a YAZILMAZ, bellekte taşınır.
+    // Aşama 1 KİMLİK aşaması olduğu için tüm yüz açılarını alır; aşama 2/3
+    // geometri ve ışık işi yapar, orada tek yüz karesi çapa olarak yeterli
+    // (fazladan görsel prompt'taki "ÜÇÜNCÜ görsel" göndermelerini bulandırır).
     const s1 = await generateWithOpenAI(
       buildStage1Prompt(identityCaption, bodyCaption, bodyProfile),
-      [templateUrl, bestFaceUrl, bodyPhotoUrl]
+      fullSet
     );
     if (!s1) {
       console.warn(`Pipeline aşama 1 başarısız (style=${styleId}, chunk=${chunkIdx})`);
@@ -1399,11 +1429,12 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     return s3;
   }
 
-  // MOD 1 (tam prompt) ve MOD 3 (kısaltılmış prompt): tek atım.
+  // MOD 1 (tam prompt) ve MOD 3 (kısaltılmış prompt): tek atım, tüm yüz
+  // açıları gönderilir (bkz. yukarıdaki GÖRSEL SAYISI GEÇMİŞİ).
   const prompt = mode === PHOTO_MODE_SHORT
     ? buildEditPromptShort(identityCaption, bodyCaption, bodyProfile)
     : buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
-  return await generateWithOpenAI(prompt, [templateUrl, bestFaceUrl, bodyPhotoUrl]);
+  return await generateWithOpenAI(prompt, fullSet);
 }
 
 async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
@@ -1455,7 +1486,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
       try {
         // Referans selfie de gönderiliyor -> Vision "aynı kişi mi?" diye de
         // sorabiliyor (bkz. assessOutputWithVision gerekçesi).
-        const v = await assessOutputWithVision(buf, refUrls[0]);
+        const v = await assessOutputWithVision(buf, splitRefUrls(refUrls).faceUrls);
         visionOk = v.ok;
         console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}`);
       } catch (e) {
@@ -2050,14 +2081,15 @@ exports.falInferenceWebhook = onRequest(
             ` netlik=${d.blurScore != null ? d.blurScore.toFixed(1) : "null"})`).join(", "));
 
         // İKİNCİ KATMAN — VISION: matematiksel kapıyı geçen kareler gpt-4o
-        // vision'a gönderilir. Referans selfie DE gönderilir, böylece Vision
-        // "aynı kişi mi?" sorusunu da yanıtlar (bkz. assessOutputWithVision).
-        // Maliyet SADECE buraya kadar gelen karelere ödenir. Fail-safe:
-        // hata durumunda ok:true döner, iyi kareler asla boşuna elenmez.
+        // vision'a gönderilir. TÜM yüz selfie'leri (3 açı) DE gönderilir,
+        // böylece Vision "aynı kişi mi?" sorusunu üç açıdan karşılaştırarak
+        // yanıtlar (bkz. assessOutputWithVision). Maliyet SADECE buraya kadar
+        // gelen karelere ödenir. Fail-safe: hata durumunda ok:true döner,
+        // iyi kareler asla boşuna elenmez.
         if (passed.length > 0) {
-          const refPhoto = Array.isArray(job.falRefUrls) ? job.falRefUrls[0] : null;
+          const refFaces = splitRefUrls(job.falRefUrls).faceUrls;
           const visionChecked = await Promise.all(passed.map(async (d) => ({
-            d, v: await assessOutputWithVision(d.buf, refPhoto),
+            d, v: await assessOutputWithVision(d.buf, refFaces),
           })));
           const visionPassed = visionChecked.filter((x) => x.v.ok).map((x) => x.d);
           console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ` +
