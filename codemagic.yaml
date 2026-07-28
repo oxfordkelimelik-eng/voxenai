@@ -17,6 +17,12 @@ workflows:
         - $HOME/.pub-cache
         - $HOME/Library/Caches/CocoaPods
         - ios/Pods
+        # Xcode DerivedData: xcodebuild archive'ın asıl derleme çıktısı burada
+        # tutulur (Pods hedeflerinin + Flutter engine'in nesne dosyaları).
+        # Kaynak kodda küçük bir değişiklik olduğunda Xcode DEĞİŞMEYEN
+        # hedefleri sıfırdan derlemek yerine önbellekten kullanır — tekrarlayan
+        # build'lerde arşivleme süresini ciddi kısaltır.
+        - $HOME/Library/Developer/Xcode/DerivedData
     environment:
       flutter: stable
       xcode: latest
@@ -94,11 +100,16 @@ workflows:
           # use-profiles Runner hedefini manuel + app-store profiliyle
           # yapilandirdi; xcodebuild bunu okuyup arsivi dagitim sertifikasiyla
           # imzalar. Otomatik imza/gelistirme sertifikasi URETILMEZ.
+          # COMPILER_INDEX_STORE_ENABLE=NO: Xcode'un IDE-ici kod tamamlama/
+          # atlama icin urettigi indeksleme verisini KAPATIR. CI'da hic
+          # kullanilmiyor ama derleme suresine gercek katki yapiyor; kapatmak
+          # yaygin bilinen bir CI hizlandirma ayari, cikan .ipa'yi etkilemez.
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$CM_BUILD_DIR/build/ios/archive/Runner.xcarchive" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             archive
       - name: 5. Fix App.framework CFBundleIdentifier collision
         script: |
