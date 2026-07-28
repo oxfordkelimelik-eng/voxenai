@@ -97,6 +97,19 @@ const DEFAULT_MODEL_ID = "nano-banana-pro";
 const OPENAI_MODEL_ID = "gpt-image-2";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
+
+// ÜRETİM MODLARI — client "mode" alanıyla hangisini istediğini bildirir
+// (3 ayrı "Fotoğraflarımı Oluştur" butonu, A/B karşılaştırması için).
+// Üçü de AYNI modeli (OpenAI gpt-image-2), AYNI 3 görseli ve AYNI iki
+// katmanlı kalite kapısını kullanır — TEK FARK prompt stratejisi:
+//   full   : tek atım, kapsamlı buildEditPrompt (~2600 kelime) — mevcut sürüm
+//   staged : 3 ardışık üretim çağrısı (kimlik -> geometri/bakış -> ışık),
+//            her aşama kısa ve odaklı; MALİYET 3x
+//   short  : tek atım, buildEditPromptShort (~350 kelime, ana odaklar korunmuş)
+const PHOTO_MODE_FULL = "full";
+const PHOTO_MODE_STAGED = "staged";
+const PHOTO_MODE_SHORT = "short";
+const PHOTO_MODES = [PHOTO_MODE_FULL, PHOTO_MODE_STAGED, PHOTO_MODE_SHORT];
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -648,6 +661,160 @@ function buildEditPromptSimple(bodyCaption, bodyProfile) {
   );
 }
 
+/* ============================================================
+ * MOD 2 — 3 AŞAMALI PIPELINE PROMPT'LARI
+ * ============================================================
+ * buildEditPrompt (~2600 kelime) tek atımda gönderiliyor ve modelin
+ * dikkatinin seyreldiğinden şüpheleniyoruz (bkz. #0/#1/#2/#3 kurallarını en
+ * başa taşıma ihtiyacı). Bu mod aynı ana odakları KORUYARAK üç ardışık
+ * üretim çağrısına böler; her aşamanın çıktısı bir sonrakinin TABAN görseli
+ * olur. Böylece her çağrıda model daha az sayıda kurala odaklanır.
+ *
+ * BİLİNEN RİSK (kullanıcıya açıkça söylendi): her aşama görseli YENİDEN
+ * üretir ("sadece şuraya dokun" kilidi yok), yani 1. aşamada iyi çıkan yüz
+ * 2./3. aşamada tekrar bozulabilir. Ayrıca maliyet 3 katına çıkar. Bu mod
+ * tam da bunu ÖLÇMEK için ayrı bir buton olarak duruyor.
+ */
+
+// AŞAMA 1: kimlik — yüz + ten + vücut. Kompozisyon/ışık düzeltmesi YOK.
+function buildStage1Prompt(identityCaption, bodyCaption, bodyProfile) {
+  let bodyBlock = "";
+  if (bodyCaption) {
+    bodyBlock +=
+      "REFERENCE BODY (match this build/weight, do not idealise or slim down): " +
+      bodyCaption + "\n\n";
+  }
+  bodyBlock += bodyProfileHint(bodyProfile);
+
+  return (
+    "STAGE 1 of 3 — PERSON REPLACEMENT. Do this one job only.\n\n" +
+    "The FIRST image is the BASE PHOTO and it is your ONLY canvas: your output must be that same photo " +
+    "with only the person swapped. The other images show a DIFFERENT real person (the target). Never " +
+    "output one of those reference images — if your result does not have the FIRST image's background " +
+    "and framing, you have failed.\n\n" +
+    "Replace the person in the base photo with the target person. Keep the background, location, " +
+    "lighting, camera angle, framing, body pose, and EVERY clothing item and accessory (glasses, " +
+    "jewellery, watches, hats, bags, shoes) exactly as they are in the base photo — the reference photos " +
+    "are for FACE, SKIN and BODY only, never for outfit.\n\n" +
+    "FACE — copy it exactly: reproduce the target's face feature by feature from their close-up " +
+    "reference photos (ignore the distant full-body one for the face). The EXACT nose (bridge width, " +
+    "length, tip, nostrils), EXACT eyebrows (thickness, arch, length, spacing), EXACT eyes (shape, size, " +
+    "slant, spacing, eyelids), EXACT lips (shape, thickness, width) and the EXACT jaw, chin and " +
+    "cheekbone shape. Keep their real face outline and length-to-width ratio — never round, puff, swell, " +
+    "widen or stretch it. Do NOT beautify, symmetrise, average or redesign anything. Keep their own " +
+    "natural expression; do not add a smile that is not in their references. Never blend the base " +
+    "person's features into the result.\n\n" +
+    "SKIN COLOUR — the target's real skin tone must be applied to EVERY visible piece of skin: face, " +
+    "neck, ears, chest, arms, hands, legs, feet. Never leave any body part in the base person's original " +
+    "skin colour and never produce a two-tone patchwork. Do not lighten, brighten or add glow — keep " +
+    "their true tone exactly as in their photos.\n\n" +
+    "BODY — match the target's real build, weight and height; resize the SAME clothing to fit naturally. " +
+    "Keep the body anatomically correct.\n\n" +
+    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    bodyBlock +
+    "TATTOOS: only if clearly visible in the target's own photos. Remove the base person's tattoos; if " +
+    "the target has none, the skin is clean.\n\n" +
+    "Ignore head size, gaze direction and lighting polish for now — a later stage handles those."
+  );
+}
+
+// AŞAMA 2: geometri — kafa boyutu, boyun birleşimi, bakış yönü.
+// GİRDİ: [aşama-1 çıktısı, orijinal taban, en iyi yüz]
+function buildStage2Prompt() {
+  return (
+    "STAGE 2 of 3 — HEAD GEOMETRY AND GAZE. Do this one job only.\n\n" +
+    "The FIRST image is your canvas (a photo of a person in a scene). The SECOND image is the ORIGINAL " +
+    "reference composition — use it ONLY to read the correct head size and gaze direction. The THIRD " +
+    "image is the person's real face — use it ONLY to keep their identity unchanged.\n\n" +
+    "Fix exactly three things in the first image, changing nothing else:\n\n" +
+    "1) HEAD SIZE: make the head the same size relative to the body, and in the same proportion of the " +
+    "frame, as the person in the SECOND image. If the head is too large or the face looks puffed or " +
+    "swollen, shrink and slim it back to a natural, anatomically correct size. A bobble-head is a " +
+    "failure.\n\n" +
+    "2) HEAD AND NECK: the head must sit upright and firmly on the neck, aligned with the shoulders, " +
+    "with a clean natural join — no gap, seam, mismatch, floating or pasted-on look, no tilting, " +
+    "drooping or leaning.\n\n" +
+    "3) GAZE: look at the SECOND image and see exactly where that person's eyes and head are pointing " +
+    "(into the camera, or off to a specific side, up, down or away). Make the eyes in your output point " +
+    "in that EXACT same direction. Both eyes aligned and coherent, fully open, clear, with natural " +
+    "catch-light — never cross-eyed, wandering, half-closed or dead-eyed.\n\n" +
+    "CRITICAL: do NOT change the person's identity while doing this. Their facial structure — nose, " +
+    "eyebrows, eyes, lips, jaw, cheekbones and face shape — must stay exactly as it is (cross-check " +
+    "against the THIRD image). Do not change the background, clothing, accessories, pose, skin tone or " +
+    "expression."
+  );
+}
+
+// AŞAMA 3: rötuş — ışık, ten temizliği, gerçekçilik. Yapıya DOKUNMAZ.
+function buildStage3Prompt() {
+  return (
+    "STAGE 3 of 3 — LIGHT AND SKIN POLISH. Do this one job only, very gently.\n\n" +
+    "The FIRST image is your canvas. The SECOND image is the person's real face photo — use it ONLY to " +
+    "check that you are keeping their true skin colour and identity.\n\n" +
+    "Make these small corrections and nothing else:\n\n" +
+    "1) LIGHTING: remove genuinely bad lighting only — harsh shadows falling across the eyes or nose, a " +
+    "face so dark it is hard to see, blown-out highlights, or any unexplained dark blotch, black smudge " +
+    "or dirty patch on the face. The face must sit under the same light direction, intensity and colour " +
+    "as the rest of the scene.\n\n" +
+    "2) SKIN TONE: keep the person's TRUE skin colour exactly as in the second image. Do NOT brighten, " +
+    "whiten, lighten or add any glow, sheen, shine or radiance. The face must not look lit-up or " +
+    "enhanced compared to the rest of the photo. Skin tone must stay even and consistent across the " +
+    "whole body.\n\n" +
+    "3) SKIN CLEANUP: gently clean temporary blemishes, spots and stray noise on the face. Preserve real " +
+    "skin texture and permanent identity features (moles, freckles, scars, beard, wrinkles). Never " +
+    "produce plastic, waxy or airbrushed skin.\n\n" +
+    "CRITICAL: change NOTHING structural. Do not alter the face shape, nose, eyebrows, eyes, lips, jaw, " +
+    "head size, gaze direction, expression, pose, clothing, accessories or background. The result should " +
+    "look like an ordinary, unedited phone photo of a real person."
+  );
+}
+
+/* ============================================================
+ * MOD 3 — KISALTILMIŞ TEK PROMPT
+ * ============================================================
+ * buildEditPrompt'un ANA ODAKLARI korunarak ~2600 kelimeden ~350 kelimeye
+ * indirildi. Hipotez: görsel modellerin metin encoder'ı çok uzun promptta
+ * dikkatini kaybediyor; kısa ve net bir talimat daha iyi sonuç verebilir
+ * (kanıt: kullanıcının ChatGPT'de tek cümlelik komutla aldığı iyi sonuç).
+ * Korunan odaklar: doğru tuval, yüz yapısı kilidi, tüm-vücut ten, vücut,
+ * kıyafet/arka plan sabitliği, kafa boyutu, bakış yönü, ifade, ışık, dövme.
+ */
+function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
+  const bodyBits = [];
+  if (bodyCaption) bodyBits.push(bodyCaption);
+  const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
+  const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
+  if (bt) bodyBits.push(bt);
+  if (ht) bodyBits.push(ht);
+  const bodyNote = bodyBits.length
+    ? ` Their build: ${bodyBits.join(", ")} — match it, do not idealise or slim down.`
+    : "";
+
+  return (
+    "Edit the FIRST image (your only canvas) by replacing the person in it with the person shown in the " +
+    "other reference images. Never output a reference image — the result must keep the FIRST image's " +
+    "background, scene and framing.\n\n" +
+    "KEEP IDENTICAL to the first image: background, location, lighting, camera angle, framing, body " +
+    "pose, and every clothing item and accessory (glasses, jewellery, watches, hats, bags, shoes). Also " +
+    "keep the head the SAME size relative to the body as the person already in it — never enlarge the " +
+    "head or puff up the face. And make the eyes look in the SAME direction as that person looks; ignore " +
+    "where the target looks in their own selfies.\n\n" +
+    "COPY EXACTLY from the target's close-up face photos (never the distant full-body one): their exact " +
+    "nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline — same shapes, same proportions, " +
+    "same face length-to-width ratio. Do not beautify, symmetrise, average, round, puff or widen the " +
+    "face. Keep their own natural expression; add no smile that isn't already there. The output must be " +
+    "unmistakably the same person as the selfies.\n\n" +
+    "ALSO CHANGE: their true skin tone, applied evenly to EVERY visible piece of skin (face, neck, arms, " +
+    "hands, legs, feet — never a two-tone patchwork, never lightened or given a glow), and their real " +
+    "body build, height and weight, resizing the same clothing to fit naturally." + bodyNote + "\n\n" +
+    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    "Tattoos only if visible in the target's own photos; remove the base person's tattoos. Fix only " +
+    "genuinely bad lighting (harsh shadows, an unexplained dark blotch, a too-dark face) without " +
+    "brightening the skin. Keep it looking like an ordinary, unedited phone photo — natural skin " +
+    "texture, no plastic airbrush, no distorted hands or extra limbs."
+  );
+}
+
 function styleUnitsFor(styleCount) {
   return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
 }
@@ -988,10 +1155,15 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrl
  * Döner: PNG buffer, ya da (moderasyon reddi/hata/429 dahil tüm durumlarda)
  * null — FAIL-SAFE, çağıran taraf null'da chunk'ı retry'siz başarısız sayar
  * (bkz. runOpenAiDirectChunk, MAX_CHUNK_RETRIES=0 politikasıyla tutarlı).
+ *
+ * images dizisi hem URL (string) hem HAM BUFFER kabul eder — 3 aşamalı
+ * pipeline'da (mod 2) sonraki aşamaların tuvali bir önceki aşamanın
+ * buffer'ıdır, Storage'a yazıp URL üretmeye gerek yok.
  */
 async function generateWithOpenAI(prompt, imageUrls) {
   try {
     const buffers = await Promise.all(imageUrls.map(async (url) => {
+      if (Buffer.isBuffer(url)) return url; // zaten ham görsel (pipeline ara çıktısı)
       const r = await fetch(url);
       if (!r.ok) throw new Error(`referans indirilemedi: ${r.status}`);
       return Buffer.from(await r.arrayBuffer());
@@ -1134,28 +1306,68 @@ async function assessOutputWithVision(buf) {
 // yok — bu tek bir senkron çağrı zinciri, döngü aynı fonksiyon içinde).
 const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef) {
-  // buildEditPromptSimple DEĞİL — fal yolunun aynı, kapsamlı, çok turluk
-  // kullanıcı testiyle olgunlaşmış buildEditPrompt'u kullanıyor.
-  //
-  // GÖRSEL SAYISI (2026-07-27 düzeltme): 5 DEĞİL, 3 görsel — [taban, en iyi
-  // yüz, tam boy]. Gerçek test kanıtı: 5 görsel gönderilince OpenAI bazen
-  // HANGİ görselin "taban/tuval" olduğunu KARIŞTIRIP kullanıcının kendi tam
-  // boy referans fotoğrafını neredeyse hiç değiştirmeden ÇIKTI olarak
-  // döndürdü (taban sahne tamamen yok sayıldı). OpenAI'nin resmi
-  // dokümantasyonu "ilk görsel = düzenlenecek tuval" der ama bu maske
-  // OLMADAN garanti değil — çok sayıda görselle model bunu metinden
-  // çıkarmaya çalışıyor ve güvenilmez. Görsel sayısını azaltmak bu
-  // karışma riskini azaltır (bkz. aşağıdaki #0 KURAL da aynı riske karşı
-  // açık bir uyarı ekliyor).
-  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+/**
+ * Bir denemede ham görseli üretir — MOD'a göre tek atım ya da 3 aşamalı
+ * pipeline. Döner: Buffer | null.
+ *
+ * GÖRSEL SAYISI (2026-07-27 düzeltme, tüm modlarda geçerli): 5 DEĞİL, 3
+ * görsel — [taban, en iyi yüz, tam boy]. Gerçek test kanıtı: 5 görsel
+ * gönderilince OpenAI bazen HANGİ görselin "taban/tuval" olduğunu KARIŞTIRIP
+ * kullanıcının kendi tam boy referans fotoğrafını neredeyse hiç
+ * değiştirmeden ÇIKTI olarak döndürdü. OpenAI'nin dokümantasyonu "ilk görsel
+ * = tuval" der ama bu maske OLMADAN garanti değil.
+ */
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx) {
   const bestFaceUrl = refUrls[0];
   const bodyPhotoUrl = refUrls[refUrls.length - 1];
-  const imageUrls = [templateUrl, bestFaceUrl, bodyPhotoUrl];
 
+  if (mode === PHOTO_MODE_STAGED) {
+    // MOD 2 — 3 AŞAMALI PIPELINE. Her aşamanın çıktısı bir sonrakinin TUVALİ.
+    // Maliyet 3x; ara aşama çıktıları Storage'a YAZILMAZ, bellekte taşınır.
+    const s1 = await generateWithOpenAI(
+      buildStage1Prompt(identityCaption, bodyCaption, bodyProfile),
+      [templateUrl, bestFaceUrl, bodyPhotoUrl]
+    );
+    if (!s1) {
+      console.warn(`Pipeline aşama 1 başarısız (style=${styleId}, chunk=${chunkIdx})`);
+      return null;
+    }
+    // Aşama 2 tuvali = aşama 1 çıktısı. Orijinal taban (doğru kafa oranı +
+    // bakış yönü kaynağı) ve en iyi yüz (kimlik çapası) referans olarak gider.
+    const s2 = await generateWithOpenAI(
+      buildStage2Prompt(),
+      [s1, templateUrl, bestFaceUrl]
+    );
+    if (!s2) {
+      // Aşama 2 patlarsa aşama 1 çıktısı yine kullanılabilir bir sonuçtur —
+      // tamamen başarısız saymak yerine onunla devam et (fail-soft).
+      console.warn(`Pipeline aşama 2 başarısız, aşama 1 çıktısıyla devam (style=${styleId}, chunk=${chunkIdx})`);
+      return s1;
+    }
+    const s3 = await generateWithOpenAI(
+      buildStage3Prompt(),
+      [s2, bestFaceUrl]
+    );
+    if (!s3) {
+      console.warn(`Pipeline aşama 3 başarısız, aşama 2 çıktısıyla devam (style=${styleId}, chunk=${chunkIdx})`);
+      return s2;
+    }
+    return s3;
+  }
+
+  // MOD 1 (tam prompt) ve MOD 3 (kısaltılmış prompt): tek atım.
+  const prompt = mode === PHOTO_MODE_SHORT
+    ? buildEditPromptShort(identityCaption, bodyCaption, bodyProfile)
+    : buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  return await generateWithOpenAI(prompt, [templateUrl, bestFaceUrl, bodyPhotoUrl]);
+}
+
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
-    const buf = await generateWithOpenAI(prompt, imageUrls);
+    const buf = await generateForMode(
+      mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx
+    );
     if (!buf) {
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
       break;
@@ -1448,7 +1660,7 @@ exports.startPhotoGeneration = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
-    const { styles, jobId, model } = request.data || {};
+    const { styles, jobId, model, mode } = request.data || {};
     if (!Array.isArray(styles) || styles.length === 0 || !jobId) {
       throw new HttpsError("invalid-argument", "styles ve jobId zorunlu.");
     }
@@ -1464,6 +1676,12 @@ exports.startPhotoGeneration = onCall(
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
     }
     const modelId = model || DEFAULT_MODEL_ID;
+    // Prompt stratejisi (bkz. PHOTO_MODES). Yalnızca OpenAI doğrudan yolunda
+    // anlamlı; fal yolu her zaman kapsamlı buildEditPrompt kullanır.
+    if (mode !== undefined && !PHOTO_MODES.includes(mode)) {
+      throw new HttpsError("invalid-argument", `Bilinmeyen mod: ${mode}`);
+    }
+    const photoMode = mode || PHOTO_MODE_FULL;
 
     const walletRef = db.doc(`users/${uid}/private/wallet`);
     const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
@@ -1570,6 +1788,7 @@ exports.startPhotoGeneration = onCall(
         packUnitsCharged: unitsToCharge,
         usedFreeTier,
         model: modelId, // hangi model kullanıldı — izleme/karşılaştırma için
+        photoMode, // hangi prompt stratejisi — A/B karşılaştırması için
       }, { merge: true });
     });
 
@@ -1602,7 +1821,7 @@ exports.startPhotoGeneration = onCall(
             const templateUrl = await signedDownloadUrl(file);
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, templateUrl, refUrls, identityCaption,
-              bodyCaption, bodyProfile, refDescriptor, jobRef
+              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode
             );
           }));
         }));

@@ -157,6 +157,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   bool _validatingPhotos = false; // tam boy yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
   String? _prepareError; // doğrulama başarısızsa paket adımında gösterilir
+  // Kullanıcının bastığı üretim butonunun modu — bakiye yetmeyip paywall'a
+  // gidildiğinde, dönüşteki otomatik üretimin AYNI modu kullanması için
+  // saklanır (bkz. _openPaywallThenMaybeGenerate).
+  String _lastMode = 'full';
 
   bool get _refsReady =>
       _facePhotos.length == DatingConfig.faceCaptureCount && _bodyPhoto != null;
@@ -207,11 +211,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// AŞAMA 2 — ÜRETİM (loader burada başlar): doğrulama geçtiyse loader gösterilir
   /// ve `startPhotoGeneration` çağrılır (bakiye burada düşülür). Yani loader
   /// başladıysa, fotoğraflar zaten sorunsuz demektir.
-  /// modelId: tek "Fotoğraflarımı Oluştur" butonu 'gpt-image-2' gönderir
-  /// (arka planda fal-ai/gpt-image-2/edit — kullanıcıya model adı gösterilmez).
-  /// null verilirse sunucu varsayılanı (nano-banana-pro) kullanılır.
-  Future<void> _generate({String? modelId}) async {
+  /// modelId: 'gpt-image-2' -> sunucuda doğrudan OpenAI yolu kullanılır.
+  /// mode: prompt stratejisi (A/B karşılaştırması için 3 buton):
+  ///   'full'   -> tek atım, kapsamlı prompt (mevcut/varsayılan sürüm)
+  ///   'staged' -> 3 ardışık üretim (kimlik -> geometri/bakış -> ışık), 3x maliyet
+  ///   'short'  -> tek atım, kısaltılmış prompt
+  Future<void> _generate({String? modelId, String? mode}) async {
     if (!_refsReady || _styles.isEmpty) return;
+    if (mode != null) _lastMode = mode;
 
     var answers = ref.read(datingAnswersProvider);
     if (answers.bodyType == null || answers.heightRange == null) {
@@ -312,6 +319,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         'styles': _styles.toList(),
         'jobId': jobId,
         'model': ?modelId,
+        'mode': ?mode,
       });
 
       if (!mounted) return;
@@ -846,8 +854,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     await context.push('${DatingRoutes.paywall}?mode=ai_photo');
     if (!mounted) return;
     // Paketten dönüldü: artık karşılanabiliyorsa gerçek üretimi başlat.
+    // Kullanıcının bastığı butonun modu korunur (bkz. _lastMode).
     if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
-      _generate();
+      _generate(modelId: 'gpt-image-2', mode: _lastMode);
     }
   }
 
@@ -1367,15 +1376,29 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
             const SizedBox(height: 12),
           ],
-          // TEK BUTON: "Fotoğraflarımı Oluştur" → arka planda gpt-image-2
-          // (fal-ai/gpt-image-2/edit) çalışır. Kullanıcıya model adı
-          // gösterilmez; eski ayrı "(GPT2)" butonu kaldırıldı.
+          // 3 BUTON — A/B karşılaştırması (hepsi aynı model: doğrudan OpenAI
+          // gpt-image-2; TEK FARK prompt stratejisi, bkz. falPhotos.js
+          // PHOTO_MODES). Karşılaştırma bitince fazlalıklar kaldırılacak.
           PrimaryButton(
             label:
-                _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur',
+                _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur-1',
             onPressed: (_refsReady && !_preparing)
-                ? () => _generate(modelId: 'gpt-image-2')
+                ? () => _generate(modelId: 'gpt-image-2', mode: 'full')
                 : null,
+          ),
+          const SizedBox(height: 10),
+          _AltGenerateButton(
+            label: 'Fotoğraflarımı Oluştur-2',
+            hint: '3 aşamalı üretim — daha yavaş, 3x maliyet',
+            enabled: _refsReady && !_preparing,
+            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'staged'),
+          ),
+          const SizedBox(height: 10),
+          _AltGenerateButton(
+            label: 'Fotoğraflarımı Oluştur-3',
+            hint: 'Kısaltılmış komut',
+            enabled: _refsReady && !_preparing,
+            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'short'),
           ),
           const SizedBox(height: 8),
           Center(
@@ -2219,6 +2242,59 @@ Future<List<String>> _findFacelessPhotos(List<File> files) async {
     await detector.close();
   }
   return faceless;
+}
+
+/// Alternatif üretim butonu (A/B karşılaştırması için ikincil stil).
+/// Ana "Fotoğraflarımı Oluştur-1" butonundan görsel olarak ayrışsın diye
+/// outlined; altında ne yaptığını anlatan kısa bir ipucu satırı var.
+class _AltGenerateButton extends StatelessWidget {
+  final String label;
+  final String hint;
+  final bool enabled;
+  final VoidCallback onPressed;
+  const _AltGenerateButton({
+    required this.label,
+    required this.hint,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 52,
+          child: OutlinedButton(
+            onPressed: enabled ? onPressed : null,
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(
+                color: enabled ? AppColors.borderGold : AppColors.borderSubtle,
+              ),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: enabled ? AppColors.gold : AppColors.textMuted,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Center(
+          child: Text(
+            hint,
+            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// Sağ üstünde kaldırma (çarpı) butonu olan seçilmiş fotoğraf küçük görseli.
