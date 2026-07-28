@@ -541,6 +541,15 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "or shorter than the base person, reshape the body accordingly and resize the SAME clothing to fit " +
     "naturally. Keep the body anatomically whole and coherent — correct number of arms, legs, hands and " +
     "fingers, natural joints and proportions, nothing merged, missing, duplicated or distorted.\n\n" +
+    "EYEWEAR (sunglasses/glasses): if the person in the base photo wears sunglasses or glasses, keep " +
+    "that eyewear EXACTLY as in the base photo — same frame shape, colour, size, position and " +
+    "reflections. But the eyewear must NOT change the face underneath it. Because the eyes are hidden, " +
+    "the VISIBLE parts carry the identity and must match the target's selfies with extra precision: the " +
+    "EXACT nose (bridge width, length, tip shape, nostrils), the EXACT mouth and lips, the EXACT jawline, " +
+    "chin and cheekbones, and the EXACT eyebrows wherever they show above or around the frames. Do NOT " +
+    "reshape or widen the nose to 'fit' the glasses, and do NOT drift toward a generic face just because " +
+    "the eyes are covered — reconstruct the face exactly as it is in the selfies, then place the base " +
+    "photo's eyewear on top of it.\n\n" +
     "TATTOOS / SKIN MARKINGS: do NOT invent or add any tattoos, and do NOT keep the base person's " +
     "tattoos. The target person's skin only has a tattoo if it is clearly visible in THEIR OWN reference " +
     "photos. If their references show no tattoos, the output skin must be completely clean with no " +
@@ -808,6 +817,9 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "hands, legs, feet — never a two-tone patchwork, never lightened or given a glow), and their real " +
     "body build, height and weight, resizing the same clothing to fit naturally." + bodyNote + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    "If the base person wears sunglasses or glasses, keep that eyewear exactly, but do not let it change " +
+    "the face under it — with the eyes hidden, match the nose, mouth, jaw and cheekbones to the selfies " +
+    "even more precisely, and never widen the nose to suit the frames.\n\n" +
     "Tattoos only if visible in the target's own photos; remove the base person's tattoos. Fix only " +
     "genuinely bad lighting (harsh shadows, an unexplained dark blotch, a too-dark face) without " +
     "brightening the skin. Keep it looking like an ordinary, unedited phone photo — natural skin " +
@@ -1437,11 +1449,59 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
   return await generateWithOpenAI(prompt, fullSet);
 }
 
+// Şablondaki kişi kadrajda bu orandan KÜÇÜKSE şablon yakınlaştırılır.
+// 2026-07-29 gerçek verisi: 0.091-0.101 oranlı şablon en kötü kimliği
+// (0.524-0.550) verdi; 0.162-0.193 oranlılar en iyisini (0.316-0.375).
+const TEMPLATE_MIN_FACE_RATIO = 0.13;
+// Kırpma sonrası hedeflenen yüz oranı (iyi çalışan şablonların bandı).
+const TEMPLATE_TARGET_FACE_RATIO = 0.17;
+
+/**
+ * Taban şablonunu üretime hazırlar: kişi kadrajda çok küçükse şablonu
+ * YAKINLAŞTIRIR (bkz. postProcess.cropForFaceRatio gerekçesi).
+ * Döner: kırpılmış Buffer ya da (kırpma gerekmiyorsa/başarısızsa) orijinal
+ * templateUrl string'i — generateWithOpenAI ikisini de kabul eder.
+ * FAIL-SAFE: her hata durumunda orijinal URL döner, üretim asla bloklanmaz.
+ */
+async function prepareTemplate(templateUrl, styleId, chunkIdx) {
+  try {
+    const r = await fetch(templateUrl);
+    if (!r.ok) return templateUrl;
+    const buf = Buffer.from(await r.arrayBuffer());
+
+    const { detectMainFace } = require("./faceQuality");
+    const face = await detectMainFace(buf);
+    if (!face) {
+      console.warn(`ŞABLON: yüz bulunamadı, kırpma atlandı (style=${styleId}, chunk=${chunkIdx})`);
+      return templateUrl;
+    }
+    if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
+      console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
+      return templateUrl;
+    }
+
+    const { cropForFaceRatio } = require("./postProcess");
+    const cropped = await cropForFaceRatio(
+      buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO
+    );
+    if (!cropped) return templateUrl;
+    console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO}`);
+    return cropped;
+  } catch (e) {
+    console.error("Şablon hazırlama başarısız (orijinal kullanılıyor):", e.message || e);
+    return templateUrl;
+  }
+}
+
 async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
+  // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
+  // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
+  const templateInput = await prepareTemplate(templateUrl, styleId, chunkIdx);
+
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     const buf = await generateForMode(
-      mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx
+      mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx
     );
     if (!buf) {
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;

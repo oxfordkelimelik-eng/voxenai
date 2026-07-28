@@ -149,4 +149,71 @@ async function normalizeExifOrientation(buf) {
   }
 }
 
-module.exports = { addPhoneCameraTexture, cropFaceRegion, normalizeExifOrientation };
+// Kırpılan şablonun uzun kenarı bu değerin altındaysa modele makul bir tuval
+// vermek için büyütülür. 1024, üretim çıktı boyutuyla uyumlu.
+const TEMPLATE_CROP_LONG_EDGE = 1024;
+// Yüz merkezinin kırpılmış karede dikey konumu (üstten oran). 0.30 = yüz
+// üst üçte bire yakın durur, gövde altta kalır — portre kompozisyonu.
+const TEMPLATE_CROP_FACE_TOP = 0.30;
+
+/**
+ * TABAN ŞABLONUNU, içindeki kişi kadrajda çok küçük kaldığında YAKINLAŞTIRIR.
+ *
+ * NEDEN (2026-07-29, gerçek veri): geniş/uzak planlı şablonlarda üretilen
+ * yüz, 1024px'lik çıktının ~%9-10'unu kaplıyordu (≈100x100 piksel). Bu kadar
+ * az pikselde model kimliği (burun/kaş/göz aralığı) taşıyamıyor ve kullanıcıya
+ * "başka biri" gibi görünen kareler çıkıyordu. Ölçümler bunu doğruladı:
+ * yüz oranı en küçük olan şablon (0.091-0.101) en kötü kimlik mesafesini
+ * (0.524-0.550) veriyordu.
+ *
+ * Kırpma, EN-BOY ORANINI KORUR (kompozisyon bozulmaz), yüzü yatayda ortalar
+ * ve dikeyde üst üçte bire yerleştirir. Görsel sınırlarını aşarsa kenetlenir.
+ *
+ * Döner: kırpılmış JPEG Buffer | null (kırpma gerekmiyorsa/yapılamıyorsa —
+ * çağıran taraf orijinali kullanır, fail-safe).
+ */
+async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
+  try {
+    if (!box || !(currentRatio > 0) || !(targetRatio > 0)) return null;
+    const scaleDown = targetRatio / currentRatio; // >1 => kadraj daraltılacak
+    if (scaleDown <= 1.05) return null; // zaten yeterince yakın
+
+    const meta = await sharp(buf).metadata();
+    const imgW = meta.width, imgH = meta.height;
+    if (!imgW || !imgH) return null;
+
+    let cropW = Math.round(imgW / scaleDown);
+    let cropH = Math.round(imgH / scaleDown);
+    if (cropW < 2 || cropH < 2) return null;
+
+    const faceCx = box.x + box.width / 2;
+    const faceCy = box.y + box.height / 2;
+    let left = Math.round(faceCx - cropW / 2);
+    let top = Math.round(faceCy - cropH * TEMPLATE_CROP_FACE_TOP);
+
+    // Sınırlara kenetle (kırpma penceresi görselin dışına taşmasın).
+    left = Math.max(0, Math.min(left, imgW - cropW));
+    top = Math.max(0, Math.min(top, imgH - cropH));
+
+    let out = sharp(buf).extract({ left, top, width: cropW, height: cropH });
+    // Kırpma sonrası piksel sayısı düştü; modele küçük bir tuval vermemek için
+    // uzun kenarı TEMPLATE_CROP_LONG_EDGE'e büyüt (zaten büyükse dokunma).
+    if (Math.max(cropW, cropH) < TEMPLATE_CROP_LONG_EDGE) {
+      out = out.resize(TEMPLATE_CROP_LONG_EDGE, TEMPLATE_CROP_LONG_EDGE, {
+        fit: "inside",
+        kernel: "lanczos3",
+      });
+    }
+    return await out.jpeg({ quality: 92 }).toBuffer();
+  } catch (e) {
+    console.error("Şablon kırpma başarısız (orijinal kullanılıyor):", e);
+    return null;
+  }
+}
+
+module.exports = {
+  addPhoneCameraTexture,
+  cropFaceRegion,
+  normalizeExifOrientation,
+  cropForFaceRatio,
+};

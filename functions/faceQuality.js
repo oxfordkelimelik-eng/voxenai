@@ -464,9 +464,47 @@ async function assessOutputFace(buf, refDescriptor) {
   return { ok: true, distance, faceRatio, blurScore, reason: null };
 }
 
+/**
+ * TABAN ŞABLONUNDAKİ ANA kişinin yüzünü bulur (kadrajdaki EN BÜYÜK yüz —
+ * arka planda duran kişiler değil). detectSingleFace'ten farkı: "tam olarak
+ * 1 yüz" şartı YOK (şablonlarda arkada insanlar olabilir) ve asgari oran
+ * filtresi YOK (amacı zaten KÜÇÜK yüzleri bulmak).
+ *
+ * Döner: { ratio, box } | null.
+ *  - ratio: yüzün kadrajı kaplama oranı (assessOutputFace'teki ile aynı tanım)
+ *  - box:   ORİJİNAL görsel koordinatlarında yüz kutusu (kırpma için)
+ */
+async function detectMainFace(buf) {
+  const faceapi = await ensureModelsLoaded();
+  const { tensor, scale } = bufferToTensorScaled(buf);
+  try {
+    const options = new faceapi.SsdMobilenetv1Options({
+      minConfidence: MIN_DETECTION_CONFIDENCE,
+    });
+    const faces = await faceapi.detectAllFaces(tensor, options);
+    if (faces.length === 0) return null;
+    const [h, w] = tensor.shape;
+    let best = faces[0];
+    for (const f of faces) {
+      if (f.box.width * f.box.height > best.box.width * best.box.height) best = f;
+    }
+    const b = best.box;
+    return {
+      ratio: Math.max(b.width / w, b.height / h),
+      box: {
+        x: b.x / scale, y: b.y / scale,
+        width: b.width / scale, height: b.height / scale,
+      },
+    };
+  } finally {
+    tensor.dispose();
+  }
+}
+
 module.exports = {
   analyzeReferences,
   matchesIdentity,
   assessOutputFace,
+  detectMainFace,
   FACE_MATCH_THRESHOLD,
 };
