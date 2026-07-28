@@ -1376,9 +1376,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
             const SizedBox(height: 12),
           ],
-          // 3 BUTON — A/B karşılaştırması (hepsi aynı model: doğrudan OpenAI
-          // gpt-image-2; TEK FARK prompt stratejisi, bkz. falPhotos.js
-          // PHOTO_MODES). Karşılaştırma bitince fazlalıklar kaldırılacak.
+          // 6 BUTON — A/B karşılaştırması (hepsi aynı model: doğrudan OpenAI
+          // gpt-image-2, aynı görsel seti, aynı kalite kapısı). Buton 2 hariç
+          // TEK FARK prompt UZUNLUĞU — bkz. falPhotos.js PHOTO_MODES
+          // "uzunluk merdiveni". Karşılaştırma bitince fazlalıklar kaldırılacak.
           PrimaryButton(
             label:
                 _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur-1',
@@ -1396,9 +1397,30 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           const SizedBox(height: 10),
           _AltGenerateButton(
             label: 'Fotoğraflarımı Oluştur-3',
-            hint: 'Kısaltılmış komut',
+            hint: 'Kısa komut (~465 kelime)',
             enabled: _refsReady && !_preparing,
             onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'short'),
+          ),
+          const SizedBox(height: 10),
+          _AltGenerateButton(
+            label: 'Fotoğraflarımı Oluştur-4',
+            hint: 'En yalın komut (~310 kelime)',
+            enabled: _refsReady && !_preparing,
+            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p300'),
+          ),
+          const SizedBox(height: 10),
+          _AltGenerateButton(
+            label: 'Fotoğraflarımı Oluştur-5',
+            hint: 'Orta uzunluk (~740 kelime)',
+            enabled: _refsReady && !_preparing,
+            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p800'),
+          ),
+          const SizedBox(height: 10),
+          _AltGenerateButton(
+            label: 'Fotoğraflarımı Oluştur-6',
+            hint: 'Uzunca komut (~1190 kelime)',
+            enabled: _refsReady && !_preparing,
+            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p1400'),
           ),
           const SizedBox(height: 8),
           Center(

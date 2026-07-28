@@ -109,7 +109,21 @@ const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
 const PHOTO_MODE_FULL = "full";
 const PHOTO_MODE_STAGED = "staged";
 const PHOTO_MODE_SHORT = "short";
-const PHOTO_MODES = [PHOTO_MODE_FULL, PHOTO_MODE_STAGED, PHOTO_MODE_SHORT];
+// PROMPT UZUNLUĞU MERDİVENİ (2026-07-29): tek değişkeni prompt uzunluğu olan
+// A/B testi. Hepsi Buton-1 ile AYNI şekilde çalışır (tek atım, aynı görsel
+// seti, aynı kalite kapısı) — SADECE prompt uzunluğu farklıdır.
+//   p300  ~300 kelime  | en yalın
+//   short ~470 kelime  | mevcut (Buton-3)
+//   p800  ~800 kelime  | pratikte "en verimli" bandın ortası
+//   p1400 ~1400 kelime | karmaşık image-to-image için üst bant
+//   full  ~2900 kelime | mevcut (Buton-1), getirisi azalan bölge
+const PHOTO_MODE_P300 = "p300";
+const PHOTO_MODE_P800 = "p800";
+const PHOTO_MODE_P1400 = "p1400";
+const PHOTO_MODES = [
+  PHOTO_MODE_FULL, PHOTO_MODE_STAGED, PHOTO_MODE_SHORT,
+  PHOTO_MODE_P300, PHOTO_MODE_P800, PHOTO_MODE_P1400,
+];
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
@@ -795,6 +809,157 @@ function buildStage3Prompt() {
  * Korunan odaklar: doğru tuval, yüz yapısı kilidi, tüm-vücut ten, vücut,
  * kıyafet/arka plan sabitliği, kafa boyutu, bakış yönü, ifade, ışık, dövme.
  */
+/**
+ * Beden/boy ipuçlarını tek cümlede toplar — uzunluk merdiveni prompt'ları
+ * (p300/p800/p1400) bunu paylaşır, her birinde tekrar yazılmasın diye.
+ */
+function shortBodyNote(bodyCaption, bodyProfile) {
+  const bits = [];
+  if (bodyCaption) bits.push(bodyCaption);
+  const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
+  const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
+  if (bt) bits.push(bt);
+  if (ht) bits.push(ht);
+  return bits.length
+    ? ` Their build: ${bits.join(", ")} — match it, never idealise or slim down.`
+    : "";
+}
+
+/**
+ * ~300 KELİME — merdivenin en yalın basamağı.
+ * Yapı: görev -> korunacaklar -> değişecekler -> kalite. Tekrar YOK; her kural
+ * yalnızca bir kez ve en kısa haliyle söylenir.
+ */
+function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
+  return (
+    "TASK: edit the FIRST image — it is your only canvas. Replace the person in it with the person in " +
+    "the other reference photos. Never output a reference photo; the result must be the first image, " +
+    "edited.\n\n" +
+    "KEEP EXACTLY AS IN THE FIRST IMAGE: background, location, lighting, camera angle, framing, body " +
+    "pose, head rotation and gaze direction, head size relative to the body, and every clothing item " +
+    "and accessory (glasses, jewellery, watches, bags, shoes). If that person is in profile or " +
+    "three-quarter view, stay in that view — never turn the head toward the camera. Ignore how the " +
+    "target is posed or where they look in their own selfies.\n\n" +
+    "CHANGE ONLY THE PERSON, using their close-up face photos (the distant full-body photo is for body " +
+    "only):\n" +
+    "- Face: copy their exact nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline. Same " +
+    "shapes, same proportions. Do not beautify, symmetrise, round or puff the face. Keep their own " +
+    "natural expression. It must unmistakably be the same person.\n" +
+    "- Skin: their true tone, applied evenly to every visible area — face, neck, arms, hands, legs. " +
+    "Never two-tone, never lightened or given a glow.\n" +
+    "- Body: their real build, height and weight, resizing the same clothing to fit." +
+    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
+    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    "QUALITY: an ordinary, unedited phone photo. Natural skin texture, no plastic airbrush, no added " +
+    "brightness. Tattoos only if visible in the target's own photos. Keep eyewear from the first image " +
+    "but match the visible face parts to the selfies precisely. Clean temporary blemishes only. No " +
+    "distorted hands or extra limbs."
+  );
+}
+
+/**
+ * ~800 KELİME — pratikte en verimli kabul edilen bandın ortası.
+ * P300 ile aynı iskelet, ama her maddeye modelin en sık yaptığı hataya karşı
+ * tek bir netleştirici cümle eklenmiş (tekrar değil, ayrıntı).
+ */
+function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
+  return (
+    "TASK: the FIRST image is your only canvas — a scene with a person in it. The other images are " +
+    "reference photos of a different real person (the target). Produce an edited version of the FIRST " +
+    "image in which the person has been replaced by the target. Never output a reference photo, and " +
+    "never produce something that looks like a barely-edited copy of one; if your result does not have " +
+    "the first image's background and framing, you edited the wrong image.\n\n" +
+    "WHICH REFERENCE IS WHICH: the LAST reference is a distant, full-body photo — use it ONLY to judge " +
+    "build, height and weight, and ignore its face entirely (too small to be reliable). All the other " +
+    "references are close-up face photos: these are the only source of truth for facial identity.\n\n" +
+    "KEEP IDENTICAL TO THE FIRST IMAGE (do not redesign or regenerate any of it):\n" +
+    "- Background, location, objects, lighting and colours.\n" +
+    "- Camera angle, framing and composition.\n" +
+    "- Body pose, and the head's rotation and gaze direction. If the person is shown in profile or " +
+    "three-quarter view, the output stays in that same view. Never rotate the head toward the camera to " +
+    "make the face easier to draw or more recognisable — a frontal face where the base shows a profile " +
+    "is a failure. Ignore how the target is posed in their own selfies.\n" +
+    "- Head size relative to the body. Never enlarge the head; a bobble-head or a puffed face is a " +
+    "failure.\n" +
+    "- Every clothing item and accessory, including glasses, sunglasses, jewellery, watches, hats, bags " +
+    "and shoes. The target's own clothing must never be copied over.\n\n" +
+    "CHANGE ONLY THESE THREE THINGS:\n\n" +
+    "1) FACE — the highest priority. Copy the target's facial structure feature by feature from their " +
+    "close-up photos: the exact nose (bridge width, length, tip), the exact eyebrows (thickness, arch, " +
+    "spacing), the exact eyes (shape, size, slant, spacing), the exact lips (shape, thickness, width), " +
+    "and the exact jaw, chin and cheekbones. Keep the same face outline and the same length-to-width " +
+    "ratio — do not round, puff, widen, stretch or make the face more rectangular. Do not beautify, " +
+    "symmetrise or average. Keep their own natural expression; add no smile that is not already there. " +
+    "Their selfies may be taken at an awkward close-up angle: you may undo that lens distortion, but " +
+    "only slightly, never as licence to redesign the face. Do not blend the base person's features into " +
+    "the result — the output face is 100% the target's.\n\n" +
+    "2) SKIN TONE — apply the target's true skin colour to EVERY visible piece of skin: face, neck, " +
+    "ears, chest, arms, hands, legs and feet. Leaving any limb in the base person's original tone is a " +
+    "serious error, and so is a two-tone patchwork. Do not brighten, whiten or add glow, sheen or " +
+    "radiance; the skin must read exactly as dark or light as in the references.\n\n" +
+    "3) BODY — their real build, height and weight, resizing the SAME clothing to fit naturally. Keep " +
+    "the body anatomically coherent: correct number of limbs and fingers, natural joints and " +
+    "proportions." + shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
+    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    "EYEWEAR: if the base person wears glasses or sunglasses, keep them exactly as they are, but do not " +
+    "let them change the face underneath. With the eyes hidden, the visible parts carry the identity — " +
+    "match the nose, mouth, jaw and cheekbones to the selfies even more precisely, and never widen the " +
+    "nose to suit the frames.\n\n" +
+    "TATTOOS: only if clearly visible in the target's own photos. Remove the base person's tattoos.\n\n" +
+    "LIGHTING: fix only genuinely bad lighting — harsh shadows across the eyes or nose, an unexplained " +
+    "dark blotch, or a face so dark it is hard to see. Otherwise the face sits under the same light " +
+    "direction, intensity and colour as the rest of the scene, with no extra light on it.\n\n" +
+    "QUALITY: the result should look like an ordinary, unedited phone photo of a real person — real " +
+    "skin texture, no plastic airbrush or beauty-filter smoothing, no CGI look. Gently clean temporary " +
+    "blemishes while preserving permanent features (moles, freckles, scars, beard). True-to-life colour " +
+    "and contrast. No garbled text, watermarks, distorted hands or extra limbs."
+  );
+}
+
+/**
+ * ~1400 KELİME — karmaşık image-to-image için üst bant.
+ * P800'ün üstüne, gerçek kullanıcı testlerinde TEKRARLAYAN hataların her biri
+ * için birer kısa madde ekler (bu maddelerin hepsi gözlemlenmiş sorunlardan
+ * gelir, "her ihtimale karşı" yazılmış değildir).
+ */
+function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
+  return (
+    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) + "\n\n" +
+    "OBSERVED FAILURE MODES — each of these has actually happened before; check your result against " +
+    "every one of them before finishing:\n\n" +
+    "- WRONG CANVAS: the output came back as the user's own reference photo, almost unedited. Verify " +
+    "your result carries the FIRST image's background, scene and framing.\n\n" +
+    "- A DIFFERENT PERSON: the face looked clean and natural but belonged to someone else — often a " +
+    "lightened version of the base person rather than the target. Compare your face against the " +
+    "close-up references feature by feature; if a stranger could not place them side by side and see " +
+    "the same person, start again.\n\n" +
+    "- FACE STRUCTURE DRIFTING UNDER ROTATION: when the head is turned to a three-quarter or profile " +
+    "view, the nose, cheekbones and jaw got stretched or reshaped. Keep the person's true 3D facial " +
+    "geometry consistent from every angle; a turned head must still be the same skull.\n\n" +
+    "- SWOLLEN OR ROUNDED FACE: cheeks and jaw were inflated, turning a narrow face into a round one. " +
+    "The bone structure is fixed identity — only the head's angle may change, never its shape.\n\n" +
+    "- DISTORTED LIPS: lip thickness and mouth width drifted. Copy them exactly.\n\n" +
+    "- SLEEPY OR MISMATCHED EYES: half-closed, vacant or incoherent eyes. The eyes, eyelids, mouth and " +
+    "micro-expressions must sit together coherently and look awake, alert and self-assured. If the " +
+    "person's eyes look very narrow in their selfies you may open them slightly, but only a little, " +
+    "keeping the same eye shape.\n\n" +
+    "- SKIN TONE STOPPING AT THE NECK: the face was recoloured but the arms, hands or legs kept the " +
+    "base person's tone. Re-check every visible limb one by one before finishing.\n\n" +
+    "- GLOWING FACE: the skin was brightened or given a sheen so the face looked lit separately from " +
+    "the scene. The face must not look enhanced compared to the rest of the photo.\n\n" +
+    "- HEAD NOT JOINING THE NECK: the head floated, looked pasted on, or sat at a tilt. It must sit " +
+    "upright and firmly on the neck, aligned with the shoulders, with a clean natural join.\n\n" +
+    "- OVERSIZED HEAD: the head grew relative to the body. The close-up references are zoomed in for " +
+    "identity detail only — never treat their zoom level as a size reference.\n\n" +
+    "- INVENTED SMILE: an open smile or grin appeared that is not in the target's references. Keep " +
+    "whatever calm, natural expression they actually have.\n\n" +
+    "- DUPLICATED FACE: the target's face was pasted onto other people in the scene. The target appears " +
+    "exactly once; any background people stay generic and unrelated.\n\n" +
+    "- UNEXPLAINED DARK PATCH: a black smudge or dirty patch was left on the face. Facial skin stays " +
+    "clean and evenly toned in the person's real colour."
+  );
+}
+
 function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
   const bodyBits = [];
   if (bodyCaption) bodyBits.push(bodyCaption);
@@ -1526,11 +1691,17 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     return cur;
   }
 
-  // MOD 1 (tam prompt) ve MOD 3 (kısaltılmış prompt): tek atım, tüm yüz
-  // açıları gönderilir (bkz. yukarıdaki GÖRSEL SAYISI GEÇMİŞİ).
-  const prompt = mode === PHOTO_MODE_SHORT
-    ? buildEditPromptShort(identityCaption, bodyCaption, bodyProfile)
-    : buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  // TEK ATIM MODLARI: hepsi AYNI görsel setini ve aynı kalite kapısını
+  // kullanır — aralarındaki TEK fark prompt uzunluğudur (bkz. PHOTO_MODES
+  // uzunluk merdiveni). Böylece A/B testinde tek değişken izole edilir.
+  const promptBuilders = {
+    [PHOTO_MODE_P300]: buildEditPromptP300,
+    [PHOTO_MODE_SHORT]: buildEditPromptShort,
+    [PHOTO_MODE_P800]: buildEditPromptP800,
+    [PHOTO_MODE_P1400]: buildEditPromptP1400,
+  };
+  const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
+  const prompt = build(identityCaption, bodyCaption, bodyProfile);
   return await generateWithOpenAI(prompt, fullSet);
 }
 
