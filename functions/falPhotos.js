@@ -470,12 +470,17 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "#2 RULE — HEAD SIZE: the head must be the same size relative to the body as the person already in " +
     "the BASE photo. Never enlarge the head or puff/swell the face; a too-big head or bloated face is a " +
     "failure.\n\n" +
-    "#3 RULE — GAZE COPIES THE BASE, NEVER THE SELFIES: look at the FIRST image (the base photo) and see " +
-    "exactly where that person's eyes/head are pointing — straight at the camera, or off to a side, up, " +
-    "down or away. The output's eyes must point in that EXACT SAME direction. Completely IGNORE where " +
-    "the person is looking in their own selfies — their selfies are for face/skin/body only, never for " +
-    "gaze direction. A wrong gaze direction (looking somewhere other than where the base photo's person " +
-    "looks) is a failure.\n\n" +
+    "#3 RULE — HEAD ORIENTATION AND GAZE COPY THE BASE, NEVER THE SELFIES: look at the FIRST image (the " +
+    "base photo) and see exactly how that person's HEAD IS TURNED and where their eyes point — straight " +
+    "at the camera, or off to a side, up, down or away. The output must reproduce that EXACT head " +
+    "rotation and gaze. Completely IGNORE how the person is posed in their own selfies — their selfies " +
+    "are for face/skin/body only, never for head angle or gaze.\n" +
+    "PROFILE / TURNED-AWAY POSES ARE NOT AN EXCUSE: if the base person is shown in profile or " +
+    "three-quarter view (face turned to the side, one ear toward the camera), the output MUST stay in " +
+    "that same profile or three-quarter view. Do NOT rotate the head toward the camera to make the face " +
+    "easier to draw or to make it look more like the front-facing selfies. Rendering a frontal face " +
+    "where the base photo shows a profile is a FAILURE, even if the resulting face resembles the person " +
+    "well. Instead, reconstruct how THIS person's face looks from that same angle.\n\n" +
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
     "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
     "Among these reference photos, the LAST one is a distant, full-body photo — use it ONLY to judge " +
@@ -743,10 +748,12 @@ function buildStage2Prompt() {
     "2) HEAD AND NECK: the head must sit upright and firmly on the neck, aligned with the shoulders, " +
     "with a clean natural join — no gap, seam, mismatch, floating or pasted-on look, no tilting, " +
     "drooping or leaning.\n\n" +
-    "3) GAZE: look at the SECOND image and see exactly where that person's eyes and head are pointing " +
-    "(into the camera, or off to a specific side, up, down or away). Make the eyes in your output point " +
-    "in that EXACT same direction. Both eyes aligned and coherent, fully open, clear, with natural " +
-    "catch-light — never cross-eyed, wandering, half-closed or dead-eyed.\n\n" +
+    "3) HEAD ORIENTATION AND GAZE: look at the SECOND image and see exactly how that person's HEAD IS " +
+    "TURNED and where their eyes point (into the camera, or off to a specific side, up, down or away). " +
+    "Reproduce that EXACT head rotation and gaze. If the SECOND image shows a profile or three-quarter " +
+    "view, your output must stay in that same view — never rotate the head toward the camera to make " +
+    "the face easier or more recognisable. Both eyes aligned and coherent, fully open, clear, with " +
+    "natural catch-light — never cross-eyed, wandering, half-closed or dead-eyed.\n\n" +
     "CRITICAL: do NOT change the person's identity while doing this. Their facial structure — nose, " +
     "eyebrows, eyes, lips, jaw, cheekbones and face shape — must stay exactly as it is (cross-check " +
     "against the THIRD image). Do not change the background, clothing, accessories, pose, skin tone or " +
@@ -1211,9 +1218,24 @@ async function generateWithOpenAI(prompt, imageUrls) {
         body: form,
       });
       if (resp.status === 429 && attempt < maxAttempts) {
-        // OpenAI eşzamanlılık/oran limiti — kısa bekleyip tekrar dene (bkz.
-        // face-swap'te yaşadığımız aynı 429 dersi, bkz. faceSwap()).
-        await new Promise((r) => setTimeout(r, attempt * 1500));
+        // OpenAI oran limiti. ÖNEMLİ (2026-07-29 gerçek log): limit "input
+        // images per min" üzerinden geliyor ("Limit 5, Used 5") ve OpenAI
+        // cevabın içinde ne kadar bekleneceğini SÖYLÜYOR ("Please try again
+        // in 12s"). Eski sabit backoff (1.5sn/3sn) DAKİKALIK bir pencere için
+        // çok kısaydı ve retry'ler de 429 alıyordu. Artık ipucu ayrıştırılıp
+        // ona uyuluyor; yoksa üstel backoff'a düşülüyor (tavan 30sn).
+        let waitMs = attempt * 5000;
+        try {
+          const txt = await resp.clone().text();
+          const m = txt.match(/try again in ([\d.]+)\s*(ms|s)\b/i);
+          if (m) {
+            const v = parseFloat(m[1]);
+            waitMs = /ms/i.test(m[2]) ? v : v * 1000;
+            waitMs = Math.min(waitMs + 500, 30000); // küçük emniyet payı
+          }
+        } catch { /* ipucu okunamadı — üstel backoff kullanılır */ }
+        console.warn(`OpenAI 429 (oran limiti), ${Math.round(waitMs / 1000)}sn beklenip tekrar denenecek (deneme ${attempt}/${maxAttempts})`);
+        await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
       const json = await resp.json();
@@ -1398,7 +1420,55 @@ function splitRefUrls(refUrls) {
  *    kural 27 Temmuz'daki indirimle BİRLİKTE eklenmişti, yani koruma
  *    görsel sayısından bağımsız olarak yerinde duruyor.
  */
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx) {
+/**
+ * Bir görselin kaynak kimlik vektörüne uzaklığını döner (düşük = daha benzer).
+ * Yüz bulunamazsa / hata olursa null. Yerel hesap — API maliyeti YOK.
+ */
+async function identityDistanceOf(buf, refDescriptor) {
+  if (!refDescriptor) return null;
+  try {
+    const { matchesIdentity } = require("./faceQuality");
+    const { distance } = await matchesIdentity(buf, refDescriptor);
+    return distance;
+  } catch (e) {
+    console.error("Aşama kimlik ölçümü başarısız (aşama kabul ediliyor):", e.message || e);
+    return null;
+  }
+}
+
+// Bir pipeline aşamasının kimliği bu kadar BOZMASINA izin verilir. Aşamalar
+// geometri/ışık düzeltmesi karşılığında ufak bir sapma yapabilir; bundan
+// fazlası kabul edilmez ve aşama çıktısı ATILIR (bir önceki aşamaya dönülür).
+const STAGE_IDENTITY_TOLERANCE = 0.03;
+
+/**
+ * Bir aşama çıktısını, kimliği kabul edilemez ölçüde bozmuyorsa kabul eder.
+ *
+ * NEDEN (2026-07-29, gerçek veri): 3 aşamalı pipeline çalıştığında 4/4 kare
+ * Vision'dan RED[identity] aldı; aşama 3 (veya 2) çöküp devre dışı kaldığında
+ * 5/5 kare GEÇTİ. Yani aşamalar kimliği bozuyordu. Prompt'ta zaten "hiçbir
+ * yapısal şeyi değiştirme" yazıyor ama generative model her geçişte görüntüyü
+ * SIFIRDAN üretiyor — metin bunu engelleyemiyor. Çözüm aşamayı kaldırmak
+ * DEĞİL, çıktısını ÖLÇMEK: aşama kimliği bozduysa çıktısı atılır, bir önceki
+ * aşamanın görseliyle devam edilir. Böylece aşamalar yalnızca fayda
+ * sağladıklarında hayatta kalır ("aşama yerini hak etmeli").
+ */
+async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, label, styleId, chunkIdx) {
+  if (!next) return { buf: prev, dist: prevDist };
+  const d = await identityDistanceOf(next, refDescriptor);
+  // Ölçemiyorsak (kimlik vektörü yok / yüz bulunamadı) eski davranış: kabul.
+  if (d == null || prevDist == null) {
+    return { buf: next, dist: d != null ? d : prevDist };
+  }
+  if (d <= prevDist + STAGE_IDENTITY_TOLERANCE) {
+    console.log(`AŞAMA ${label} KABUL (style=${styleId}, chunk=${chunkIdx}): mesafe ${prevDist.toFixed(3)} -> ${d.toFixed(3)}`);
+    return { buf: next, dist: d };
+  }
+  console.warn(`AŞAMA ${label} REDDEDİLDİ — kimliği bozdu (style=${styleId}, chunk=${chunkIdx}): mesafe ${prevDist.toFixed(3)} -> ${d.toFixed(3)} (tolerans ${STAGE_IDENTITY_TOLERANCE})`);
+  return { buf: prev, dist: prevDist };
+}
+
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
   const { faceUrls, bodyUrl } = splitRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Tam görsel seti: taban + TÜM yüz açıları + tam boy.
@@ -1410,6 +1480,10 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // Aşama 1 KİMLİK aşaması olduğu için tüm yüz açılarını alır; aşama 2/3
     // geometri ve ışık işi yapar, orada tek yüz karesi çapa olarak yeterli
     // (fazladan görsel prompt'taki "ÜÇÜNCÜ görsel" göndermelerini bulandırır).
+    //
+    // KİMLİK KORUMASI: her aşamadan sonra kimlik mesafesi ölçülür; aşama
+    // kimliği tolerans üstünde bozduysa çıktısı ATILIR (bkz.
+    // acceptStageIfIdentityHolds). Ölçüm yereldir, API maliyeti yoktur.
     const s1 = await generateWithOpenAI(
       buildStage1Prompt(identityCaption, bodyCaption, bodyProfile),
       fullSet
@@ -1418,27 +1492,33 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
       console.warn(`Pipeline aşama 1 başarısız (style=${styleId}, chunk=${chunkIdx})`);
       return null;
     }
-    // Aşama 2 tuvali = aşama 1 çıktısı. Orijinal taban (doğru kafa oranı +
+    let cur = s1;
+    let curDist = await identityDistanceOf(s1, refDescriptor);
+
+    // Aşama 2 tuvali = güncel çıktı. Orijinal taban (doğru kafa oranı +
     // bakış yönü kaynağı) ve en iyi yüz (kimlik çapası) referans olarak gider.
     const s2 = await generateWithOpenAI(
       buildStage2Prompt(),
-      [s1, templateUrl, bestFaceUrl]
+      [cur, templateUrl, bestFaceUrl]
     );
     if (!s2) {
-      // Aşama 2 patlarsa aşama 1 çıktısı yine kullanılabilir bir sonuçtur —
-      // tamamen başarısız saymak yerine onunla devam et (fail-soft).
-      console.warn(`Pipeline aşama 2 başarısız, aşama 1 çıktısıyla devam (style=${styleId}, chunk=${chunkIdx})`);
-      return s1;
+      console.warn(`Pipeline aşama 2 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
+    } else {
+      ({ buf: cur, dist: curDist } = await acceptStageIfIdentityHolds(
+        cur, curDist, s2, refDescriptor, "2", styleId, chunkIdx));
     }
+
     const s3 = await generateWithOpenAI(
       buildStage3Prompt(),
-      [s2, bestFaceUrl]
+      [cur, bestFaceUrl]
     );
     if (!s3) {
-      console.warn(`Pipeline aşama 3 başarısız, aşama 2 çıktısıyla devam (style=${styleId}, chunk=${chunkIdx})`);
-      return s2;
+      console.warn(`Pipeline aşama 3 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
+      return cur;
     }
-    return s3;
+    ({ buf: cur } = await acceptStageIfIdentityHolds(
+      cur, curDist, s3, refDescriptor, "3", styleId, chunkIdx));
+    return cur;
   }
 
   // MOD 1 (tam prompt) ve MOD 3 (kısaltılmış prompt): tek atım, tüm yüz
@@ -1501,7 +1581,8 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     const buf = await generateForMode(
-      mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx
+      mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx,
+      refDescriptor
     );
     if (!buf) {
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
