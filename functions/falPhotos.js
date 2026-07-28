@@ -813,13 +813,17 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "KEEP IDENTICAL to the first image: background, location, lighting, camera angle, framing, body " +
     "pose, and every clothing item and accessory (glasses, jewellery, watches, hats, bags, shoes). Also " +
     "keep the head the SAME size relative to the body as the person already in it — never enlarge the " +
-    "head or puff up the face. And make the eyes look in the SAME direction as that person looks; ignore " +
-    "where the target looks in their own selfies.\n\n" +
+    "head or puff up the face. And keep the SAME head rotation and gaze direction as that person; ignore " +
+    "how the target is posed in their own selfies. If that person is shown in profile or three-quarter " +
+    "view, stay in that view — never turn the head toward the camera to make the face easier or more " +
+    "recognisable.\n\n" +
     "COPY EXACTLY from the target's close-up face photos (never the distant full-body one): their exact " +
     "nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline — same shapes, same proportions, " +
     "same face length-to-width ratio. Do not beautify, symmetrise, average, round, puff or widen the " +
     "face. Keep their own natural expression; add no smile that isn't already there. The output must be " +
-    "unmistakably the same person as the selfies.\n\n" +
+    "unmistakably the same person as the selfies. Their selfies may be taken at an awkward close-up " +
+    "angle — you may undo that lens distortion, but only slightly, never as an excuse to redesign the " +
+    "face.\n\n" +
     "ALSO CHANGE: their true skin tone, applied evenly to EVERY visible piece of skin (face, neck, arms, " +
     "hands, legs, feet — never a two-tone patchwork, never lightened or given a glow), and their real " +
     "body build, height and weight, resizing the same clothing to fit naturally." + bodyNote + "\n\n" +
@@ -829,8 +833,9 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "even more precisely, and never widen the nose to suit the frames.\n\n" +
     "Tattoos only if visible in the target's own photos; remove the base person's tattoos. Fix only " +
     "genuinely bad lighting (harsh shadows, an unexplained dark blotch, a too-dark face) without " +
-    "brightening the skin. Keep it looking like an ordinary, unedited phone photo — natural skin " +
-    "texture, no plastic airbrush, no distorted hands or extra limbs."
+    "brightening the skin. Gently clean temporary blemishes and spots on the face, but keep real skin " +
+    "texture and permanent features (moles, freckles, scars, beard). Keep it looking like an ordinary, " +
+    "unedited phone photo — natural skin texture, no plastic airbrush, no distorted hands or extra limbs."
   );
 }
 
