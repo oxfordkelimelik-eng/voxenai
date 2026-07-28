@@ -1225,36 +1225,84 @@ async function generateWithOpenAI(prompt, imageUrls) {
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 // Vision kalite kontrol modeli. gpt-4o görsel yargı için güçlü ve uygun
-// maliyetli (kare başına ~$0.01-0.02, düşük detail + kısa çıktı ile).
+// maliyetli: 2 görsel (çıktı + referans selfie) "high" detail ile ~1500-2000
+// giriş token'ı ≈ kare başına ~$0.005-0.01. "low" detail (512px) kimlik
+// karşılaştırması için yeterli değildi, bilinçli olarak "high" seçildi.
 const VISION_MODEL = "gpt-4o";
 
 /**
  * VISION KALİTE KONTROLÜ (ikinci katman): üretilen çıktı karesini gpt-4o
- * vision'a gönderip yüzün DOĞAL/BOZULMAMIŞ olup olmadığını sorar. Matematiksel
- * kapı (assessOutputFace: kimlik/netlik/kafa oranı) sayı ile ölçülemeyen ince
- * deformasyonları (şişmiş/yuvarlaklaşmış yüz, bozuk dudak, çarpık öğeler,
- * anlamsız koyu leke) yakalayamıyor — bu katman tam onları hedefler.
+ * vision'a gönderir ve İKİ şeyi birden sorar:
+ *   1) KİMLİK — bu, referans selfie'deki KİŞİYLE AYNI kişi mi?
+ *   2) KALİTE — yüz doğal mı, yoksa AI artefaktıyla bozulmuş mu?
  *
- * Döner: true = kabul (doğal görünüyor), false = REDDET (bozuk — yeniden
- * üretilmeli). FAIL-SAFE: API hatası / belirsiz cevap / kota → true döner
- * (Vision katmanı ASLA iyi bir kareyi hata yüzünden elemez; yalnızca AÇIKÇA
- * bozuk dediğinde reddeder). Böylece bu katman çökse bile üretim durmaz,
- * sadece matematiksel kapıya geri düşer.
+ * KİMLİK KARŞILAŞTIRMASI NEDEN EKLENDİ (2026-07-28, gerçek olay): kullanıcı
+ * "tamamen farklı biri" olan bir çıktı bildirdi; loglar o karenin İKİ kapıdan
+ * da geçtiğini gösterdi. Sebep: (a) matematiksel kapı face-api.js'in 2018
+ * modelini kullanıyor ve eşiği (FACE_MATCH_THRESHOLD=0.70) foto kaybını
+ * önlemek için bilinçli olarak gevşetilmişti; (b) Vision'a o zamana kadar
+ * SADECE çıktı gönderiliyordu, referans selfie GÖSTERİLMİYORDU — yani
+ * "bu senin yüzün mü?" sorusu hiç sorulmuyordu. Kendi içinde düzgün görünen
+ * ama BAŞKA BİRİNE ait bir yüz bu testten rahatça geçiyordu. Artık iki görsel
+ * yan yana gönderiliyor ve gpt-4o insan gibi karşılaştırıyor.
+ *
+ * referenceImage: kullanıcının referans yüz fotoğrafı — URL (string) ya da
+ * Buffer. null/undefined ise kimlik karşılaştırması ATLANIR ve yalnızca
+ * eski kalite kontrolü yapılır (geriye dönük güvenli).
+ *
+ * Döner: { ok, reason } — ok:false ise reason "identity" | "quality".
+ * FAIL-SAFE: API hatası / belirsiz cevap / kota → ok:true (Vision katmanı
+ * ASLA iyi bir kareyi hata yüzünden elemez; yalnızca AÇIKÇA reddettiğinde
+ * eler). Böylece bu katman çökse bile üretim durmaz.
  */
-async function assessOutputWithVision(buf) {
+async function assessOutputWithVision(buf, referenceImage) {
   try {
     const b64 = buf.toString("base64");
-    const prompt =
-      "You are a strict photo quality checker for AI-generated portrait photos. " +
-      "Look ONLY at the main person's face and body. Is the face natural and " +
-      "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
-      "see any of: a puffed/swollen/rounded/melted face, warped or distorted lips, " +
-      "mouth, eyes or nose, an unnaturally rectangular/stretched face, mismatched " +
-      "or asymmetric features that look wrong, an unexplained dark blotch or smudge " +
-      "on the face, a head that looks pasted on or wrongly sized, or generally a " +
-      "face that looks deformed/uncanny. Accept (good) if the face looks like a " +
-      "normal, natural real photo of a person, even if not perfect. " +
-      "Answer with ONLY one word: GOOD or BAD.";
+    const hasRef = referenceImage != null;
+
+    const prompt = hasRef
+      ? ("You are a strict quality checker for AI-generated portrait photos.\n" +
+         "IMAGE 1 is an AI-generated photo. IMAGE 2 is a real reference photo of the person it is " +
+         "supposed to depict.\n\n" +
+         "Check two things:\n" +
+         "A) IDENTITY — is the person in IMAGE 1 recognisably the SAME person as in IMAGE 2? Compare " +
+         "the nose shape, eyebrows, eye shape and spacing, lips, jawline, face shape and overall " +
+         "impression. Allow for differences in angle, lighting, hairstyle and expression, but the " +
+         "underlying facial identity must clearly match. If it looks like a DIFFERENT person, or only " +
+         "vaguely similar, that fails.\n" +
+         "B) QUALITY — is the face in IMAGE 1 natural and undistorted? It fails if you see a puffed/" +
+         "swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched or " +
+         "rectangular face, an unexplained dark blotch or smudge, a head that looks pasted on or wrongly " +
+         "sized, or a generally deformed/uncanny face.\n\n" +
+         "Answer with ONLY one word:\n" +
+         "GOOD — both checks pass\n" +
+         "BAD_IDENTITY — it is not clearly the same person\n" +
+         "BAD_QUALITY — same person, but the face is visibly broken")
+      : ("You are a strict photo quality checker for AI-generated portrait photos. " +
+         "Look ONLY at the main person's face and body. Is the face natural and " +
+         "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
+         "see any of: a puffed/swollen/rounded/melted face, warped or distorted lips, " +
+         "mouth, eyes or nose, an unnaturally rectangular/stretched face, mismatched " +
+         "or asymmetric features that look wrong, an unexplained dark blotch or smudge " +
+         "on the face, a head that looks pasted on or wrongly sized, or generally a " +
+         "face that looks deformed/uncanny. Accept (good) if the face looks like a " +
+         "normal, natural real photo of a person, even if not perfect. " +
+         "Answer with ONLY one word: GOOD or BAD.");
+
+    // detail "high": kimlik karşılaştırması için yüz ayrıntısı şart; "low"
+    // (512px) yüz hatlarını ayırt etmeye yetmiyor. Maliyet farkı ihmal
+    // edilebilir (~1500 giriş token'ı ≈ yarım cent).
+    const content = [
+      { type: "text", text: prompt },
+      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}`, detail: "high" } },
+    ];
+    if (hasRef) {
+      const refUrl = Buffer.isBuffer(referenceImage)
+        ? `data:image/jpeg;base64,${referenceImage.toString("base64")}`
+        : referenceImage; // public URL (fal CDN / imzalı Firebase URL)
+      content.push({ type: "image_url", image_url: { url: refUrl, detail: "high" } });
+    }
+
     const resp = await fetch(OPENAI_CHAT_URL, {
       method: "POST",
       headers: {
@@ -1263,31 +1311,27 @@ async function assessOutputWithVision(buf) {
       },
       body: JSON.stringify({
         model: VISION_MODEL,
-        max_tokens: 3,
+        max_tokens: 8, // "BAD_IDENTITY" birkaç token
         temperature: 0,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}`, detail: "low" } },
-          ],
-        }],
+        messages: [{ role: "user", content }],
       }),
     });
     if (!resp.ok) {
       console.error(`Vision kalite kontrolü HTTP ${resp.status} — fail-safe kabul`);
-      return true;
+      return { ok: true, reason: null };
     }
     const json = await resp.json();
     const answer = (json?.choices?.[0]?.message?.content || "").trim().toUpperCase();
-    if (answer.startsWith("BAD")) return false;
-    if (answer.startsWith("GOOD")) return true;
+    if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity" };
+    if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality" };
+    if (answer.startsWith("BAD")) return { ok: false, reason: "quality" }; // referanssız mod
+    if (answer.startsWith("GOOD")) return { ok: true, reason: null };
     // Belirsiz cevap → fail-safe kabul.
     console.warn(`Vision kalite kontrolü belirsiz cevap ("${answer.slice(0, 40)}") — fail-safe kabul`);
-    return true;
+    return { ok: true, reason: null };
   } catch (e) {
     console.error("Vision kalite kontrolü hata (fail-safe kabul):", e.message || e);
-    return true;
+    return { ok: true, reason: null };
   }
 }
 
@@ -1391,9 +1435,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor);
         mathOk = q.ok;
-        if (!q.ok) {
-          console.warn(`OpenAI yolu: kalite kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[${q.reason}](${q.distance != null ? q.distance.toFixed(3) : "null"})`);
-        }
+        // ÖLÇÜM (2026-07-28): GEÇEN kareler de loglanıyor. Eskiden sadece
+        // elenenler loglanıyordu, bu yüzden "geçen bir kare hangi mesafedeydi"
+        // sorusuna veri yoktu ve FACE_MATCH_THRESHOLD tahminle ayarlanıyordu.
+        // Artık gerçek dağılım görülebilir -> eşik veriyle kalibre edilebilir.
+        const d = q.distance != null ? q.distance.toFixed(3) : "null";
+        const fr = q.faceRatio != null ? q.faceRatio.toFixed(3) : "null";
+        const bs = q.blurScore != null ? q.blurScore.toFixed(1) : "null";
+        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} yüzOranı=${fr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
       } catch (e) {
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
@@ -1404,10 +1453,11 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
 
       let visionOk = true;
       try {
-        visionOk = await assessOutputWithVision(buf);
-        if (!visionOk) {
-          console.warn(`OpenAI yolu: Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
-        }
+        // Referans selfie de gönderiliyor -> Vision "aynı kişi mi?" diye de
+        // sorabiliyor (bkz. assessOutputWithVision gerekçesi).
+        const v = await assessOutputWithVision(buf, refUrls[0]);
+        visionOk = v.ok;
+        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
       }
@@ -1991,27 +2041,27 @@ exports.falInferenceWebhook = onRequest(
           return { ...d, ...q };
         }));
         passed = checked.filter((d) => d.ok);
-        if (passed.length < checked.length) {
-          console.warn(`Kalite kapısı elendi (style=${styleId}, chunk=${chunkIdx}): ` +
-            checked.map((d) => d.ok
-              ? `OK(${d.distance?.toFixed(3)})`
-              : `RED[${d.reason}](${d.distance?.toFixed(3)})`).join(", "));
-        }
+        // ÖLÇÜM: geçen kareler de loglanıyor (eşiği veriyle kalibre edebilmek
+        // için — bkz. OpenAI yolundaki aynı gerekçe).
+        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}): ` +
+          checked.map((d) => (d.ok ? "GEÇTİ" : `RED[${d.reason}]`) +
+            `(mesafe=${d.distance != null ? d.distance.toFixed(3) : "null"}` +
+            ` yüzOranı=${d.faceRatio != null ? d.faceRatio.toFixed(3) : "null"}` +
+            ` netlik=${d.blurScore != null ? d.blurScore.toFixed(1) : "null"})`).join(", "));
 
         // İKİNCİ KATMAN — VISION: matematiksel kapıyı geçen kareler gpt-4o
-        // vision'a gönderilip yüzün DOĞAL/bozulmamış olduğu doğrulanır (bkz.
-        // assessOutputWithVision). Maliyet SADECE buraya kadar gelen karelere
-        // ödenir (~$0.01-0.02/kare). Fail-safe: assessOutputWithVision hata
-        // durumunda true döner, iyi kareler asla boşuna elenmez.
+        // vision'a gönderilir. Referans selfie DE gönderilir, böylece Vision
+        // "aynı kişi mi?" sorusunu da yanıtlar (bkz. assessOutputWithVision).
+        // Maliyet SADECE buraya kadar gelen karelere ödenir. Fail-safe:
+        // hata durumunda ok:true döner, iyi kareler asla boşuna elenmez.
         if (passed.length > 0) {
+          const refPhoto = Array.isArray(job.falRefUrls) ? job.falRefUrls[0] : null;
           const visionChecked = await Promise.all(passed.map(async (d) => ({
-            d, natural: await assessOutputWithVision(d.buf),
+            d, v: await assessOutputWithVision(d.buf, refPhoto),
           })));
-          const visionPassed = visionChecked.filter((v) => v.natural).map((v) => v.d);
-          if (visionPassed.length < passed.length) {
-            console.warn(`Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}): ` +
-              `${passed.length - visionPassed.length}/${passed.length} kare "bozuk" (deforme yüz)`);
-          }
+          const visionPassed = visionChecked.filter((x) => x.v.ok).map((x) => x.d);
+          console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ` +
+            visionChecked.map((x) => x.v.ok ? "GEÇTİ" : `RED[${x.v.reason}]`).join(", "));
           passed = visionPassed;
         }
       } catch (e) {
