@@ -1004,6 +1004,17 @@ async function generateWithOpenAI(prompt, imageUrls) {
     // "medium" ~4x daha ucuz (~$0.05). Kalite kapısı (assessOutputFace +
     // Vision) bozuk kareleri zaten eliyor; medium'da tanınabilirlik yeterli.
     form.append("quality", "medium");
+    // KRİTİK DÜZELTME (2026-07-28): bu alan EKSİKTİ. OpenAI'nin images/edits
+    // API'sinde output_format'ın VARSAYILANI PNG'dir, JPEG DEĞİL. Biz
+    // dönen görseli JPEG sanıp jpeg-js ile decode etmeye çalışıyorduk
+    // (assessOutputFace -> bufferToTensorScaled), bu da HER TEK fotoğrafta
+    // "Error: SOI not found" ile patlıyordu (SOI = JPEG'in başlangıç
+    // imzası, PNG'de yok). runOpenAiDirectChunk'taki catch bloğu bu hatayı
+    // yutup kaliteyi HİÇ KONTROL ETMEDEN chunk'ı kabul ediyordu — yani iki
+    // katmanlı kalite kapımız (kimlik+netlik+kafa oranı + Vision) OpenAI-
+    // direct'e geçtiğimizden beri HİÇ ÇALIŞMIYORDU (loglarda 24 saatte 10/10
+    // chunk'ta doğrulandı). Şimdi JPEG açıkça isteniyor.
+    form.append("output_format", "jpeg");
     buffers.forEach((buf, i) => {
       form.append("image[]", new Blob([buf], { type: "image/jpeg" }), `ref_${i}.jpg`);
     });
@@ -1154,23 +1165,43 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
     // netlik+kafa oranı (assessOutputFace), sonra onu geçenler için Vision
     // AI (assessOutputWithVision) — yüz şekli/dudak deformasyonu gibi
     // matematikle ölçülemeyen bozuklukları yakalar.
+    //
+    // SERTLEŞTİRME (2026-07-28): iki kontrol artık BAĞIMSIZ try/catch'lerde.
+    // Eskiden ikisi TEK try bloğundaydı — assessOutputFace beklenmedik bir
+    // hatayla patlarsa (gerçek örnek: output_format eksikliği yüzünden
+    // OpenAI PNG döndürüyordu, jpeg-js "SOI not found" ile patlıyordu),
+    // Vision kontrolü de HİÇ ÇALIŞMADAN chunk sessizce kabul ediliyordu —
+    // yani TEK bir katmandaki hata İKİ katmanı da devre dışı bırakıyordu.
+    // Şimdi bir katman patlarsa sadece O katman atlanır, diğeri yine çalışır.
     if (refDescriptor) {
+      let mathOk = true;
       try {
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor);
+        mathOk = q.ok;
         if (!q.ok) {
           console.warn(`OpenAI yolu: kalite kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[${q.reason}](${q.distance != null ? q.distance.toFixed(3) : "null"})`);
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
-          break;
-        }
-        const natural = await assessOutputWithVision(buf);
-        if (!natural) {
-          console.warn(`OpenAI yolu: Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
-          break;
         }
       } catch (e) {
-        console.error("OpenAI yolu kalite kontrolü başarısız (filtresiz devam):", e);
+        console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
+      }
+      if (!mathOk) {
+        if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+        break;
+      }
+
+      let visionOk = true;
+      try {
+        visionOk = await assessOutputWithVision(buf);
+        if (!visionOk) {
+          console.warn(`OpenAI yolu: Vision kapısı elendi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
+      }
+      if (!visionOk) {
+        if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+        break;
       }
     }
 
