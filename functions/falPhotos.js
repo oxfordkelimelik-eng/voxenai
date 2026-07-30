@@ -481,14 +481,20 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "any of these. A stranger must be able to place the output and a selfie side by side and see the SAME " +
     "person's exact face. Only the head's ANGLE and the GAZE direction may change to match the base photo " +
     "— the underlying facial geometry must not.\n\n" +
-    "#2 RULE — HEAD SIZE: the head must be the same size relative to the body as the person already in " +
-    "the BASE photo. Never enlarge the head or puff/swell the face; a too-big head or bloated face is a " +
-    "failure.\n\n" +
+    "#2 RULE — HEAD SIZE MUST FOLLOW THE BODY: the head must stay in the same proportion to the body as " +
+    "in the BASE photo — measured against SHOULDER WIDTH, not against the picture frame. This matters " +
+    "most when you resize the body: if the target person is slimmer or narrower than the base person, " +
+    "you must SCALE THE HEAD DOWN BY THE SAME AMOUNT as the shoulders and torso. Keeping the head at its " +
+    "original size on a narrowed body makes it look oversized — that is a failure, and it is the most " +
+    "common way this goes wrong. Never enlarge the head or puff/swell the face.\n\n" +
     "#3 RULE — HEAD ORIENTATION AND GAZE COPY THE BASE, NEVER THE SELFIES: look at the FIRST image (the " +
     "base photo) and see exactly how that person's HEAD IS TURNED and where their eyes point — straight " +
     "at the camera, or off to a side, up, down or away. The output must reproduce that EXACT head " +
-    "rotation and gaze. Completely IGNORE how the person is posed in their own selfies — their selfies " +
-    "are for face/skin/body only, never for head angle or gaze.\n" +
+    "rotation and gaze. This covers ALL THREE axes: the left/right turn, the up/down chin angle, and the " +
+    "sideways TILT (how much the head leans toward one shoulder). Do not straighten a tilted or angled " +
+    "head into a neutral upright pose — copy the base person's exact head attitude. Completely IGNORE " +
+    "how the person is posed in their own selfies — their selfies are for face/skin/body only, never " +
+    "for head angle or gaze.\n" +
     "PROFILE / TURNED-AWAY POSES ARE NOT AN EXCUSE: if the base person is shown in profile or " +
     "three-quarter view (face turned to the side, one ear toward the camera), the output MUST stay in " +
     "that same profile or three-quarter view. Do NOT rotate the head toward the camera to make the face " +
@@ -608,12 +614,15 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "the nose, cheekbones, jaw, chin, brow and the spacing of the features must stay correct and " +
     "consistent for that same person from any angle. Rotating the view must NOT stretch, flatten, warp, " +
     "widen or distort the face or change who the person is.\n\n" +
-    "HEAD SIZE (match the base): the head must be the SAME size and take up the SAME proportion of the " +
-    "body as the head of the person already in the BASE photo — keep the exact head-to-body ratio and " +
-    "the exact head position/scale from the base photo. Do NOT enlarge the head. The close-up face " +
-    "reference photos are zoomed-in for identity detail ONLY — never use their zoom level as a size " +
-    "reference. Occupy the same head area as the base subject. The head must never look oversized, " +
-    "bobble-headed or too big for the shoulders and body.\n\n" +
+    "HEAD SIZE (scale it with the body): keep the head in the SAME proportion to the body as the person " +
+    "already in the BASE photo. Judge this against SHOULDER WIDTH — on a normal adult the head is about " +
+    "one third of the shoulder span — not against the picture frame. CRITICAL when the build changes: " +
+    "you are also reshaping the body to the target's real build; if that makes the shoulders and torso " +
+    "narrower than the base person's, the head MUST shrink by the same proportion. A head left at its " +
+    "original size on a narrowed body reads as oversized even though nothing about the head changed. " +
+    "The close-up face references are zoomed-in for identity detail ONLY — never use their zoom level " +
+    "as a size reference. The head must never look oversized, bobble-headed or too big for the " +
+    "shoulders.\n\n" +
     "SINGLE PERSON: the target person appears EXACTLY ONCE. Do not duplicate their face onto other people " +
     "in the scene; any background people stay different, generic, unrelated people.\n\n" +
     "LIGHTING (strict): the face's skin colour and tone must look IDENTICAL to the reference photos — " +
@@ -746,8 +755,13 @@ function buildStage1Prompt(identityCaption, bodyCaption, bodyProfile) {
     "in profile or three-quarter view (face to the side, one ear toward the camera), your output stays " +
     "in that same view — never rotate the head toward the camera to make the face easier to draw or " +
     "more like the front-facing selfies. Ignore how the target is posed in their own selfies.\n\n" +
-    "Leave head SIZE and fine gaze/lighting polish to a later stage — but the head's ROTATION above is " +
-    "your job, not theirs, because your output may be used as-is if a later stage is discarded."
+    "HEAD MUST SCALE WITH THE BODY: you are reshaping the body to the target's real build. If that makes " +
+    "the shoulders and torso narrower than the base person's, scale the HEAD DOWN by the same proportion " +
+    "(judge it against shoulder width — an adult head is roughly a third of the shoulder span). A head " +
+    "left at its original size on a narrowed body reads as oversized. Also keep the head's TILT and chin " +
+    "angle exactly as in the base photo — do not straighten a tilted head.\n\n" +
+    "Leave only the fine gaze/lighting polish to a later stage — head rotation, tilt and scaling are " +
+    "YOUR job, because your output may be used as-is if a later stage is discarded."
   );
 }
 
@@ -760,19 +774,25 @@ function buildStage2Prompt() {
     "reference composition — use it ONLY to read the correct head size and gaze direction. The THIRD " +
     "image is the person's real face — use it ONLY to keep their identity unchanged.\n\n" +
     "Fix exactly three things in the first image, changing nothing else:\n\n" +
-    "1) HEAD SIZE: make the head the same size relative to the body, and in the same proportion of the " +
-    "frame, as the person in the SECOND image. If the head is too large or the face looks puffed or " +
-    "swollen, shrink and slim it back to a natural, anatomically correct size. A bobble-head is a " +
+    "1) HEAD SIZE: make the head the right size for the BODY IT IS ON in the first image — judge it " +
+    "against that body's SHOULDER WIDTH (an adult head is roughly a third of the shoulder span), not " +
+    "against the picture frame. Use the SECOND image only to see what head-to-shoulder proportion the " +
+    "original composition had. IMPORTANT: the body in the first image may have been narrowed to match a " +
+    "slimmer person; in that case the head must be scaled DOWN to match those narrower shoulders, not " +
+    "left at the original size. If the head looks too large for the shoulders, or the face looks puffed " +
+    "or swollen, shrink and slim it to a natural, anatomically correct size. A bobble-head is a " +
     "failure.\n\n" +
-    "2) HEAD AND NECK: the head must sit upright and firmly on the neck, aligned with the shoulders, " +
-    "with a clean natural join — no gap, seam, mismatch, floating or pasted-on look, no tilting, " +
-    "drooping or leaning.\n\n" +
+    "2) HEAD AND NECK JOIN: the head must sit firmly on the neck, aligned with the shoulders, with a " +
+    "clean natural join — no gap, seam, mismatch, floating or pasted-on look, and no drooping. This is " +
+    "about the JOIN, not the angle: if the person in the SECOND image holds their head tilted or at an " +
+    "angle, keep that same tilt (see point 3) — do not straighten it.\n\n" +
     "3) HEAD ORIENTATION AND GAZE: look at the SECOND image and see exactly how that person's HEAD IS " +
-    "TURNED and where their eyes point (into the camera, or off to a specific side, up, down or away). " +
-    "Reproduce that EXACT head rotation and gaze. If the SECOND image shows a profile or three-quarter " +
-    "view, your output must stay in that same view — never rotate the head toward the camera to make " +
-    "the face easier or more recognisable. Both eyes aligned and coherent, fully open, clear, with " +
-    "natural catch-light — never cross-eyed, wandering, half-closed or dead-eyed.\n\n" +
+    "POSED — its left/right turn, its up/down chin angle, and its sideways TILT toward one shoulder — " +
+    "and where their eyes point. Reproduce that EXACT head attitude and gaze on all three axes. If the " +
+    "SECOND image shows a profile or three-quarter view, your output must stay in that same view — never " +
+    "rotate the head toward the camera to make the face easier or more recognisable, and never " +
+    "straighten a tilted head into a neutral upright pose. Both eyes aligned and coherent, fully open, " +
+    "clear, with natural catch-light — never cross-eyed, wandering, half-closed or dead-eyed.\n\n" +
     "CRITICAL: do NOT change the person's identity while doing this. Their facial structure — nose, " +
     "eyebrows, eyes, lips, jaw, cheekbones and face shape — must stay exactly as it is (cross-check " +
     "against the THIRD image). Do not change the background, clothing, accessories, pose, skin tone or " +
@@ -841,10 +861,10 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
     "the other reference photos. Never output a reference photo; the result must be the first image, " +
     "edited.\n\n" +
     "KEEP EXACTLY AS IN THE FIRST IMAGE: background, location, lighting, camera angle, framing, body " +
-    "pose, head rotation and gaze direction, head size relative to the body, and every clothing item " +
-    "and accessory (glasses, jewellery, watches, bags, shoes). If that person is in profile or " +
-    "three-quarter view, stay in that view — never turn the head toward the camera. Ignore how the " +
-    "target is posed or where they look in their own selfies.\n\n" +
+    "pose, head rotation, TILT and gaze direction, head size relative to the shoulders, and every " +
+    "clothing item and accessory (glasses, jewellery, watches, bags, shoes). If that person is in " +
+    "profile or three-quarter view, stay in that view — never turn or straighten the head toward the " +
+    "camera. Ignore how the target is posed or where they look in their own selfies.\n\n" +
     "CHANGE ONLY THE PERSON, using their close-up face photos (the distant full-body photo is for body " +
     "only):\n" +
     "- Face: copy their exact nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline. Same " +
@@ -852,7 +872,9 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
     "natural expression. It must unmistakably be the same person.\n" +
     "- Skin: their true tone, applied evenly to every visible area — face, neck, arms, hands, legs. " +
     "Never two-tone, never lightened or given a glow.\n" +
-    "- Body: their real build, height and weight, resizing the same clothing to fit." +
+    "- Body: their real build, height and weight, resizing the same clothing to fit. If this makes the " +
+    "shoulders narrower than the base person's, scale the HEAD DOWN by the same amount — a head left at " +
+    "its original size on a narrowed body looks oversized." +
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     "QUALITY: an ordinary, unedited phone photo. Natural skin texture, no plastic airbrush, no added " +
@@ -884,8 +906,13 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "three-quarter view, the output stays in that same view. Never rotate the head toward the camera to " +
     "make the face easier to draw or more recognisable — a frontal face where the base shows a profile " +
     "is a failure. Ignore how the target is posed in their own selfies.\n" +
-    "- Head size relative to the body. Never enlarge the head; a bobble-head or a puffed face is a " +
-    "failure.\n" +
+    "- Head size relative to the body, judged against SHOULDER WIDTH (roughly one third of the shoulder " +
+    "span on an adult). Note this interacts with the body change below: if you narrow the shoulders and " +
+    "torso to match the target's build, you must scale the head down by the same proportion. Leaving the " +
+    "head at its original size on a narrowed body makes it read as oversized — the single most common " +
+    "failure here. Never enlarge the head or puff the face.\n" +
+    "- The head's TILT (how far it leans toward one shoulder) and chin angle, not just its left/right " +
+    "turn. Do not straighten a tilted head into a neutral upright pose.\n" +
     "- Every clothing item and accessory, including glasses, sunglasses, jewellery, watches, hats, bags " +
     "and shoes. The target's own clothing must never be copied over.\n\n" +
     "CHANGE ONLY THESE THREE THINGS:\n\n" +
@@ -982,11 +1009,12 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "background, scene and framing.\n\n" +
     "KEEP IDENTICAL to the first image: background, location, lighting, camera angle, framing, body " +
     "pose, and every clothing item and accessory (glasses, jewellery, watches, hats, bags, shoes). Also " +
-    "keep the head the SAME size relative to the body as the person already in it — never enlarge the " +
-    "head or puff up the face. And keep the SAME head rotation and gaze direction as that person; ignore " +
-    "how the target is posed in their own selfies. If that person is shown in profile or three-quarter " +
-    "view, stay in that view — never turn the head toward the camera to make the face easier or more " +
-    "recognisable.\n\n" +
+    "keep the head the SAME size relative to the body — judged against shoulder width — as the person " +
+    "already in it; if you narrow the body to match the target's build, scale the head down by the same " +
+    "amount, never leave it at its original size on a narrower body. And keep the SAME head rotation, " +
+    "tilt and gaze direction as that person; ignore how the target is posed in their own selfies. If " +
+    "that person is shown in profile or three-quarter view, stay in that view — never turn or straighten " +
+    "the head toward the camera to make the face easier or more recognisable.\n\n" +
     "COPY EXACTLY from the target's close-up face photos (never the distant full-body one): their exact " +
     "nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline — same shapes, same proportions, " +
     "same face length-to-width ratio. Do not beautify, symmetrise, average, round, puff or widen the " +
@@ -1496,12 +1524,19 @@ async function assessOutputWithVision(buf, referenceImages) {
          "shapes, the edit failed.\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
-         "or rectangular face, an unexplained dark blotch or smudge, a head that looks pasted on or " +
-         "wrongly sized, or a generally deformed face.\n\n" +
+         "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face. Also " +
+         "check HEAD PROPORTION: is the head a natural size for the shoulders and torso it sits on? " +
+         "Measure it against the shoulder width — an adult's head is roughly a third of the shoulder " +
+         "span. If the head looks too large for the body, or pasted on, that fails.\n" +
+         "C) SKIN TONE CONSISTENCY — is the skin colour the SAME across the whole visible body in " +
+         "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
+         "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
+         "as if two different people's skin were combined — that fails.\n\n" +
          "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words):\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
-         "BAD_QUALITY: <what looks broken>")
+         "BAD_QUALITY: <what looks broken, e.g. head too big for body>\n" +
+         "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1562,6 +1597,10 @@ async function assessOutputWithVision(buf, referenceImages) {
     // sayısal hakem kuralı (visionRejectionOverridden) aynen çalışsın.
     if (answer.startsWith("BAD_FEATURES")) return { ok: false, reason: "identity", detail, inconclusive: false };
     if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity", detail, inconclusive: false };
+    // BAD_SKIN ayrı bir sebep: sayısal hakem kuralı bunu ASLA geçersiz kılamaz
+    // (kimlik mesafesi vücut ten tutarlılığı hakkında hiçbir şey söylemez —
+    // bkz. visionRejectionOverridden yalnızca "identity" ile ilgilenir).
+    if (answer.startsWith("BAD_SKIN")) return { ok: false, reason: "skin", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
