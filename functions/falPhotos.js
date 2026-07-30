@@ -1475,24 +1475,32 @@ async function assessOutputWithVision(buf, referenceImages) {
       .filter((r) => r != null);
     const hasRef = refs.length > 0;
 
+    // ÇERÇEVELEME NOTU (2026-07-30): bu prompt bilinçli olarak "bu iki
+    // fotoğraftaki kişi aynı kişi mi?" DEMİYOR. Öyle sorulduğunda gpt-4o
+    // içerik politikası gereği reddediyordu ("I'm sorry, I can't help with
+    // identifying or comparing people") — gerçek logda 5 karenin 2'sinde.
+    // Ret, fail-safe kabule düşüyor ve kapı sessizce devre dışı kalıyordu.
+    // Artık soru bir DÜZENLEME İŞİNİN SADAKAT DENETİMİ olarak kuruluyor:
+    // "bu edit, kaynak materyaldeki yüz hatlarını doğru kopyalamış mı?"
+    // Bu, istediğimiz bilginin aynısı ama kimlik tespiti sorusu değil.
     const prompt = hasRef
-      ? ("You are a strict quality checker for AI-generated portrait photos.\n" +
-         "IMAGE 1 is an AI-generated photo. The REMAINING images are real reference photos of the " +
-         "person it is supposed to depict (taken from different angles: front and sides).\n\n" +
-         "Check two things:\n" +
-         "A) IDENTITY — is the person in IMAGE 1 recognisably the SAME person as in the reference " +
-         "photos? Compare " +
-         "the nose shape, eyebrows, eye shape and spacing, lips, jawline, face shape and overall " +
-         "impression. Allow for differences in angle, lighting, hairstyle and expression, but the " +
-         "underlying facial identity must clearly match. If it looks like a DIFFERENT person, or only " +
-         "vaguely similar, that fails.\n" +
-         "B) QUALITY — is the face in IMAGE 1 natural and undistorted? It fails if you see a puffed/" +
-         "swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched or " +
-         "rectangular face, an unexplained dark blotch or smudge, a head that looks pasted on or wrongly " +
-         "sized, or a generally deformed/uncanny face.\n\n" +
+      ? ("You are a quality checker for an AI image-editing pipeline.\n" +
+         "IMAGE 1 was produced by an edit. The REMAINING images are the SOURCE MATERIAL the edit was " +
+         "instructed to copy the facial features from.\n\n" +
+         "Judge how faithfully the edit reproduced that source material:\n" +
+         "A) FEATURE FIDELITY — do the facial features rendered in IMAGE 1 match the shapes in the " +
+         "source images? Check the nose shape and width, eyebrow thickness and arch, eye shape and " +
+         "spacing, lip shape and thickness, and the jaw, chin and cheekbone structure. Differences in " +
+         "angle, lighting, hairstyle and expression are expected and fine — you are only judging whether " +
+         "the underlying feature SHAPES were copied faithfully. If the features are clearly different " +
+         "shapes, the edit failed.\n" +
+         "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
+         "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
+         "or rectangular face, an unexplained dark blotch or smudge, a head that looks pasted on or " +
+         "wrongly sized, or a generally deformed face.\n\n" +
          "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words):\n" +
          "GOOD: <why it passes>\n" +
-         "BAD_IDENTITY: <which features differ>\n" +
+         "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
@@ -1536,25 +1544,34 @@ async function assessOutputWithVision(buf, referenceImages) {
         messages: [{ role: "user", content }],
       }),
     });
+    // inconclusive: Vision KARAR VEREMEDİ (HTTP hatası, politika reddi ya da
+    // ayrıştırılamayan cevap). ok:true ile aynı şey DEĞİL — çağıran taraf,
+    // başka hiçbir kanıtı yoksa (ör. matematiksel kapı da yüzü görememişse)
+    // kareyi kabul etmemeyi seçebilsin diye ayrı bir bayrak.
     if (!resp.ok) {
       console.error(`Vision kalite kontrolü HTTP ${resp.status} — fail-safe kabul`);
-      return { ok: true, reason: null, detail: null };
+      return { ok: true, reason: null, detail: null, inconclusive: true };
     }
     const json = await resp.json();
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
     const answer = raw.toUpperCase();
     // Gerekçe: ilk iki nokta üst üstesinden sonrası (yoksa boş).
     const detail = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim().slice(0, 120) : null;
-    if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity", detail };
-    if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail };
-    if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail }; // referanssız mod
-    if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail };
-    // Belirsiz cevap → fail-safe kabul.
-    console.warn(`Vision kalite kontrolü belirsiz cevap ("${raw.slice(0, 60)}") — fail-safe kabul`);
-    return { ok: true, reason: null, detail: null };
+    // BAD_FEATURES = yeni çerçevelemedeki ad; BAD_IDENTITY eski cevaplarla
+    // uyum için korunuyor. İkisi de içeride "identity" sebebine eşlenir ki
+    // sayısal hakem kuralı (visionRejectionOverridden) aynen çalışsın.
+    if (answer.startsWith("BAD_FEATURES")) return { ok: false, reason: "identity", detail, inconclusive: false };
+    if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity", detail, inconclusive: false };
+    if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
+    if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
+    if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
+    // Ayrıştırılamayan cevap (çoğunlukla politika reddi) → fail-safe kabul,
+    // ama KARARSIZ olarak işaretlenir.
+    console.warn(`Vision kalite kontrolü belirsiz/reddedilmiş cevap ("${raw.slice(0, 70)}") — fail-safe kabul (kararsız)`);
+    return { ok: true, reason: null, detail: null, inconclusive: true };
   } catch (e) {
     console.error("Vision kalite kontrolü hata (fail-safe kabul):", e.message || e);
-    return { ok: true, reason: null, detail: null };
+    return { ok: true, reason: null, detail: null, inconclusive: true };
   }
 }
 
@@ -1862,27 +1879,52 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
       } catch (e) {
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
-      if (!mathOk) {
+      // "no-face" AYRI ELE ALINIR (2026-07-30): bu, "kare bozuk" demek DEĞİL,
+      // "yüz dedektörüm yüzü göremedi" demek. Gerçek örnek: güneş gözlüklü
+      // Versailles şablonunda üretilen kare gözle GAYET İYİYDİ ama face-api
+      // gözler kapalı olduğu için yüz noktalarını çıkaramadı ve kare boşuna
+      // atıldı (bir üretim de boşa gitti). Artık böyle kareler doğrudan
+      // elenmiyor, kararı GÖRÜNTÜYÜ GERÇEKTEN GÖREBİLEN Vision'a devrediyor.
+      const noFace = !mathOk && mathReason === "no-face";
+      if (!mathOk && !noFace) {
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
           mode, gate: `math-${mathReason || "?"}`, distance: mathDist,
         });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
       }
+      if (noFace) {
+        console.warn(`KALITE: yüz tespit edilemedi (gözlük/açı olabilir) — kare atılmıyor, karar Vision'a devredildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+      }
 
       let visionOk = true;
       let visionDetail = null;
       let visionReason = null;
+      let visionInconclusive = true; // çağrı hiç yapılamazsa da kararsız sayılır
       try {
-        // Referans selfie de gönderiliyor -> Vision "aynı kişi mi?" diye de
-        // sorabiliyor (bkz. assessOutputWithVision gerekçesi).
+        // Referans selfie'ler de gönderiliyor -> Vision hat-sadakatini de
+        // değerlendirebiliyor (bkz. assessOutputWithVision gerekçesi).
         const v = await assessOutputWithVision(buf, splitRefUrls(refUrls).faceUrls);
         visionOk = v.ok;
         visionDetail = v.detail;
         visionReason = v.reason;
-        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}${v.detail ? ` — "${v.detail}"` : ""}`);
+        visionInconclusive = !!v.inconclusive;
+        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? (v.inconclusive ? "KARARSIZ(kabul)" : "GEÇTİ") : "RED[" + v.reason + "]"}${v.detail ? ` — "${v.detail}"` : ""}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
+      }
+
+      // İKİ KAPI DA KÖR KALDIYSA kareyi kabul etmiyoruz: matematiksel kapı
+      // yüzü görememiş VE Vision da karar verememişse elimizde hiçbir kanıt
+      // yok. Böyle bir kareyi geçirmek, gerçekten bozuk (yüzsüz) bir görselin
+      // kullanıcıya gitmesi riskini taşır — kanıtsızlıkta güvenli taraf ret.
+      if (noFace && visionInconclusive) {
+        console.warn(`KALITE: yüz tespit edilemedi VE Vision karar veremedi — kanıt yok, kare reddedildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+        await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+          mode, gate: "math-no-face+vision-inconclusive", distance: null,
+        });
+        if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+        break;
       }
       // Sayısal ölçüm hakem: kimlik mesafesi açıkça iyiyse Vision'ın "farklı
       // kişi" reddi geçersiz sayılır (bkz. visionRejectionOverridden).
@@ -2472,11 +2514,14 @@ exports.falInferenceWebhook = onRequest(
           const q = await assessOutputFace(d.buf, job.refDescriptor);
           return { ...d, ...q };
         }));
-        passed = checked.filter((d) => d.ok);
+        // "no-face" doğrudan elenmez, kararı Vision'a devreder (bkz. OpenAI
+        // yolundaki aynı gerekçe: gözlük/açı yüzünden dedektörün yüzü
+        // görememesi, karenin bozuk olduğu anlamına gelmiyor).
+        passed = checked.filter((d) => d.ok || d.reason === "no-face");
         // ÖLÇÜM: geçen kareler de loglanıyor (eşiği veriyle kalibre edebilmek
         // için — bkz. OpenAI yolundaki aynı gerekçe).
         console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}): ` +
-          checked.map((d) => (d.ok ? "GEÇTİ" : `RED[${d.reason}]`) +
+          checked.map((d) => (d.ok ? "GEÇTİ" : (d.reason === "no-face" ? "YÜZ YOK→Vision'a" : `RED[${d.reason}]`)) +
             `(mesafe=${d.distance != null ? d.distance.toFixed(3) : "null"}` +
             ` yüzOranı=${d.faceRatio != null ? d.faceRatio.toFixed(3) : "null"}` +
             ` netlik=${d.blurScore != null ? d.blurScore.toFixed(1) : "null"})`).join(", "));
@@ -2498,6 +2543,12 @@ exports.falInferenceWebhook = onRequest(
             if (!x.v.ok && visionRejectionOverridden(x.v.reason, x.d.distance)) {
               console.warn(`VISION REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}): mesafe=${x.d.distance.toFixed(3)} < ${VISION_OVERRIDE_MAX_DISTANCE} — Vision "${x.v.detail || "identity"}" demişti, kare KABUL edildi`);
               x.v = { ...x.v, ok: true, overridden: true };
+            }
+            // İki kapı da kör kaldıysa (yüz tespit edilemedi VE Vision karar
+            // veremedi) kanıt yok — güvenli taraf ret.
+            if (x.v.ok && x.v.inconclusive && x.d.reason === "no-face") {
+              console.warn(`KALITE: yüz tespit edilemedi VE Vision karar veremedi — kanıt yok, kare reddedildi (style=${styleId}, chunk=${chunkIdx})`);
+              x.v = { ...x.v, ok: false, reason: "no-evidence" };
             }
           }
           const visionPassed = visionChecked.filter((x) => x.v.ok).map((x) => x.d);
