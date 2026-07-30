@@ -1553,6 +1553,29 @@ async function assessOutputWithVision(buf, referenceImages) {
   }
 }
 
+// Vision "farklı kişi" dediğinde, SAYISAL kimlik ölçümü bu değerden iyiyse
+// Vision'ın reddi GEÇERSİZ sayılır (sayısal ölçüm hakem olur).
+//
+// NEDEN (2026-07-30 gerçek veri): Vision'ın kararları sayısal mesafeyle
+// örtüşmüyordu — 0.305 (koşunun EN İYİ skoru) RED alırken 0.448 GEÇTİ.
+// Aynı soruya (bu aynı kişi mi?) iki ölçüm çelişince, güçlü sayısal kanıtın
+// gürültülü olabilen tek bir model yargısını geçersiz kılması makul.
+//
+// SINIR — YALNIZCA "identity" REDDİ İÇİN: Vision "quality" (yüz deforme)
+// dediğinde bu kural ASLA uygulanmaz, çünkü kimlik mesafesi deformasyon
+// hakkında hiçbir şey söylemez; şişmiş/çarpık bir yüz de pekâlâ düşük mesafe
+// verebilir. Orada Vision tek yetkili kalır.
+//
+// 0.35 muhafazakâr seçildi: kabul eşiğimiz 0.70, yani bu onun yarısı —
+// "sınırda" değil, açıkça güçlü bir eşleşme.
+const VISION_OVERRIDE_MAX_DISTANCE = 0.35;
+
+function visionRejectionOverridden(visionReason, distance) {
+  return visionReason === "identity"
+    && distance != null
+    && distance < VISION_OVERRIDE_MAX_DISTANCE;
+}
+
 // A/B karşılaştırma dönemi boyunca REDDEDİLEN kareler Storage'a yazılır ki
 // "Vision haklı mı?" sorusu gözle doğrulanabilsin. Karşılaştırma bitince
 // false yapılıp bu depolama kapatılabilir.
@@ -1855,6 +1878,12 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
         console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}${v.detail ? ` — "${v.detail}"` : ""}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
+      }
+      // Sayısal ölçüm hakem: kimlik mesafesi açıkça iyiyse Vision'ın "farklı
+      // kişi" reddi geçersiz sayılır (bkz. visionRejectionOverridden).
+      if (!visionOk && visionRejectionOverridden(visionReason, mathDist)) {
+        console.warn(`VISION REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): mesafe=${mathDist.toFixed(3)} < ${VISION_OVERRIDE_MAX_DISTANCE} — Vision "${visionDetail || "identity"}" demişti, sayısal kanıt güçlü olduğu için kare KABUL edildi`);
+        visionOk = true;
       }
       if (!visionOk) {
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
@@ -2458,9 +2487,17 @@ exports.falInferenceWebhook = onRequest(
           const visionChecked = await Promise.all(passed.map(async (d) => ({
             d, v: await assessOutputWithVision(d.buf, refFaces),
           })));
+          // Sayısal ölçüm hakem: kimlik mesafesi açıkça iyiyse Vision'ın
+          // "farklı kişi" reddi geçersiz sayılır (bkz. visionRejectionOverridden).
+          for (const x of visionChecked) {
+            if (!x.v.ok && visionRejectionOverridden(x.v.reason, x.d.distance)) {
+              console.warn(`VISION REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}): mesafe=${x.d.distance.toFixed(3)} < ${VISION_OVERRIDE_MAX_DISTANCE} — Vision "${x.v.detail || "identity"}" demişti, kare KABUL edildi`);
+              x.v = { ...x.v, ok: true, overridden: true };
+            }
+          }
           const visionPassed = visionChecked.filter((x) => x.v.ok).map((x) => x.d);
           console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ` +
-            visionChecked.map((x) => (x.v.ok ? "GEÇTİ" : `RED[${x.v.reason}]`) +
+            visionChecked.map((x) => (x.v.ok ? (x.v.overridden ? "GEÇTİ(hakem)" : "GEÇTİ") : `RED[${x.v.reason}]`) +
               (x.v.detail ? ` — "${x.v.detail}"` : "")).join(", "));
           // Reddedilenleri teşhis için sakla (fal yolu; bkz. saveRejectedFrame).
           for (const x of visionChecked) {
