@@ -742,7 +742,12 @@ function buildStage1Prompt(identityCaption, bodyCaption, bodyProfile) {
     bodyBlock +
     "TATTOOS: only if clearly visible in the target's own photos. Remove the base person's tattoos; if " +
     "the target has none, the skin is clean.\n\n" +
-    "Ignore head size, gaze direction and lighting polish for now — a later stage handles those."
+    "HEAD ORIENTATION: keep the head turned exactly as it is in the base photo. If that person is shown " +
+    "in profile or three-quarter view (face to the side, one ear toward the camera), your output stays " +
+    "in that same view — never rotate the head toward the camera to make the face easier to draw or " +
+    "more like the front-facing selfies. Ignore how the target is posed in their own selfies.\n\n" +
+    "Leave head SIZE and fine gaze/lighting polish to a later stage — but the head's ROTATION above is " +
+    "your job, not theirs, because your output may be used as-is if a later stage is discarded."
   );
 }
 
