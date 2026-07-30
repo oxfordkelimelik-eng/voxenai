@@ -1485,10 +1485,10 @@ async function assessOutputWithVision(buf, referenceImages) {
          "swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched or " +
          "rectangular face, an unexplained dark blotch or smudge, a head that looks pasted on or wrongly " +
          "sized, or a generally deformed/uncanny face.\n\n" +
-         "Answer with ONLY one word:\n" +
-         "GOOD — both checks pass\n" +
-         "BAD_IDENTITY — it is not clearly the same person\n" +
-         "BAD_QUALITY — same person, but the face is visibly broken")
+         "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words):\n" +
+         "GOOD: <why it passes>\n" +
+         "BAD_IDENTITY: <which features differ>\n" +
+         "BAD_QUALITY: <what looks broken>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1522,27 +1522,63 @@ async function assessOutputWithVision(buf, referenceImages) {
       },
       body: JSON.stringify({
         model: VISION_MODEL,
-        max_tokens: 8, // "BAD_IDENTITY" birkaç token
+        // Karar + kısa gerekçe için yeterli. Gerekçe TEŞHİS içindir: Vision'ın
+        // haklı mı yoksa gürültülü mü olduğunu ancak "neden reddettiğini"
+        // görerek anlayabiliriz (bkz. 2026-07-30: 0.305 mesafeli en iyi kare
+        // reddedilirken 0.448'lik kare kabul edildi — sayıyla örtüşmüyor).
+        max_tokens: 40,
         temperature: 0,
         messages: [{ role: "user", content }],
       }),
     });
     if (!resp.ok) {
       console.error(`Vision kalite kontrolü HTTP ${resp.status} — fail-safe kabul`);
-      return { ok: true, reason: null };
+      return { ok: true, reason: null, detail: null };
     }
     const json = await resp.json();
-    const answer = (json?.choices?.[0]?.message?.content || "").trim().toUpperCase();
-    if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity" };
-    if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality" };
-    if (answer.startsWith("BAD")) return { ok: false, reason: "quality" }; // referanssız mod
-    if (answer.startsWith("GOOD")) return { ok: true, reason: null };
+    const raw = (json?.choices?.[0]?.message?.content || "").trim();
+    const answer = raw.toUpperCase();
+    // Gerekçe: ilk iki nokta üst üstesinden sonrası (yoksa boş).
+    const detail = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim().slice(0, 120) : null;
+    if (answer.startsWith("BAD_IDENTITY")) return { ok: false, reason: "identity", detail };
+    if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail };
+    if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail }; // referanssız mod
+    if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail };
     // Belirsiz cevap → fail-safe kabul.
-    console.warn(`Vision kalite kontrolü belirsiz cevap ("${answer.slice(0, 40)}") — fail-safe kabul`);
-    return { ok: true, reason: null };
+    console.warn(`Vision kalite kontrolü belirsiz cevap ("${raw.slice(0, 60)}") — fail-safe kabul`);
+    return { ok: true, reason: null, detail: null };
   } catch (e) {
     console.error("Vision kalite kontrolü hata (fail-safe kabul):", e.message || e);
-    return { ok: true, reason: null };
+    return { ok: true, reason: null, detail: null };
+  }
+}
+
+// A/B karşılaştırma dönemi boyunca REDDEDİLEN kareler Storage'a yazılır ki
+// "Vision haklı mı?" sorusu gözle doğrulanabilsin. Karşılaştırma bitince
+// false yapılıp bu depolama kapatılabilir.
+const SAVE_REJECTED_FRAMES = true;
+const DEBUG_ROOT = "dating_rejected";
+
+/**
+ * Reddedilen bir kareyi teşhis için saklar. Dosya adı kararın TÜM bağlamını
+ * taşır (mod, chunk, deneme, hangi kapı, mesafe) — böylece görsele bakarken
+ * neden elendiği ayrıca aranmaz. Tamamen fail-safe: kaydetme hatası üretimi
+ * etkilemez, yalnızca loglanır.
+ */
+async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, meta) {
+  if (!SAVE_REJECTED_FRAMES) return;
+  try {
+    const parts = [
+      `${styleId}_c${chunkIdx}_att${attempt}`,
+      `mode-${meta.mode || "?"}`,
+      `gate-${meta.gate || "?"}`,
+      meta.distance != null ? `dist-${meta.distance.toFixed(3)}` : null,
+    ].filter(Boolean);
+    const path = `${DEBUG_ROOT}/${uid}/${jobId}/${parts.join("__")}.jpg`;
+    await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
+    console.log(`REDDEDİLEN KARE KAYDEDİLDİ: ${path}${meta.detail ? ` | Vision gerekçesi: ${meta.detail}` : ""}`);
+  } catch (e) {
+    console.error("Reddedilen kare kaydedilemedi (teşhis kaybı, üretim etkilenmedi):", e.message || e);
   }
 }
 
@@ -1779,10 +1815,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
     // Şimdi bir katman patlarsa sadece O katman atlanır, diğeri yine çalışır.
     if (refDescriptor) {
       let mathOk = true;
+      let mathDist = null;
+      let mathReason = null;
       try {
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor);
         mathOk = q.ok;
+        mathDist = q.distance;
+        mathReason = q.reason;
         // ÖLÇÜM (2026-07-28): GEÇEN kareler de loglanıyor. Eskiden sadece
         // elenenler loglanıyordu, bu yüzden "geçen bir kare hangi mesafedeydi"
         // sorusuna veri yoktu ve FACE_MATCH_THRESHOLD tahminle ayarlanıyordu.
@@ -1795,21 +1835,31 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
       if (!mathOk) {
+        await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+          mode, gate: `math-${mathReason || "?"}`, distance: mathDist,
+        });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
       }
 
       let visionOk = true;
+      let visionDetail = null;
+      let visionReason = null;
       try {
         // Referans selfie de gönderiliyor -> Vision "aynı kişi mi?" diye de
         // sorabiliyor (bkz. assessOutputWithVision gerekçesi).
         const v = await assessOutputWithVision(buf, splitRefUrls(refUrls).faceUrls);
         visionOk = v.ok;
-        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}`);
+        visionDetail = v.detail;
+        visionReason = v.reason;
+        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? "GEÇTİ" : "RED[" + v.reason + "]"}${v.detail ? ` — "${v.detail}"` : ""}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
       }
       if (!visionOk) {
+        await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+          mode, gate: `vision-${visionReason || "?"}`, distance: mathDist, detail: visionDetail,
+        });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
       }
@@ -2410,7 +2460,17 @@ exports.falInferenceWebhook = onRequest(
           })));
           const visionPassed = visionChecked.filter((x) => x.v.ok).map((x) => x.d);
           console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ` +
-            visionChecked.map((x) => x.v.ok ? "GEÇTİ" : `RED[${x.v.reason}]`).join(", "));
+            visionChecked.map((x) => (x.v.ok ? "GEÇTİ" : `RED[${x.v.reason}]`) +
+              (x.v.detail ? ` — "${x.v.detail}"` : "")).join(", "));
+          // Reddedilenleri teşhis için sakla (fal yolu; bkz. saveRejectedFrame).
+          for (const x of visionChecked) {
+            if (!x.v.ok) {
+              await saveRejectedFrame(uid, jobId, styleId, chunkIdx, 1, x.d.buf, {
+                mode: "fal", gate: `vision-${x.v.reason || "?"}`,
+                distance: x.d.distance, detail: x.v.detail,
+              });
+            }
+          }
           passed = visionPassed;
         }
       } catch (e) {
