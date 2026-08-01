@@ -1506,6 +1506,19 @@ async function generateWithOpenAI(prompt, imageUrls) {
         console.error("OpenAI images/edits OK ama görsel yok:", JSON.stringify(json).slice(0, 300));
         return null;
       }
+      // MALİYET ÖLÇÜMÜ: OpenAI gerçek token sayılarını cevapta döndürüyor.
+      // Proje API anahtarı faturalama uçlarını okuyamadığı için (admin key
+      // gerekiyor) net maliyeti ancak buradan ÖLÇEBİLİYORUZ — tahmin değil.
+      if (json.usage) {
+        const u = json.usage;
+        const d = u.input_tokens_details || {};
+        console.log(
+          `MALIYET GORSEL: girdi=${u.input_tokens ?? "?"} ` +
+          `(metin=${d.text_tokens ?? "?"} gorsel=${d.image_tokens ?? "?"}) ` +
+          `cikti=${u.output_tokens ?? "?"} toplam=${u.total_tokens ?? "?"} ` +
+          `kalite=medium referansSayisi=${buffers.length}`
+        );
+      }
       return Buffer.from(b64, "base64");
     }
     return null;
@@ -1648,6 +1661,14 @@ async function assessOutputWithVision(buf, referenceImages) {
       return { ok: true, reason: null, detail: null, inconclusive: true };
     }
     const json = await resp.json();
+    // MALİYET ÖLÇÜMÜ — bkz. generateWithOpenAI'daki aynı gerekçe.
+    if (json.usage) {
+      const u = json.usage;
+      console.log(
+        `MALIYET VISION: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
+        `toplam=${u.total_tokens ?? "?"} model=${VISION_MODEL} gorselSayisi=${refs.length + 1}`
+      );
+    }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
     const answer = raw.toUpperCase();
     // Gerekçe: ilk iki nokta üst üstesinden sonrası (yoksa boş).
