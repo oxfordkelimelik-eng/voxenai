@@ -904,63 +904,53 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  */
 function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
-    "TASK: the FIRST image is your only canvas — a scene with a person in it. The other images are " +
-    "reference photos of a different real person (the target). Produce an edited version of the FIRST " +
-    "image in which the person has been replaced by the target. Never output a reference photo, and " +
-    "never produce something that looks like a barely-edited copy of one; if your result does not have " +
-    "the first image's background and framing, you edited the wrong image.\n\n" +
-    "WHICH REFERENCE IS WHICH: the LAST reference is a distant, full-body photo — use it ONLY to judge " +
-    "build, height and weight, and ignore its face entirely (too small to be reliable). All the other " +
-    "references are close-up face photos: these are the only source of truth for facial identity.\n\n" +
-    "KEEP IDENTICAL TO THE FIRST IMAGE (do not redesign or regenerate any of it):\n" +
-    "- Background, location, objects, lighting and colours.\n" +
-    "- Camera angle, framing and composition.\n" +
-    "- Body pose, and the head's rotation and gaze direction. If the person is shown in profile or " +
-    "three-quarter view, the output stays in that same view. Never rotate the head toward the camera to " +
-    "make the face easier to draw or more recognisable — a frontal face where the base shows a profile " +
-    "is a failure. Ignore how the target is posed in their own selfies.\n" +
-    "- Head size relative to the body, judged against SHOULDER WIDTH (roughly one third of the shoulder " +
-    "span on an adult). Note this interacts with the body change below: if you narrow the shoulders and " +
-    "torso to match the target's build, you must scale the head down by the same proportion. Leaving the " +
-    "head at its original size on a narrowed body makes it read as oversized — the single most common " +
-    "failure here. Never enlarge the head or puff the face.\n" +
-    "- The head's TILT (how far it leans toward one shoulder) and chin angle, not just its left/right " +
-    "turn. Do not straighten a tilted head into a neutral upright pose.\n" +
-    "- Every clothing item and accessory, including glasses, sunglasses, jewellery, watches, hats, bags " +
-    "and shoes. The target's own clothing must never be copied over.\n\n" +
-    "CHANGE ONLY THESE THREE THINGS:\n\n" +
-    "1) FACE — the highest priority. Copy the target's facial structure feature by feature from their " +
-    "close-up photos: the exact nose (bridge width, length, tip), the exact eyebrows (thickness, arch, " +
-    "spacing), the exact eyes (shape, size, slant, spacing), the exact lips (shape, thickness, width), " +
-    "and the exact jaw, chin and cheekbones. Keep the same face outline and the same length-to-width " +
-    "ratio — do not round, puff, widen, stretch or make the face more rectangular. Do not beautify, " +
-    "symmetrise or average. Keep their own natural expression; add no smile that is not already there. " +
-    "Their selfies may be taken at an awkward close-up angle: you may undo that lens distortion, but " +
-    "only slightly, never as licence to redesign the face. Do not blend the base person's features into " +
-    "the result — the output face is 100% the target's.\n\n" +
-    "2) SKIN TONE — apply the target's true skin colour to EVERY visible piece of skin: face, neck, " +
-    "ears, chest, arms, hands, legs and feet. Leaving any limb in the base person's original tone is a " +
-    "serious error, and so is a two-tone patchwork. Do not brighten, whiten or add glow, sheen or " +
-    "radiance; the skin must read exactly as dark or light as in the references.\n\n" +
+    "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
+    "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
+    "output a reference photo — if your result lacks the first image's background and framing, you " +
+    "edited the wrong image.\n\n" +
+    "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build, height and weight; " +
+    "ignore its face. The others are close-up face photos, the only source of truth for facial " +
+    "identity. References tell you the person's face, skin and build — never their clothing, " +
+    "accessories or pose.\n\n" +
+    "CHANGE EXACTLY THREE THINGS: face, skin tone, body build. Everything else stays identical to the " +
+    "first image — background, lighting, camera angle, framing, pose, and every clothing item and " +
+    "accessory.\n\n" +
+    "1) FACE — highest priority. Copy the target's structure feature by feature from the close-up " +
+    "photos: exact nose (bridge width, length, tip), eyebrows (thickness, arch, spacing), eyes (shape, " +
+    "size, slant, spacing), lips (shape, thickness, width), jaw, chin, cheekbones, face outline and " +
+    "length-to-width ratio. Do not beautify, symmetrise, average, round, puff, widen or stretch. Keep " +
+    "their own expression; add no smile that is not there. Their selfies may be close-up and " +
+    "lens-distorted — you may undo that slightly, never as licence to redesign. The output face is " +
+    "100% the target's, never blended with the base person's.\n\n" +
+    "2) SKIN TONE — the target's true colour on EVERY visible piece of skin: face, neck, ears, chest, " +
+    "arms, hands, legs, feet. Any limb left in the base person's tone, or a two-tone patchwork, is a " +
+    "serious error. No brightening, whitening, glow or sheen.\n\n" +
     "3) BODY — their real build, height and weight, resizing the SAME clothing to fit naturally. Keep " +
-    "the body anatomically coherent: correct number of limbs and fingers, natural joints and " +
-    "proportions." + shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
+    "limbs, fingers and joints anatomically correct." +
+    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "EYEWEAR — DECIDED ONLY BY THE BASE PHOTO: if the base person is NOT wearing glasses or sunglasses, " +
-    "the output must have NO eyewear at all. The target's reference photos often show them wearing " +
-    "sunglasses; that is irrelevant here and must NEVER be carried over — adding eyewear that the base " +
-    "photo does not have is a FAILURE. Conversely, if the base person DOES wear glasses or sunglasses, " +
-    "keep them exactly as they are, but do not let them change the face underneath. With the eyes " +
-    "hidden, the visible parts carry the identity — match the nose, mouth, jaw and cheekbones to the " +
-    "selfies even more precisely, and never widen the nose to suit the frames.\n\n" +
-    "TATTOOS: only if clearly visible in the target's own photos. Remove the base person's tattoos.\n\n" +
-    "LIGHTING: fix only genuinely bad lighting — harsh shadows across the eyes or nose, an unexplained " +
-    "dark blotch, or a face so dark it is hard to see. Otherwise the face sits under the same light " +
-    "direction, intensity and colour as the rest of the scene, with no extra light on it.\n\n" +
-    "QUALITY: the result should look like an ordinary, unedited phone photo of a real person — real " +
-    "skin texture, no plastic airbrush or beauty-filter smoothing, no CGI look. Gently clean temporary " +
-    "blemishes while preserving permanent features (moles, freckles, scars, beard). True-to-life colour " +
-    "and contrast. No garbled text, watermarks, distorted hands or extra limbs."
+    "HEAD-TO-BODY PROPORTION — the most common failure; verify this last. In the first image the head " +
+    "occupies a certain fraction of the shoulder width. That fraction must be IDENTICAL in your " +
+    "output. This is where step 3 catches people out: if you narrow the shoulders and torso to match " +
+    "the target's build, you must shrink the head by exactly the same factor. A head left at its " +
+    "original size on a narrowed body reads as oversized even though you never enlarged it. Never " +
+    "enlarge the head or puff the face. The close-up references are zoomed in for detail only — never " +
+    "take head scale from them.\n\n" +
+    "HEAD ANGLE: keep the head's rotation, tilt and gaze exactly as in the first image, on all three " +
+    "axes (left/right turn, up/down chin, sideways lean). If the base shows a profile or three-quarter " +
+    "view, stay in it — rotating toward the camera to make the face easier is a failure. Ignore how " +
+    "the target is posed in their own selfies.\n\n" +
+    "EYEWEAR — the base photo alone decides. If the base person wears none, the output has none; the " +
+    "target's references often show sunglasses and carrying them over is a failure. If the base does " +
+    "wear eyewear, keep it exactly and match the still-visible nose, mouth and jaw to the selfies even " +
+    "more precisely.\n\n" +
+    "TATTOOS: only if clearly visible in the target's own photos; remove the base person's.\n\n" +
+    "LIGHTING & QUALITY: fix only genuinely bad lighting (harsh shadow across the eyes, an unexplained " +
+    "dark blotch, a face too dark to see); otherwise the face sits under the scene's existing light " +
+    "with none added. The result must look like an ordinary unedited phone photo — real skin texture, " +
+    "no airbrush, beauty filter or CGI look. Gently clean temporary blemishes while keeping permanent " +
+    "features (moles, freckles, scars, beard). No garbled text, watermarks, distorted hands or extra " +
+    "limbs."
   );
 }
 
@@ -1589,19 +1579,24 @@ async function assessOutputWithVision(buf, referenceImages) {
          "shapes, the edit failed.\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
-         "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face. Also " +
-         "check HEAD PROPORTION: is the head a natural size for the shoulders and torso it sits on? " +
-         "Measure it against the shoulder width — an adult's head is roughly a third of the shoulder " +
-         "span. If the head looks too large for the body, or pasted on, that fails.\n" +
+         "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face.\n" +
          "C) SKIN TONE CONSISTENCY — is the skin colour the SAME across the whole visible body in " +
          "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
          "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
-         "as if two different people's skin were combined — that fails.\n\n" +
-         "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words):\n" +
+         "as if two different people's skin were combined — that fails.\n" +
+         "D) HEAD-TO-BODY PROPORTION — judge this SEPARATELY and do not let a clean, artifact-free " +
+         "face excuse it; a perfectly rendered head can still be the wrong SIZE. Ignore the face " +
+         "entirely and compare the head's width to the SHOULDER width in IMAGE 1: on a normal adult " +
+         "the head is roughly one third of the shoulder span. If the head is clearly wider than that " +
+         "relative to the shoulders — the body looking too narrow or the head too large for it, or the " +
+         "head appearing pasted on — that FAILS, even if everything else is perfect.\n\n" +
+         "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words). Check all " +
+         "four questions before answering GOOD:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
-         "BAD_QUALITY: <what looks broken, e.g. head too big for body>\n" +
-         "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>")
+         "BAD_QUALITY: <what looks broken>\n" +
+         "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
+         "BAD_PROPORTION: <e.g. head too large for the shoulders>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1666,6 +1661,12 @@ async function assessOutputWithVision(buf, referenceImages) {
     // (kimlik mesafesi vücut ten tutarlılığı hakkında hiçbir şey söylemez —
     // bkz. visionRejectionOverridden yalnızca "identity" ile ilgilenir).
     if (answer.startsWith("BAD_SKIN")) return { ok: false, reason: "skin", detail, inconclusive: false };
+    // BAD_PROPORTION da ayrı sebep: kafa/omuz oranı bozukluğunu kimlik mesafesi
+    // ÖLÇEMEZ (yüz doğru olabilir, boyutu yanlış olabilir — gerçek örnek:
+    // 2026-08-01, mesafe 0.256 "çok iyi" iken kafa gövdeye göre büyüktü).
+    // "identity" DIŞINDAKİ sebepler sayısal hakem tarafından geçersiz
+    // kılınamaz — bkz. visionRejectionOverridden.
+    if (answer.startsWith("BAD_PROPORTION")) return { ok: false, reason: "proportion", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
