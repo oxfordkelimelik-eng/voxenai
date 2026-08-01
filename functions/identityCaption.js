@@ -26,22 +26,53 @@ const STYLE_LABELS = {
   car: "prestige / car lifestyle dating photos",
 };
 
-async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220, temperature = 0.2 }) {
-  const body = {
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          ...imagePartsBase64.map((data) => ({
-            inline_data: { mime_type: "image/jpeg", data },
-          })),
-        ],
-      },
-    ],
-    generationConfig: { maxOutputTokens, temperature },
-  };
+/**
+ * Caption GERÇEKTEN kullanılabilir mi?
+ *
+ * GERÇEK OLAY (2026-08-02 tespiti): üretilen HER caption birkaç kelimede
+ * kesiliyordu — "The person appears to be", "The individual is a male
+ * appearing to" — ve ikisinde prompt'un kendi metni sızmıştı ("fit unless
+ * clearly true, do", "ID document style (literal,"). Bu kırık metinler
+ * doğrudan görsel üretim prompt'una "The target person: ..." diye
+ * yazılıyordu. Sebep: gemini-2.5-flash'ın "thinking" token'ları
+ * maxOutputTokens bütçesini (160/200) görünür metin üretilmeden tüketiyor.
+ * Çözüm iki katlı: thinking kapatıldı + bütçe artırıldı (aşağıda), ve
+ * yine de bozuk gelirse caption HİÇ kullanılmıyor (null) — yarım cümle
+ * beslemektense hiç beslememek daha iyi.
+ */
+function isUsableCaption(text) {
+  if (!text) return false;
+  const t = text.trim();
+  if (t.length < 40) return false;                 // birkaç kelimelik kırıntı
+  if (!/[.!?]$/.test(t)) return false;             // cümle ortasında kesilmiş
+  // Prompt'un kendi ifadeleri geri döndüyse (echo) kullanma.
+  if (/unless clearly true|do NOT|no markdown|ID document style/i.test(t)) return false;
+  return true;
+}
 
+async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220, temperature = 0.2 }) {
   for (const model of GEMINI_MODELS) {
+    const generationConfig = { maxOutputTokens, temperature };
+    // 2.5 ailesinde "thinking" token'ları maxOutputTokens'tan düşülüyor ve
+    // görünür metin kalmadan bütçe bitebiliyor (bkz. isUsableCaption). Bu
+    // iş için akıl yürütmeye gerek yok — kapatıyoruz. Eski modeller bu alanı
+    // tanımadığı için yalnızca 2.5'e gönderiliyor.
+    if (model.startsWith("gemini-2.5")) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
+    const body = {
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            ...imagePartsBase64.map((data) => ({
+              inline_data: { mime_type: "image/jpeg", data },
+            })),
+          ],
+        },
+      ],
+      generationConfig,
+    };
     try {
       const resp = await fetch(geminiUrl(model, key), {
         method: "POST",
@@ -55,7 +86,17 @@ async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220
       const json = await resp.json();
       const parts = json?.candidates?.[0]?.content?.parts || [];
       const textPart = parts.find((p) => typeof p.text === "string");
-      if (textPart && textPart.text.trim()) return textPart.text.trim();
+      const text = textPart?.text?.trim();
+      if (!text) continue;
+      if (!isUsableCaption(text)) {
+        // Kırık/kesik caption: bir sonraki modeli dene, hepsi bozuksa null.
+        console.warn(
+          `identityCaption: model ${model} kullanılamaz caption verdi ` +
+          `(${text.length} karakter, bitiş="${text.slice(-25)}") — atlanıyor`
+        );
+        continue;
+      }
+      return text;
     } catch (e) {
       console.warn(`identityCaption: model ${model} hata:`, e.message || e);
     }
@@ -94,7 +135,7 @@ async function describeIdentity(buffers) {
       key,
       prompt: IDENTITY_PROMPT,
       imagePartsBase64: base64s,
-      maxOutputTokens: 200,
+      maxOutputTokens: 400, // thinking kapalı; 2-3 cümle için bol pay (bkz. isUsableCaption)
     });
   } catch (e) {
     console.error("identityCaption başarısız (caption olmadan devam ediliyor):", e);
@@ -114,7 +155,7 @@ async function describeBodyBuild(bodyBuffer) {
       key,
       prompt: BODY_PROMPT,
       imagePartsBase64: [bodyBuffer.toString("base64")],
-      maxOutputTokens: 160,
+      maxOutputTokens: 320, // thinking kapalı; 1-2 cümle için bol pay
     });
   } catch (e) {
     console.error("bodyCaption başarısız (atlanıyor):", e);

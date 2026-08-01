@@ -850,16 +850,81 @@ function buildStage3Prompt() {
  * Beden/boy ipuçlarını tek cümlede toplar — uzunluk merdiveni prompt'ları
  * (p300/p800/p1400) bunu paylaşır, her birinde tekrar yazılmasın diye.
  */
+// Kullanıcının formda SEÇTİĞİ beden tipi -> modelin uygulayabileceği SOMUT
+// geometri. Etiketin kendisi ("athletic / sporty build") modele ne YAPACAĞINI
+// söylemiyordu; bu tablo omuz/gövde/kol düzeyinde ne değişeceğini söylüyor.
+const BODY_TYPE_DIRECTIVE = {
+  slim: "narrow the shoulders and rib cage, flatten the chest, and slim the arms, waist and thighs; " +
+    "the clothing should hang loosely rather than being filled out",
+  athletic: "broaden the shoulders and upper back into a clear V-taper down to a trim waist, fill out " +
+    "the chest and arms with lean muscle, and keep the stomach flat",
+  average: "keep ordinary everyday adult proportions — neither noticeably slim nor heavy, shoulders " +
+    "and waist in normal balance, with no visible muscle definition",
+  solid: "broaden and thicken the torso, chest and waist, fill out the arms and thighs, and let the " +
+    "clothing sit fuller and tighter across the middle",
+};
+
+// Boy -> klasik figür oranı (baş yüksekliği cinsinden toplam boy). Kafa/vücut
+// oranını SEÇİLEN BOYA bağlar: kısa kişide kafa toplam boyun daha büyük bir
+// kesri, uzun kişide daha küçük bir kesridir.
+const HEIGHT_HEAD_UNITS = {
+  under160: "about 7",
+  "160-165": "about 7",
+  "165-170": "about 7¼",
+  "170-175": "about 7½",
+  "175-180": "about 7½",
+  "180-185": "about 7¾",
+  "185-190": "about 8",
+  "190+": "about 8",
+};
+
+/**
+ * Vücut yönergesi. KULLANICININ SEÇİMİ BELİRLEYİCİDİR.
+ *
+ * ÖNCEKİ HÂLİ HATALIYDI (2026-08-02): bodyCaption (fotoğraftan Gemini'nin
+ * çıkardığı serbest metin) ile kullanıcının form seçimi aynı cümlede yan yana
+ * diziliyordu ve BİRBİRİYLE ÇELİŞİYORDU — gerçek çıktı:
+ *   "Their build: average build, athletic / sporty build, about 170–175 cm"
+ * Model hem "average" hem "athletic" duyuyordu. Üstelik bodyCaption'ların
+ * TAMAMI birkaç kelimede kesikti ("The person appears to be") ve ikisinde
+ * prompt metni sızmıştı (bkz. identityCaption.js isUsableCaption).
+ *
+ * Artık: kullanıcının seçtiği boy + beden tipi tek yetkili kaynak, somut
+ * geometriye çevriliyor; kafa oranı da bu seçime bağlanıyor. bodyCaption
+ * yalnızca DOĞRULANMIŞSA ve seçimle çelişmeyecek şekilde ek bir gözlem
+ * cümlesi olarak veriliyor.
+ */
 function shortBodyNote(bodyCaption, bodyProfile) {
-  const bits = [];
-  if (bodyCaption) bits.push(bodyCaption);
-  const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
+  const bt = bodyProfile && BODY_TYPE_DIRECTIVE[bodyProfile.bodyType];
+  const label = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
   const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
-  if (bt) bits.push(bt);
-  if (ht) bits.push(ht);
-  return bits.length
-    ? ` Their build: ${bits.join(", ")} — match it, never idealise or slim down.`
-    : "";
+  const heads = bodyProfile && HEIGHT_HEAD_UNITS[bodyProfile.heightRange];
+  if (!bt && !ht) return "";
+
+  const target = [ht, label].filter(Boolean).join(", ");
+  let s = `\n\nTARGET BUILD — the user stated this themselves, so it OVERRIDES whatever the reference ` +
+    `photos seem to show: ${target}.`;
+  if (bt) s += ` Reshape the base person's body accordingly: ${bt}.`;
+  if (heads) {
+    s += ` At this height the whole figure is ${heads} head-heights tall; if the full body is visible, ` +
+      `check the head against that.`;
+  }
+  // bodyCaption (fotoğraftan otomatik gözlem) YALNIZCA tam bir cümleyse ve
+  // kullanıcının seçimiyle çelişmiyorsa ek bilgi olarak veriliyor; çelişirse
+  // seçim kazanır. Kırık/kesik caption'lar zaten identityCaption.js'te
+  // eleniyor, bu ikinci bir emniyet kemeri.
+  const cap = typeof bodyCaption === "string" ? bodyCaption.trim() : "";
+  const capUsable = cap.length >= 40 && /[.!?]$/.test(cap);
+  const conflicts = capUsable && label &&
+    Object.values(BODY_TYPE_HINTS)
+      .filter((v) => v !== label)
+      .some((v) => cap.toLowerCase().includes(v.split(" ")[0].toLowerCase()));
+  if (capUsable && !conflicts) {
+    s += ` Their own full-body photo also shows: ${cap} Use this only for details the line above does ` +
+      `not cover; where they disagree, the user's stated build wins.`;
+  }
+
+  return s;
 }
 
 /**
@@ -925,17 +990,17 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "2) SKIN TONE — the target's true colour on EVERY visible piece of skin: face, neck, ears, chest, " +
     "arms, hands, legs, feet. Any limb left in the base person's tone, or a two-tone patchwork, is a " +
     "serious error. No brightening, whitening, glow or sheen.\n\n" +
-    "3) BODY — their real build, height and weight, resizing the SAME clothing to fit naturally. Keep " +
-    "limbs, fingers and joints anatomically correct." +
+    "3) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
+    "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
+    "anatomically correct." +
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "HEAD-TO-BODY PROPORTION — the most common failure; verify this last. In the first image the head " +
-    "occupies a certain fraction of the shoulder width. That fraction must be IDENTICAL in your " +
-    "output. This is where step 3 catches people out: if you narrow the shoulders and torso to match " +
-    "the target's build, you must shrink the head by exactly the same factor. A head left at its " +
-    "original size on a narrowed body reads as oversized even though you never enlarged it. Never " +
-    "enlarge the head or puff the face. The close-up references are zoomed in for detail only — never " +
-    "take head scale from them.\n\n" +
+    "HEAD-TO-BODY PROPORTION — the most common failure; verify this LAST, after the body is done. A " +
+    "head is about one third of the shoulder width. Reshaping the body in step 3 changes what that " +
+    "means, so re-measure: compare the head against the NEW shoulder width and scale the head to " +
+    "match. A head left at its old size on a reshaped body reads as oversized even though you never " +
+    "enlarged it. Never enlarge the head or puff the face. The close-up references are zoomed in for " +
+    "detail only — never take head scale from them.\n\n" +
     "HEAD ANGLE: keep the head's rotation, tilt and gaze exactly as in the first image, on all three " +
     "axes (left/right turn, up/down chin, sideways lean). If the base shows a profile or three-quarter " +
     "view, stay in it — rotating toward the camera to make the face easier is a failure. Ignore how " +
