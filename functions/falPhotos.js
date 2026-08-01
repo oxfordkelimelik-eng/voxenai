@@ -571,7 +571,12 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
     "or shorter than the base person, reshape the body accordingly and resize the SAME clothing to fit " +
     "naturally. Keep the body anatomically whole and coherent — correct number of arms, legs, hands and " +
     "fingers, natural joints and proportions, nothing merged, missing, duplicated or distorted.\n\n" +
-    "EYEWEAR (sunglasses/glasses): if the person in the base photo wears sunglasses or glasses, keep " +
+    "EYEWEAR (sunglasses/glasses) — THE BASE PHOTO DECIDES, NEVER THE REFERENCES: if the person in the " +
+    "BASE photo is NOT wearing eyewear, the output must have NO glasses or sunglasses whatsoever. The " +
+    "target's reference photos frequently show them wearing sunglasses (especially the distant full-body " +
+    "one) — that eyewear belongs to THEIR photo, not to this scene, and carrying it over is a FAILURE. " +
+    "Never add, invent or borrow eyewear that the base photo does not already have.\n" +
+    "If the person in the base photo DOES wear sunglasses or glasses, keep " +
     "that eyewear EXACTLY as in the base photo — same frame shape, colour, size, position and " +
     "reflections. But the eyewear must NOT change the face underneath it. Because the eyes are hidden, " +
     "the VISIBLE parts carry the identity and must match the target's selfies with extra precision: the " +
@@ -737,7 +742,9 @@ function buildStage1Prompt(identityCaption, bodyCaption, bodyProfile) {
     "Replace the person in the base photo with the target person. Keep the background, location, " +
     "lighting, camera angle, framing, body pose, and EVERY clothing item and accessory (glasses, " +
     "jewellery, watches, hats, bags, shoes) exactly as they are in the base photo — the reference photos " +
-    "are for FACE, SKIN and BODY only, never for outfit.\n\n" +
+    "are for FACE, SKIN and BODY only, never for outfit. EYEWEAR especially: if the base person wears " +
+    "none, the output has none — the target's own photos often show sunglasses and carrying them over " +
+    "is a failure.\n\n" +
     "FACE — copy it exactly: reproduce the target's face feature by feature from their close-up " +
     "reference photos (ignore the distant full-body one for the face). The EXACT nose (bridge width, " +
     "length, tip, nostrils), EXACT eyebrows (thickness, arch, length, spacing), EXACT eyes (shape, size, " +
@@ -883,9 +890,10 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     "QUALITY: an ordinary, unedited phone photo. Natural skin texture, no plastic airbrush, no added " +
-    "brightness. Tattoos only if visible in the target's own photos. Keep eyewear from the first image " +
-    "but match the visible face parts to the selfies precisely. Clean temporary blemishes only. No " +
-    "distorted hands or extra limbs."
+    "brightness. Tattoos only if visible in the target's own photos. Eyewear comes ONLY from the first " +
+    "image: if it has none, add none — the target's own photos often show sunglasses and copying them " +
+    "over is a failure. If the first image has eyewear, keep it and match the visible face parts to the " +
+    "selfies precisely. Clean temporary blemishes only. No distorted hands or extra limbs."
   );
 }
 
@@ -938,10 +946,13 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "the body anatomically coherent: correct number of limbs and fingers, natural joints and " +
     "proportions." + shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "EYEWEAR: if the base person wears glasses or sunglasses, keep them exactly as they are, but do not " +
-    "let them change the face underneath. With the eyes hidden, the visible parts carry the identity — " +
-    "match the nose, mouth, jaw and cheekbones to the selfies even more precisely, and never widen the " +
-    "nose to suit the frames.\n\n" +
+    "EYEWEAR — DECIDED ONLY BY THE BASE PHOTO: if the base person is NOT wearing glasses or sunglasses, " +
+    "the output must have NO eyewear at all. The target's reference photos often show them wearing " +
+    "sunglasses; that is irrelevant here and must NEVER be carried over — adding eyewear that the base " +
+    "photo does not have is a FAILURE. Conversely, if the base person DOES wear glasses or sunglasses, " +
+    "keep them exactly as they are, but do not let them change the face underneath. With the eyes " +
+    "hidden, the visible parts carry the identity — match the nose, mouth, jaw and cheekbones to the " +
+    "selfies even more precisely, and never widen the nose to suit the frames.\n\n" +
     "TATTOOS: only if clearly visible in the target's own photos. Remove the base person's tattoos.\n\n" +
     "LIGHTING: fix only genuinely bad lighting — harsh shadows across the eyes or nose, an unexplained " +
     "dark blotch, or a face so dark it is hard to see. Otherwise the face sits under the same light " +
@@ -990,6 +1001,9 @@ function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
     "identity detail only — never treat their zoom level as a size reference.\n\n" +
     "- INVENTED SMILE: an open smile or grin appeared that is not in the target's references. Keep " +
     "whatever calm, natural expression they actually have.\n\n" +
+    "- BORROWED SUNGLASSES: the target wore sunglasses in their own reference photos (often the distant " +
+    "full-body one), and that eyewear was carried into a base scene that had none. Eyewear is decided " +
+    "ONLY by the base photo — if the base person wears none, the output has none.\n\n" +
     "- DUPLICATED FACE: the target's face was pasted onto other people in the scene. The target appears " +
     "exactly once; any background people stay generic and unrelated.\n\n" +
     "- UNEXPLAINED DARK PATCH: a black smudge or dirty patch was left on the face. Facial skin stays " +
@@ -1034,7 +1048,9 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "hands, legs, feet — never a two-tone patchwork, never lightened or given a glow), and their real " +
     "body build, height and weight, resizing the same clothing to fit naturally." + bodyNote + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "If the base person wears sunglasses or glasses, keep that eyewear exactly, but do not let it change " +
+    "EYEWEAR is decided ONLY by the base photo: if the base person wears no glasses or sunglasses, the " +
+    "output must have none — the target's own photos often show sunglasses, and copying that over is a " +
+    "failure. If the base person DOES wear eyewear, keep it exactly, but do not let it change " +
     "the face under it — with the eyes hidden, match the nose, mouth, jaw and cheekbones to the selfies " +
     "even more precisely, and never widen the nose to suit the frames.\n\n" +
     "Tattoos only if visible in the target's own photos; remove the base person's tattoos. Fix only " +
