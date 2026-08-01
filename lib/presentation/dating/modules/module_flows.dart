@@ -147,8 +147,19 @@ class AiPhotoFlow extends ConsumerStatefulWidget {
 enum _AiStage { style, package, loading, result, error, teaser }
 
 class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
-  _AiStage _stage = _AiStage.style;
-  final Set<String> _styles = {};
+  // STİL KATEGORİLERİ KALDIRILDI (2026-08-02): taban görseller artık tek düz
+  // havuzda (Storage: dating_templates/) ve her üretimde oradan rastgele —
+  // önceki işlerde kullanılmayanlara öncelikle — 5 tane seçiliyor (bkz.
+  // falPhotos.js pickTemplatesFromPool). Bu yüzden stil seçim adımı atlanır
+  // ve akış doğrudan selfie/paket adımıyla başlar.
+  //
+  // Sunucu API'si hâlâ "styles" dizisi bekliyor (cüzdan/chunk/iade mantığı
+  // stil birimi üzerinden çalışıyor) — tek sabit birim gönderiliyor. _AiStage
+  // .style ve _styleStep() kodu SİLİNMEDİ; kategoriler geri gelirse
+  // _stage'i tekrar .style yapmak yeterli.
+  static const String _defaultStyleId = 'elegance';
+  _AiStage _stage = _AiStage.package;
+  final Set<String> _styles = {_defaultStyleId};
   /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
   /// Zorunlu tam boy (kamera veya galeri).
@@ -179,7 +190,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   static const _uploadingSteps = ['Üretim başlatılıyor…'];
   static const _generatingSteps = [
     'Yüzün referans alınıyor…',
-    'Seçtiğin stiller uygulanıyor…',
+    'Sahneler uygulanıyor…',
     'Son kontroller…',
   ];
 
@@ -189,8 +200,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   /// Erişim etiketi: paket bakiyesi varsa kalan hak, yoksa nazik bir davet.
   String get _accessLabel {
-    final left = ref.read(packBalanceProvider).photo; // stil cinsinden
-    if (left > 0) return 'Paketinde $left stil hakkın var';
+    final left = ref.read(packBalanceProvider).photo; // üretim hakkı cinsinden
+    if (left > 0) return 'Paketinde $left üretim hakkın var';
     return 'Fotoğraflarını oluşturmaya hazırsın';
   }
 
@@ -335,7 +346,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 'unauthenticated' => 'Giriş yapman gerekiyor.',
                 'failed-precondition' =>
                   'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
-                      'Tek stil ücretsiz denenebilir.',
+                      'Devam etmek için AI Foto paketi al.',
                 _ => 'Üretim başlatılamadı (${e.code}). Lütfen tekrar dene.',
               };
       });
@@ -400,10 +411,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   void _reset() {
     _jobSub?.cancel();
     setState(() {
-      _stage = _AiStage.style;
+      // Stil seçimi kalktı — başlangıç adımı doğrudan selfie/paket adımı
+      // ve sabit tek birim (bkz. _defaultStyleId).
+      _stage = _AiStage.package;
       _facePhotos.clear();
       _bodyPhoto = null;
-      _styles.clear();
+      _styles
+        ..clear()
+        ..add(_defaultStyleId);
       _jobData = null;
       _errorMessage = null;
       _preparing = false;
@@ -516,6 +531,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   }
 
   Future<void> _captureFaceAngles() async {
+    // KREDİ KAPISI: selfie çekmeye (kamera izni, zaman, çaba) BAŞLAMADAN önce
+    // bakiye/ücretsiz hak kontrol edilir — yoksa doğrudan pakete yönlendirilir.
+    // Kullanıcı boşuna selfie çekip en sonda paywall'a çarpmaz.
+    if (!await _ensureCanAfford()) return;
+    if (!mounted) return;
+
     // Kamera (rehberli canlı açı çekimi) VEYA galeriden seçim — test kolaylığı
     // için galeri de destekleniyor.
     final choice = await showModalBottomSheet<String>(
@@ -1096,11 +1117,30 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             label: 'Devam Et',
             onPressed: _styles.isEmpty
                 ? null
-                : () => setState(() => _stage = _AiStage.package),
+                : () async {
+                    if (await _ensureCanAfford() && mounted) {
+                      setState(() => _stage = _AiStage.package);
+                    }
+                  },
           ),
         ),
       ],
     );
+  }
+
+  /// Bakiye/ücretsiz hak var mı? Yoksa pakete yönlendirir ve dönüşte tekrar
+  /// bakar. `true` dönerse üretim yolunda ilerlenebilir.
+  ///
+  /// Selfie çekimi BAŞLAMADAN önce çağrılır (bkz. _captureFaceAngles) —
+  /// kullanıcı boşuna selfie çekip en sonda paywall'a çarpmasın diye
+  /// (bkz. kullanıcı talebi: "kredi almadan selfie çekmeye izin verme").
+  Future<bool> _ensureCanAfford() async {
+    if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
+      return true;
+    }
+    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
+    if (!mounted) return false;
+    return ref.read(packBalanceProvider).canAffordStyles(_styles.length);
   }
 
   /// Seçilen her stil için örnek fotoğraf önizlemesi. Görseller henüz
@@ -1187,7 +1227,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1)),
                 const SizedBox(height: 6),
-                Text('$_photoCount fotoğraf · ${_styles.length} stil',
+                // Stil kategorileri kaldırıldı — "N stil" ve stil rozetleri
+                // artık kullanıcı için anlamsız (hiç stil seçmiyor), sadece
+                // üretilecek foto sayısı gösteriliyor.
+                Text('$_photoCount fotoğraf',
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -1195,30 +1238,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 const SizedBox(height: 4),
                 Text(_accessLabel,
                     style: const TextStyle(color: Colors.white70)),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final id in _styles)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                            PhotoStyle.coreStyles
-                                .firstWhere((s) => s.id == id)
-                                .label,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700)),
-                      ),
-                  ],
-                ),
               ],
             ),
           ),
@@ -1376,62 +1395,74 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
             const SizedBox(height: 12),
           ],
-          // 6 BUTON — A/B karşılaştırması (hepsi aynı model: doğrudan OpenAI
-          // gpt-image-2, aynı görsel seti, aynı kalite kapısı). Buton 2 hariç
-          // TEK FARK prompt UZUNLUĞU — bkz. falPhotos.js PHOTO_MODES
-          // "uzunluk merdiveni". Karşılaştırma bitince fazlalıklar kaldırılacak.
+          // A/B karşılaştırması sonucu Buton-5 (p800, ~740 kelime) en tutarlı
+          // sonucu verdi — bkz. proje notları. Tek buton olarak o kalıyor;
+          // diğer 5 modun kodu (falPhotos.js PHOTO_MODES) ve butonları
+          // silinmedi, karşılaştırmaya dönmek istersek yorumdan çıkarılabilir.
           PrimaryButton(
-            label:
-                _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur-1',
+            label: _preparing
+                ? 'Fotoğraflar kontrol ediliyor…'
+                : 'Fotoğraflarımı Oluştur',
             onPressed: (_refsReady && !_preparing)
-                ? () => _generate(modelId: 'gpt-image-2', mode: 'full')
+                ? () => _generate(modelId: 'gpt-image-2', mode: 'p800')
                 : null,
           ),
-          const SizedBox(height: 10),
-          _AltGenerateButton(
-            label: 'Fotoğraflarımı Oluştur-2',
-            hint: '3 aşamalı üretim — daha yavaş, 3x maliyet',
-            enabled: _refsReady && !_preparing,
-            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'staged'),
-          ),
-          const SizedBox(height: 10),
-          _AltGenerateButton(
-            label: 'Fotoğraflarımı Oluştur-3',
-            hint: 'Kısa komut (~465 kelime)',
-            enabled: _refsReady && !_preparing,
-            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'short'),
-          ),
-          const SizedBox(height: 10),
-          _AltGenerateButton(
-            label: 'Fotoğraflarımı Oluştur-4',
-            hint: 'En yalın komut (~310 kelime)',
-            enabled: _refsReady && !_preparing,
-            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p300'),
-          ),
-          const SizedBox(height: 10),
-          _AltGenerateButton(
-            label: 'Fotoğraflarımı Oluştur-5',
-            hint: 'Orta uzunluk (~740 kelime)',
-            enabled: _refsReady && !_preparing,
-            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p800'),
-          ),
-          const SizedBox(height: 10),
-          _AltGenerateButton(
-            label: 'Fotoğraflarımı Oluştur-6',
-            hint: 'Uzunca komut (~1190 kelime)',
-            enabled: _refsReady && !_preparing,
-            onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p1400'),
-          ),
+          // const SizedBox(height: 10),
+          // PrimaryButton(
+          //   label:
+          //       _preparing ? 'Fotoğraflar kontrol ediliyor…' : 'Fotoğraflarımı Oluştur-1',
+          //   onPressed: (_refsReady && !_preparing)
+          //       ? () => _generate(modelId: 'gpt-image-2', mode: 'full')
+          //       : null,
+          // ),
+          // const SizedBox(height: 10),
+          // _AltGenerateButton(
+          //   label: 'Fotoğraflarımı Oluştur-2',
+          //   hint: '3 aşamalı üretim — daha yavaş, 3x maliyet',
+          //   enabled: _refsReady && !_preparing,
+          //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'staged'),
+          // ),
+          // const SizedBox(height: 10),
+          // _AltGenerateButton(
+          //   label: 'Fotoğraflarımı Oluştur-3',
+          //   hint: 'Kısa komut (~465 kelime)',
+          //   enabled: _refsReady && !_preparing,
+          //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'short'),
+          // ),
+          // const SizedBox(height: 10),
+          // _AltGenerateButton(
+          //   label: 'Fotoğraflarımı Oluştur-4',
+          //   hint: 'En yalın komut (~310 kelime)',
+          //   enabled: _refsReady && !_preparing,
+          //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p300'),
+          // ),
+          // const SizedBox(height: 10),
+          // _AltGenerateButton(
+          //   label: 'Fotoğraflarımı Oluştur-5',
+          //   hint: 'Orta uzunluk (~740 kelime)',
+          //   enabled: _refsReady && !_preparing,
+          //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p800'),
+          // ),
+          // const SizedBox(height: 10),
+          // _AltGenerateButton(
+          //   label: 'Fotoğraflarımı Oluştur-6',
+          //   hint: 'Uzunca komut (~1190 kelime)',
+          //   enabled: _refsReady && !_preparing,
+          //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p1400'),
+          // ),
           const SizedBox(height: 8),
-          Center(
-            child: TextButton(
-              onPressed: _preparing
-                  ? null
-                  : () => setState(() => _stage = _AiStage.style),
-              child: const Text('← Stili değiştir',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-          ),
+          // Stil kategorileri kaldırıldığı için "← Stili değiştir" bağlantısı
+          // da kaldırıldı — artık gidilecek bir stil adımı yok (bkz.
+          // _defaultStyleId). Kategoriler geri gelirse yorumdan çıkarılır.
+          // Center(
+          //   child: TextButton(
+          //     onPressed: _preparing
+          //         ? null
+          //         : () => setState(() => _stage = _AiStage.style),
+          //     child: const Text('← Stili değiştir',
+          //         style: TextStyle(color: AppColors.textSecondary)),
+          //   ),
+          // ),
         ],
       ),
     );
@@ -1439,6 +1470,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   /// Tamamlanan stil sayısı (Firestore'daki `results.{styleId}.status`
   /// alanı 'done' veya 'failed' olanlar — hâlâ 'pending' olanlar hariç).
+  ///
+  /// Stil kategorileri kaldırıldıktan sonra artık tek birim üretiliyor, bu
+  /// yüzden "N/M stil hazır" göstergesi kalktı ve bu getter kullanılmıyor —
+  /// kategoriler geri gelirse hazır dursun diye SİLİNMEDİ.
+  // ignore: unused_element
   int get _completedStyleCount {
     final results = _jobData?['results'] as Map<String, dynamic>?;
     if (results == null) return 0;
@@ -1448,10 +1484,23 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         .length;
   }
 
+  /// Ücretsiz denemede sunucunun HİÇ ÜRETMEDİĞİ (bkz. falPhotos.js
+  /// FREE_TIER_CHUNK_COUNT) kalan foto sayısı — stiller toplamı.
+  int get _lockedCount {
+    final results = _jobData?['results'] as Map<String, dynamic>?;
+    if (results == null) return 0;
+    var total = 0;
+    for (final entry in results.values) {
+      final map = entry as Map<String, dynamic>;
+      total += (map['lockedCount'] as num?)?.toInt() ?? 0;
+    }
+    return total;
+  }
+
   Widget _resultStep() {
     final urls = _resultUrls;
+    final locked = _lockedCount;
     final stillGenerating = (_jobData?['status'] as String?) == 'generating';
-    final total = _styles.length;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1463,9 +1512,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary)),
           const SizedBox(height: 6),
-          const Text(
-            'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
-            style: TextStyle(
+          Text(
+            locked > 0
+                ? 'İlk fotoğrafın ücretsiz. Kalan $locked fotoğrafın kilidini '
+                    'açmak için AI Foto paketi al.'
+                : 'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
+            style: const TextStyle(
                 fontSize: 13, color: AppColors.textSecondary),
           ),
           if (stillGenerating) ...[
@@ -1479,9 +1531,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                       strokeWidth: 2, color: AppColors.gold),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                    '$_completedStyleCount/$total stil hazır — kalanlar üretiliyor…',
-                    style: const TextStyle(
+                const Text(
+                    'Fotoğraflar üretiliyor…',
+                    style: TextStyle(
                         fontSize: 12, color: AppColors.textSecondary)),
               ],
             ),
@@ -1501,6 +1553,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             children: [
               for (int i = 0; i < urls.length; i++)
                 _resultTile(urls[i], index: i),
+              for (int i = 0; i < locked; i++) _lockedTile(),
             ],
           ),
           const SizedBox(height: 16),
@@ -1518,6 +1571,44 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   Widget _resultTile(String gsUrl, {required int index}) =>
       GeneratedPhotoTile(gsUrl: gsUrl, allGsUrls: _resultUrls, index: index);
+
+  /// Ücretsiz denemede üretilmeyen (bkz. lockedCount) foto için kilit kartı.
+  /// Bu iş zaten TAMAMLANDI (1 ücretsiz foto teslim edildi) — aynı işe kalan
+  /// 4'ü "eklenemez". Bunun yerine: pakete git, satın alınca AYNI selfie'lerle
+  /// (yeniden çekmeye gerek yok — _facePhotos/_bodyPhoto hâlâ bellekte) YENİ
+  /// bir iş açılır ve artık ücretsiz kota değil gerçek paket hakkı kullanılıp
+  /// tam 5 foto üretilir (bkz. falPhotos.js FREE_TIER_CHUNK_COUNT).
+  Widget _lockedTile() {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () async {
+          await context.push('${DatingRoutes.paywall}?mode=ai_photo');
+          if (!mounted) return;
+          if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
+            _generate(modelId: 'gpt-image-2', mode: _lastMode);
+          }
+        },
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline_rounded,
+                  color: AppColors.textSecondary, size: 28),
+              SizedBox(height: 6),
+              Text('Paket Al',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================

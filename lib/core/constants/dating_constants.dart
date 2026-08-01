@@ -71,7 +71,13 @@ class DatingConfig {
   static const int creditsText = 1; // (pasif modüller — arka planda)
 }
 
-/// AI foto üretimi stilleri (Bölüm 6.3 — çekirdek 7 stil)
+/// AI foto üretimi stilleri (Bölüm 6.3 — çekirdek 5 stil)
+///
+/// NOT: Eskiden 7 stildi. "Old Money" ayrı bir seçenek olmaktan çıkarıldı —
+/// o estetiğin taban fotoğrafları artık "elegance" ile aynı Storage
+/// klasörüne (dating_templates/elegance/) yükleniyor, ayrı stil olarak
+/// SUNULMUYOR. "Beach Body" tamamen kaldırıldı. Storage'daki taban fotoğraf
+/// klasör sayısı da buna göre 7'den 5'e düştü.
 class PhotoStyle {
   final String id;
   final String label;
@@ -86,12 +92,13 @@ class PhotoStyle {
         Icons.fitness_center),
     PhotoStyle('traveller', 'World Traveller', 'Dünya gezgini, maceracı',
         Icons.travel_explore),
-    PhotoStyle('oldmoney', 'Old Money', 'Klasik varlık estetiği',
-        Icons.account_balance_outlined),
     PhotoStyle('nightout', 'Night Out', 'Gece çıkışı, sosyal',
         Icons.nightlife),
-    PhotoStyle('beach', 'Beach Body', 'Plaj, fit vücut', Icons.beach_access),
     PhotoStyle('car', 'Car', 'Arabayla, prestij', Icons.directions_car_filled),
+    // Kaldırılanlar (Storage klasörleri artık yok, kod referansı da silindi):
+    // PhotoStyle('oldmoney', 'Old Money', 'Klasik varlık estetiği',
+    //     Icons.account_balance_outlined), // -> elegance'a birleşti
+    // PhotoStyle('beach', 'Beach Body', 'Plaj, fit vücut', Icons.beach_access),
   ];
 }
 

@@ -167,7 +167,7 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
         const Text('Sorularını ve önerilerini bekliyoruz.',
             style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
         const SizedBox(height: 20),
-        _contactTile(Icons.email_outlined, 'E-posta', 'destek@voxenai.app'),
+        _contactTile(Icons.email_outlined, 'E-posta', 'destek@voxenai.com.tr'),
         _contactTile(Icons.camera_alt_outlined, 'Instagram', '@voxenai'),
         _contactTile(Icons.help_outline_rounded, 'Sık Sorulan Sorular',
             'Yardım merkezini görüntüle'),

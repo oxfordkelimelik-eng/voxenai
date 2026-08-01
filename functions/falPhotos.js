@@ -127,6 +127,11 @@ const PHOTO_MODES = [
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
 const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// Ücretsiz ilk deneme artık TÜM stili (5 foto) değil, tek bir stildeki TEK
+// fotoğrafı üretir — kalan 4'ü hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
+// yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
+// IMAGES_PER_STYLE ile çalışır. Bkz. startPhotoGeneration + finalizeChunk.
+const FREE_TIER_CHUNK_COUNT = 1;
 // Kullanıcıdan istenen referans: 3 canlı yüz (ön/sağ/sol) + 1 zorunlu tam boy.
 const REFERENCE_PHOTO_COUNT = 4;
 const FACE_PHOTO_COUNT = 3;
@@ -1014,7 +1019,10 @@ function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
     "amount, never leave it at its original size on a narrower body. And keep the SAME head rotation, " +
     "tilt and gaze direction as that person; ignore how the target is posed in their own selfies. If " +
     "that person is shown in profile or three-quarter view, stay in that view — never turn or straighten " +
-    "the head toward the camera to make the face easier or more recognisable.\n\n" +
+    "the head toward the camera to make the face easier or more recognisable. Both eyes must stay aligned " +
+    "and coherent, pointed together at that same exact spot — never cross-eyed, wall-eyed or wandering. " +
+    "The head must sit firmly and naturally on the neck, upright and well-connected, never tilted loosely, " +
+    "drooping, floating or pasted-on.\n\n" +
     "COPY EXACTLY from the target's close-up face photos (never the distant full-body one): their exact " +
     "nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline — same shapes, same proportions, " +
     "same face length-to-width ratio. Do not beautify, symmetrise, average, round, puff or widen the " +
@@ -1140,45 +1148,86 @@ async function signedDownloadUrl(file) {
 // riski). Üretimde nano-banana-pro yerine bu tabanların üstüne kullanıcının
 // yüzü swap'lenir; arka plan/vücut/poz tabandan aynen korunur.
 //
-// KLASÖR YAPISI (fallback: en spesifikten en genele — istediğin kadar granüler
-// yükleyebilirsin, hepsi çalışır):
-//   dating_templates/{styleId}/{gender}/{bodyType}/*.jpg   (en spesifik)
-//   dating_templates/{styleId}/{gender}/*.jpg
-//   dating_templates/{styleId}/*.jpg                        (en genel)
-// styleId: elegance|athletic|traveller|oldmoney|nightout|beach|car
-// gender:  male|female|na (form cevabı)   bodyType: slim|athletic|average|solid
+// KLASÖR YAPISI — TEK DÜZ HAVUZ (2026-08-02):
+//   dating_templates/*.jpg
+// Eskiden stil/gender/bodyType alt klasörleri ve fallback zinciri vardı;
+// kategoriler kaldırıldı (kullanıcı kararı) — tüm taban görseller tek klasöre
+// yüklenir ve her üretimde bu havuzdan rastgele seçilir.
 const TEMPLATE_ROOT = "dating_templates";
 
-// Bir stil için taban görsel dosyalarını bulur (fallback zinciriyle). Döner:
-// Storage File[] (boşsa []).
-async function listTemplateFiles(styleId, gender, bodyType) {
-  const prefixes = [];
-  if (gender && bodyType) prefixes.push(`${TEMPLATE_ROOT}/${styleId}/${gender}/${bodyType}/`);
-  if (gender) prefixes.push(`${TEMPLATE_ROOT}/${styleId}/${gender}/`);
-  prefixes.push(`${TEMPLATE_ROOT}/${styleId}/`);
-  for (const prefix of prefixes) {
-    const [found] = await bucket().getFiles({ prefix });
-    const imgs = found.filter(
-      (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name)
-    );
-    if (imgs.length > 0) return imgs;
-  }
-  return [];
+// Havuzdaki TÜM taban görselleri döner (alt klasörler dahil — yanlışlıkla
+// klasörlü yüklenirse de bulunur). Döner: Storage File[] (boşsa []).
+async function listTemplateFiles() {
+  const [found] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/` });
+  return found.filter(
+    (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name)
+  );
 }
 
-// jobId+styleId'e göre DETERMİNİSTİK ama işe-özgü karışık sıra üretir; tam
-// `count` dosya döner (havuz count'tan azsa döngüsel tekrar). Farklı iş (jobId)
-// aynı stili seçse bile FARKLI alt küme/sıra alır — arka plan tekrarını önler
-// (bkz. pickScene ile aynı desen).
-function pickTemplatesFromPool(files, jobId, styleId, count) {
-  const order = files.map((_, i) => i);
-  const rand = mulberry32(seedFromString(`${jobId}:${styleId}:tpl`));
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
+/**
+ * Havuzdan `count` taban görsel seçer.
+ *
+ * TEKRAR ETMEME (2026-08-02): `recentNames` = bu kullanıcının önceki
+ * işlerinde kullanılmış dosya adları (bkz. recentTemplateNames). Önce HİÇ
+ * kullanılmamışlar arasından seçilir; havuz tükenirse (kullanıcı havuzdaki
+ * her şeyi görmüşse) kalan ihtiyaç en eski kullanılanlardan tamamlanır —
+ * yani havuz küçük olsa bile üretim asla durmaz, sadece tekrar en geç olur.
+ *
+ * Sıra jobId'den türeyen DETERMİNİSTİK tohumla karıştırılır: aynı iş yeniden
+ * işlenirse (retry) aynı tabanları verir, farklı iş farklı sıra alır.
+ */
+function pickTemplatesFromPool(files, jobId, count, recentNames = []) {
+  const recent = new Set(recentNames);
+  const rand = mulberry32(seedFromString(`${jobId}:tpl`));
+  const shuffle = (arr) => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const fresh = shuffle(files.filter((f) => !recent.has(f.name)));
+  if (fresh.length >= count) return fresh.slice(0, count);
+
+  // Havuz yetmedi — kalanı, EN ESKİ kullanılmışlardan (recentNames sırası
+  // yeniden-eskiye) tamamla, böylece en son görülenler en son tekrar eder.
+  const staleOrder = new Map(recentNames.map((n, i) => [n, i]));
+  const stale = files
+    .filter((f) => recent.has(f.name))
+    .sort((a, b) => (staleOrder.get(b.name) ?? 0) - (staleOrder.get(a.name) ?? 0));
+
+  const picked = [...fresh, ...stale].slice(0, count);
+  // Havuz count'tan da azsa (ör. 3 dosya, 5 gerekiyor) döngüsel tekrarla doldur.
+  if (picked.length === 0) return [];
+  return Array.from({ length: count }, (_, i) => picked[i % picked.length]);
+}
+
+/**
+ * Kullanıcının son işlerinde kullanılmış taban görsel adlarını (yeniden
+ * eskiye) döner — pickTemplatesFromPool bunları elemek için kullanır.
+ * Her iş bittiğinde kullanılan adlar job dokümanına `templateNames` olarak
+ * yazılır (bkz. startPhotoGeneration).
+ */
+async function recentTemplateNames(uid, limit = 40) {
+  try {
+    const snap = await db
+      .collection(`users/${uid}/private/genData/genJobs`)
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+    const names = [];
+    for (const doc of snap.docs) {
+      const used = doc.data().templateNames;
+      if (Array.isArray(used)) names.push(...used);
+    }
+    return names;
+  } catch (e) {
+    // Geçmiş okunamazsa üretimi ENGELLEME — sadece tekrar riski artar.
+    console.error("Taban görsel geçmişi okunamadı (tekrar filtresi atlanıyor):", e);
+    return [];
   }
-  const shuffled = order.map((i) => files[i]);
-  return Array.from({ length: count }, (_, i) => shuffled[i % shuffled.length]);
 }
 
 /**
@@ -2270,23 +2319,24 @@ exports.startPhotoGeneration = onCall(
     const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
     const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
-    const folderGender = bodyProfile.gender || null;     // klasör eşleşmesi (male/female/na)
-    const bodyType = bodyProfile.bodyType || null;
 
-    // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç. Bir stilin havuzu boşsa net
-    // hata (kredi harcanmadan) — kullanıcı o stile taslak yüklemeli.
+    // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç (havuz boşsa kredi
+    // harcanmadan net hata). Kategoriler kaldırıldı (2026-08-02): tek düz
+    // havuzdan, kullanıcının ÖNCEKİ işlerinde kullanılmamışlara öncelik
+    // vererek seçilir — bkz. pickTemplatesFromPool / recentTemplateNames.
+    const files = await listTemplateFiles();
+    if (files.length === 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Taban görsel havuzu boş. Firebase Storage'da ${TEMPLATE_ROOT}/ ` +
+        `klasörüne AI ile üretilmiş taslak görseller yükle.`
+      );
+    }
+    const recentNames = await recentTemplateNames(uid);
     const templatesByStyle = {};
     for (const styleId of styles) {
-      const files = await listTemplateFiles(styleId, folderGender, bodyType);
-      if (files.length === 0) {
-        throw new HttpsError(
-          "failed-precondition",
-          `"${styleId}" stili için taban görsel yok. Firebase Storage'da ` +
-          `${TEMPLATE_ROOT}/${styleId}/ klasörüne (veya {gender}/{bodyType} alt ` +
-          `klasörlerine) AI ile üretilmiş taslak görseller yükle.`
-        );
-      }
-      templatesByStyle[styleId] = pickTemplatesFromPool(files, jobId, styleId, IMAGES_PER_STYLE);
+      templatesByStyle[styleId] =
+        pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE, recentNames);
     }
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
@@ -2364,6 +2414,21 @@ exports.startPhotoGeneration = onCall(
     // satır `false` yapılabilir.
     const useOpenAiDirect = modelId === OPENAI_MODEL_ID;
 
+    // TEKRAR FİLTRESİ İÇİN GEÇMİŞ (2026-08-02): bu işte GERÇEKTEN üretilen
+    // taban görsellerin adları kaydedilir; sonraki işler bunları eleyerek
+    // seçim yapar (bkz. recentTemplateNames). Ücretsiz denemede yalnızca
+    // üretilen ilk kare sayılır — kilitli kalanlar "görülmüş" değildir.
+    const usedTemplateNames = [
+      ...new Set(
+        styles.flatMap((styleId) => {
+          const full = templatesByStyle[styleId];
+          const gen = usedFreeTier ? full.slice(0, FREE_TIER_CHUNK_COUNT) : full;
+          return gen.map((f) => f.name);
+        })
+      ),
+    ];
+    await jobRef.set({ templateNames: usedTemplateNames }, { merge: true });
+
     try {
       if (useOpenAiDirect) {
         // OPENAI DOĞRUDAN YOLU — webhook YOK. Her chunk için önce 'pending'
@@ -2372,12 +2437,23 @@ exports.startPhotoGeneration = onCall(
         // bekleniyor (webhook'un yapacağı işi runOpenAiDirectChunk yapıyor).
         // Fonksiyon bu Promise.all bitmeden dönmez — bkz. onCall timeoutSeconds.
         await Promise.all(styles.map(async (styleId) => {
-          const picked = templatesByStyle[styleId];
+          const fullPicked = templatesByStyle[styleId];
+          // Ücretsiz denemede sadece İLK chunk üretilir; kalanı hiç
+          // ÇALIŞTIRILMAZ (API maliyeti yok) — "chunks" haritasına da
+          // GİRMEZ ki finalizeChunk'ın "tüm chunk'lar bitti mi" kontrolü
+          // yalnızca gerçekten üretilenleri beklesin. Kilitli kalan sayısı
+          // ayrı bir alanda (lockedCount) saklanır — istemci kilit/"paket al"
+          // kartlarını buradan gösterir.
+          const picked = usedFreeTier ? fullPicked.slice(0, FREE_TIER_CHUNK_COUNT) : fullPicked;
+          const lockedCount = fullPicked.length - picked.length;
           const initialChunks = Object.fromEntries(
             picked.map((_, i) => [String(i), { photoUrls: [], status: "pending", retries: 0 }])
           );
           await jobRef.set({
-            results: { [styleId]: { status: "pending", photoUrls: [], chunks: initialChunks } },
+            results: { [styleId]: {
+              status: "pending", photoUrls: [], chunks: initialChunks,
+              ...(lockedCount > 0 ? { lockedCount } : {}),
+            } },
           }, { merge: true });
 
           await Promise.all(picked.map(async (file, i) => {
@@ -2391,7 +2467,9 @@ exports.startPhotoGeneration = onCall(
       } else {
         // fal.ai YOLU — submit hızlı döner, webhook sonuçlandırıyor.
         await Promise.all(styles.map(async (styleId) => {
-          const picked = templatesByStyle[styleId];
+          const fullPicked = templatesByStyle[styleId];
+          const picked = usedFreeTier ? fullPicked.slice(0, FREE_TIER_CHUNK_COUNT) : fullPicked;
+          const lockedCount = fullPicked.length - picked.length;
           const submissions = await Promise.all(
             picked.map(async (file, i) => {
               const templateUrl = await signedDownloadUrl(file);
@@ -2408,7 +2486,10 @@ exports.startPhotoGeneration = onCall(
           );
           const chunks = Object.fromEntries(submissions);
           await jobRef.set({
-            results: { [styleId]: { status: "pending", photoUrls: [], chunks } },
+            results: { [styleId]: {
+              status: "pending", photoUrls: [], chunks,
+              ...(lockedCount > 0 ? { lockedCount } : {}),
+            } },
           }, { merge: true });
         }));
       }
@@ -2724,11 +2805,13 @@ async function maybeRetryBadChunk(uid, jobId, styleId, chunkIdx, chunk, job, job
   if (!claimed) return false;
 
   try {
-    const folderGender = job.bodyProfile?.gender || null;
-    const bodyType = job.bodyProfile?.bodyType || null;
-    const files = await listTemplateFiles(styleId, folderGender, bodyType);
-    const picked = pickTemplatesFromPool(files, jobId, styleId, IMAGES_PER_STYLE);
-    const file = picked[Number(chunkIdx)];
+    // Taban görsel ARTIK yeniden hesaplanamaz: seçim havuzun anlık içeriğine
+    // ve kullanıcının geçmişine bağlı (bkz. pickTemplatesFromPool) — aynı
+    // tohum aynı dosyayı garanti etmiyor. Bu yüzden işin kendi kaydındaki
+    // templateNames kullanılıyor (startPhotoGeneration yazıyor).
+    const names = Array.isArray(job.templateNames) ? job.templateNames : [];
+    const name = names[Number(chunkIdx)];
+    const file = name ? bucket().file(name) : null;
     const refUrls = job.falRefUrls;
     if (!file || !Array.isArray(refUrls) || refUrls.length === 0) {
       console.error(`Kalite retry: taban görsel/referans yeniden kurulamadı (style=${styleId}, chunk=${chunkIdx})`);
