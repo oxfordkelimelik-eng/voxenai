@@ -6,8 +6,22 @@ import 'package:logger/logger.dart';
 
 /// Tüm bildirim altyapısı:
 ///  • Push (Firebase Cloud Messaging) — sunucudan/kampanyadan gelen bildirimler
-///  • Yerel zamanlı hatırlatmalar (flutter_local_notifications) — günlük görev
-///    ve streak hatırlatması (retention'ın #1 kaldıracı, sunucu gerektirmez)
+///  • Yerel zamanlı hatırlatmalar (flutter_local_notifications)
+///
+/// BİLDİRİM STRATEJİSİ (2026-08-02'de yeniden yazıldı):
+/// Eskiden "Rise Up" (alışkanlık/streak uygulaması) döneminden kalma, her gün
+/// tekrar eden 2 sabit bildirim vardı: 09:00 "günlük görevlerin hazır" ve
+/// 20:00 "serini kaybetme". Voxen AI'da ne günlük görev ne de streak var —
+/// bu ekranlar router'da bile yok, yani kullanıcı OLMAYAN bir özellik için
+/// günde 2 kez rahatsız ediliyordu.
+///
+/// Voxen AI ara sıra kullanılan bir fotoğraf aracı; günlük ritim uygulaması
+/// DEĞİL. Bu yüzden sabit tekrarlayan bildirim YOK. Bildirimler yalnızca
+/// GERÇEK bir duruma bağlı olarak, tek seferlik ve seyrek zamanlanır:
+///   • Ücretsiz hakkını hiç kullanmamış   -> 1. gün + 3. gün
+///   • Ücretsiz fotoyu üretmiş, 4'ü kilitli -> 2. gün
+/// Durum değişince (hak kullanıldı / paket alındı) ilgili bildirim iptal
+/// edilir — bkz. syncEngagementReminders.
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
@@ -17,18 +31,32 @@ class NotificationService {
   bool _initialized = false;
 
   // Bildirim kimlikleri (sabit — yeniden zamanlamada eskisini ezer)
-  static const int _dailyTaskId = 1001;
-  static const int _streakId = 1002;
+  static const int _freeTrialDay1Id = 2001;
+  static const int _freeTrialDay3Id = 2002;
+  static const int _lockedPhotosId = 2003;
+
+  /// Eski "Rise Up" döneminden kalan bildirim kimlikleri — güncelleme ile
+  /// gelen kullanıcılarda zamanlanmış hâlde kalmasınlar diye iptal edilir.
+  static const List<int> _legacyIds = [1001, 1002];
+
+  /// Eski kanal: 'riseup_reminders' ("Günlük görev ve streak hatırlatmaları").
+  /// Android'de var olan bir kanalın adı/açıklaması uygulama tarafından
+  /// DEĞİŞTİRİLEMEZ — bu yüzden yeni bir kanal açılıp eskisi siliniyor,
+  /// yoksa kullanıcı ayarlarında hâlâ "streak" yazan bir kanal görünürdü.
+  static const String _legacyChannelId = 'riseup_reminders';
 
   static const _androidChannel = AndroidNotificationChannel(
-    'riseup_reminders',
+    'voxen_reminders',
     'Hatırlatmalar',
-    description: 'Günlük görev ve streak hatırlatmaları',
+    description: 'Ücretsiz hakkın ve bekleyen fotoğrafların için hatırlatmalar',
     importance: Importance.high,
   );
 
-  /// Uygulama açılışında çağrılır. İzin ister, kanalı kurar, FCM'i bağlar
-  /// ve varsayılan günlük hatırlatmaları zamanlar. Hata olursa sessizce geçer.
+  /// Uygulama açılışında çağrılır. İzin ister, kanalı kurar, FCM'i bağlar.
+  /// Hata olursa sessizce geçer.
+  ///
+  /// NOT: Burada artık bildirim ZAMANLANMAZ. Zamanlama cüzdan durumuna
+  /// bağlı olduğu için syncEngagementReminders ile yapılır.
   Future<void> init() async {
     if (_initialized) return;
     try {
@@ -45,14 +73,18 @@ class NotificationService {
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
       await androidImpl?.createNotificationChannel(_androidChannel);
+      await androidImpl?.deleteNotificationChannel(_legacyChannelId);
       await androidImpl?.requestNotificationsPermission();
       await androidImpl?.requestExactAlarmsPermission();
 
+      // Güncellemeyle gelen kullanıcılarda eski (artık anlamsız) günlük
+      // görev/streak hatırlatmalarını temizle.
+      for (final id in _legacyIds) {
+        await _local.cancel(id);
+      }
+
       // FCM izni + token (push için)
       await _initFcm();
-
-      // Varsayılan günlük hatırlatmaları kur
-      await scheduleDailyReminders();
 
       _initialized = true;
     } catch (e) {
@@ -100,34 +132,70 @@ class NotificationService {
         iOS: const DarwinNotificationDetails(),
       );
 
-  /// Her gün tekrar eden 2 hatırlatma kurar:
-  ///  • 09:00 — günlük görevler hazır
-  ///  • 20:00 — streak'ini kaybetme (gün bitmeden görevleri tamamla)
-  Future<void> scheduleDailyReminders() async {
+  /// Kullanıcının GERÇEK durumuna göre hatırlatmaları yeniden kurar.
+  /// Uygulama her açıldığında ve cüzdan durumu değiştiğinde çağrılmalı —
+  /// her çağrıda ilgili bildirimler önce iptal edilip koşul hâlâ geçerliyse
+  /// yeniden zamanlanır (böylece hak kullanılınca bildirim kendiliğinden
+  /// susar ve süre baştan başlar).
+  ///
+  /// [freePhotoUsed]    : AI foto ücretsiz hakkı kullanıldı mı
+  /// [freeAnalysisUsed] : foto analizi ücretsiz hakkı kullanıldı mı
+  /// [hasLockedPhotos]  : ücretsiz üretimden kilitli kalan fotoğraf var mı
+  ///                      (paket alınmamışsa 5'in 4'ü kilitli kalır)
+  Future<void> syncEngagementReminders({
+    required bool freePhotoUsed,
+    required bool freeAnalysisUsed,
+    required bool hasLockedPhotos,
+  }) async {
+    // init() henüz bitmemiş olabilir (ikisi de uygulama açılışında paralel
+    // tetikleniyor) — plugin hazır değilken zamanlama sessizce düşerdi.
+    // init() idempotent, ikinci çağrı hemen döner.
+    await init();
     try {
-      await _scheduleDaily(
-        id: _dailyTaskId,
-        hour: 9,
-        minute: 0,
-        title: '🔥 Günlük görevlerin hazır',
-        body: 'Bugünün planını aç ve serini büyütmeye devam et.',
-      );
-      await _scheduleDaily(
-        id: _streakId,
-        hour: 20,
-        minute: 0,
-        title: '⚠️ Serini kaybetme!',
-        body: 'Gün bitmeden bugünkü görevlerini tamamla. Zinciri kırma.',
-      );
+      // Her seferinde sıfırla — koşul artık geçerli değilse yeniden kurulmaz.
+      await _local.cancel(_freeTrialDay1Id);
+      await _local.cancel(_freeTrialDay3Id);
+      await _local.cancel(_lockedPhotosId);
+
+      // 1) Ücretsiz hakkını hiç kullanmamış: 1. ve 3. gün hatırlat.
+      final hasUnusedFreeTrial = !freePhotoUsed || !freeAnalysisUsed;
+      if (hasUnusedFreeTrial) {
+        final what = !freePhotoUsed && !freeAnalysisUsed
+            ? 'Ücretsiz fotoğrafın ve analizin'
+            : (!freePhotoUsed ? 'Ücretsiz fotoğrafın' : 'Ücretsiz analizin');
+        await _scheduleIn(
+          id: _freeTrialDay1Id,
+          delay: const Duration(days: 1),
+          title: '✨ $what seni bekliyor',
+          body: 'Birkaç selfie yükle, profilin için hazır kareyi gör.',
+        );
+        await _scheduleIn(
+          id: _freeTrialDay3Id,
+          delay: const Duration(days: 3),
+          title: '📸 Profil fotoğrafın eşleşmelerini belirliyor',
+          body: '$what hâlâ kullanılmadı. Denemek birkaç dakika sürüyor.',
+        );
+      }
+
+      // 2) Ücretsiz fotoyu üretmiş ama kalanlar kilitli: 2. gün hatırlat.
+      if (hasLockedPhotos) {
+        await _scheduleIn(
+          id: _lockedPhotosId,
+          delay: const Duration(days: 2),
+          title: '🔒 Fotoğraflarının kilidi hâlâ kapalı',
+          body: 'Senin için hazırlanan kareleri açmak için pakete göz at.',
+        );
+      }
     } catch (e) {
       _logger.w('Hatırlatma zamanlama atlandı: $e');
     }
   }
 
-  Future<void> _scheduleDaily({
+  /// Belirtilen süre sonrası için TEK SEFERLİK bildirim kurar
+  /// (matchDateTimeComponents YOK — tekrar etmez).
+  Future<void> _scheduleIn({
     required int id,
-    required int hour,
-    required int minute,
+    required Duration delay,
     required String title,
     required String body,
   }) async {
@@ -135,27 +203,10 @@ class NotificationService {
       id,
       title,
       body,
-      _nextInstanceOf(hour, minute),
+      tz.TZDateTime.now(tz.local).add(delay),
       _details(),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      matchDateTimeComponents: DateTimeComponents.time, // her gün tekrarla
     );
-  }
-
-  tz.TZDateTime _nextInstanceOf(int hour, int minute) {
-    final now = tz.TZDateTime.now(tz.local);
-    var scheduled = tz.TZDateTime(
-      tz.local,
-      now.year,
-      now.month,
-      now.day,
-      hour,
-      minute,
-    );
-    if (scheduled.isBefore(now)) {
-      scheduled = scheduled.add(const Duration(days: 1));
-    }
-    return scheduled;
   }
 
   /// Kullanıcı bildirimleri kapatmak isterse hepsini iptal eder.

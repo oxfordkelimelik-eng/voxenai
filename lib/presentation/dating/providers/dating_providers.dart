@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../data/sources/dating_purchase_service.dart';
+import '../../../data/sources/notification_service.dart';
 import '../../providers/app_providers.dart' show authServiceProvider;
 
 /// Dating paketleri için tüketilebilir IAP servisi (App Store/Play Store +
@@ -399,6 +400,11 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
       photo: prefs.getInt(DatingKeys.packPhotoBalance) ?? 0,
       analysis: prefs.getInt(DatingKeys.packAnalysisBalance) ?? 0,
     );
+    // Yeni kurulumda cüzdan dokümanı henüz YOK — Firestore dinleyicisi hiç
+    // tetiklenmez. Ücretsiz hak hatırlatmasının hedefi tam olarak bu
+    // kullanıcı olduğu için burada da bir kez kuruluyor; cüzdan gelince
+    // dinleyici gerçek duruma göre yeniden senkronlar.
+    _syncReminders();
   }
 
   void _subscribeWallet(String? uid) {
@@ -417,7 +423,47 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
         freeAnalysisUsed: data['freeAnalysisUsed'] == true,
       );
       _persist();
+      _syncReminders();
     });
+  }
+
+  /// Cüzdan durumu her değiştiğinde hatırlatmaları yeniden kurar — hak
+  /// kullanılınca / paket alınınca ilgili bildirim kendiliğinden susar
+  /// (bkz. NotificationService.syncEngagementReminders).
+  Future<void> _syncReminders() async {
+    NotificationService.instance.syncEngagementReminders(
+      freePhotoUsed: state.freePhotoUsed,
+      freeAnalysisUsed: state.freeAnalysisUsed,
+      hasLockedPhotos: await _latestJobHasLockedPhotos(),
+    );
+  }
+
+  /// EN SON üretimde açılmamış (kilitli) fotoğraf kaldı mı?
+  ///
+  /// Cüzdandan türetmek YANILTICI olurdu: "ücretsiz hak kullanıldı + bakiye 0"
+  /// koşulu, paket alıp tam 5 fotoluk üretim yapmış ve bakiyesi bitmiş
+  /// kullanıcıda da doğru çıkar — o kişiye "fotoğrafların kilitli" demek
+  /// yanlış olur. Bu yüzden gerçek kaynağa bakılıyor: son işin lockedCount'u
+  /// (bkz. falPhotos.js — yalnızca ücretsiz üretimde yazılır).
+  Future<bool> _latestJobHasLockedPhotos() async {
+    final uid = ref.read(authServiceProvider).uid;
+    if (uid == null) return false;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users/$uid/private/genData/genJobs')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return false;
+      final results = snap.docs.first.data()['results'] as Map<String, dynamic>?;
+      if (results == null) return false;
+      return results.values.any((e) =>
+          ((e as Map<String, dynamic>)['lockedCount'] as num?  ?? 0) > 0);
+    } catch (_) {
+      // Okunamazsa hatırlatma kurma — yanlış bildirim göndermektense hiç
+      // göndermemek yeğdir.
+      return false;
+    }
   }
 
   Future<void> _persist() async {
@@ -434,6 +480,9 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
   Future<void> reset() async {
     state = const PackBalance();
     await _persist();
+    // Hesap silindi/çıkış yapıldı — zamanlanmış hatırlatmalar geride
+    // kalmasın (silinen hesaba "ücretsiz hakkın bekliyor" bildirimi gitmesin).
+    await NotificationService.instance.cancelAll();
   }
 
   @override
