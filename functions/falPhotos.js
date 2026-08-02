@@ -2227,7 +2227,7 @@ exports.prepareReferencePhotos = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
-    const { jobId, bodyProfile, styles: prepStyles } = request.data || {};
+    const { jobId, bodyProfile } = request.data || {};
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
@@ -2239,11 +2239,6 @@ exports.prepareReferencePhotos = onCall(
           gender: typeof bodyProfile.gender === "string" ? bodyProfile.gender : null,
         }
       : null;
-    // Wardrobe notları için seçilen stiller (opsiyonel; yoksa atlanır).
-    const stylesForWardrobe = Array.isArray(prepStyles)
-      ? prepStyles.filter((s) => typeof s === "string" && STYLE_SCENES[s])
-      : [];
-
     // Referansları indir (+ içerik moderasyonu, bkz. uploadReferencePhotos) ve
     // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
@@ -2322,30 +2317,30 @@ exports.prepareReferencePhotos = onCall(
       console.error("Yüz kontrolü başarısız (kimlik kapısı devre dışı, üretim engellenmiyor):", e);
     }
 
-    // Gemini ön-işlem (paralel, fail-safe): kimlik + tam boy beden + stil wardrobe.
-    let identityCaption = null;
+    // Gemini ön-işlem (fail-safe): tam boy beden tarifi.
+    //
+    // identityCaption KALDIRILDI (2026-08-02, kullanıcı kararı): Gemini'nin
+    // yüz/ten/yaş tarifini prompt'a ekleyen bu adım hem yavaşlık riski
+    // taşıyordu (3 model sırayla deneniyordu, gerçek olayda tek bir modelin
+    // cevabı 1dk45sn sürüp "deadline exceeded"e yol açtı) hem de üretilen
+    // tarifler sıklıkla kırık/kullanılamaz çıkıyordu (bkz. isUsableCaption).
+    // Kimlik artık YALNIZCA referans fotoğrafların kendisinden geliyor —
+    // OpenAI zaten görselleri doğrudan görüyor, ayrı bir metin tarifine
+    // ihtiyaç yok. bodyCaption KORUNDU: boy/beden seçimi zaten kullanıcının
+    // formundan (bodyProfile) geliyor ve öncelikli sayılıyor (bkz.
+    // shortBodyNote), bodyCaption yalnızca tam cümleyse ek bilgi olarak
+    // ekleniyor — riski aynı ama katkısı identityCaption'dan farklı ve
+    // ikincil konumda olduğu için tutuldu.
+    // styleWardrobes de KALDIRILDI: hiçbir prompt fonksiyonuna hiç
+    // geçmiyordu, yalnızca Firestore'a yazılıp duran kullanılmayan bir
+    // Gemini çağrısıydı.
     let bodyCaption = null;
-    let styleWardrobes = {};
     try {
-      const {
-        describeIdentity,
-        describeBodyBuild,
-        describeStyleWardrobes,
-      } = require("./identityCaption");
-      const faceBuffers = refBuffers.slice(0, FACE_PHOTO_COUNT);
+      const { describeBodyBuild } = require("./identityCaption");
       const bodyBuffer = refBuffers.length > FACE_PHOTO_COUNT
         ? refBuffers[refBuffers.length - 1]
         : null;
-      const [idCap, bodyCap, wardrobes] = await Promise.all([
-        describeIdentity(faceBuffers.length ? faceBuffers : refBuffers),
-        describeBodyBuild(bodyBuffer),
-        stylesForWardrobe.length
-          ? describeStyleWardrobes(refBuffers, stylesForWardrobe)
-          : Promise.resolve({}),
-      ]);
-      identityCaption = idCap;
-      bodyCaption = bodyCap;
-      styleWardrobes = wardrobes || {};
+      bodyCaption = await describeBodyBuild(bodyBuffer);
     } catch (e) {
       console.error("Gemini ön-işlem başarısız (caption'sız devam):", e);
     }
@@ -2365,9 +2360,7 @@ exports.prepareReferencePhotos = onCall(
       // falInferenceWebhook + faceSwap). fal CDN kopyası; Storage silinse de kalır.
       ...(refUrls[0] ? { primaryFaceUrl: refUrls[0] } : {}),
       ...(refDescriptor ? { refDescriptor } : {}),
-      ...(identityCaption ? { identityCaption } : {}),
       ...(bodyCaption ? { bodyCaption } : {}),
-      ...(Object.keys(styleWardrobes).length ? { styleWardrobes } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
     });
 
