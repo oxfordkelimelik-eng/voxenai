@@ -274,7 +274,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             .ref('dating_training/$uid/$jobId/photo_$i.jpg')
             .putFile(refs[i]);
       }
-      await functions.httpsCallable('prepareReferencePhotos').call({
+      await functions
+          .httpsCallable(
+            'prepareReferencePhotos',
+            options: HttpsCallableOptions(
+              // Sunucu tarafı timeoutSeconds:180 (bkz. falPhotos.js) — kimlik/
+              // beden/wardrobe caption'ları için birden çok Gemini modeli
+              // sırayla denenebiliyor. İstemci varsayılanı (70sn) bundan kısa
+              // olduğu için sunucu işi BAŞARIYLA bitirse bile istemci erkenden
+              // "deadline-exceeded" fırlatıyordu (gerçek örnek: 2026-08-02,
+              // sunucu 120.7sn'de 200 döndü ama istemci çoktan vazgeçmişti).
+              timeout: const Duration(seconds: 180),
+            ),
+          )
+          .call({
         'jobId': jobId,
         'styles': _styles.toList(),
         'bodyProfile': {

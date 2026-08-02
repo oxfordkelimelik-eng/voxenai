@@ -50,6 +50,17 @@ function isUsableCaption(text) {
   return true;
 }
 
+// Model başına maksimum bekleme. GERÇEK OLAY (2026-08-02): 3 modelin SIRAYLA
+// denenmesi (bkz. isUsableCaption eklenmesinden sonra) bir çağrıda 120+
+// saniye sürdü — gemini-2.0-flash 429 verdi (hemen atlandı), ama
+// gemini-flash-latest'in cevabı 1dk45sn gecikti. Kodumuzda bilinçli bir
+// bekleme YOKTU; gecikme Gemini API'nin/ağın kendisindendi ve bizim
+// kontrolümüz dışında. AbortController ile üst sınır koyuyoruz: bir model
+// bu süre içinde cevap vermezse sonsuza kadar beklemek yerine sıradaki
+// modele geçilir. Worst-case artık 3 model × MODEL_TIMEOUT_MS, önceden
+// sınırsızdı.
+const MODEL_TIMEOUT_MS = 20000;
+
 async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220, temperature = 0.2 }) {
   for (const model of GEMINI_MODELS) {
     const generationConfig = { maxOutputTokens, temperature };
@@ -73,11 +84,14 @@ async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220
       ],
       generationConfig,
     };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
     try {
       const resp = await fetch(geminiUrl(model, key), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
       if (!resp.ok) {
         console.warn(`identityCaption: model ${model} -> ${resp.status}`);
@@ -98,7 +112,13 @@ async function callGemini({ key, prompt, imagePartsBase64, maxOutputTokens = 220
       }
       return text;
     } catch (e) {
-      console.warn(`identityCaption: model ${model} hata:`, e.message || e);
+      if (e.name === "AbortError") {
+        console.warn(`identityCaption: model ${model} ${MODEL_TIMEOUT_MS}ms içinde cevap vermedi — atlanıyor`);
+      } else {
+        console.warn(`identityCaption: model ${model} hata:`, e.message || e);
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
   return null;
