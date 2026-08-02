@@ -853,15 +853,30 @@ function buildStage3Prompt() {
 // Kullanıcının formda SEÇTİĞİ beden tipi -> modelin uygulayabileceği SOMUT
 // geometri. Etiketin kendisi ("athletic / sporty build") modele ne YAPACAĞINI
 // söylemiyordu; bu tablo omuz/gövde/kol düzeyinde ne değişeceğini söylüyor.
+// ATLETİK ≠ KASLI (2026-08-02 düzeltmesi): önceki metin athletic için
+// "fill out the chest and arms with LEAN MUSCLE" + "clear V-taper" diyordu;
+// model bunu vücut geliştirici gibi yorumluyordu. Formdaki "Atletik"
+// seçeneği sıradan bir kullanıcı için "spor yapan, formda, fazlalığı
+// olmayan" demek — kas sergileyen biri demek DEĞİL. Artık kas yerine
+// "fazla yağ yok / düz karın / dik duruş" tarif ediliyor.
+//
+// GERÇEK KİLOYA YAKINLIK: formda kg/cm alanı YOK, elimizdeki tek beyan bu
+// dört kategori. O yüzden her madde iki yönlü fren içeriyor — hem
+// "abartma" hem "güzelleştirme/inceltme" yasak. Modelin varsayılan
+// eğilimi herkesi ideal/fit göstermek olduğu için özellikle 'average' ve
+// 'solid' maddelerinde bu fren açıkça yazıldı.
 const BODY_TYPE_DIRECTIVE = {
-  slim: "narrow the shoulders and rib cage, flatten the chest, and slim the arms, waist and thighs; " +
-    "the clothing should hang loosely rather than being filled out",
-  athletic: "broaden the shoulders and upper back into a clear V-taper down to a trim waist, fill out " +
-    "the chest and arms with lean muscle, and keep the stomach flat",
-  average: "keep ordinary everyday adult proportions — neither noticeably slim nor heavy, shoulders " +
-    "and waist in normal balance, with no visible muscle definition",
-  solid: "broaden and thicken the torso, chest and waist, fill out the arms and thighs, and let the " +
-    "clothing sit fuller and tighter across the middle",
+  slim: "give them a genuinely slim, light frame: narrow shoulders and rib cage, a flat chest, thin " +
+    "arms, and a narrow waist and thighs, with the clothing hanging loosely rather than being filled out",
+  athletic: "give them a fit, trim everyday build — someone who exercises regularly, NOT a bodybuilder: " +
+    "no excess weight at the waist, a flat stomach and upright posture, shoulders only slightly wider " +
+    "than average. Do NOT add bulging muscles, visible abs, an inflated chest or an exaggerated V-taper",
+  average: "give them ordinary everyday adult proportions — neither noticeably slim nor heavy, shoulders " +
+    "and waist in normal balance, a naturally soft stomach (not flat, not toned), and no visible muscle " +
+    "definition. This is the most common real build; do not idealise or slim it down",
+  solid: "give them a genuinely heavier, fuller frame: a broader and thicker torso, a fuller chest and " +
+    "midsection that clearly carries weight, fuller arms and thighs, and a slightly fuller face and " +
+    "neck, with the clothing sitting tighter across the middle. Do not slim them down",
 };
 
 // Boy -> klasik figür oranı (baş yüksekliği cinsinden toplam boy). Kafa/vücut
@@ -901,13 +916,24 @@ function shortBodyNote(bodyCaption, bodyProfile) {
   const heads = bodyProfile && HEIGHT_HEAD_UNITS[bodyProfile.heightRange];
   if (!bt && !ht) return "";
 
-  const target = [ht, label].filter(Boolean).join(", ");
+  // BOY, KADRAJI DEĞİŞTİRME TALEBİ DEĞİLDİR (2026-08-02): önceki metin boyu
+  // beden tipiyle aynı cümlede "hedef" gibi veriyordu. Ama kompozisyon/arka
+  // plan "birebir korunacak" kuralımız yüzünden kişiyi sahne içinde gerçekten
+  // uzatmak/kısaltmak geometrik olarak İMKANSIZ — kişi kısalsa kafasının
+  // üstünde boşluk açılır ve model orayı arka plan uydurarak doldurmaya
+  // çalışır (tam da korumaya çalıştığımız şeyi bozar). Bu yüzden boy artık
+  // yalnızca KAFA/GÖVDE ORANI için bir referans; sahnedeki ölçeği değiştirme
+  // emri olarak verilmiyor.
   let s = `\n\nTARGET BUILD — the user stated this themselves, so it OVERRIDES whatever the reference ` +
-    `photos seem to show: ${target}.`;
+    `photos seem to show: ${label || ht}.`;
   if (bt) s += ` Reshape the base person's body accordingly: ${bt}.`;
+  s += ` Change ONLY the body's shape and bulk. Do NOT change how tall the person stands in the frame, ` +
+    `where they are positioned, or how much of the scene they cover — the framing and background must ` +
+    `stay pixel-identical, so never rescale the person to fit a target height.`;
   if (heads) {
-    s += ` At this height the whole figure is ${heads} head-heights tall; if the full body is visible, ` +
-      `check the head against that.`;
+    s += ` For head-size reference only, a person of their stated height (${ht}) is ${heads} ` +
+      `head-heights tall — use this to judge whether the head looks right on the reshaped body, not to ` +
+      `resize the person.`;
   }
   // bodyCaption (fotoğraftan otomatik gözlem) YALNIZCA tam bir cümleyse ve
   // kullanıcının seçimiyle çelişmiyorsa ek bilgi olarak veriliyor; çelişirse
