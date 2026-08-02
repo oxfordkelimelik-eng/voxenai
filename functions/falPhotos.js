@@ -1252,13 +1252,55 @@ async function signedDownloadUrl(file) {
 // yüklenir ve her üretimde bu havuzdan rastgele seçilir.
 const TEMPLATE_ROOT = "dating_templates";
 
-// Havuzdaki TÜM taban görselleri döner (alt klasörler dahil — yanlışlıkla
-// klasörlü yüklenirse de bulunur). Döner: Storage File[] (boşsa []).
-async function listTemplateFiles() {
+// BOY BANDINA GÖRE ŞABLON HAVUZU (2026-08-02).
+//
+// NEDEN: bir fotoğrafta boy, kişinin sahnedeki nesnelere (kapı, araba,
+// korkuluk, diğer insanlar) göre oranıyla okunur. Kompozisyon/arka plan
+// "birebir korunacak" kuralımız yüzünden kişiyi sahne içinde uzatmak/
+// kısaltmak geometrik olarak imkansız (bkz. shortBodyNote'taki açıklama) —
+// kişiyi büyütürsek kadraj taşar, küçültürsek üstte boşluk açılır ve model
+// orayı arka plan uydurarak doldurur.
+//
+// ÇÖZÜM: boyu üretim sırasında zorlamak yerine, ŞABLONUN KENDİSİNDEN gelmesi.
+// Kullanıcının seçtiği boya uygun kadrajlı şablonlar seçilir; boy bilgisi
+// böylece prompt'a değil, TUVAL SEÇİMİNE yansır.
+//
+// Bantlar (kullanıcı kararı): 175 ve altı short, 175-185 middle, 185+ tall.
+const TEMPLATE_HEIGHT_BANDS = ["short", "middle", "tall"];
+const HEIGHT_RANGE_TO_BAND = {
+  under160: "short",
+  "160-165": "short",
+  "165-170": "short",
+  "170-175": "short",
+  "175-180": "middle",
+  "180-185": "middle",
+  "185-190": "tall",
+  "190+": "tall",
+};
+
+// Havuzdaki taban görselleri döner.
+//
+// heightRange verilirse önce o boya karşılık gelen alt klasör denenir
+// (dating_templates/{band}/). O klasör BOŞSA sessizce tüm havuza düşülür —
+// böylece kullanıcı henüz bantlara ayırmamışsa üretim durmaz (fail-safe:
+// yanlış boy bandı, hiç üretim yapamamaktan iyidir).
+// Döner: { files: Storage File[], band: string|null }
+async function listTemplateFiles(heightRange) {
+  const band = HEIGHT_RANGE_TO_BAND[heightRange] || null;
+  const isImage = (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name);
+
+  if (band) {
+    const [inBand] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/${band}/` });
+    const banded = inBand.filter(isImage);
+    if (banded.length > 0) return { files: banded, band };
+    console.warn(`ŞABLON BANDI BOŞ: ${TEMPLATE_ROOT}/${band}/ — tüm havuza düşülüyor (boy=${heightRange})`);
+  }
+
+  // Tüm havuz. Bant klasörleri de bu listeye dahil olur (alt klasörler
+  // getFiles prefix'ine giriyor) — bantlara ayrılmamış eski/düz yüklemeler
+  // için doğru davranış budur.
   const [found] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/` });
-  return found.filter(
-    (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name)
-  );
+  return { files: found.filter(isImage), band: null };
 }
 
 /**
@@ -2481,14 +2523,22 @@ exports.startPhotoGeneration = onCall(
     // harcanmadan net hata). Kategoriler kaldırıldı (2026-08-02): tek düz
     // havuzdan, kullanıcının ÖNCEKİ işlerinde kullanılmamışlara öncelik
     // vererek seçilir — bkz. pickTemplatesFromPool / recentTemplateNames.
-    const files = await listTemplateFiles();
+    // BOY BANDI (2026-08-02): kullanıcının seçtiği boya uygun alt klasör
+    // varsa yalnızca oradan seçilir — bkz. listTemplateFiles / HEIGHT_RANGE_TO_BAND.
+    const { files, band: templateBand } = await listTemplateFiles(bodyProfile.heightRange);
     if (files.length === 0) {
       throw new HttpsError(
         "failed-precondition",
         `Taban görsel havuzu boş. Firebase Storage'da ${TEMPLATE_ROOT}/ ` +
-        `klasörüne AI ile üretilmiş taslak görseller yükle.`
+        `klasörüne (veya boy bantlarına: ${TEMPLATE_HEIGHT_BANDS.join(" / ")}) ` +
+        `AI ile üretilmiş taslak görseller yükle.`
       );
     }
+    console.log(
+      `ŞABLON HAVUZU: ${files.length} görsel` +
+      (templateBand ? ` (boy bandı=${templateBand}, boy=${bodyProfile.heightRange})`
+                    : ` (bant yok — tüm havuz, boy=${bodyProfile.heightRange || "belirtilmemiş"})`)
+    );
     const recentNames = await recentTemplateNames(uid);
     const templatesByStyle = {};
     for (const styleId of styles) {
