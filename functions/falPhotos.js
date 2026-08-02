@@ -1987,44 +1987,61 @@ const TEMPLATE_TARGET_FACE_RATIO = 0.17;
 /**
  * Taban şablonunu üretime hazırlar: kişi kadrajda çok küçükse şablonu
  * YAKINLAŞTIRIR (bkz. postProcess.cropForFaceRatio gerekçesi).
- * Döner: kırpılmış Buffer ya da (kırpma gerekmiyorsa/başarısızsa) orijinal
- * templateUrl string'i — generateWithOpenAI ikisini de kabul eder.
- * FAIL-SAFE: her hata durumunda orijinal URL döner, üretim asla bloklanmaz.
+ *
+ * GERİ YERLEŞTİRME (2026-08-02): kırpma yapıldıysa, OpenAI üretimi
+ * BİTTİKTEN SONRA sonucu orijinal (kırpılmamış) tuvale geri koyabilmek için
+ * hem orijinal buffer hem de kırpma geometrisi de döndürülüyor — bkz.
+ * postProcess.recompositeIntoOriginal ve bu fonksiyonun çağrıldığı yer
+ * (runOpenAiDirectChunk). Amaç: taban fotoğrafın arka planı/kompozisyonu
+ * kırpma nedeniyle asla değişmesin, sadece yüzün olduğu bölge güncellensin.
+ *
+ * Döner: {
+ *   input: kırpılmış Buffer ya da orijinal templateUrl string'i (OpenAI'ye
+ *          giden budur — generateWithOpenAI ikisini de kabul eder),
+ *   restore: kırpma yapıldıysa { originalBuf, geo }, yapılmadıysa null,
+ * }
+ * FAIL-SAFE: her hata durumunda { input: templateUrl, restore: null } döner,
+ * üretim asla bloklanmaz.
  */
 async function prepareTemplate(templateUrl, styleId, chunkIdx) {
+  const noCrop = { input: templateUrl, restore: null };
   try {
     const r = await fetch(templateUrl);
-    if (!r.ok) return templateUrl;
+    if (!r.ok) return noCrop;
     const buf = Buffer.from(await r.arrayBuffer());
 
     const { detectMainFace } = require("./faceQuality");
     const face = await detectMainFace(buf);
     if (!face) {
       console.warn(`ŞABLON: yüz bulunamadı, kırpma atlandı (style=${styleId}, chunk=${chunkIdx})`);
-      return templateUrl;
+      return noCrop;
     }
     if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
       console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
-      return templateUrl;
+      return noCrop;
     }
 
-    const { cropForFaceRatio } = require("./postProcess");
-    const cropped = await cropForFaceRatio(
-      buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO
-    );
-    if (!cropped) return templateUrl;
+    const { cropForFaceRatio, computeFaceCropGeometry } = require("./postProcess");
+    const [cropped, geo] = await Promise.all([
+      cropForFaceRatio(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
+      computeFaceCropGeometry(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
+    ]);
+    if (!cropped || !geo) return noCrop;
     console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO}`);
-    return cropped;
+    return { input: cropped, restore: { originalBuf: buf, geo } };
   } catch (e) {
     console.error("Şablon hazırlama başarısız (orijinal kullanılıyor):", e.message || e);
-    return templateUrl;
+    return noCrop;
   }
 }
 
 async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
-  const templateInput = await prepareTemplate(templateUrl, styleId, chunkIdx);
+  // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
+  // (kırpılmamış) taban fotoğrafa geri yerleştirmek için gereken bilgi —
+  // bkz. prepareTemplate ve aşağıdaki kaydetme adımı.
+  const { input: templateInput, restore } = await prepareTemplate(templateUrl, styleId, chunkIdx);
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
@@ -2142,8 +2159,26 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
   }
 
   try {
-    const { addPhoneCameraTexture } = require("./postProcess");
-    const textured = await addPhoneCameraTexture(finalBuf);
+    const { addPhoneCameraTexture, recompositeIntoOriginal } = require("./postProcess");
+
+    // GERİ YERLEŞTİRME: kalite kapısı KIRPILMIŞ (yüze yakın) tuval üzerinde
+    // çalıştı — yüz oranı/kimlik ölçümü ve Vision karşılaştırması bunu
+    // gerektiriyor, geniş orijinal tuvalde yüz çok küçük kalırdı. Kare
+    // KABUL edildikten SONRA, kırpma yapılmışsa sonuç orijinal (kırpılmamış)
+    // taban fotoğrafa geri yerleştirilir — böylece taban fotoğrafın arka
+    // planı/kompozisyonu HİÇBİR ZAMAN kırpılmış hâliyle kullanıcıya gitmez.
+    let deliverBuf = finalBuf;
+    if (restore) {
+      const recomposited = await recompositeIntoOriginal(finalBuf, restore.originalBuf, restore.geo);
+      if (recomposited) {
+        deliverBuf = recomposited;
+        console.log(`ŞABLON GERİ YERLEŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}): orijinal boyuta döndürüldü`);
+      } else {
+        console.warn(`ŞABLON GERİ YERLEŞTİRME BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}) — kırpılmış sonuç kullanılıyor`);
+      }
+    }
+
+    const textured = await addPhoneCameraTexture(deliverBuf);
     const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_0.jpg`;
     await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });

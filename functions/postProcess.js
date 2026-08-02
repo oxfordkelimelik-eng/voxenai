@@ -172,15 +172,39 @@ const TEMPLATE_CROP_FACE_TOP = 0.30;
  * Döner: kırpılmış JPEG Buffer | null (kırpma gerekmiyorsa/yapılamıyorsa —
  * çağıran taraf orijinali kullanır, fail-safe).
  */
+/**
+ * cropForFaceRatio ile AYNI mantık, ama kırpılmış Buffer yerine kırpma
+ * GEOMETRİSİNİ (left/top/cropW/cropH + orijinal boyut) döner — çağıran
+ * taraf hem kırpılmış görseli üretebilsin hem de üretim bittikten sonra
+ * sonucu orijinal tuvale GERİ YERLEŞTİREBİLSİN (bkz. recompositeIntoOriginal).
+ * Döner: { left, top, cropW, cropH, imgW, imgH } | null.
+ */
+function computeFaceCrop(buf, box, currentRatio, targetRatio, imgW, imgH) {
+  const scaleDown = targetRatio / currentRatio; // >1 => kadraj daraltılacak
+  if (scaleDown <= 1.05) return null; // zaten yeterince yakın
+  if (!imgW || !imgH) return null;
+
+  let cropW = Math.round(imgW / scaleDown);
+  let cropH = Math.round(imgH / scaleDown);
+  if (cropW < 2 || cropH < 2) return null;
+
+  const faceCx = box.x + box.width / 2;
+  const faceCy = box.y + box.height / 2;
+  let left = Math.round(faceCx - cropW / 2);
+  let top = Math.round(faceCy - cropH * TEMPLATE_CROP_FACE_TOP);
+
+  left = Math.max(0, Math.min(left, imgW - cropW));
+  top = Math.max(0, Math.min(top, imgH - cropH));
+
+  return { left, top, cropW, cropH, imgW, imgH };
+}
+
 async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
   try {
     if (!box || !(currentRatio > 0) || !(targetRatio > 0)) return null;
-    const scaleDown = targetRatio / currentRatio; // >1 => kadraj daraltılacak
-    if (scaleDown <= 1.05) return null; // zaten yeterince yakın
-
     const meta = await sharp(buf).metadata();
-    const imgW = meta.width, imgH = meta.height;
-    if (!imgW || !imgH) return null;
+    const geo = computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height);
+    if (!geo) return null;
 
     // NOT (2026-07-29): boyutları 16'nın katına hizalamayı denedim, sonra geri
     // aldım. gpt-image-2'nin "genişlik/yükseklik 16'ya bölünebilir olmalı"
@@ -188,24 +212,11 @@ async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
     // parametreyi göndermiyoruz, dolayısıyla GİRDİ görseli için bir zorunluluk
     // yok. Hizalama karşılığında en-boy oranında ~%2 sapma oluşuyordu; kanıtsız
     // bir fayda için gerçek bir bozulma kabul edilmedi.
-    let cropW = Math.round(imgW / scaleDown);
-    let cropH = Math.round(imgH / scaleDown);
-    if (cropW < 2 || cropH < 2) return null;
-
-    const faceCx = box.x + box.width / 2;
-    const faceCy = box.y + box.height / 2;
-    let left = Math.round(faceCx - cropW / 2);
-    let top = Math.round(faceCy - cropH * TEMPLATE_CROP_FACE_TOP);
-
-    // Sınırlara kenetle (kırpma penceresi görselin dışına taşmasın).
-    left = Math.max(0, Math.min(left, imgW - cropW));
-    top = Math.max(0, Math.min(top, imgH - cropH));
-
-    let out = sharp(buf).extract({ left, top, width: cropW, height: cropH });
+    let out = sharp(buf).extract({ left: geo.left, top: geo.top, width: geo.cropW, height: geo.cropH });
     // Kırpma sonrası piksel sayısı düştü; modele küçük bir tuval vermemek için
     // uzun kenarı TEMPLATE_CROP_LONG_EDGE'e büyüt (zaten büyükse dokunma).
     // fit:"inside" en-boy oranını AYNEN korur (bkz. yukarıdaki 16-hizalama notu).
-    if (Math.max(cropW, cropH) < TEMPLATE_CROP_LONG_EDGE) {
+    if (Math.max(geo.cropW, geo.cropH) < TEMPLATE_CROP_LONG_EDGE) {
       out = out.resize(TEMPLATE_CROP_LONG_EDGE, TEMPLATE_CROP_LONG_EDGE, {
         fit: "inside",
         kernel: "lanczos3",
@@ -218,9 +229,105 @@ async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
   }
 }
 
+/**
+ * cropForFaceRatio ile AYNI geometriyi hesaplar ama Buffer yerine geometri
+ * nesnesi döner — recompositeIntoOriginal bunu ihtiyaç duyar (bkz. orada).
+ * Döner: { left, top, cropW, cropH, imgW, imgH } | null.
+ */
+async function computeFaceCropGeometry(buf, box, currentRatio, targetRatio) {
+  try {
+    if (!box || !(currentRatio > 0) || !(targetRatio > 0)) return null;
+    const meta = await sharp(buf).metadata();
+    return computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height);
+  } catch (e) {
+    console.error("Kırpma geometrisi hesaplanamadı:", e);
+    return null;
+  }
+}
+
+/**
+ * ŞABLON YAKINLAŞTIRMASININ TERSİ: OpenAI'nin (kırpılmış tuval üzerinde)
+ * ürettiği sonucu, ORİJİNAL taban fotoğrafın İÇİNE, aynı konum ve boyutta
+ * geri yerleştirir. Amaç: taban fotoğrafın arka planı/kompozisyonu kırpma
+ * ARTEFAKTI OLMADAN korunsun — model hiçbir zaman "geniş tuvali" görmediği
+ * için arka planı yanlışlıkla değiştirme riski de yok.
+ *
+ * İKİ KAYIP KAYNAĞINI SINIRLAR:
+ *  1) ÇİFTE RESAMPLE: kırpma sırasında görsel TEMPLATE_CROP_LONG_EDGE'e
+ *     BÜYÜTÜLMÜŞTÜ (modele küçük tuval vermemek için). OpenAI o büyütülmüş
+ *     boyutta üretim yapıp döndürür. Burada TEK bir adımda — doğrudan
+ *     orijinal kırpma boyutuna (geo.cropW × geo.cropH) — küçültülür; büyüt-
+ *     sonra-küçült yerine tek resample.
+ *  2) SERT KENAR: kırpma dikdörtgeninin sınırında OpenAI'nin ürettiği ton/
+ *     doku ile orijinalin geri kalanı arasında görünür bir çizgi olabilir.
+ *     Bunu YUMUŞAK (feathered) bir maskeyle önlüyoruz: maskenin kenarları
+ *     bulanıklaştırılmış, ortası tam opak — composite ile üst üste
+ *     bindirildiğinde geçiş kademeli olur, sert bir dikdörtgen görünmez.
+ *
+ * outputBuf   : OpenAI'den dönen üretim sonucu (kırpılmış tuval üzerinde)
+ * originalBuf : prepareTemplate'e giren, HİÇ kırpılmamış orijinal şablon
+ * geo         : computeFaceCropGeometry'nin döndürdüğü { left, top, cropW, cropH, imgW, imgH }
+ *
+ * Döner: orijinal boyutta, yüzü değişmiş JPEG Buffer | null (başarısızsa —
+ * çağıran taraf bu durumda kırpılmış (dar kadrajlı) sonucu kullanmaya devam
+ * edebilir, üretim asla bloklanmaz).
+ */
+async function recompositeIntoOriginal(outputBuf, originalBuf, geo) {
+  try {
+    if (!geo) return null;
+    const { left, top, cropW, cropH, imgW, imgH } = geo;
+
+    // 1) TEK RESAMPLE: OpenAI çıktısını (büyütülmüş tuval) doğrudan orijinal
+    // kırpma boyutuna küçült — ara adım yok.
+    const patch = await sharp(outputBuf)
+      .resize(cropW, cropH, { fit: "fill", kernel: "lanczos3" })
+      .toBuffer();
+
+    // 2) YUMUŞAK MASKE: beyaz dikdörtgen + kuvvetli Gaussian blur = kenarları
+    // saydamlaşan bir alfa maskesi. Blur yarıçapı kırpma boyutuna göre
+    // ölçekli (küçük kırpmada aşırı blur her şeyi saydamlaştırır).
+    const featherPx = Math.max(8, Math.round(Math.min(cropW, cropH) * 0.06));
+    const insetSvg =
+      `<svg width="${cropW}" height="${cropH}">` +
+      `<rect x="${featherPx}" y="${featherPx}" ` +
+      `width="${Math.max(1, cropW - featherPx * 2)}" height="${Math.max(1, cropH - featherPx * 2)}" ` +
+      `fill="white"/></svg>`;
+    const mask = await sharp(Buffer.from(insetSvg))
+      .blur(featherPx / 1.5)
+      .png()
+      .toBuffer();
+
+    // Yamayı maskeyle birleştir: maskenin saydam (siyah) bölgeleri yamayı
+    // saydamlaştırır, composite ile orijinalin üstüne bindirildiğinde altta
+    // kalan orijinal piksel yumuşakça görünür.
+    const patchWithAlpha = await sharp(patch)
+      .ensureAlpha()
+      .composite([{ input: mask, blend: "dest-in" }])
+      .png()
+      .toBuffer();
+
+    // 3) Orijinal tuvalin üstüne, kırpmanın alındığı TAM konuma bindir.
+    const result = await sharp(originalBuf)
+      .composite([{ input: patchWithAlpha, left, top }])
+      .jpeg({ quality: 92 })
+      .toBuffer();
+
+    // Boyut kontrolü — beklenmedik bir sapma olursa fail-safe null.
+    const outMeta = await sharp(result).metadata();
+    if (outMeta.width !== imgW || outMeta.height !== imgH) return null;
+
+    return result;
+  } catch (e) {
+    console.error("Orijinale geri yerleştirme başarısız (kırpılmış sonuç kullanılacak):", e);
+    return null;
+  }
+}
+
 module.exports = {
   addPhoneCameraTexture,
   cropFaceRegion,
   normalizeExifOrientation,
   cropForFaceRatio,
+  computeFaceCropGeometry,
+  recompositeIntoOriginal,
 };
