@@ -1012,21 +1012,22 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "2) SKIN TONE — the target's true colour on EVERY visible piece of skin: face, neck, ears, chest, " +
     "arms, hands, legs, feet. Any limb left in the base person's tone, or a two-tone patchwork, is a " +
     "serious error. No brightening, whitening, glow or sheen.\n\n" +
-    "3) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
-    "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
-    "anatomically correct." +
-    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "HEAD-TO-BODY PROPORTION — the most common failure; verify this LAST, after the body is done. A " +
-    "head is about one third of the shoulder width. Reshaping the body in step 3 changes what that " +
-    "means, so re-measure: compare the head against the NEW shoulder width and scale the head to " +
-    "match. A head left at its old size on a reshaped body reads as oversized even though you never " +
-    "enlarged it. Never enlarge the head or puff the face. The close-up references are zoomed in for " +
-    "detail only — never take head scale from them.\n\n" +
-    "HEAD ANGLE: keep the head's rotation, tilt and gaze exactly as in the first image, on all three " +
-    "axes (left/right turn, up/down chin, sideways lean). If the base shows a profile or three-quarter " +
-    "view, stay in it — rotating toward the camera to make the face easier is a failure. Ignore how " +
-    "the target is posed in their own selfies.\n\n" +
+    "3) HEAD-TO-BODY PROPORTION — the most common failure; this rule OVERRIDES the body step below if " +
+    "they ever conflict. A head is about one third of the shoulder width. Reshaping the body changes " +
+    "what that means, so re-measure at the end: compare the head against the NEW shoulder width and " +
+    "scale the head to match. A head left at its old size on a reshaped body reads as oversized even " +
+    "though you never enlarged it. Never enlarge the head or puff the face. The close-up references " +
+    "are zoomed in for detail only — never take head scale from them.\n\n" +
+    "4) HEAD ANGLE: keep the head's rotation, tilt and gaze exactly as in the first image, on all " +
+    "three axes (left/right turn, up/down chin, sideways lean). If the base shows a profile or " +
+    "three-quarter view, stay in it — rotating toward the camera to make the face easier is a " +
+    "failure. Ignore how the target is posed in their own selfies.\n\n" +
+    "5) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
+    "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
+    "anatomically correct. Never let this step change the head-to-body proportion or head angle set " +
+    "above." +
+    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     "EYEWEAR — the base photo alone decides. If the base person wears none, the output has none; the " +
     "target's references often show sunglasses and carrying them over is a failure. If the base does " +
     "wear eyewear, keep it exactly and match the still-visible nose, mouth and jaw to the selfies even " +
