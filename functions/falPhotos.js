@@ -1028,10 +1028,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "anatomically correct. Never let this step change the head-to-body proportion or head angle set " +
     "above." +
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
-    "EYEWEAR — the base photo alone decides. If the base person wears none, the output has none; the " +
-    "target's references often show sunglasses and carrying them over is a failure. If the base does " +
-    "wear eyewear, keep it exactly and match the still-visible nose, mouth and jaw to the selfies even " +
-    "more precisely.\n\n" +
+    "EYEWEAR — the output NEVER has glasses or sunglasses. If the base person wears them, drop them " +
+    "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
+    "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
     "TATTOOS: only if clearly visible in the target's own photos; remove the base person's.\n\n" +
     "LIGHTING & QUALITY: fix only genuinely bad lighting (harsh shadow across the eyes, an unexplained " +
     "dark blotch, a face too dark to see); otherwise the face sits under the scene's existing light " +
