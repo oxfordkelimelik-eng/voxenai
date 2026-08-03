@@ -924,16 +924,12 @@ function shortBodyNote(bodyCaption, bodyProfile) {
   // çalışır (tam da korumaya çalıştığımız şeyi bozar). Bu yüzden boy artık
   // yalnızca KAFA/GÖVDE ORANI için bir referans; sahnedeki ölçeği değiştirme
   // emri olarak verilmiyor.
-  let s = `\n\nTARGET BUILD — the user stated this themselves, so it OVERRIDES whatever the reference ` +
-    `photos seem to show: ${label || ht}.`;
+  let s = `\n\nTARGET BUILD — based on their own full-body reference and their stated build: ` +
+    `${label || ht}.`;
   if (bt) s += ` Reshape the base person's body accordingly: ${bt}.`;
-  s += ` Change ONLY the body's shape and bulk. Do NOT change how tall the person stands in the frame, ` +
-    `where they are positioned, or how much of the scene they cover — the framing and background must ` +
-    `stay pixel-identical, so never rescale the person to fit a target height.`;
   if (heads) {
-    s += ` For head-size reference only, a person of their stated height (${ht}) is ${heads} ` +
-      `head-heights tall — use this to judge whether the head looks right on the reshaped body, not to ` +
-      `resize the person.`;
+    s += ` For head-size reference only, they are ${heads} head-heights tall — use this to judge ` +
+      `whether the head looks right on the reshaped body, not to resize the person.`;
   }
   // bodyCaption (fotoğraftan otomatik gözlem) YALNIZCA tam bir cümleyse ve
   // kullanıcının seçimiyle çelişmiyorsa ek bilgi olarak veriliyor; çelişirse
