@@ -879,20 +879,6 @@ const BODY_TYPE_DIRECTIVE = {
     "neck, with the clothing sitting tighter across the middle. Do not slim them down",
 };
 
-// Boy -> klasik figür oranı (baş yüksekliği cinsinden toplam boy). Kafa/vücut
-// oranını SEÇİLEN BOYA bağlar: kısa kişide kafa toplam boyun daha büyük bir
-// kesri, uzun kişide daha küçük bir kesridir.
-const HEIGHT_HEAD_UNITS = {
-  under160: "about 7",
-  "160-165": "about 7",
-  "165-170": "about 7¼",
-  "170-175": "about 7½",
-  "175-180": "about 7½",
-  "180-185": "about 7¾",
-  "185-190": "about 8",
-  "190+": "about 8",
-};
-
 /**
  * Vücut yönergesi. KULLANICININ SEÇİMİ BELİRLEYİCİDİR.
  *
@@ -913,24 +899,18 @@ function shortBodyNote(bodyCaption, bodyProfile) {
   const bt = bodyProfile && BODY_TYPE_DIRECTIVE[bodyProfile.bodyType];
   const label = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
   const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
-  const heads = bodyProfile && HEIGHT_HEAD_UNITS[bodyProfile.heightRange];
   if (!bt && !ht) return "";
 
-  // BOY, KADRAJI DEĞİŞTİRME TALEBİ DEĞİLDİR (2026-08-02): önceki metin boyu
-  // beden tipiyle aynı cümlede "hedef" gibi veriyordu. Ama kompozisyon/arka
-  // plan "birebir korunacak" kuralımız yüzünden kişiyi sahne içinde gerçekten
-  // uzatmak/kısaltmak geometrik olarak İMKANSIZ — kişi kısalsa kafasının
-  // üstünde boşluk açılır ve model orayı arka plan uydurarak doldurmaya
-  // çalışır (tam da korumaya çalıştığımız şeyi bozar). Bu yüzden boy artık
-  // yalnızca KAFA/GÖVDE ORANI için bir referans; sahnedeki ölçeği değiştirme
-  // emri olarak verilmiyor.
+  // BOY ARTIK PROMPT'A GİRMİYOR (2026-08-03): kullanıcının boyu, şablon
+  // havuzunun hangi bandından (short/middle/tall) seçim yapılacağını
+  // belirliyor — yani taban fotoğraf zaten doğru boy oranında geliyor.
+  // Prompt'ta ayrıca "şu kadar kafa boyu uzun" demek ölçülemez bir talimattı:
+  // kareler çoğunlukla bel/göğüs üstü, bacaklar görünmüyor, dolayısıyla model
+  // bu ölçüyü uygulayamıyordu. Kafa boyutu artık tek bir yerde, OMUZ
+  // GENİŞLİĞİNE bağlı olarak yönetiliyor (bkz. prompt'taki "3) HEAD SIZE").
   let s = `\n\nTARGET BUILD — based on their own full-body reference and their stated build: ` +
     `${label || ht}.`;
   if (bt) s += ` Reshape the base person's body accordingly: ${bt}.`;
-  if (heads) {
-    s += ` For head-size reference only, they are ${heads} head-heights tall — use this to judge ` +
-      `whether the head looks right on the reshaped body, not to resize the person.`;
-  }
   // bodyCaption (fotoğraftan otomatik gözlem) YALNIZCA tam bir cümleyse ve
   // kullanıcının seçimiyle çelişmiyorsa ek bilgi olarak veriliyor; çelişirse
   // seçim kazanır. Kırık/kesik caption'lar zaten identityCaption.js'te
@@ -995,49 +975,46 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
     "output a reference photo — if your result lacks the first image's background and framing, you " +
     "edited the wrong image.\n\n" +
-    "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build, height and weight; " +
-    "ignore its face. The others are close-up face photos, the only source of truth for facial " +
-    "identity. References tell you the person's face, skin and build — never their clothing, " +
-    "accessories or pose.\n\n" +
-    "CHANGE EXACTLY THREE THINGS: face, skin tone, body build. Everything else stays identical to the " +
-    "first image — background, lighting, camera angle, framing, pose, and every clothing item and " +
-    "accessory.\n\n" +
+    "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build; ignore its face. " +
+    "The others are close-up face photos, the only source of truth for facial identity. References " +
+    "tell you the person's face, skin and build — never their clothing, accessories or pose.\n\n" +
+    "CHANGE ONLY THE PERSON — their face, skin tone and body build, per the numbered steps below. " +
+    "Everything else stays identical to the first image: background, lighting, camera angle, framing, " +
+    "pose, and every clothing item and accessory.\n\n" +
     "1) FACE — highest priority. Copy the target's structure feature by feature from the close-up " +
-    "photos: exact nose (bridge width, length, tip), eyebrows (thickness, arch, spacing), eyes (shape, " +
-    "size, slant, spacing), lips (shape, thickness, width), jaw, chin, cheekbones, face outline and " +
-    "length-to-width ratio. Do not beautify, symmetrise, average, round, puff, widen or stretch. Keep " +
-    "their own expression; add no smile that is not there. Their selfies may be close-up and " +
-    "lens-distorted — you may undo that slightly, never as licence to redesign. The output face is " +
-    "100% the target's, never blended with the base person's.\n\n" +
-    "2) SKIN TONE — the target's true colour on EVERY visible piece of skin: face, neck, ears, chest, " +
-    "arms, hands, legs, feet. Any limb left in the base person's tone, or a two-tone patchwork, is a " +
-    "serious error. No brightening, whitening, glow or sheen.\n\n" +
+    "photos: nose, eyebrows, eyes, lips, jaw, chin, cheekbones, face outline and length-to-width " +
+    "ratio. Do not beautify, symmetrise, average, round, puff, widen or stretch. Keep their own " +
+    "expression; add no smile that is not there. The output face is 100% the target's, never blended " +
+    "with the base person's.\n\n" +
+    "2) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
+    "person's tone, or a two-tone patchwork, is a serious error. No brightening, whitening, glow or " +
+    "sheen.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "3) HEAD-TO-BODY PROPORTION — the most common failure; this rule OVERRIDES the body step below if " +
-    "they ever conflict. A head is about one third of the shoulder width. Reshaping the body changes " +
-    "what that means, so re-measure at the end: compare the head against the NEW shoulder width and " +
-    "scale the head to match. A head left at its old size on a reshaped body reads as oversized even " +
-    "though you never enlarged it. Never enlarge the head or puff the face. The close-up references " +
-    "are zoomed in for detail only — never take head scale from them.\n\n" +
-    "4) HEAD ANGLE: keep the head's rotation, tilt and gaze exactly as in the first image, on all " +
-    "three axes (left/right turn, up/down chin, sideways lean). If the base shows a profile or " +
-    "three-quarter view, stay in it — rotating toward the camera to make the face easier is a " +
-    "failure. Ignore how the target is posed in their own selfies.\n\n" +
+    "3) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
+    "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
+    "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
+    "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
+    "a head kept at its old size on narrowed shoulders reads as oversized. Never enlarge the head or " +
+    "puff the face. The close-up references are zoomed in for detail only — never take head scale from " +
+    "them.\n\n" +
+    "4) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
+    "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
+    "point in the scene — if the base person looks away from the camera, the output looks away too. " +
+    "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
+    "toward the camera to make the face easier is a failure. Ignore how the target is posed or where " +
+    "they look in their own selfies.\n\n" +
     "5) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
     "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
-    "anatomically correct. Never let this step change the head-to-body proportion or head angle set " +
-    "above." +
+    "anatomically correct." +
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
     "EYEWEAR — the output NEVER has glasses or sunglasses. If the base person wears them, drop them " +
     "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
     "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
-    "TATTOOS: only if clearly visible in the target's own photos; remove the base person's.\n\n" +
-    "LIGHTING & QUALITY: fix only genuinely bad lighting (harsh shadow across the eyes, an unexplained " +
-    "dark blotch, a face too dark to see); otherwise the face sits under the scene's existing light " +
-    "with none added. The result must look like an ordinary unedited phone photo — real skin texture, " +
-    "no airbrush, beauty filter or CGI look. Gently clean temporary blemishes while keeping permanent " +
-    "features (moles, freckles, scars, beard). No garbled text, watermarks, distorted hands or extra " +
-    "limbs."
+    "TATTOOS: the output has none — remove the base person's.\n\n" +
+    "QUALITY: the face sits under the scene's existing light; add none of your own. The result must " +
+    "look like an ordinary unedited phone photo — real skin texture, no airbrush, beauty filter or " +
+    "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
+    "scars, beard)."
   );
 }
 
@@ -1726,14 +1703,16 @@ async function assessOutputWithVision(buf, referenceImages) {
          "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
          "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
          "as if two different people's skin were combined — that fails.\n" +
-         "D) HEAD-TO-BODY PROPORTION — judge this SEPARATELY and do not let a clean, artifact-free " +
-         "face excuse it; a perfectly rendered head can still be the wrong SIZE. Ignore the face " +
-         "entirely and compare the head's width to the SHOULDER width in IMAGE 1: on a normal adult " +
-         "the head is roughly one third of the shoulder span. If the head is clearly wider than that " +
-         "relative to the shoulders — the body looking too narrow or the head too large for it, or the " +
-         "head appearing pasted on — that FAILS, even if everything else is perfect.\n\n" +
-         "Answer with the verdict word first, then a colon and a SHORT reason (max 12 words). Check all " +
-         "four questions before answering GOOD:\n" +
+         "D) HEAD SIZE — you must MEASURE this, not glance at it. Ignore the face entirely. Find the " +
+         "widest point of the head in IMAGE 1 and the full shoulder span (outer edge of one shoulder " +
+         "to the other), then state how many head-widths fit across the shoulders. On a normal adult " +
+         "that is about 3. Below 2.6 the head is too big and FAILS, however clean the face looks. If " +
+         "the shoulders are cropped or hidden, say UNKNOWN for this number and judge D as passing.\n\n" +
+         "Reply on exactly two lines:\n" +
+         "HEADS_ACROSS_SHOULDERS: <number, or UNKNOWN>\n" +
+         "<verdict>: <SHORT reason, max 12 words>\n\n" +
+         "Work out line 1 before choosing the verdict; if that number is below 2.6 the verdict must be " +
+         "BAD_PROPORTION. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
@@ -1776,7 +1755,7 @@ async function assessOutputWithVision(buf, referenceImages) {
         // haklı mı yoksa gürültülü mü olduğunu ancak "neden reddettiğini"
         // görerek anlayabiliriz (bkz. 2026-07-30: 0.305 mesafeli en iyi kare
         // reddedilirken 0.448'lik kare kabul edildi — sayıyla örtüşmüyor).
-        max_tokens: 40,
+        max_tokens: 60,
         temperature: 0,
         messages: [{ role: "user", content }],
       }),
@@ -1799,9 +1778,25 @@ async function assessOutputWithVision(buf, referenceImages) {
       );
     }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
-    const answer = raw.toUpperCase();
-    // Gerekçe: ilk iki nokta üst üstesinden sonrası (yoksa boş).
-    const detail = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim().slice(0, 120) : null;
+
+    // İKİ SATIRLI CEVAP (2026-08-03): Vision'a önce ÖLÇÜM yaptırıyoruz
+    // ("omuz genişliğine kaç kafa sığıyor?"), karar ikinci satırda geliyor.
+    // Gerekçe: tek satır isteyince model her kareye rutin olarak
+    // "GOOD: ...correct proportions" yazıyordu — kafa gövdeye göre gözle
+    // görülür büyük olan karelerde bile (5/5 geçmişti). Bir sayı üretmek
+    // zorunda kalınca gerçekten bakmak durumunda kalıyor.
+    // Ayrıştırma, ölçüm satırını atlayıp verdict satırını bulur; model tek
+    // satırla cevap verirse (eski davranış) o satır zaten verdict olur.
+    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    const headsLine = lines.find((l) => l.toUpperCase().startsWith("HEADS_ACROSS_SHOULDERS"));
+    const verdictLine = lines.find((l) => !l.toUpperCase().startsWith("HEADS_ACROSS_SHOULDERS")) || "";
+    if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
+
+    const answer = verdictLine.toUpperCase();
+    // Gerekçe: verdict satırındaki iki nokta üst üstesinden sonrası (yoksa boş).
+    const detail = verdictLine.includes(":")
+      ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120)
+      : null;
     // BAD_FEATURES = yeni çerçevelemedeki ad; BAD_IDENTITY eski cevaplarla
     // uyum için korunuyor. İkisi de içeride "identity" sebebine eşlenir ki
     // sayısal hakem kuralı (visionRejectionOverridden) aynen çalışsın.

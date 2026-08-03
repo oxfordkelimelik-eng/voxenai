@@ -251,7 +251,9 @@ async function descriptorFromBuffer(buf) {
   const { tensor } = bufferToTensorScaled(buf);
   try {
     const result = await faceapi
-      .detectSingleFace(tensor)
+      .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
+        minConfidence: MIN_DETECTION_CONFIDENCE,
+      }))
       .withFaceLandmarks()
       .withFaceDescriptor();
     return result ? result.descriptor : null;
@@ -272,8 +274,16 @@ async function descriptorAndBoxFromBuffer(buf) {
   const { tensor } = bufferToTensorScaled(buf);
   try {
     const [h, w] = tensor.shape; // [height, width, 3]
+    // EŞİK AÇIKÇA VERİLİYOR: seçeneksiz çağrıldığında face-api kendi
+    // varsayılanını (minConfidence 0.5) kullanıyordu, oysa projenin kalibre
+    // edilmiş eşiği 0.35. Tutarlılık için açıkça geçiliyor.
+    // NOT: bu tek başına "no-face" sorununu ÇÖZMEZ — 2026-08-03 çıktıları
+    // üzerinde ölçüldüğünde tespit skorları zaten 0.93-0.99 aralığındaydı,
+    // yani eşik hiç bağlayıcı değildi.
     const result = await faceapi
-      .detectSingleFace(tensor)
+      .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
+        minConfidence: MIN_DETECTION_CONFIDENCE,
+      }))
       .withFaceLandmarks()
       .withFaceDescriptor();
     if (!result) return null;
@@ -415,6 +425,45 @@ async function matchesIdentity(buf, refDescriptor) {
 const OUTPUT_FACE_RATIO_MIN = 0.05;
 const OUTPUT_FACE_RATIO_MAX = 0.75;
 
+// KURTARMA EŞİĞİ (2026-08-03): profil/yan bakış karelerinde SSD skoru normal
+// eşiğin altına düşüp yüz "yok" sayılıyordu. Gerçek ölçüm: 2026-08-03
+// üretiminde 5 karenin 3'ü "no-face" verdi; bunlardan biri (Madrid terası,
+// kişi yana bakıyor, elinde gözlük) 0.35'te hiç bulunamazken 0.20'de
+// skor=0.251 ile bulundu ve yüz oranı 0.163 çıktı — yani yüz ORADAYDI.
+// Bu bir sorun, çünkü yüz bulunamayınca KAFA ORANI ölçümü de kayboluyor ve
+// oransız kafayı yakalayacak tek sayısal kapı devre dışı kalıyor.
+//
+// Ayrım şu: düşük skorlu tespit KİMLİK karşılaştırması için güvenilmez
+// (descriptor gürültülü olur), ama kutunun BOYUTU için yeterlidir. Bu yüzden
+// kurtarma tespiti yalnızca faceRatio ölçmek için kullanılır; kimlik kararı
+// hâlâ "yüz yok" olarak Vision'a devredilir.
+const RESCUE_DETECTION_CONFIDENCE = 0.2;
+
+/**
+ * Normal eşikte yüz bulunamadığında SADECE kafa oranını ölçmek için düşük
+ * eşikli ikinci deneme. Döner: faceRatio | null. Kimlik için KULLANILMAZ.
+ */
+async function rescueFaceRatio(buf) {
+  const faceapi = await ensureModelsLoaded();
+  const { tensor } = bufferToTensorScaled(buf);
+  try {
+    const [h, w] = tensor.shape;
+    const faces = await faceapi.detectAllFaces(tensor, new faceapi.SsdMobilenetv1Options({
+      minConfidence: RESCUE_DETECTION_CONFIDENCE,
+    }));
+    if (faces.length === 0) return null;
+    let best = faces[0];
+    for (const f of faces) {
+      if (f.box.width * f.box.height > best.box.width * best.box.height) best = f;
+    }
+    return Math.max(best.box.width / w, best.box.height / h);
+  } catch (e) {
+    return null; // fail-safe: kurtarma başarısız olursa eskisi gibi davran
+  } finally {
+    tensor.dispose();
+  }
+}
+
 /**
  * Üretilen çıktı karesi için BİRLEŞİK kalite kapısı (best-of-N seçimi ve
  * "bozuk kareyi yeniden üret" için): kimlik + netlik + kafa oranı.
@@ -434,7 +483,14 @@ async function assessOutputFace(buf, refDescriptor) {
 
   const db = await descriptorAndBoxFromBuffer(buf);
   if (!db) {
-    return { ok: false, distance: null, faceRatio: null, blurScore: null, reason: "no-face" };
+    // Yüz normal eşikte bulunamadı → kimlik ölçülemez, karar Vision'a gider.
+    // Ama KAFA ORANI'nı yine de ölçmeyi dene (bkz. rescueFaceRatio): oransız
+    // büyük kafa, kimlikten bağımsız ve tek başına eleme sebebidir.
+    const rescued = await rescueFaceRatio(buf);
+    if (rescued !== null && rescued > OUTPUT_FACE_RATIO_MAX) {
+      return { ok: false, distance: null, faceRatio: rescued, blurScore: null, reason: "head-ratio" };
+    }
+    return { ok: false, distance: null, faceRatio: rescued, blurScore: null, reason: "no-face" };
   }
   faceRatio = db.faceRatio;
 
