@@ -3232,16 +3232,52 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         (k) => results[k]?.status === "failed"
       ).length;
 
+      // EKSİK TESLİM = HAK İADESİ (2026-08-04). Bir stil "done" sayılıyordu
+      // ve iade almıyordu, tek bir fotoğraf bile üretilmişse — yani 5 fotoluk
+      // ödeme yapıp 4 alan kullanıcı hiçbir şey geri almıyordu. Artık teslim
+      // edilen foto sayısı BEKLENENDEN azsa o stilin birimi geri veriliyor;
+      // kullanıcı 5 fotoyu baştan üretebiliyor.
+      //
+      // "Beklenen" = o stil için AÇILAN chunk sayısı. Bu tanım ücretsiz
+      // denemeyi ve kilitli fotoğrafları doğru şekilde dışarıda bırakır:
+      // ücretsiz denemede zaten yalnızca FREE_TIER_CHUNK_COUNT kadar chunk
+      // açılıyor (kilitli 4 foto hiç chunk değil), dolayısıyla 1/1 teslim
+      // "tam" sayılır. Ayrıca packUnitsCharged>0 koşulu, ücretsiz denemede
+      // (charged=0) iade yapılmasını ayrıca engeller.
+      const expectedChunkCount = (k) => {
+        if (k === styleId) return chunkKeys.length;
+        const ch = (j.results || {})[k]?.chunks;
+        return ch ? Object.keys(ch).length : 0;
+      };
+      const incompleteCount = Object.keys(results).filter((k) => {
+        const r = results[k];
+        if (r?.status !== "done" || !Array.isArray(r.photoUrls)) return false;
+        const expected = expectedChunkCount(k);
+        return expected > 0 && r.photoUrls.length < expected;
+      }).length;
+
       if (successCount > 0) {
-        // Kısmi başarı: üretilen stilleri göster. Başarısız stil birimleri iade.
-        if (failedCount > 0 && (j.packUnitsCharged || 0) > 0) {
-          const refundUnits = Math.min(failedCount, j.packUnitsCharged || 0);
+        // Kısmi başarı: üretilen stilleri göster. Başarısız VE eksik teslim
+        // edilen stillerin birimleri iade edilir.
+        const creditUnits = failedCount + incompleteCount;
+        if (creditUnits > 0 && (j.packUnitsCharged || 0) > 0) {
+          const refundUnits = Math.min(creditUnits, j.packUnitsCharged || 0);
           const walletSnap = await tx.get(walletRef);
           const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
           tx.set(walletRef, {
             photoBalance: (wallet.photoBalance || 0) + refundUnits,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           }, { merge: true });
+          update.refundedUnits = refundUnits;
+          if (incompleteCount > 0) {
+            // İstemci bu alanı görüp kullanıcıya "hakkın iade edildi, tekrar
+            // üretebilirsin" diyebilsin diye ayrıca işaretleniyor.
+            update.incompleteDelivery = true;
+            console.warn(
+              `EKSİK TESLİM: ${incompleteCount} stil beklenenden az foto üretti ` +
+              `— ${refundUnits} hak iade edildi (uid=${uid}, job=${jobId})`
+            );
+          }
         }
         update.status = "done";
       } else {

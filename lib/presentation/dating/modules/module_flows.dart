@@ -1551,6 +1551,38 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               ],
             ),
           ],
+          // EKSİK TESLİM: sunucu, beklenenden az foto üretilen işlerde hakkı
+          // iade ediyor (bkz. falPhotos.js "EKSİK TESLİM"). Kullanıcı bunu
+          // bilmezse iade edilen hakkı kullanmaz — bu yüzden açıkça söyleniyor.
+          if (!stillGenerating && _jobData?['incompleteDelivery'] == true) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.gold.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.gold.withValues(alpha: 0.35)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.card_giftcard, size: 18, color: AppColors.gold),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Bu üretimde beklenenden az fotoğraf çıktı, bu yüzden '
+                      'hakkını geri yükledik. Dilediğin zaman 5 fotoğrafı '
+                      'yeniden oluşturabilirsin.',
+                      style: TextStyle(
+                          fontSize: 12,
+                          height: 1.35,
+                          color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           GridView.count(
             shrinkWrap: true,
