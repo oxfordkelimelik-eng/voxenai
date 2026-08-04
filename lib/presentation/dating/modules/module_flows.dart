@@ -57,7 +57,7 @@ class ModuleScaffold extends StatelessWidget {
   }
 }
 
-/// Krediyi düşer; yetmezse nazik "kredin bitti" sayfasına yönlendiren yardımcı.
+/// Paket hakkını düşer; yetmezse nazik "paket hakkın bitti" diyaloğuna yönlendirir.
 Future<bool> _charge(BuildContext context, WidgetRef ref, int cost) async {
   final ok = await ref.read(creditsProvider.notifier).spend(cost);
   if (!ok && context.mounted) {
@@ -72,20 +72,21 @@ Future<bool> _charge(BuildContext context, WidgetRef ref, int cost) async {
             const Icon(Icons.hourglass_empty_rounded,
                 color: AppColors.gold, size: 48),
             const SizedBox(height: 12),
-            const Text('Kredin bitti',
+            const Text('Paket hakkın bitti',
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 8),
-            const Text('Kredilerin bir sonraki dönemde yenilenir.',
+            const Text(
+                'Abonelik yok. Devam etmek için tek seferlik paket alabilirsin.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textSecondary)),
             const SizedBox(height: 16),
             SizedBox(
               width: 200,
               child: PrimaryButton(
-                label: 'Planları Gör',
+                label: 'Paketleri Gör',
                 onPressed: () {
                   Navigator.pop(context);
                   context.push(DatingRoutes.paywall);
@@ -1015,7 +1016,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           ),
         ),
         // Bakiye/seçim bilgisi: kullanıcı kaç stil üretebileceğini üretimden
-        // ÖNCE net görsün (her stil 1 paket hakkı = 10 foto). Bakiye 0 ise
+        // ÖNCE net görsün (her stil 1 paket hakkı = photosPerSet foto). Bakiye 0 ise
         // ilk stil ücretsiz denenebilir.
         Builder(builder: (_) {
           final bal = ref.watch(packBalanceProvider).photo;

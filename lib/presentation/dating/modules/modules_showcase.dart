@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
@@ -50,6 +51,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   @override
   void initState() {
     super.initState();
+    _loadStorePrices();
     _autoScroll = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted || !_pageController.hasClients) return;
       final next = (_page + 1) % _slides.length;
@@ -61,11 +63,32 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
     });
   }
 
+  Future<void> _loadStorePrices() async {
+    await ref.read(datingPurchaseServiceProvider).init();
+    if (mounted) setState(() {});
+  }
+
+  String _price(String productId, String fallback) => datingStorePrice(
+        ref.read(datingPurchaseServiceProvider),
+        productId,
+        fallback,
+      );
+
   @override
   void dispose() {
     _autoScroll?.cancel();
     _pageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      context.push(DatingRoutes.settings);
+    }
   }
 
   Future<void> _buy(_PackKind kind) async {
@@ -292,10 +315,11 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                         body:
                             'Canlı yüz çekimi + tam boy, stil seç. AI yüzünü koruyarak '
                             'seçtiğin mekân ve tarzda profesyonel fotoğraflar üretir.',
-                        bullets: const [
+                        bullets: [
                           'Stile özel arka plan',
                           'İlk fotoğraf ücretsiz önizleme',
-                          '10 veya 50 fotoğraf paketleri',
+                          '${DatingConfig.photoStandardPhotos} veya '
+                              '${DatingConfig.photoPremiumPhotos} fotoğraf paketleri',
                         ],
                       ),
                     ),
@@ -310,10 +334,11 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                         body:
                             'Profil fotoğraflarını puanlar, güçlü/zayıf yönlerini '
                             'söyler ve hangisini kullanmanı önerir.',
-                        bullets: const [
+                        bullets: [
                           'Çekicilik skoru',
                           'İlk analiz ücretsiz',
-                          '₺99 tekli · ₺249 standart',
+                          '${_price(DatingConfig.analysisSingleProductId, DatingConfig.analysisSinglePriceLabel)} tekli · '
+                              '${_price(DatingConfig.analysisStandardProductId, DatingConfig.analysisStandardPriceLabel)} standart',
                         ],
                       ),
                     ),
@@ -343,7 +368,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.insights,
                               title: 'Tekli Analiz',
                               sub: '1 analiz',
-                              price: DatingConfig.analysisSinglePriceLabel,
+                              price: _price(
+                                DatingConfig.analysisSingleProductId,
+                                DatingConfig.analysisSinglePriceLabel,
+                              ),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.analysis1),
                             ),
@@ -354,7 +382,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.insights,
                               title: 'Standart Analiz',
                               sub: '5 analiz · Avantajlı',
-                              price: DatingConfig.analysisStandardPriceLabel,
+                              price: _price(
+                                DatingConfig.analysisStandardProductId,
+                                DatingConfig.analysisStandardPriceLabel,
+                              ),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.analysis5),
                             ),
@@ -364,8 +395,12 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             child: _PriceRow(
                               icon: Icons.auto_awesome,
                               title: 'AI Foto Standart',
-                              sub: '10 foto · 1 stil',
-                              price: DatingConfig.photoStandardPriceLabel,
+                              sub:
+                                  '${DatingConfig.photoStandardPhotos} foto · 1 stil',
+                              price: _price(
+                                DatingConfig.photoStandardProductId,
+                                DatingConfig.photoStandardPriceLabel,
+                              ),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo10),
                             ),
@@ -375,8 +410,12 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             child: _PriceRow(
                               icon: Icons.workspace_premium_rounded,
                               title: 'AI Foto Premium',
-                              sub: '50 foto · 5 stil',
-                              price: DatingConfig.photoPremiumPriceLabel,
+                              sub:
+                                  '${DatingConfig.photoPremiumPhotos} foto · 5 stil',
+                              price: _price(
+                                DatingConfig.photoPremiumProductId,
+                                DatingConfig.photoPremiumPriceLabel,
+                              ),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo50),
                             ),
@@ -413,7 +452,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   TextButton(
-                    onPressed: () => context.push(DatingRoutes.settings),
+                    onPressed: () => _openUrl(DatingConfig.privacyPolicyUrl),
                     child: const Text('Gizlilik',
                         style: TextStyle(
                             fontSize: 11, color: AppColors.textMuted)),
@@ -421,7 +460,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                   const Text('·',
                       style: TextStyle(color: AppColors.textMuted)),
                   TextButton(
-                    onPressed: () => context.push(DatingRoutes.settings),
+                    onPressed: () => _openUrl(DatingConfig.termsOfUseUrl),
                     child: const Text('Şartlar',
                         style: TextStyle(
                             fontSize: 11, color: AppColors.textMuted)),

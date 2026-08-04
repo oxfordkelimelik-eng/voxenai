@@ -27,6 +27,23 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _busy = false;
   String? _busyProductId;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadStorePrices();
+  }
+
+  Future<void> _loadStorePrices() async {
+    await ref.read(datingPurchaseServiceProvider).init();
+    if (mounted) setState(() {});
+  }
+
+  String _price(String productId, String fallback) => datingStorePrice(
+        ref.read(datingPurchaseServiceProvider),
+        productId,
+        fallback,
+      );
+
   String get _title => switch (widget.mode) {
         PaywallMode.analysis => 'Fotoğraf Analizi Paketi',
         PaywallMode.aiPhoto => 'AI Dating Fotoğraf Paketi',
@@ -115,7 +132,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Tekli Analiz',
                         sub:
                             '${DatingConfig.analysisSingleRuns} fotoğraf analizi',
-                        price: DatingConfig.analysisSinglePriceLabel,
+                        price: _price(
+                          DatingConfig.analysisSingleProductId,
+                          DatingConfig.analysisSinglePriceLabel,
+                        ),
                         busy: _busyProductId ==
                             DatingConfig.analysisSingleProductId,
                         onTap: _busy
@@ -128,7 +148,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Standart Analiz',
                         sub:
                             '${DatingConfig.analysisStandardRuns} fotoğraf analizi',
-                        price: DatingConfig.analysisStandardPriceLabel,
+                        price: _price(
+                          DatingConfig.analysisStandardProductId,
+                          DatingConfig.analysisStandardPriceLabel,
+                        ),
                         badge: 'AVANTAJLI',
                         busy: _busyProductId ==
                             DatingConfig.analysisStandardProductId,
@@ -147,7 +170,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Standart Paket',
                         sub:
                             '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
-                        price: DatingConfig.photoStandardPriceLabel,
+                        price: _price(
+                          DatingConfig.photoStandardProductId,
+                          DatingConfig.photoStandardPriceLabel,
+                        ),
                         busy: _busyProductId ==
                             DatingConfig.photoStandardProductId,
                         onTap: _busy
@@ -160,7 +186,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Premium Paket',
                         sub:
                             '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
-                        price: DatingConfig.photoPremiumPriceLabel,
+                        price: _price(
+                          DatingConfig.photoPremiumProductId,
+                          DatingConfig.photoPremiumPriceLabel,
+                        ),
                         badge: 'EN İYİ DEĞER',
                         busy: _busyProductId ==
                             DatingConfig.photoPremiumProductId,
@@ -221,15 +250,21 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                     color: AppColors.gold, size: 20)),
           ),
           const SizedBox(height: 8),
-          const Text('"Eşleşme sayım gerçekten arttı. Fotoğraflar çok iyi."',
+          const Text(
+              '"Eşleşme sayım gerçekten arttı. Fotoğraflar çok iyi."',
               textAlign: TextAlign.center,
               style: TextStyle(
                   fontSize: 13,
                   fontStyle: FontStyle.italic,
                   color: AppColors.textSecondary)),
           const SizedBox(height: 6),
-          const Text('— Emre, 24',
+          const Text('— Temsili kullanıcı yorumu',
               style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
+          const SizedBox(height: 4),
+          Text(
+            DatingConfig.representativeNote,
+            style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
+          ),
         ],
       ),
     );

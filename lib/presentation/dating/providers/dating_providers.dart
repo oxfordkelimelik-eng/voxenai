@@ -15,9 +15,19 @@ import '../../providers/app_providers.dart' show authServiceProvider;
 /// ayrı — bkz. dating_purchase_service.dart.
 final datingPurchaseServiceProvider = Provider<DatingPurchaseService>((ref) {
   final service = DatingPurchaseService();
+  // StoreKit/Play fiyatları paywall'da gösterilsin diye erken yükle.
+  unawaited(service.init());
   ref.onDispose(service.dispose);
   return service;
 });
+
+/// Mağaza fiyatı; ürün henüz yüklenmediyse fallback etiket.
+String datingStorePrice(
+  DatingPurchaseService service,
+  String productId,
+  String fallback,
+) =>
+    service.productFor(productId)?.price ?? fallback;
 
 // ============================================================
 // ONBOARDING QUIZ CEVAPLARI (Bölüm 2)
@@ -257,14 +267,11 @@ class EntitlementNotifier extends StateNotifier<Entitlement> {
   Future<void> deleteAccount() async {
     final uid = ref.read(authServiceProvider).uid;
     if (uid != null) {
-      try {
-        await FirebaseFunctions.instanceFor(region: 'europe-west1')
-            .httpsCallable('deleteAccount')
-            .call();
-      } catch (_) {
-        // Sunucu silme başarısız olsa bile yerelde çıkış yapılır; kullanıcı
-        // tekrar denediğinde aynı hesaba (varsa) düşer.
-      }
+      // Sunucu silme başarısızsa hata yukarı fırlatılır; kullanıcıya
+      // "silindi" hissi verilmez (KVKK/GDPR + App Store hesap silme).
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('deleteAccount')
+          .call();
     }
     await ref.read(authServiceProvider).signOut();
 

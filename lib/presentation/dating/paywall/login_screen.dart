@@ -6,8 +6,8 @@ import '../../../core/router/dating_routes.dart';
 import '../../providers/app_providers.dart' show authServiceProvider;
 import '../providers/dating_providers.dart';
 
-/// Giriş ekranı (Bölüm 3 & 5). Yalnızca abonelik anında tetiklenir.
-/// Apple + Google. Email/şifre YOK. Giriş → ödeme → abonelik aktifleşir.
+/// Giriş ekranı (Bölüm 3 & 5). Paket satın alma / geri yükleme öncesi.
+/// Apple + Google. Email/şifre YOK. Giriş → satın alımlar hesabına bağlanır.
 ///
 /// NOT (üretim): Apple için `sign_in_with_apple`, Google için `google_sign_in`
 /// (pubspec'te mevcut) ve ödeme için RevenueCat/`in_app_purchase` bağlanmalı.
@@ -109,8 +109,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 20),
                     Text(
                       restore
-                          ? 'Aboneliğini geri yükle'
-                          : 'Aboneliğini güvenle sakla',
+                          ? 'Satın alımlarını geri yükle'
+                          : 'Satın alımlarını güvenle sakla',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                           fontSize: 22,
@@ -120,8 +120,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const SizedBox(height: 8),
                     Text(
                       restore
-                          ? 'Giriş yaparak önceki aboneliğini bu cihaza taşı.'
-                          : 'Hesabını oluştur; aboneliğin ve ürettiklerin '
+                          ? 'Giriş yaparak önceki paket bakiyeni bu cihaza taşı.'
+                          : 'Hesabını oluştur; paketlerin ve ürettiklerin '
                               'cihaz değişse bile kaybolmasın.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(

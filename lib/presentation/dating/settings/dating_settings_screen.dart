@@ -1,11 +1,14 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 
-/// Ayarlar & Gizlilik (Bölüm 9). Politika, şartlar, abonelik, restore,
+/// Ayarlar & Gizlilik (Bölüm 9). Politika, şartlar, paketler, restore,
 /// hesap/veri silme, destek. KVKK/GDPR + App Store gerekleri.
 class DatingSettingsScreen extends ConsumerWidget {
   const DatingSettingsScreen({super.key});
@@ -54,18 +57,30 @@ class DatingSettingsScreen extends ConsumerWidget {
           const SizedBox(height: 20),
           _section('GİZLİLİK & YASAL'),
           _tile(Icons.privacy_tip_outlined, 'Gizlilik Politikası',
-              onTap: () => _policySheet(context, _privacyText)),
+              onTap: () => _openLegal(
+                    context,
+                    DatingConfig.privacyPolicyUrl,
+                    _privacyText,
+                  )),
           _tile(Icons.description_outlined, 'Kullanım Şartları',
-              onTap: () => _policySheet(context, _termsText)),
+              onTap: () => _openLegal(
+                    context,
+                    DatingConfig.termsOfUseUrl,
+                    _termsText,
+                  )),
           _tile(Icons.info_outline_rounded, 'Veri İşleme Aydınlatması',
-              onTap: () => _policySheet(context, _dataText)),
+              onTap: () => _openLegal(
+                    context,
+                    DatingConfig.dataProcessingUrl,
+                    _dataText,
+                  )),
 
           const SizedBox(height: 20),
           _section('HESAP'),
           _tile(Icons.support_agent_outlined, 'Destek / İletişim',
-              subtitle: 'destek@voxenai.com.tr',
+              subtitle: DatingConfig.supportEmail,
               onTap: () => _info(context, 'Destek',
-                  'Her türlü soru için: destek@voxenai.com.tr')),
+                  'Her türlü soru için: ${DatingConfig.supportEmail}')),
           _tile(Icons.delete_forever_outlined, 'Hesabımı ve Verilerimi Sil',
               danger: true,
               onTap: () => _confirmDelete(context, ref)),
@@ -237,13 +252,15 @@ class DatingSettingsScreen extends ConsumerWidget {
                   Navigator.pop(context);
                   context.go(DatingRoutes.onboarding);
                 }
-              } catch (_) {
+              } catch (e) {
                 if (context.mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text(
-                        'Silme işlemi tamamlanamadı. Lütfen tekrar dene.'),
-                  ));
+                  final msg = e is FirebaseFunctionsException
+                      ? (e.message ?? 'Silme işlemi tamamlanamadı.')
+                      : 'Silme işlemi tamamlanamadı. Lütfen tekrar dene.';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(msg)),
+                  );
                 }
               }
             },
@@ -254,6 +271,24 @@ class DatingSettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _openLegal(
+    BuildContext context,
+    String url,
+    String fallbackText,
+  ) async {
+    final uri = Uri.parse(url);
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (launched) return;
+    } catch (_) {
+      // Aşağıda offline özet sheet açılır.
+    }
+    if (context.mounted) _policySheet(context, fallbackText);
   }
 
   static const String _privacyText =
@@ -270,6 +305,7 @@ class DatingSettingsScreen extends ConsumerWidget {
       'silebilirsiniz.\n'
       '• Haklarınız (KVKK/GDPR): erişim, düzeltme, silme. "Hesabımı ve '
       'Verilerimi Sil" ile tüm verileriniz kalıcı silinir.\n\n'
+      'Tam metin: ${DatingConfig.privacyPolicyUrl}\n\n'
       'Grafik ve istatistikler temsilidir; kesin ölçüm değildir.';
 
   static const String _termsText =
@@ -278,9 +314,10 @@ class DatingSettingsScreen extends ConsumerWidget {
       '• Yalnızca kendinize ait fotoğrafları yükleyebilirsiniz.\n'
       '• Üretilen içerik yasa dışı, aldatıcı veya başkasını taklit edecek '
       'şekilde kullanılamaz.\n'
-      '• Abonelikler seçtiğiniz dönem sonunda otomatik yenilenir; App Store / '
-      'Google Play üzerinden iptal edilebilir.\n'
-      '• Looksmaxxing önerileri yapıcı rehberliktir; tıbbi tavsiye değildir.';
+      '• Uygulama abonelik sunmaz; satın alımlar tek seferlik tüketilebilir '
+      'paketlerdir. Otomatik yenileme yoktur.\n'
+      '• Looksmaxxing önerileri yapıcı rehberliktir; tıbbi tavsiye değildir.\n\n'
+      'Tam metin: ${DatingConfig.termsOfUseUrl}';
 
   static const String _dataText =
       'VERİ İŞLEME AYDINLATMASI\n\n'
@@ -288,5 +325,6 @@ class DatingSettingsScreen extends ConsumerWidget {
       '(AI üretim / analiz) gerçekleştirmek için işlenir. İşlem tamamlandıktan '
       'sonra kaynak fotoğraflar sonuçları üretmek dışında kullanılmaz.\n\n'
       'Fotoğraflarınızın işlenmesine başlamadan önce açık rızanız alınır. '
-      'Rızanızı dilediğiniz an geri çekebilir ve verilerinizi silebilirsiniz.';
+      'Rızanızı dilediğiniz an geri çekebilir ve verilerinizi silebilirsiniz.\n\n'
+      'Tam metin: ${DatingConfig.dataProcessingUrl}';
 }

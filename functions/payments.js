@@ -262,6 +262,7 @@ exports.deleteAccount = onCall(
       await Promise.all([
         bucket().deleteFiles({ prefix: `dating_training/${uid}/` }),
         bucket().deleteFiles({ prefix: `dating_results/${uid}/` }),
+        bucket().deleteFiles({ prefix: `dating_rejected/${uid}/` }),
       ]);
     } catch (e) {
       console.error("deleteAccount storage silme hatası:", e);

@@ -69,6 +69,13 @@ class DatingConfig {
   static const int creditsAiPhoto = 10; // AI foto üretimi
   static const int creditsAnalysis = 3; // fotoğraf analizi
   static const int creditsText = 1; // (pasif modüller — arka planda)
+
+  // --- Yasal sayfalar (App Store Privacy Policy URL + uygulama içi linkler) ---
+  // docs/ klasörü voxenai.com.tr üzerinde yayınlanır.
+  static const String privacyPolicyUrl = 'https://voxenai.com.tr/privacy.html';
+  static const String termsOfUseUrl = 'https://voxenai.com.tr/terms.html';
+  static const String dataProcessingUrl = 'https://voxenai.com.tr/data.html';
+  static const String supportEmail = 'destek@voxenai.com.tr';
 }
 
 /// AI foto üretimi stilleri (Bölüm 6.3 — çekirdek 5 stil)
