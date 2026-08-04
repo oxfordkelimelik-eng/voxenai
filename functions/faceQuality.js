@@ -300,9 +300,44 @@ async function descriptorAndBoxFromBuffer(buf) {
     if (!result) return null;
     const box = result.detection.box;
     const faceRatio = Math.max(box.width / w, box.height / h);
-    return { descriptor: result.descriptor, faceRatio };
+    return {
+      descriptor: result.descriptor,
+      faceRatio,
+      profileDegree: profileDegreeFromLandmarks(result.landmarks),
+    };
   } finally {
     tensor.dispose();
+  }
+}
+
+/**
+ * Yüzün ne kadar yandan göründüğünü kabaca ölçer: 0 = tam önden,
+ * 1'e yakın = tam profil. Burun ucunun İKİ GÖZ KÖŞESİ arasındaki yatay
+ * konumundan hesaplanır — kafa yana döndükçe burun bir kenara kayar.
+ * Ölçülemezse null.
+ *
+ * NEDEN GEREKLİ (2026-08-04): face-api'nin kimlik vektörü çoğunlukla önden
+ * yüzlerle eğitilmiştir; kafa yana döndüğünde mesafe KİMLİKTEN BAĞIMSIZ
+ * olarak şişer. Gerçek ölçüm (aynı kullanıcı, aynı iş):
+ *   profil<=0.45 -> mesafe 0.259, 0.292, 0.307, 0.329  (dar küme)
+ *   profil >0.45 -> mesafe 0.373, 0.606, 0.802         (dağınık)
+ * 0.802'lik kare GÖZLE GAYET İYİYDİ (telefonuna bakan, profilden bir kare)
+ * ama kimlik kapısı onu eledi ve kullanıcı 5 yerine 4 foto aldı. Yani o
+ * kapı profil karelerde kimliği değil, POZU ölçüyordu.
+ */
+function profileDegreeFromLandmarks(landmarks) {
+  try {
+    const lm = landmarks && landmarks.positions;
+    if (!lm || lm.length < 46) return null;
+    const leftEyeOuter = lm[36];
+    const rightEyeOuter = lm[45];
+    const noseTip = lm[30];
+    const span = rightEyeOuter.x - leftEyeOuter.x;
+    if (!isFinite(span) || Math.abs(span) < 1e-6) return null;
+    const rel = (noseTip.x - leftEyeOuter.x) / span; // 0.5 = tam ortada
+    return Math.min(1, Math.abs(rel - 0.5) * 2);
+  } catch (e) {
+    return null; // fail-safe: ölçemezsek eskisi gibi davran
   }
 }
 
@@ -454,6 +489,12 @@ const OUTPUT_FACE_RATIO_MAX = 0.45;
 // hakkında bilgi taşımaz. O iş Vision'ın HEAD_VS_SHOULDERS sınıfına ait.
 const OUTPUT_FACE_GROWTH_MAX = 1.45;
 
+// Bu derecenin üstünde kafa yana dönüktür ve kimlik mesafesi güvenilmez
+// sayılır (bkz. profileDegreeFromLandmarks). 0.45, gerçek ölçümde önden
+// karelerin oluşturduğu dar kümenin (maks 0.32) üstünde, profil karelerin
+// (0.69+) altındadır.
+const PROFILE_UNRELIABLE_MIN = 0.45;
+
 // KURTARMA EŞİĞİ (2026-08-03): profil/yan bakış karelerinde SSD skoru normal
 // eşiğin altına düşüp yüz "yok" sayılıyordu. Gerçek ölçüm: 2026-08-03
 // üretiminde 5 karenin 3'ü "no-face" verdi; bunlardan biri (Madrid terası,
@@ -530,18 +571,30 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
 
   // 1) Kimlik: yüz kullanıcıya benziyor mu?
   if (distance >= FACE_MATCH_THRESHOLD) {
-    return { ok: false, distance, faceRatio, blurScore, reason: "identity" };
+    // PROFİL İSTİSNASI: kafa belirgin şekilde yana dönükse bu mesafe
+    // GÜVENİLMEZ (bkz. profileDegreeFromLandmarks'taki ölçüm). Kareyi sert
+    // reddetmek yerine, "no-face"te olduğu gibi kararı GÖRÜNTÜYÜ GERÇEKTEN
+    // GÖREBİLEN Vision'a devrediyoruz — Vision referans selfie'lerle
+    // karşılaştırma yapabildiği için profilde bizden daha yetkin.
+    const pd = db.profileDegree;
+    if (pd != null && pd > PROFILE_UNRELIABLE_MIN) {
+      return {
+        ok: false, distance, faceRatio, blurScore,
+        reason: "profile", profileDegree: pd,
+      };
+    }
+    return { ok: false, distance, faceRatio, blurScore, reason: "identity", profileDegree: pd };
   }
   // 2) Kafa oranı: oransız büyük/küçük kafa (bobble-head) artefaktı?
   if (faceRatio < OUTPUT_FACE_RATIO_MIN || faceRatio > OUTPUT_FACE_RATIO_MAX) {
-    return { ok: false, distance, faceRatio, blurScore, reason: "head-ratio" };
+    return { ok: false, distance, faceRatio, blurScore, reason: "head-ratio", profileDegree: db.profileDegree };
   }
   // 2b) Şablona göre büyüme: model kafayı büyüttü mü? Sabit eşikten farkı,
   // kadrajdan bağımsız olması (bkz. OUTPUT_FACE_GROWTH_MAX).
   if (templateFaceRatio && templateFaceRatio > 0) {
     const growth = faceRatio / templateFaceRatio;
     if (growth > OUTPUT_FACE_GROWTH_MAX) {
-      return { ok: false, distance, faceRatio, blurScore, reason: "head-grew", growth };
+      return { ok: false, distance, faceRatio, blurScore, reason: "head-grew", growth, profileDegree: db.profileDegree };
     }
   }
   // 3) Netlik: bariz bulanık/eritilmiş yüz? (fail-safe: kontrol hata verirse geç)
@@ -549,12 +602,12 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
     const q = await assessImageQuality(buf);
     blurScore = q.blurScore;
     if (q.isBlurry) {
-      return { ok: false, distance, faceRatio, blurScore, reason: "blurry" };
+      return { ok: false, distance, faceRatio, blurScore, reason: "blurry", profileDegree: db.profileDegree };
     }
   } catch (e) {
     console.error("assessOutputFace netlik kontrolü başarısız (netlik atlanıyor):", e);
   }
-  return { ok: true, distance, faceRatio, blurScore, reason: null };
+  return { ok: true, distance, faceRatio, blurScore, reason: null, profileDegree: db.profileDegree };
 }
 
 /**

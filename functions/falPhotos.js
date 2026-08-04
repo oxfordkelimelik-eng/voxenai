@@ -2208,7 +2208,8 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         // GEÇEN karelerde de loglanıyor.
         const gr = (templateFaceRatio && q.faceRatio)
           ? (q.faceRatio / templateFaceRatio).toFixed(2) : "null";
-        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} yüzOranı=${fr} büyüme=${gr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
+        const pd = q.profileDegree != null ? q.profileDegree.toFixed(2) : "null";
+        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} profil=${pd} yüzOranı=${fr} büyüme=${gr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
       } catch (e) {
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
@@ -2218,7 +2219,12 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // gözler kapalı olduğu için yüz noktalarını çıkaramadı ve kare boşuna
       // atıldı (bir üretim de boşa gitti). Artık böyle kareler doğrudan
       // elenmiyor, kararı GÖRÜNTÜYÜ GERÇEKTEN GÖREBİLEN Vision'a devrediyor.
-      const noFace = !mathOk && mathReason === "no-face";
+      // "profile" AYNI MANTIKLA eklendi (2026-08-04): kafa yana dönükse
+      // kimlik mesafesi pozu ölçer, kimliği değil — gerçek örnek: telefonuna
+      // bakan profil kare, mesafe 0.802 ile elendi, kullanıcı 5 yerine 4 foto
+      // aldı, oysa kare gözle gayet iyiydi. Bu da sert ret değil, Vision'a
+      // devir sebebidir.
+      const noFace = !mathOk && (mathReason === "no-face" || mathReason === "profile");
       if (!mathOk && !noFace) {
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
           mode, gate: `math-${mathReason || "?"}`, distance: mathDist,
@@ -2227,7 +2233,10 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         break;
       }
       if (noFace) {
-        console.warn(`KALITE: yüz tespit edilemedi (gözlük/açı olabilir) — kare atılmıyor, karar Vision'a devredildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+        const why = mathReason === "profile"
+          ? `yüz PROFİLDEN görünüyor, kimlik mesafesi (${mathDist != null ? mathDist.toFixed(3) : "?"}) güvenilmez`
+          : "yüz tespit edilemedi (gözlük/açı olabilir)";
+        console.warn(`KALITE: ${why} — kare atılmıyor, karar Vision'a devredildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
       }
 
       let visionOk = true;
