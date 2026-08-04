@@ -976,34 +976,39 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "output a reference photo — if your result lacks the first image's background and framing, you " +
     "edited the wrong image.\n\n" +
     "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build; ignore its face. " +
-    "The others are close-up face photos, the only source of truth for facial identity. References " +
-    "tell you the person's face, skin and build — never their clothing, accessories or pose.\n\n" +
-    "CHANGE ONLY THE PERSON — their face, skin tone and body build, per the numbered steps below. " +
-    "Everything else stays identical to the first image: background, lighting, camera angle, framing, " +
-    "pose, and every clothing item and accessory.\n\n" +
+    "The others are close-up face photos, the only source of truth for facial identity and hair. " +
+    "References tell you the person's face, hair, skin and build — never their clothing, accessories " +
+    "or pose.\n\n" +
+    "CHANGE ONLY THE PERSON — their face, hair, skin tone and body build, per the numbered steps " +
+    "below. Everything else stays identical to the first image: background, lighting, camera angle, " +
+    "framing, pose, and every clothing item and accessory.\n\n" +
     "1) FACE — highest priority. Copy the target's structure feature by feature from the close-up " +
     "photos: nose, eyebrows, eyes, lips, jaw, chin, cheekbones, face outline and length-to-width " +
     "ratio. Do not beautify, symmetrise, average, round, puff, widen or stretch. Keep their own " +
     "expression; add no smile that is not there. The output face is 100% the target's, never blended " +
     "with the base person's.\n\n" +
-    "2) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
+    "2) HAIR — part of who they are, so take it from the SAME close-up selfies, never from the base " +
+    "person and never invented: their hairline, density, length, texture and colour. If the target is " +
+    "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
+    "they do not have is as wrong as giving them someone else's nose.\n\n" +
+    "3) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
     "person's tone, or a two-tone patchwork, is a serious error. No brightening, whitening, glow or " +
     "sheen.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "3) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
+    "4) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
     "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
     "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
     "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
     "a head kept at its old size on narrowed shoulders reads as oversized. Never enlarge the head or " +
     "puff the face. The close-up references are zoomed in for detail only — never take head scale from " +
     "them.\n\n" +
-    "4) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
+    "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
     "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
     "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
     "toward the camera to make the face easier is a failure. Ignore how the target is posed or where " +
     "they look in their own selfies.\n\n" +
-    "5) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
+    "6) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
     "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
     "anatomically correct." +
     shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
@@ -1693,7 +1698,7 @@ async function assessOutputWithVision(buf, referenceImages) {
          "A) FEATURE FIDELITY — do the facial features rendered in IMAGE 1 match the shapes in the " +
          "source images? Check the nose shape and width, eyebrow thickness and arch, eye shape and " +
          "spacing, lip shape and thickness, and the jaw, chin and cheekbone structure. Differences in " +
-         "angle, lighting, hairstyle and expression are expected and fine — you are only judging whether " +
+         "angle, lighting, styling and expression are expected and fine — you are only judging whether " +
          "the underlying feature SHAPES were copied faithfully. If the features are clearly different " +
          "shapes, the edit failed.\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
@@ -1703,7 +1708,11 @@ async function assessOutputWithVision(buf, referenceImages) {
          "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
          "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
          "as if two different people's skin were combined — that fails.\n" +
-         "D) HEAD SIZE — compare, do not glance. Ignore the face itself. Put the width of the head " +
+         "D) HAIR — judge only GROSS mismatches against the source images, never styling: is the " +
+         "person in IMAGE 1 given hair the source person does not have (source bald or clearly " +
+         "balding, IMAGE 1 with a full head of hair), or a hairline/length that is obviously someone " +
+         "else's? Messy, windblown, differently combed or partly hidden hair is fine and passes.\n" +
+         "E) HEAD SIZE — compare, do not glance. Ignore the face itself. Put the width of the head " +
          "side by side with the width of the shoulders in IMAGE 1 and classify what you see:\n" +
          "  HEAD_NORMAL — the shoulders are roughly three head-widths across; the head belongs to " +
          "that body.\n" +
@@ -1716,11 +1725,13 @@ async function assessOutputWithVision(buf, referenceImages) {
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
          "Decide line 1 before the verdict; if line 1 is HEAD_LARGE the verdict MUST be " +
-         "BAD_PROPORTION, however clean the face looks. Verdict is one of:\n" +
+         "BAD_PROPORTION, however clean the face looks. Check all five questions before answering " +
+         "GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
+         "BAD_HAIR: <e.g. hair added to a bald person>\n" +
          "BAD_PROPORTION: <e.g. head too large for the shoulders>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
@@ -1823,6 +1834,12 @@ async function assessOutputWithVision(buf, referenceImages) {
     // (kimlik mesafesi vücut ten tutarlılığı hakkında hiçbir şey söylemez —
     // bkz. visionRejectionOverridden yalnızca "identity" ile ilgilenir).
     if (answer.startsWith("BAD_SKIN")) return { ok: false, reason: "skin", detail, inconclusive: false };
+    // BAD_HAIR de ayrı sebep — ve bu AYRIM ÖNEMLİ: saç uyuşmazlığını
+    // "identity" altına koysaydık sayısal hakem onu geçersiz kılabilirdi
+    // (bkz. visionRejectionOverridden, mesafe<0.35). face-api'nin kimlik
+    // vektörü yüz noktalarından çıkar, SAÇI HİÇ GÖRMEZ — yani kel birine
+    // saç eklenmiş bir kare pekâlâ 0.30 mesafeyle gelip affedilirdi.
+    if (answer.startsWith("BAD_HAIR")) return { ok: false, reason: "hair", detail, inconclusive: false };
     // BAD_PROPORTION da ayrı sebep: kafa/omuz oranı bozukluğunu kimlik mesafesi
     // ÖLÇEMEZ (yüz doğru olabilir, boyutu yanlış olabilir — gerçek örnek:
     // 2026-08-01, mesafe 0.256 "çok iyi" iken kafa gövdeye göre büyüktü).
