@@ -66,9 +66,20 @@ const OVEREXPOSURE_CLIP_MAX = 0.65;
 // kullanıcı 3 foto alıyordu (retry=0). Eşik 0.63 -> 0.70: 0.648 gibi sınırda-
 // kabul edilebilir yüzler geçer, 0.758 gibi açıkça yanlış yüzler yine reddedilir.
 // Asıl çözüm buildEditPrompt'taki güçlendirilmiş yüz-sadakati (mesafeler zaten
-// düşmeli); bu eşik yalnızca sınır kayıplarını azaltıyor. Yüz benzemiyor
-// şikayeti sürerse DÜŞÜR (0.66), hâlâ foto kaybı varsa YÜKSELT (0.74).
-const FACE_MATCH_THRESHOLD = 0.70;
+// düşmeli); bu eşik yalnızca sınır kayıplarını azaltıyor.
+//
+// 0.70 -> 0.55 SIKILAŞTIRILDI (2026-08-04, İLK KEZ GERÇEK DAĞILIMLA):
+// 2026-07-28'den itibaren loglanan 60 ölçümün TAMAMI geçti — yani 0.70 eşiği
+// hiçbir zaman devreye girmedi, fiilen kapalı bir kapıydı. Gerçek dağılım:
+//   0.210 ... 0.498 (58 kare, ana kütle)  |  0.534  |  [boşluk]  |  0.646
+// 0.646'lık kare kullanıcı tarafından "taban fotoğraf gibi, yüz benzememiş"
+// diye işaretlendi (smokinli, loş sahne). 0.534 ile 0.646 arasındaki doğal
+// boşluk eşik için doğru yer: onaylanmış-kötü kareyi eler, ana kütleye ve
+// 0.534'e dokunmaz (60 karede yalnızca 1 ret = %1.7).
+// Ret = kare atılmaz, ÖNCE yeniden denenir (OPENAI_DIRECT_MAX_ATTEMPTS=2);
+// iki deneme de tutmazsa o kare eksik kalır. Foto kaybı görülürse 0.60'a
+// çekilebilir; "yüz benzemiyor" şikayeti sürerse 0.50'ye.
+const FACE_MATCH_THRESHOLD = 0.55;
 
 let _initPromise = null;
 let _faceapi = null;
@@ -422,8 +433,26 @@ async function matchesIdentity(buf, refDescriptor) {
 // Üretilen çıktı karesinin yüzünün, taban SAHNEDEKİ kadrajın makul bir
 // kısmını kaplaması beklenir. Bunun ALTI = yüz ya kadraj dışı ya da
 // tespit güvenilmez; ÜSTÜ = oransız büyük kafa (bobble-head artefaktı).
+//
+// 0.75 -> 0.45 (2026-08-04): 62 gerçek ölçümde aralık 0.076-0.241 çıktı,
+// yani 0.75 hiçbir zaman devreye girmedi (ölü eşik). 0.45 hâlâ gözlenen
+// tavanın çok üstünde — yalnızca gerçekten grotesk bobble-head'i yakalar,
+// meşru yakın plan kadrajlara dokunmaz.
 const OUTPUT_FACE_RATIO_MIN = 0.05;
-const OUTPUT_FACE_RATIO_MAX = 0.75;
+const OUTPUT_FACE_RATIO_MAX = 0.45;
+
+// ŞABLONA GÖRE BÜYÜME SINIRI (2026-08-04). Sabit eşiğin zayıflığı şu:
+// çıktının yüz oranı KADRAJA bağlı — uzak sahnede 0.08, yakın planda 0.24
+// normaldir, dolayısıyla tek bir sayı ikisini birden yakalayamaz. Kadrajdan
+// bağımsız soru şudur: model, ŞABLONDAKİ kafayı büyüttü mü?
+// Gerçek eşleştirilmiş veri (şablon oranı -> çıktı oranı, 13 kare):
+//   1.03, 1.15, 0.92, 0.80, 0.98, 0.78, 1.22, 0.74, 1.23, 1.03, 0.86, 1.02
+// yani gözlenen bant ~0.74-1.23. 1.45 bunun belirgin üstünde: normal
+// varyasyona dokunmaz, yalnızca bariz büyütmeyi eler.
+// DÜRÜST SINIR: bu kontrol KABA büyümeyi yakalar; "dar omuzda kafa büyük
+// duruyor" gibi ince oransızlığı YAKALAMAZ, çünkü yüz kutusu omuz genişliği
+// hakkında bilgi taşımaz. O iş Vision'ın HEAD_VS_SHOULDERS sınıfına ait.
+const OUTPUT_FACE_GROWTH_MAX = 1.45;
 
 // KURTARMA EŞİĞİ (2026-08-03): profil/yan bakış karelerinde SSD skoru normal
 // eşiğin altına düşüp yüz "yok" sayılıyordu. Gerçek ölçüm: 2026-08-03
@@ -475,7 +504,7 @@ async function rescueFaceRatio(buf) {
  * assessImageQuality'nin bulanıklık eşiği (BLUR_VARIANCE_MIN) burada da
  * yeniden kullanılır (aynı kalibrasyon).
  */
-async function assessOutputFace(buf, refDescriptor) {
+async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
   const faceapi = await ensureModelsLoaded();
   let distance = null;
   let faceRatio = null;
@@ -506,6 +535,14 @@ async function assessOutputFace(buf, refDescriptor) {
   // 2) Kafa oranı: oransız büyük/küçük kafa (bobble-head) artefaktı?
   if (faceRatio < OUTPUT_FACE_RATIO_MIN || faceRatio > OUTPUT_FACE_RATIO_MAX) {
     return { ok: false, distance, faceRatio, blurScore, reason: "head-ratio" };
+  }
+  // 2b) Şablona göre büyüme: model kafayı büyüttü mü? Sabit eşikten farkı,
+  // kadrajdan bağımsız olması (bkz. OUTPUT_FACE_GROWTH_MAX).
+  if (templateFaceRatio && templateFaceRatio > 0) {
+    const growth = faceRatio / templateFaceRatio;
+    if (growth > OUTPUT_FACE_GROWTH_MAX) {
+      return { ok: false, distance, faceRatio, blurScore, reason: "head-grew", growth };
+    }
   }
   // 3) Netlik: bariz bulanık/eritilmiş yüz? (fail-safe: kontrol hata verirse geç)
   try {

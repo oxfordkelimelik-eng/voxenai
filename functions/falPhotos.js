@@ -1703,16 +1703,20 @@ async function assessOutputWithVision(buf, referenceImages) {
          "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
          "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
          "as if two different people's skin were combined — that fails.\n" +
-         "D) HEAD SIZE — you must MEASURE this, not glance at it. Ignore the face entirely. Find the " +
-         "widest point of the head in IMAGE 1 and the full shoulder span (outer edge of one shoulder " +
-         "to the other), then state how many head-widths fit across the shoulders. On a normal adult " +
-         "that is about 3. Below 2.6 the head is too big and FAILS, however clean the face looks. If " +
-         "the shoulders are cropped or hidden, say UNKNOWN for this number and judge D as passing.\n\n" +
+         "D) HEAD SIZE — compare, do not glance. Ignore the face itself. Put the width of the head " +
+         "side by side with the width of the shoulders in IMAGE 1 and classify what you see:\n" +
+         "  HEAD_NORMAL — the shoulders are roughly three head-widths across; the head belongs to " +
+         "that body.\n" +
+         "  HEAD_LARGE — the shoulders are barely two head-widths or less; the head is too big for " +
+         "the body, or the body too narrow for the head, so it reads as pasted on.\n" +
+         "  HEAD_SMALL — the head is noticeably too small for the shoulders.\n" +
+         "  NO_SHOULDERS — use ONLY when neither shoulder is inside the frame at all. A partly " +
+         "visible, turned or clothed shoulder still counts as visible, so judge it.\n\n" +
          "Reply on exactly two lines:\n" +
-         "HEADS_ACROSS_SHOULDERS: <number, or UNKNOWN>\n" +
+         "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Work out line 1 before choosing the verdict; if that number is below 2.6 the verdict must be " +
-         "BAD_PROPORTION. Verdict is one of:\n" +
+         "Decide line 1 before the verdict; if line 1 is HEAD_LARGE the verdict MUST be " +
+         "BAD_PROPORTION, however clean the face looks. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
@@ -1779,18 +1783,31 @@ async function assessOutputWithVision(buf, referenceImages) {
     }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
 
-    // İKİ SATIRLI CEVAP (2026-08-03): Vision'a önce ÖLÇÜM yaptırıyoruz
-    // ("omuz genişliğine kaç kafa sığıyor?"), karar ikinci satırda geliyor.
-    // Gerekçe: tek satır isteyince model her kareye rutin olarak
-    // "GOOD: ...correct proportions" yazıyordu — kafa gövdeye göre gözle
-    // görülür büyük olan karelerde bile (5/5 geçmişti). Bir sayı üretmek
-    // zorunda kalınca gerçekten bakmak durumunda kalıyor.
-    // Ayrıştırma, ölçüm satırını atlayıp verdict satırını bulur; model tek
-    // satırla cevap verirse (eski davranış) o satır zaten verdict olur.
+    // İKİ SATIRLI CEVAP: Vision önce kafa/omuz SINIFLANDIRMASI yapıyor, karar
+    // ikinci satırda geliyor. Gerekçe: tek satır isteyince model her kareye
+    // rutin olarak "GOOD: ...correct proportions" yazıyordu — kafa gövdeye
+    // göre gözle görülür büyük olan karelerde bile (5/5 geçmişti).
+    //
+    // SAYI YERİNE SINIF (2026-08-04): ilk sürüm "omuz genişliğine kaç kafa
+    // sığıyor" diye SAYI istiyor, omuz kırpılmışsa UNKNOWN'a izin veriyordu.
+    // Sonuç: 5 karenin 5'inde de UNKNOWN geldi — model kaçış kapısını her
+    // seferinde kullandı, kontrol yine hiçbir şey elemedi. Artık ayrık sınıf
+    // isteniyor (modeller sınıflandırmada sayısal tahminden çok daha
+    // güvenilir) ve NO_SHOULDERS yalnızca iki omuz da kadraj dışındaysa
+    // geçerli.
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-    const headsLine = lines.find((l) => l.toUpperCase().startsWith("HEADS_ACROSS_SHOULDERS"));
-    const verdictLine = lines.find((l) => !l.toUpperCase().startsWith("HEADS_ACROSS_SHOULDERS")) || "";
+    const isHeadLine = (l) => /^HEAD(_VS_SHOULDERS|S_ACROSS_SHOULDERS)/.test(l.toUpperCase());
+    const headsLine = lines.find(isHeadLine);
+    const verdictLine = lines.find((l) => !isHeadLine(l)) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
+
+    // HEAD_LARGE bağlayıcıdır: model sınıfı "büyük" deyip verdict'i GOOD
+    // bırakırsa (talimata rağmen olabiliyor) kare yine de reddedilir —
+    // sınıflandırma satırı kararın kendisinden daha güvenilir bir sinyal.
+    if (headsLine && /HEAD_LARGE/i.test(headsLine)) {
+      const d = verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
+      return { ok: false, reason: "proportion", detail: d || "HEAD_LARGE", inconclusive: false };
+    }
 
     const answer = verdictLine.toUpperCase();
     // Gerekçe: verdict satırındaki iki nokta üst üstesinden sonrası (yoksa boş).
@@ -2063,7 +2080,7 @@ const TEMPLATE_TARGET_FACE_RATIO = 0.17;
  * üretim asla bloklanmaz.
  */
 async function prepareTemplate(templateUrl, styleId, chunkIdx) {
-  const noCrop = { input: templateUrl, restore: null };
+  const noCrop = { input: templateUrl, restore: null, usable: true };
   try {
     const r = await fetch(templateUrl);
     if (!r.ok) return noCrop;
@@ -2072,35 +2089,62 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
     const { detectMainFace } = require("./faceQuality");
     const face = await detectMainFace(buf);
     if (!face) {
-      console.warn(`ŞABLON: yüz bulunamadı, kırpma atlandı (style=${styleId}, chunk=${chunkIdx})`);
-      return noCrop;
+      // KULLANILAMAZ ŞABLON (2026-08-04): yüzü tespit edilemeyen bir şablon
+      // yalnızca "kırpamıyoruz" demek değil — model için de zor demek.
+      // Gerçek örnek: loş smokinli sahne, yüz kadrajın %7'si; üretim kimlik
+      // mesafesi 0.646 ile geldi (ana kütle 0.21-0.50) ve kullanıcı "taban
+      // fotoğrafı göstermişsin, yüz benzememiş" diye işaretledi. Böyle
+      // şablonlar artık kullanılmıyor, yerine yedek şablon seçiliyor.
+      console.warn(`ŞABLON KULLANILAMAZ: yüz bulunamadı (style=${styleId}, chunk=${chunkIdx}) — yedek şablon denenecek`);
+      return { input: templateUrl, restore: null, usable: false };
     }
     if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
       console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
-      return noCrop;
+      return { ...noCrop, faceRatio: face.ratio };
     }
+
 
     const { cropForFaceRatio, computeFaceCropGeometry } = require("./postProcess");
     const [cropped, geo] = await Promise.all([
       cropForFaceRatio(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
       computeFaceCropGeometry(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
     ]);
-    if (!cropped || !geo) return noCrop;
+    if (!cropped || !geo) return { ...noCrop, faceRatio: face.ratio };
     console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO}`);
-    return { input: cropped, restore: { originalBuf: buf, geo } };
+    // Kırpma sonrası ETKİN oran hedeftir — kalite kapısı kırpılmış tuvale
+    // baktığı için karşılaştırma da onunla yapılmalı.
+    return {
+      input: cropped, restore: { originalBuf: buf, geo },
+      usable: true, faceRatio: TEMPLATE_TARGET_FACE_RATIO,
+    };
   } catch (e) {
     console.error("Şablon hazırlama başarısız (orijinal kullanılıyor):", e.message || e);
     return noCrop;
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
   // (kırpılmamış) taban fotoğrafa geri yerleştirmek için gereken bilgi —
   // bkz. prepareTemplate ve aşağıdaki kaydetme adımı.
-  const { input: templateInput, restore } = await prepareTemplate(templateUrl, styleId, chunkIdx);
+  //
+  // YEDEK ŞABLON (2026-08-04): templateUrls = [birincil, yedek...]. Yüzü
+  // tespit edilemeyen şablon KULLANILMAZ (bkz. prepareTemplate gerekçesi),
+  // sıradaki yedeğe geçilir. Hiçbiri uygun değilse birincil ile devam edilir
+  // — üretimi bloklamak, kötü kare riskinden daha kötüdür (fail-safe).
+  const urls = Array.isArray(templateUrls) ? templateUrls : [templateUrls];
+  let prepared = null;
+  for (const url of urls) {
+    const p = await prepareTemplate(url, styleId, chunkIdx);
+    if (p.usable) { prepared = p; break; }
+  }
+  if (!prepared) {
+    console.warn(`ŞABLON: hiçbir aday uygun değil (style=${styleId}, chunk=${chunkIdx}) — birincil ile devam ediliyor`);
+    prepared = await prepareTemplate(urls[0], styleId, chunkIdx);
+  }
+  const { input: templateInput, restore, faceRatio: templateFaceRatio } = prepared;
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
@@ -2131,7 +2175,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
       let mathReason = null;
       try {
         const { assessOutputFace } = require("./faceQuality");
-        const q = await assessOutputFace(buf, refDescriptor);
+        const q = await assessOutputFace(buf, refDescriptor, templateFaceRatio);
         mathOk = q.ok;
         mathDist = q.distance;
         mathReason = q.reason;
@@ -2142,7 +2186,12 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrl, 
         const d = q.distance != null ? q.distance.toFixed(3) : "null";
         const fr = q.faceRatio != null ? q.faceRatio.toFixed(3) : "null";
         const bs = q.blurScore != null ? q.blurScore.toFixed(1) : "null";
-        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} yüzOranı=${fr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
+        // büyüme = çıktı yüz oranı / şablon yüz oranı (bkz.
+        // OUTPUT_FACE_GROWTH_MAX). Eşiği veriyle kalibre edebilmek için
+        // GEÇEN karelerde de loglanıyor.
+        const gr = (templateFaceRatio && q.faceRatio)
+          ? (q.faceRatio / templateFaceRatio).toFixed(2) : "null";
+        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} yüzOranı=${fr} büyüme=${gr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
       } catch (e) {
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
@@ -2531,10 +2580,16 @@ exports.startPhotoGeneration = onCall(
                     : ` (bant yok — tüm havuz, boy=${bodyProfile.heightRange || "belirtilmemiş"})`)
     );
     const recentNames = await recentTemplateNames(uid);
+    // Her chunk için BİR YEDEK şablon da seçilir: birincil şablonun yüzü
+    // tespit edilemezse (kullanılamaz — bkz. prepareTemplate) yedeğe geçilir.
+    // Yedekler ayrı tutulur; lockedCount ve ücretsiz-deneme hesabı yalnızca
+    // BİRİNCİL listeye bakar, yedeklerin varlığı bu sayıları değiştirmez.
     const templatesByStyle = {};
+    const sparesByStyle = {};
     for (const styleId of styles) {
-      templatesByStyle[styleId] =
-        pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE, recentNames);
+      const all = pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE * 2, recentNames);
+      templatesByStyle[styleId] = all.slice(0, IMAGES_PER_STYLE);
+      sparesByStyle[styleId] = all.slice(IMAGES_PER_STYLE);
     }
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
@@ -2654,10 +2709,15 @@ exports.startPhotoGeneration = onCall(
             } },
           }, { merge: true });
 
+          const spares = sparesByStyle[styleId] || [];
           await Promise.all(picked.map(async (file, i) => {
-            const templateUrl = await signedDownloadUrl(file);
+            // [birincil, yedek] — her chunk'ın kendi yedeği var, böylece
+            // paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi
+            // üretmez. Yedek yoksa liste tek elemanlı kalır.
+            const candidates = spares[i] ? [file, spares[i]] : [file];
+            const urls = await Promise.all(candidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
-              uid, jobId, styleId, i, templateUrl, refUrls, identityCaption,
+              uid, jobId, styleId, i, urls, refUrls, identityCaption,
               bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode
             );
           }));
