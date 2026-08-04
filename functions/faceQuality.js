@@ -495,6 +495,17 @@ const OUTPUT_FACE_GROWTH_MAX = 1.45;
 // (0.69+) altındadır.
 const PROFILE_UNRELIABLE_MIN = 0.45;
 
+// ...ama profil istisnasının da bir TAVANI var. Profil pozu mesafeyi şişirir,
+// evet, ama sınırsız değil: bu değerin üstündeki bir mesafe artık "poz
+// yüzünden" diye açıklanamaz, kare gerçekten bozuktur.
+// GERÇEK OLAY (2026-08-04): mesafe 0.802'lik profil kare, şablonun ANA
+// ÖZNESİ tespit edilemediği için ARKA PLANDAKİ bir yolcuya kırpılmıştı;
+// model o kişiyi kullanıcıya çevirmeye çalışmıştı. Tavan olmasaydı bu kare
+// Vision'a devredilir ve muhtemelen teslim edilirdi.
+// Gözlenen profil mesafeleri: 0.373 / 0.606 (ikisi de sağlam, 0.606 zaten
+// kullanıcıya teslim edilmişti) ve 0.802 (bozuk). 0.70 ikisini ayırır.
+const PROFILE_DEFER_MAX_DISTANCE = 0.70;
+
 // KURTARMA EŞİĞİ (2026-08-03): profil/yan bakış karelerinde SSD skoru normal
 // eşiğin altına düşüp yüz "yok" sayılıyordu. Gerçek ölçüm: 2026-08-03
 // üretiminde 5 karenin 3'ü "no-face" verdi; bunlardan biri (Madrid terası,
@@ -577,7 +588,7 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
     // GÖREBİLEN Vision'a devrediyoruz — Vision referans selfie'lerle
     // karşılaştırma yapabildiği için profilde bizden daha yetkin.
     const pd = db.profileDegree;
-    if (pd != null && pd > PROFILE_UNRELIABLE_MIN) {
+    if (pd != null && pd > PROFILE_UNRELIABLE_MIN && distance < PROFILE_DEFER_MAX_DISTANCE) {
       return {
         ok: false, distance, faceRatio, blurScore,
         reason: "profile", profileDegree: pd,

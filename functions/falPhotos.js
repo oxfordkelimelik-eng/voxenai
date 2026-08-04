@@ -2077,6 +2077,21 @@ const TEMPLATE_MIN_FACE_RATIO = 0.13;
 // Kırpma sonrası hedeflenen yüz oranı (iyi çalışan şablonların bandı).
 const TEMPLATE_TARGET_FACE_RATIO = 0.17;
 
+// BU ORANIN ALTINDAKİ ŞABLON HİÇ KULLANILMAZ (2026-08-04). Kırpma, olmayan
+// ayrıntıyı yaratamaz — ve daha kötüsü, yüz bu kadar küçükken dedektör ANA
+// ÖZNEYİ hiç bulamayıp arka plandaki birini "en büyük yüz" sanabiliyor.
+// GERÇEK OLAY: Coachella şablonunda (1170x1462) öndeki adam hiç tespit
+// edilmedi; bulunan 7 yüzün hepsi 10-12 pikseldi ve en büyüğü arka plandaki
+// bir yolcuydu. Kırpma oraya odaklandı, model o kişiyi kullanıcıya çevirmeye
+// çalıştı, iki deneme de 0.80 mesafeyle reddedildi -> kullanıcı 5 yerine 4
+// foto aldı (ve bedelini ödemişti).
+// EŞİK VERİDEN: 80 eşleşmiş kare (şablon oranı -> kimlik mesafesi):
+//   <0.06  -> n=3,  ortalama 0.633, maks 0.802   (hepsi aynı 0.020'lik şablon)
+//   >=0.06 -> n=77, ortalama 0.348, maks 0.646
+// Gözlenen en düşük sağlam şablon 0.061. 0.020 ile 0.061 arasında hiç veri
+// yok; 0.05 bu boşluğa oturur.
+const TEMPLATE_UNUSABLE_FACE_RATIO = 0.05;
+
 /**
  * Taban şablonunu üretime hazırlar: kişi kadrajda çok küçükse şablonu
  * YAKINLAŞTIRIR (bkz. postProcess.cropForFaceRatio gerekçesi).
@@ -2115,11 +2130,17 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
       console.warn(`ŞABLON KULLANILAMAZ: yüz bulunamadı (style=${styleId}, chunk=${chunkIdx}) — yedek şablon denenecek`);
       return { input: templateUrl, restore: null, usable: false };
     }
+    // Bulunan yüz bu kadar küçükse muhtemelen ANA ÖZNE DEĞİL, arka plandaki
+    // biridir — kırpma onu merkeze alıp yanlış kişiyi düzenletir
+    // (bkz. TEMPLATE_UNUSABLE_FACE_RATIO gerekçesi).
+    if (face.ratio < TEMPLATE_UNUSABLE_FACE_RATIO) {
+      console.warn(`ŞABLON KULLANILAMAZ: yüz çok küçük (yüzOranı=${face.ratio.toFixed(3)} < ${TEMPLATE_UNUSABLE_FACE_RATIO}, ana özne yerine arka plandaki biri olabilir) (style=${styleId}, chunk=${chunkIdx}) — yedek şablon denenecek`);
+      return { input: templateUrl, restore: null, usable: false };
+    }
     if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
       console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
       return { ...noCrop, faceRatio: face.ratio };
     }
-
 
     const { cropForFaceRatio, computeFaceCropGeometry } = require("./postProcess");
     const [cropped, geo] = await Promise.all([
@@ -2147,24 +2168,41 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // (kırpılmamış) taban fotoğrafa geri yerleştirmek için gereken bilgi —
   // bkz. prepareTemplate ve aşağıdaki kaydetme adımı.
   //
-  // YEDEK ŞABLON (2026-08-04): templateUrls = [birincil, yedek...]. Yüzü
-  // tespit edilemeyen şablon KULLANILMAZ (bkz. prepareTemplate gerekçesi),
-  // sıradaki yedeğe geçilir. Hiçbiri uygun değilse birincil ile devam edilir
-  // — üretimi bloklamak, kötü kare riskinden daha kötüdür (fail-safe).
+  // YEDEK ŞABLON (2026-08-04): templateUrls = [birincil, yedek...]. Aday
+  // sırayla denenir; KULLANILAMAZ olan atlanır (yüz yok ya da yüz çok küçük
+  // — bkz. prepareTemplate). Hiçbiri uygun değilse birincil ile devam edilir:
+  // üretimi bloklamak, kötü kare riskinden daha kötüdür (fail-safe).
   const urls = Array.isArray(templateUrls) ? templateUrls : [templateUrls];
-  let prepared = null;
-  for (const url of urls) {
-    const p = await prepareTemplate(url, styleId, chunkIdx);
-    if (p.usable) { prepared = p; break; }
-  }
+  let nextCandidate = 0;
+  const prepareNextUsable = async () => {
+    while (nextCandidate < urls.length) {
+      const p = await prepareTemplate(urls[nextCandidate++], styleId, chunkIdx);
+      if (p.usable) return p;
+    }
+    return null;
+  };
+
+  let prepared = await prepareNextUsable();
   if (!prepared) {
     console.warn(`ŞABLON: hiçbir aday uygun değil (style=${styleId}, chunk=${chunkIdx}) — birincil ile devam ediliyor`);
     prepared = await prepareTemplate(urls[0], styleId, chunkIdx);
   }
-  const { input: templateInput, restore, faceRatio: templateFaceRatio } = prepared;
+  let { input: templateInput, restore, faceRatio: templateFaceRatio } = prepared;
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
+    // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI
+    // tuvali kullanıyordu. Sorun şablondan geliyorsa tekrar denemek boşuna —
+    // gerçek örnek: 0.802 ve 0.800, iki denemede neredeyse aynı sonuç, çünkü
+    // ikisi de arka plandaki yanlış kişiye kırpılmış aynı şablondu. Elde
+    // yedek varsa artık onunla deneniyor.
+    if (attempt > 1) {
+      const next = await prepareNextUsable();
+      if (next) {
+        ({ input: templateInput, restore, faceRatio: templateFaceRatio } = next);
+        console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
+      }
+    }
     const buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx,
       refDescriptor
@@ -2606,14 +2644,19 @@ exports.startPhotoGeneration = onCall(
                     : ` (bant yok — tüm havuz, boy=${bodyProfile.heightRange || "belirtilmemiş"})`)
     );
     const recentNames = await recentTemplateNames(uid);
-    // Her chunk için BİR YEDEK şablon da seçilir: birincil şablonun yüzü
-    // tespit edilemezse (kullanılamaz — bkz. prepareTemplate) yedeğe geçilir.
+    // Her chunk için İKİ YEDEK şablon da seçilir. İki ayrı işe yararlar:
+    //  1) birincil KULLANILAMAZSA (yüz yok / yüz çok küçük) atlanıp yedeğe
+    //     geçilir — bkz. prepareTemplate,
+    //  2) bir deneme kalite kapısını geçemezse SONRAKİ deneme yeni bir
+    //     şablonla yapılır — aynı bozuk şablonla tekrar denemek boşuna.
+    // İki yedek, "birincil kullanılamaz + ilk deneme de başarısız" durumunda
+    // bile 2. denemeye taze bir şablon kalmasını garanti eder.
     // Yedekler ayrı tutulur; lockedCount ve ücretsiz-deneme hesabı yalnızca
     // BİRİNCİL listeye bakar, yedeklerin varlığı bu sayıları değiştirmez.
     const templatesByStyle = {};
     const sparesByStyle = {};
     for (const styleId of styles) {
-      const all = pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE * 2, recentNames);
+      const all = pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE * 3, recentNames);
       templatesByStyle[styleId] = all.slice(0, IMAGES_PER_STYLE);
       sparesByStyle[styleId] = all.slice(IMAGES_PER_STYLE);
     }
@@ -2737,10 +2780,10 @@ exports.startPhotoGeneration = onCall(
 
           const spares = sparesByStyle[styleId] || [];
           await Promise.all(picked.map(async (file, i) => {
-            // [birincil, yedek] — her chunk'ın kendi yedeği var, böylece
-            // paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi
-            // üretmez. Yedek yoksa liste tek elemanlı kalır.
-            const candidates = spares[i] ? [file, spares[i]] : [file];
+            // [birincil, yedek1, yedek2] — her chunk'ın KENDİ yedekleri var
+            // (i ve IMAGES_PER_STYLE+i konumları), böylece paralel çalışan
+            // chunk'lar aynı yedeğe düşüp aynı kareyi üretmez.
+            const candidates = [file, spares[i], spares[IMAGES_PER_STYLE + i]].filter(Boolean);
             const urls = await Promise.all(candidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
