@@ -57,6 +57,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
+  # Sunucu fonksiyonlarını yalnızca GERÇEK uygulama örneklerine açmak için
+  # (App Attest / Play Integrity). Bkz. main.dart ve functions/_shared.js
+  # checkAppAttestation — şu an izleme modunda.
+  firebase_app_check: ^0.4.1
   cloud_firestore: ^6.6.0
   firebase_storage: ^13.4.3
   google_sign_in: ^7.2.0

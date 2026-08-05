@@ -1,6 +1,17 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
-const { admin, db } = require("./_shared");
+const { admin, db, enforceRateLimit, checkAppAttestation } = require("./_shared");
+
+// HIZ SINIRLARI — her iki uç nokta da istemciden gelen SERBEST metni
+// (analyzeImage: prompt, chat: contents) Gemini'ye iletiyor. Sınır olmadan
+// bunlar bizim kotamız üzerinden çalışan ücretsiz bir LLM proxy'sine dönüşür:
+// geçerli bir kimlik belirteci olan biri, uygulamayla hiç ilgisi olmayan
+// istekleri döngüde gönderebilir. Sınırlar gerçek kullanımın üstünde
+// (bir analiz turu birkaç çağrı, koç sohbeti dakikada birkaç mesaj).
+const RL_ANALYZE = { max: 30, windowMs: 60 * 60 * 1000,
+  message: "Çok fazla analiz isteği gönderdin. Bir saat sonra tekrar dene." };
+const RL_CHAT = { max: 60, windowMs: 60 * 60 * 1000,
+  message: "Çok fazla mesaj gönderdin. Biraz sonra tekrar dene." };
 
 // Gemini anahtarı Firebase Secret olarak saklanır (kodda/APK'da görünmez)
 const GEMINI_KEY = defineSecret("GEMINI_KEY");
@@ -66,6 +77,8 @@ exports.analyzeImage = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
+    checkAppAttestation(request, "analyzeImage");
+    await enforceRateLimit(request.auth.uid, "analyzeImage", RL_ANALYZE);
     const { prompt, imageBase64, mimeType, images } = request.data || {};
     // Çok açılı (ön/sağ/sol) destek: images = [{data, mimeType}]. Tek görsel için
     // geriye dönük olarak imageBase64/mimeType da kabul edilir.
@@ -119,9 +132,17 @@ exports.chat = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
+    checkAppAttestation(request, "chat");
+    await enforceRateLimit(request.auth.uid, "chat", RL_CHAT);
     const { contents } = request.data || {};
     if (!Array.isArray(contents) || contents.length === 0) {
       throw new HttpsError("invalid-argument", "contents zorunlu.");
+    }
+    // Girdi boyutu sınırı: devasa bir bağlam hem maliyeti hem gecikmeyi
+    // patlatır. Normal koç sohbeti bunun çok altında kalır.
+    const totalChars = JSON.stringify(contents).length;
+    if (totalChars > 20000) {
+      throw new HttpsError("invalid-argument", "Mesaj geçmişi çok uzun.");
     }
 
     const body = {

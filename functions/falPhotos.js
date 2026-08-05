@@ -1,7 +1,20 @@
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
-const { admin, db, bucket } = require("./_shared");
+const {
+  admin, db, bucket,
+  assertSafeId, enforceRateLimit, checkAppAttestation,
+} = require("./_shared");
+
+// HIZ SINIRLARI — her ikisi de GERÇEK PARA harcayan uç noktalar.
+// Değerler normal kullanımın belirgin üstünde, otomatik istismarın belirgin
+// altında: bir kullanıcı 5 fotoluk bir üretimi hazırlayıp başlatır, hata
+// olursa birkaç kez tekrar dener. Saatte 10 hazırlık / 8 üretim bunu rahat
+// karşılar; döngüye alınmış bir script ise ilk dakikada durur.
+const RL_PREPARE = { max: 10, windowMs: 60 * 60 * 1000,
+  message: "Çok fazla fotoğraf hazırlama isteği gönderdin. Bir saat sonra tekrar dene." };
+const RL_GENERATE = { max: 8, windowMs: 60 * 60 * 1000,
+  message: "Çok fazla üretim isteği gönderdin. Bir saat sonra tekrar dene." };
 
 const { GEMINI_KEY } = require("./identityCaption");
 
@@ -2399,10 +2412,16 @@ exports.prepareReferencePhotos = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
+    checkAppAttestation(request, "prepareReferencePhotos");
     const { jobId, bodyProfile } = request.data || {};
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
+    // jobId Firestore/Storage yollarına gömülüyor — biçimi istemciye
+    // bırakılmıyor (bkz. assertSafeId).
+    assertSafeId(jobId, "jobId");
+    // Gemini caption + moderasyon + yüz analizi = her çağrı maliyetli.
+    await enforceRateLimit(uid, "prepareReferencePhotos", RL_PREPARE);
     // Formdan gelen boy/vücut tipi — prompt'ta ikincil ipucu (foto öncelikli).
     const safeBodyProfile = (bodyProfile && typeof bodyProfile === "object")
       ? {
@@ -2575,10 +2594,14 @@ exports.startPhotoGeneration = onCall(
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
     }
     const uid = request.auth.uid;
+    checkAppAttestation(request, "startPhotoGeneration");
     const { styles, jobId, model, mode } = request.data || {};
     if (!Array.isArray(styles) || styles.length === 0 || !jobId) {
       throw new HttpsError("invalid-argument", "styles ve jobId zorunlu.");
     }
+    assertSafeId(jobId, "jobId");
+    // OpenAI görsel üretimi + Vision kontrolü = çağrı başına en yüksek maliyet.
+    await enforceRateLimit(uid, "startPhotoGeneration", RL_GENERATE);
     const invalidStyle = styles.find((s) => !STYLE_SCENES[s]);
     if (invalidStyle) {
       throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
