@@ -658,8 +658,222 @@ async function detectMainFace(buf) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// TEN RENGİ TUTARLILIĞI KAPISI (assessSkinToneConsistency)
+//
+// SORUN (2026-08-07, gerçek çıktı): elleriyle hindistan cevizi tutan bir karede
+// yüz hedef kişinin ten renginde, ELLER ise taban fotoğraftaki kişinin
+// (belirgin daha koyu) ten renginde kalmıştı. Ana prompt bunu zaten açıkça
+// yasaklıyor ("SKIN COLOUR — WHOLE BODY, NO EXCEPTIONS") ve Vision kapısına da
+// bu AYNI kare için "yüz ile eller aynı tonda mı?" diye soruluyordu — Vision
+// "consistent skin tone" deyip GEÇİRDİ. Yani tek başına LLM yargısı bu hatayı
+// yakalamıyor; ölçülebilir/deterministik bir ikinci kanıt gerekiyor.
+//
+// NEDEN "BU PİKSEL TEN Mİ?" DİYE SORMUYORUZ: ten rengi aralığı (YCbCr) kum,
+// ahşap, hindistan cevizi kabuğu gibi arka plan nesneleriyle fena hâlde
+// örtüşür — tam da bu karede. Böyle bir kural tek başına arka planı "bozuk
+// ten" sanardı.
+//
+// BUNUN YERİNE — ÜÇ NOKTALI KARŞILAŞTIRMA: elimizde TABAN fotoğraf da var ve
+// hata modu tam olarak "modelin taban kişinin tenini vücutta bırakması". Yani
+// asıl soru şu: bu piksel YENİ kişinin yüz tonuna mı, yoksa ESKİ (taban)
+// kişinin yüz tonuna mı daha yakın? Arka plan nesneleri ikisine de rastgele
+// uzaklıktadır; "eski tona belirgin yakın" olmak ayırt edici bir kanıttır.
+//
+// AYIRT EDİCİLİK ŞARTI: taban kişi ile hedef kişinin ten tonu zaten birbirine
+// yakınsa bu testin hiçbir ayırt etme gücü yoktur (her piksel ikisine de eşit
+// uzaklıkta olur) — o durumda ölçüm yapılmaz, kare GEÇER. Yani kapı yalnızca
+// kanıtın gerçekten var olabileceği durumda konuşur.
+// ---------------------------------------------------------------------------
+
+// Ölçüm bu uzun kenarda yapılır. Ten tonu düşük frekanslı bir sinyal —
+// küçültmek hem gürültüyü azaltır hem CPU'yu (kare başına ~10ms) düşürür.
+const SKIN_WORK_MAX_DIM = 384;
+// Taban ve hedef yüz tonu arasında EN AZ bu kadar Lab farkı olmalı ki test
+// ayırt edici sayılsın. Altındaysa ölçüm yapılmaz (bkz. yukarıdaki gerekçe).
+const SKIN_MIN_DISCRIMINATION = 10;
+// Bir piksel "eski tona ait" sayılmak için eski tona, yeni tondan bu kadar
+// DAHA yakın olmalı. Sıfır olsaydı gölge/ışık gürültüsü kararı savurur.
+const SKIN_LEFTOVER_MARGIN = 6;
+// Yüz DIŞINDAKİ ten benzeri piksellerin bu oranı "eski tona ait" çıkarsa
+// kare reddedilir. Muhafazakâr seçildi: yanlış pozitif, İYİ bir karenin
+// ücretli olarak yeniden üretilmesi demek (bkz. 2026-07-22 kredi olayı).
+const SKIN_MISMATCH_RATIO_MAX = 0.30;
+// Bu sayıdan az ten benzeri piksel varsa (ör. sadece yüz görünüyor, vücut
+// kadraj dışı/giyinik) kanıt yetersizdir — ölçüm yapılmaz, kare GEÇER.
+const SKIN_MIN_SAMPLE_PIXELS = 300;
+
+function srgbToLinear(c) {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+/**
+ * sRGB -> CIELAB (D65). Lab tercih edildi çünkü ten tonu farkı burada
+ * ALGISAL mesafeye karşılık gelir; ham RGB mesafesi aynı işi görmez.
+ */
+function rgbToLab(r, g, b) {
+  const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
+  const X = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047;
+  const Y = (R * 0.2126 + G * 0.7152 + B * 0.0722);
+  const Z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const fx = f(X), fy = f(Y), fz = f(Z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+/**
+ * Klasik YCbCr ten-aralığı kuralı. Tek başına ten TESPİTİ için güvenilmez
+ * (bkz. yukarıdaki not) — burada yalnızca ÖN ELEME olarak kullanılıyor:
+ * gökyüzü/asfalt/yeşillik gibi apaçık ten olmayan pikselleri ucuza atar,
+ * asıl kararı üç-noktalı karşılaştırma verir.
+ */
+function isSkinLike(r, g, b) {
+  const y = 0.299 * r + 0.587 * g + 0.114 * b;
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return y > 60 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
+}
+
+// Ortalama DEĞİL medyan: tek bir parlak yansıma ya da koyu gölge ortalamayı
+// kaydırır, medyanı kaydırmaz.
+function medianLab(samples) {
+  if (samples.length === 0) return null;
+  const out = [];
+  for (let c = 0; c < 3; c++) {
+    const col = samples.map((s) => s[c]).sort((a, b) => a - b);
+    out.push(col[Math.floor(col.length / 2)]);
+  }
+  return out;
+}
+
+// L (açıklık) ağırlığı bilinçli olarak 1'den küçük: farklı kişilerin ten
+// farkı hem L hem a/b'de görünür, ama GÖLGE neredeyse yalnızca L'yi
+// oynatır. L'yi tam ağırlıkla saysaydık gölgede kalan bir el "başka kişi"
+// gibi ölçülürdü.
+const LAB_L_WEIGHT = 0.6;
+function labDistance(p, q) {
+  const dl = (p[0] - q[0]) * LAB_L_WEIGHT;
+  const da = p[1] - q[1];
+  const db = p[2] - q[2];
+  return Math.sqrt(dl * dl + da * da + db * db);
+}
+
+/** Görseli ölçüm boyutuna indirip ham RGB piksellerini döner. */
+async function rawPixels(buf) {
+  const meta = await sharp(buf).metadata();
+  if (!meta.width || !meta.height) return null;
+  const scale = Math.min(1, SKIN_WORK_MAX_DIM / Math.max(meta.width, meta.height));
+  const width = Math.max(1, Math.round(meta.width * scale));
+  const height = Math.max(1, Math.round(meta.height * scale));
+  const { data } = await sharp(buf)
+    .removeAlpha()
+    .resize(width, height, { fit: "fill" })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width, height, scale };
+}
+
+/**
+ * Yüz kutusunun YANAK BANDINDAN (yatay orta %60, dikey %45-%80) ten tonunu
+ * örnekler. Bu bant bilinçli: gözler, kaşlar, saç çizgisi ve ağız dışarıda
+ * kalır — bunlar ten değil ve tonu kaydırırlar.
+ */
+function sampleFaceTone(px, box) {
+  const s = px.scale;
+  const x0 = Math.max(0, Math.floor((box.x + box.width * 0.20) * s));
+  const x1 = Math.min(px.width, Math.ceil((box.x + box.width * 0.80) * s));
+  const y0 = Math.max(0, Math.floor((box.y + box.height * 0.45) * s));
+  const y1 = Math.min(px.height, Math.ceil((box.y + box.height * 0.80) * s));
+  const samples = [];
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const o = (y * px.width + x) * 3;
+      const r = px.data[o], g = px.data[o + 1], b = px.data[o + 2];
+      if (isSkinLike(r, g, b)) samples.push(rgbToLab(r, g, b));
+    }
+  }
+  return medianLab(samples);
+}
+
+/**
+ * ÇIKTIDAKİ ten renginin vücut genelinde tutarlı olup olmadığını ÖLÇER.
+ *
+ * outputBuf   : üretilen kare
+ * templateBuf : üretimde kullanılan TABAN fotoğraf (aynı kadraj/kırpma)
+ *
+ * Döner: { ok, reason, ratio, sampled, faceDelta }
+ *   ok:false + reason:"skin" → vücutta taban kişinin teni kalmış.
+ *   ok:true  + reason:"indistinguishable" | "insufficient-sample" | null
+ *     → ölçüm yapılamadı ya da sorun yok (ikisi de KABUL — fail-safe).
+ *
+ * FAIL-SAFE: her hata durumunda ok:true. Bu kapı ASLA teknik bir aksaklık
+ * yüzünden iyi bir kareyi elemez (dosyadaki diğer ikincil katmanlarla aynı
+ * felsefe).
+ */
+async function assessSkinToneConsistency(outputBuf, templateBuf) {
+  try {
+    if (!outputBuf || !templateBuf) return { ok: true, reason: "insufficient-sample" };
+
+    const [outFace, tplFace] = await Promise.all([
+      detectMainFace(outputBuf),
+      detectMainFace(templateBuf),
+    ]);
+    if (!outFace || !tplFace) return { ok: true, reason: "insufficient-sample" };
+
+    const [outPx, tplPx] = await Promise.all([rawPixels(outputBuf), rawPixels(templateBuf)]);
+    if (!outPx || !tplPx) return { ok: true, reason: "insufficient-sample" };
+
+    const targetTone = sampleFaceTone(outPx, outFace.box); // yeni (hedef) kişi
+    const baseTone = sampleFaceTone(tplPx, tplFace.box);   // eski (taban) kişi
+    if (!targetTone || !baseTone) return { ok: true, reason: "insufficient-sample" };
+
+    // Ayırt edicilik şartı — bkz. başlıktaki gerekçe.
+    const faceDelta = labDistance(targetTone, baseTone);
+    if (faceDelta < SKIN_MIN_DISCRIMINATION) {
+      return { ok: true, reason: "indistinguishable", faceDelta };
+    }
+
+    // Yüz kutusunun DIŞINDA kalan ten benzeri pikseller: boyun, kollar,
+    // eller, bacaklar. Yüz bölgesi hariç tutulur çünkü referans tonun
+    // kendisi oradan alındı (kendisiyle karşılaştırmak anlamsız).
+    const s = outPx.scale;
+    const fx0 = (outFace.box.x) * s, fx1 = (outFace.box.x + outFace.box.width) * s;
+    const fy0 = (outFace.box.y) * s, fy1 = (outFace.box.y + outFace.box.height) * s;
+
+    let sampled = 0;
+    let leftover = 0;
+    for (let y = 0; y < outPx.height; y++) {
+      for (let x = 0; x < outPx.width; x++) {
+        if (x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue; // yüz bölgesi
+        const o = (y * outPx.width + x) * 3;
+        const r = outPx.data[o], g = outPx.data[o + 1], b = outPx.data[o + 2];
+        if (!isSkinLike(r, g, b)) continue;
+        sampled++;
+        const lab = rgbToLab(r, g, b);
+        const dTarget = labDistance(lab, targetTone);
+        const dBase = labDistance(lab, baseTone);
+        if (dBase + SKIN_LEFTOVER_MARGIN < dTarget) leftover++;
+      }
+    }
+
+    if (sampled < SKIN_MIN_SAMPLE_PIXELS) {
+      return { ok: true, reason: "insufficient-sample", sampled, faceDelta };
+    }
+    const ratio = leftover / sampled;
+    if (ratio > SKIN_MISMATCH_RATIO_MAX) {
+      return { ok: false, reason: "skin", ratio, sampled, faceDelta };
+    }
+    return { ok: true, reason: null, ratio, sampled, faceDelta };
+  } catch (e) {
+    console.error("Ten rengi kontrolü hata verdi (fail-safe kabul):", e.message || e);
+    return { ok: true, reason: "insufficient-sample" };
+  }
+}
+
 module.exports = {
   analyzeReferences,
+  assessSkinToneConsistency,
   matchesIdentity,
   assessOutputFace,
   detectMainFace,

@@ -1718,9 +1718,10 @@ async function assessOutputWithVision(buf, referenceImages) {
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
          "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face.\n" +
          "C) SKIN TONE CONSISTENCY — is the skin colour the SAME across the whole visible body in " +
-         "IMAGE 1? Compare the face against the neck, forearms and hands. Shading from light and shadow " +
-         "is normal, but if the hands or arms are noticeably darker or lighter in TONE than the face — " +
-         "as if two different people's skin were combined — that fails.\n" +
+         "IMAGE 1? Compare the face against the neck, forearms and hands, one by one. Shading from " +
+         "light and shadow is normal, but if the hands or arms are noticeably darker or lighter in " +
+         "TONE than the face — as if two different people's skin were combined — classify it as a " +
+         "mismatch below.\n" +
          "D) HAIR — judge only GROSS mismatches against the source images, never styling: is the " +
          "person in IMAGE 1 given hair the source person does not have (source bald or clearly " +
          "balding, IMAGE 1 with a full head of hair), or a hairline/length that is obviously someone " +
@@ -1733,19 +1734,29 @@ async function assessOutputWithVision(buf, referenceImages) {
          "the body, or the body too narrow for the head, so it reads as pasted on.\n" +
          "  HEAD_SMALL — the head is noticeably too small for the shoulders.\n" +
          "  NO_SHOULDERS — use ONLY when neither shoulder is inside the frame at all. A partly " +
-         "visible, turned or clothed shoulder still counts as visible, so judge it.\n\n" +
-         "Reply on exactly two lines:\n" +
+         "visible, turned or clothed shoulder still counts as visible, so judge it.\n" +
+         "F) NECK/HEAD ATTACHMENT — look specifically at where the head meets the neck and shoulders. " +
+         "It fails if the neck looks unnaturally stretched or elongated, the head sits behind the " +
+         "body's own depth plane as if pasted from a different photo, there is a visible seam, gap or " +
+         "floating disconnect at the neck, or the head-to-shoulder connection is structurally wrong. " +
+         "Normal head tilts, turns and ordinary neck length are fine — only classify a clear " +
+         "structural problem below.\n\n" +
+         "Reply on exactly four lines:\n" +
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
+         "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED>\n" +
+         "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide line 1 before the verdict; if line 1 is HEAD_LARGE the verdict MUST be " +
-         "BAD_PROPORTION, however clean the face looks. Check all five questions before answering " +
-         "GOOD. Verdict is one of:\n" +
+         "Decide the first three lines before the verdict. Binding rules — the verdict MUST match " +
+         "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
+         "STRETCHED_OR_DETACHED -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. Check every " +
+         "question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
          "BAD_HAIR: <e.g. hair added to a bald person>\n" +
-         "BAD_PROPORTION: <e.g. head too large for the shoulders>")
+         "BAD_PROPORTION: <e.g. head too large for the shoulders>\n" +
+         "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1807,10 +1818,11 @@ async function assessOutputWithVision(buf, referenceImages) {
     }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
 
-    // İKİ SATIRLI CEVAP: Vision önce kafa/omuz SINIFLANDIRMASI yapıyor, karar
-    // ikinci satırda geliyor. Gerekçe: tek satır isteyince model her kareye
-    // rutin olarak "GOOD: ...correct proportions" yazıyordu — kafa gövdeye
-    // göre gözle görülür büyük olan karelerde bile (5/5 geçmişti).
+    // DÖRT SATIRLI CEVAP: Vision önce üç zorunlu SINIFLANDIRMA yapıyor (kafa/
+    // omuz, boyun bağlantısı, ten rengi), karar en son satırda geliyor.
+    // Gerekçe: serbest metin isteyince model her kareye rutin olarak
+    // "GOOD: ...correct proportions" yazıyordu — kafa gövdeye göre gözle
+    // görülür büyük olan karelerde bile (5/5 geçmişti).
     //
     // SAYI YERİNE SINIF (2026-08-04): ilk sürüm "omuz genişliğine kaç kafa
     // sığıyor" diye SAYI istiyor, omuz kırpılmışsa UNKNOWN'a izin veriyordu.
@@ -1821,23 +1833,46 @@ async function assessOutputWithVision(buf, referenceImages) {
     // geçerli.
     const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
     const isHeadLine = (l) => /^HEAD(_VS_SHOULDERS|S_ACROSS_SHOULDERS)/.test(l.toUpperCase());
+    // NECK_ATTACHMENT / SKIN_TONE: HEAD_VS_SHOULDERS ile AYNI sebepten zorunlu
+    // sınıflandırma satırları (2026-08-07) — serbest metindeki BAD_SKIN de bu
+    // sınıflandırma eklenmeden önce gerçek bir vakada (elleri koyu kalmış bir
+    // kare) "GEÇTİ" demişti; HEAD_VS_SHOULDERS'ı düzelten aynı yöntem
+    // (zorunlu sınıf + bağlayıcı kural) burada da uygulanıyor.
+    const isNeckLine = (l) => /^NECK_ATTACHMENT/.test(l.toUpperCase());
+    const isSkinLine = (l) => /^SKIN_TONE/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
-    const verdictLine = lines.find((l) => !isHeadLine(l)) || "";
+    const neckLine = lines.find(isNeckLine);
+    const skinLine = lines.find(isSkinLine);
+    const verdictLine = lines.find((l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l)) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
+    if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
+    if (skinLine) console.log(`VISION ÖLÇÜM (ten rengi): ${skinLine}`);
+
+    const verdictDetail = () =>
+      verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
 
     // HEAD_LARGE bağlayıcıdır: model sınıfı "büyük" deyip verdict'i GOOD
     // bırakırsa (talimata rağmen olabiliyor) kare yine de reddedilir —
     // sınıflandırma satırı kararın kendisinden daha güvenilir bir sinyal.
     if (headsLine && /HEAD_LARGE/i.test(headsLine)) {
-      const d = verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
-      return { ok: false, reason: "proportion", detail: d || "HEAD_LARGE", inconclusive: false };
+      return { ok: false, reason: "proportion", detail: verdictDetail() || "HEAD_LARGE", inconclusive: false };
+    }
+    // STRETCHED_OR_DETACHED bağlayıcıdır — aynı gerekçe: boyun/kafa bağlantı
+    // sorunu ana prompt'ta yasaklanıyor ama önceden onu doğrulayan hiçbir
+    // ikinci katman yoktu (bkz. kullanıcı örneği, elegance_4_0.jpg).
+    if (neckLine && /STRETCHED_OR_DETACHED/i.test(neckLine)) {
+      return { ok: false, reason: "attachment", detail: verdictDetail() || "STRETCHED_OR_DETACHED", inconclusive: false };
+    }
+    // HANDS_OR_ARMS_MISMATCH bağlayıcıdır — aynı gerekçe: serbest metindeki
+    // BAD_SKIN kategorisi gerçek bir vakada (elegance_0_0.jpg, eller koyu
+    // kalmış) modelin kendi sorusuna rağmen "GEÇTİ" demesine engel olamadı.
+    if (skinLine && /HANDS_OR_ARMS_MISMATCH/i.test(skinLine)) {
+      return { ok: false, reason: "skin", detail: verdictDetail() || "HANDS_OR_ARMS_MISMATCH", inconclusive: false };
     }
 
     const answer = verdictLine.toUpperCase();
     // Gerekçe: verdict satırındaki iki nokta üst üstesinden sonrası (yoksa boş).
-    const detail = verdictLine.includes(":")
-      ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120)
-      : null;
+    const detail = verdictDetail();
     // BAD_FEATURES = yeni çerçevelemedeki ad; BAD_IDENTITY eski cevaplarla
     // uyum için korunuyor. İkisi de içeride "identity" sebebine eşlenir ki
     // sayısal hakem kuralı (visionRejectionOverridden) aynen çalışsın.
@@ -1859,6 +1894,10 @@ async function assessOutputWithVision(buf, referenceImages) {
     // "identity" DIŞINDAKİ sebepler sayısal hakem tarafından geçersiz
     // kılınamaz — bkz. visionRejectionOverridden.
     if (answer.startsWith("BAD_PROPORTION")) return { ok: false, reason: "proportion", detail, inconclusive: false };
+    // BAD_ATTACHMENT: NECK_ATTACHMENT satırı yakalayamazsa (beklenmedik format)
+    // diye verdict satırından ayrıca güvence — aynı "identity" dışı, hakem
+    // tarafından geçersiz kılınamaz sebep ailesi.
+    if (answer.startsWith("BAD_ATTACHMENT")) return { ok: false, reason: "attachment", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
@@ -2331,6 +2370,32 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
+      }
+
+      // ÜÇÜNCÜ KAPI — TEN RENGİ (deterministik, LLM yargısına bağlı DEĞİL).
+      // Gerekçe: bu kareyi Vision'a zaten sorduk ve Vision "consistent skin
+      // tone" deyip geçirdi (bkz. assessSkinToneConsistency başlığı, gerçek
+      // olay). Ölçüm taban fotoğrafı da kullandığı için "eski kişinin teni
+      // vücutta kaldı mı?" sorusunu sayıyla cevaplar.
+      // GEÇEN kareler de loglanıyor — eşikler (SKIN_MISMATCH_RATIO_MAX vb.)
+      // ancak gerçek dağılım görülerek kalibre edilebilir; bu, dosyadaki
+      // kimlik mesafesi ölçümüyle aynı yaklaşım.
+      try {
+        const { assessSkinToneConsistency } = require("./faceQuality");
+        const st = await assessSkinToneConsistency(buf, templateInput);
+        const rt = st.ratio != null ? st.ratio.toFixed(3) : "null";
+        const fd = st.faceDelta != null ? st.faceDelta.toFixed(1) : "null";
+        console.log(`TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${st.ok ? (st.reason ? `ÖLÇÜLEMEDİ[${st.reason}]` : "GEÇTİ") : "RED[skin]"} eskiTonOranı=${rt} yüzFarkı=${fd} örnek=${st.sampled ?? "null"}`);
+        if (!st.ok) {
+          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+            mode, gate: "skin-tone", distance: mathDist,
+            detail: `eskiTonOranı=${rt}`,
+          });
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: ten rengi kontrolü hata verdi (bu katman atlanıyor):", e);
       }
     }
 
@@ -3395,7 +3460,7 @@ exports.cleanupStuckGenJobs = onSchedule(
       .get();
 
     for (const doc of stuck.docs) {
-      const uid = doc.ref.parent.parent.parent.parent.parent.id; // users/{uid}/private/genData/genJobs/{jobId}
+      const uid = doc.ref.parent.parent.parent.parent.id; // users/{uid}/private/genData/genJobs/{jobId}
       const job = doc.data();
       console.warn(`Takılı iş temizleniyor: ${doc.ref.path}`);
       await refundAndFail(uid, doc.id, job.packUnitsCharged || 0, "Zaman aşımı — işlem tamamlanamadı.");
