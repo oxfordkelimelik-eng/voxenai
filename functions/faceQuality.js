@@ -112,16 +112,35 @@ async function ensureModelsLoaded() {
 const MAX_FACE_DIM = 800;
 
 /**
- * JPEG buffer'ı tensöre çevirir VE uygulanan küçültme ölçeğini döner
+ * Görsel buffer'ını tensöre çevirir VE uygulanan küçültme ölçeğini döner
  * (scale=1 → küçültülmedi). Çağıran taraf, tensör-uzayındaki bir kutuyu
  * (ör. yüz bounding box) ORİJİNAL görsel piksel koordinatına
  * `box / scale` ile geri çevirebilir — bkz. detectSingleFace.
+ *
+ * DEKODER: jpeg-js YERİNE sharp (2026-08-07). jpeg-js SADECE JPEG çözer;
+ * havuzdaki bazı şablonlar JPEG değil (PNG/WebP) ve onlarda `SOI not found`
+ * ile patlıyordu. Gerçek etki canlı logda görüldü: hem şablon kırpma
+ * ("Şablon hazırlama başarısız: SOI not found" → kırpma hiç yapılamıyor,
+ * yüz oranı düzeltmesi kayboluyor) hem de ten rengi kapısı (o karelerde
+ * ölçüm hiç çalışmıyor) sessizce devre dışı kalıyordu. sharp tüm yaygın
+ * formatları çözer.
+ *
+ * DAVRANIŞ AYNI TUTULDU: EXIF döndürmesi BİLİNÇLİ olarak uygulanmıyor
+ * (`.rotate()` yok) — jpeg-js de uygulamıyordu ve referans fotoğraflar bu
+ * noktaya gelmeden zaten normalizeExifOrientation'dan geçiyor. Buraya rotate
+ * eklemek mevcut kimlik ölçümlerini sessizce kaydırırdı.
  */
-function bufferToTensorScaled(buf) {
+async function bufferToTensorScaled(buf) {
   const tf = require("@tensorflow/tfjs");
-  const jpeg = require("jpeg-js");
-  const decoded = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 512 });
-  const { width, height, data } = decoded;
+  // ensureAlpha + srgb: girdi gri tonlama ya da CMYK olsa bile her zaman
+  // 4 kanal RGBA gelir — aşağıdaki şerit-alma döngüsü jpeg-js'inkiyle
+  // birebir aynı kalır.
+  const { data, info } = await sharp(buf)
+    .toColourspace("srgb")
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
   const rgb = new Uint8Array(width * height * 3);
   for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
     rgb[j] = data[i];
@@ -149,7 +168,7 @@ function bufferToTensorScaled(buf) {
  */
 async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
   const faceapi = await ensureModelsLoaded();
-  const { tensor, scale } = bufferToTensorScaled(buf);
+  const { tensor, scale } = await bufferToTensorScaled(buf);
   try {
     const options = new faceapi.SsdMobilenetv1Options({
       minConfidence: MIN_DETECTION_CONFIDENCE,
@@ -259,7 +278,7 @@ async function assessImageQuality(buf) {
  */
 async function descriptorFromBuffer(buf) {
   const faceapi = await ensureModelsLoaded();
-  const { tensor } = bufferToTensorScaled(buf);
+  const { tensor } = await bufferToTensorScaled(buf);
   try {
     const result = await faceapi
       .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
@@ -282,7 +301,7 @@ async function descriptorFromBuffer(buf) {
  */
 async function descriptorAndBoxFromBuffer(buf) {
   const faceapi = await ensureModelsLoaded();
-  const { tensor } = bufferToTensorScaled(buf);
+  const { tensor } = await bufferToTensorScaled(buf);
   try {
     const [h, w] = tensor.shape; // [height, width, 3]
     // EŞİK AÇIKÇA VERİLİYOR: seçeneksiz çağrıldığında face-api kendi
@@ -526,7 +545,7 @@ const RESCUE_DETECTION_CONFIDENCE = 0.2;
  */
 async function rescueFaceRatio(buf) {
   const faceapi = await ensureModelsLoaded();
-  const { tensor } = bufferToTensorScaled(buf);
+  const { tensor } = await bufferToTensorScaled(buf);
   try {
     const [h, w] = tensor.shape;
     const faces = await faceapi.detectAllFaces(tensor, new faceapi.SsdMobilenetv1Options({
@@ -633,7 +652,7 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
  */
 async function detectMainFace(buf) {
   const faceapi = await ensureModelsLoaded();
-  const { tensor, scale } = bufferToTensorScaled(buf);
+  const { tensor, scale } = await bufferToTensorScaled(buf);
   try {
     const options = new faceapi.SsdMobilenetv1Options({
       minConfidence: MIN_DETECTION_CONFIDENCE,
