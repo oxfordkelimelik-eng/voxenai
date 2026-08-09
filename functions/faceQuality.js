@@ -438,6 +438,10 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
   // Yüz karelerinin göz açıklıkları — çıktı kapısının "bu kişinin KENDİ
   // normali" referansı (bkz. eyesLookClosedVsReference).
   const faceEyeOpenness = [];
+  // Yüz karelerinin ten tonları (Lab) — ten kapısının artık ÇIKTININ kendi
+  // yüzüne değil, kullanıcının GERÇEK selfie tonuna güvenebilmesi için (bkz.
+  // assessSkinToneConsistency'nin refSkinTone parametresi).
+  const faceTones = [];
   let bestIndex = null;
   let bestArea = -1;
   let bestBox = null;
@@ -499,6 +503,20 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     } catch {
       // Descriptor çıkarılamaması bu referansı net-değil saymaz (tespit zaten
       // geçti) — yalnızca ortalamaya katkısı olmaz.
+    }
+
+    // TEN TONU: göz durumundan bağımsız, geçen her yüz karesinden toplanır
+    // (rawPixels + sampleFaceTone, assessSkinToneConsistency'nin taban/çıktı
+    // için kullandığı AYNI yöntem — üç taraf aynı ölçekte kıyaslansın diye).
+    // Fail-safe: çıkarılamazsa yalnızca ortalamaya katkısı olmaz.
+    if (!isBodyRef) {
+      try {
+        const px = await rawPixels(buffers[idx]);
+        const tone = px ? sampleFaceTone(px, detection.box) : null;
+        if (tone) faceTones.push(tone);
+      } catch {
+        // yut — bu referansı elemez
+      }
     }
 
     // GÖZÜ KAPALI YÜZ KARESİ: yalnızca APAÇIK kapalı olanlar (kırpma anı)
@@ -564,12 +582,18 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     refEyeOpenness = sorted[Math.floor(sorted.length / 2)];
   }
 
+  // Kullanıcının GERÇEK ten tonu (kanal başına medyan — medianLab, aynı
+  // fonksiyon assessSkinToneConsistency'nin yüz-bandı örneklemesinde de
+  // kullanılıyor). Firestore'a düz [L,a,b] dizisi olarak gider.
+  const refSkinTone = faceTones.length > 0 ? medianLab(faceTones) : null;
+
   return {
     unclearIndices,
     notFullBodyIndices,
     duplicateIndices,
     closedEyeIndices,
     refEyeOpenness,
+    refSkinTone,
     bestIndex,
     bestBox,
     refDescriptor,
@@ -958,11 +982,28 @@ function sampleFaceTone(px, box) {
 /**
  * ÇIKTIDAKİ ten renginin vücut genelinde tutarlı olup olmadığını ÖLÇER.
  *
- * outputBuf   : üretilen kare
- * templateBuf : üretimde kullanılan TABAN fotoğraf (aynı kadraj/kırpma)
+ * outputBuf    : üretilen kare
+ * templateBuf  : üretimde kullanılan TABAN fotoğraf (aynı kadraj/kırpma)
+ * refSkinTone  : [L,a,b] — kullanıcının GERÇEK selfie tonu (bkz.
+ *                analyzeReferences.refSkinTone), OPSİYONEL.
+ *
+ * REFSKINTONE NEDEN EKLENDİ (2026-08-09 gerçek vaka): eskiden "hedef ton"
+ * ÇIKTININ KENDİ yüzünden alınıyordu. Gerçek bir vakada taban kişi (koyu
+ * tenli) ile çıktı arasındaki ölçülen fark yalnızca ~9 birim çıktı — gözle
+ * BARİZ farklı iki insan olmasına rağmen. Sebep: model çıktının YÜZÜNÜ de
+ * (ellerden az olsa da) tabanın tonuna doğru hafifçe çekmiş olabilir — yani
+ * "doğru ton" için kullanılan referansın kendisi hafif kirliydi. Kullanıcının
+ * selfie'lerinden bağımsız bir ton çıkarıp ONU referans almak bu kör noktayı
+ * kapatıyor; ayrıca artık YÜZ DE teste dahil edilebiliyor (aşağıya bkz.).
+ *
+ * refSkinTone verilMEZse (eski çağıranlarla geriye dönük uyum, ya da
+ * kullanıcının hiçbir selfie'sinden ton çıkarılamadıysa): ESKİ davranışa
+ * döner — hedef ton çıktının kendi yüzünden alınır, yüz bölgesi taramadan
+ * hariç tutulur (kendisiyle karşılaştırmak anlamsız olurdu).
  *
  * Döner: { ok, reason, ratio, sampled, faceDelta }
- *   ok:false + reason:"skin" → vücutta taban kişinin teni kalmış.
+ *   ok:false + reason:"skin" → vücutta (refSkinTone varsa yüz DAHİL) taban
+ *     kişinin teni kalmış.
  *   ok:true  + reason:"indistinguishable" | "insufficient-sample" | null
  *     → ölçüm yapılamadı ya da sorun yok (ikisi de KABUL — fail-safe).
  *
@@ -970,7 +1011,7 @@ function sampleFaceTone(px, box) {
  * yüzünden iyi bir kareyi elemez (dosyadaki diğer ikincil katmanlarla aynı
  * felsefe).
  */
-async function assessSkinToneConsistency(outputBuf, templateBuf) {
+async function assessSkinToneConsistency(outputBuf, templateBuf, refSkinTone = null) {
   try {
     if (!outputBuf || !templateBuf) return { ok: true, reason: "insufficient-sample" };
 
@@ -983,8 +1024,11 @@ async function assessSkinToneConsistency(outputBuf, templateBuf) {
     const [outPx, tplPx] = await Promise.all([rawPixels(outputBuf), rawPixels(templateBuf)]);
     if (!outPx || !tplPx) return { ok: true, reason: "insufficient-sample" };
 
-    const targetTone = sampleFaceTone(outPx, outFace.box); // yeni (hedef) kişi
-    const baseTone = sampleFaceTone(tplPx, tplFace.box);   // eski (taban) kişi
+    const baseTone = sampleFaceTone(tplPx, tplFace.box); // eski (taban) kişi — HER ZAMAN taban çıktıdan
+    const usingRealRef = Array.isArray(refSkinTone) && refSkinTone.length === 3;
+    // Hedef ton: TERCİHEN kullanıcının gerçek selfie tonu; yoksa eski
+    // davranışa düş (çıktının kendi yüzü).
+    const targetTone = usingRealRef ? refSkinTone : sampleFaceTone(outPx, outFace.box);
     if (!targetTone || !baseTone) return { ok: true, reason: "insufficient-sample" };
 
     // Ayırt edicilik şartı — bkz. başlıktaki gerekçe.
@@ -993,9 +1037,10 @@ async function assessSkinToneConsistency(outputBuf, templateBuf) {
       return { ok: true, reason: "indistinguishable", faceDelta };
     }
 
-    // Yüz kutusunun DIŞINDA kalan ten benzeri pikseller: boyun, kollar,
-    // eller, bacaklar. Yüz bölgesi hariç tutulur çünkü referans tonun
-    // kendisi oradan alındı (kendisiyle karşılaştırmak anlamsız).
+    // Yüz bölgesi yalnızca hedef ton ÇIKTIDAN alındığında taramadan hariç
+    // tutulur (kendisiyle karşılaştırmak anlamsız olurdu). Gerçek selfie
+    // referansı varken yüz de dahil edilir — "çıktının yüzü de mi hafif
+    // kirli" sorusu artık cevaplanabiliyor.
     const s = outPx.scale;
     const fx0 = (outFace.box.x) * s, fx1 = (outFace.box.x + outFace.box.width) * s;
     const fy0 = (outFace.box.y) * s, fy1 = (outFace.box.y + outFace.box.height) * s;
@@ -1004,7 +1049,7 @@ async function assessSkinToneConsistency(outputBuf, templateBuf) {
     let leftover = 0;
     for (let y = 0; y < outPx.height; y++) {
       for (let x = 0; x < outPx.width; x++) {
-        if (x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue; // yüz bölgesi
+        if (!usingRealRef && x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue; // yüz bölgesi
         const o = (y * outPx.width + x) * 3;
         const r = outPx.data[o], g = outPx.data[o + 1], b = outPx.data[o + 2];
         if (!isSkinLike(r, g, b)) continue;

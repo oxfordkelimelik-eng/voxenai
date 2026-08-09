@@ -1004,6 +1004,16 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * KRİTİK: "gözleri büyüt" DENMEZ; tam prompt bunu açıkça yasaklıyor ("their
  * real eye shape IS their identity"). Cümle yalnızca artefaktı (yarı kapalı /
  * kırpma anı) yasaklar ve gözü büyütmeyi ayrıca men eder.
+ *
+ * QUALITY MADDESİNE EKLENEN EKLEM/PARMAK LEKESİ CÜMLESİ (2026-08-09): aynı
+ * gerçek vakada (hindistan cevizi tutan kare) kullanıcı ayrıca parmaklarda ve
+ * sol dirsekte doğal olmayan, lekeli bir gölgelenme fark etti — bu, ten
+ * TONU uyuşmazlığından (madde 3) FARKLI bir hata sınıfı: düz yanlış renk
+ * değil, lokal/düzensiz bir karartı. Yüz için zaten var olan "no unexplained
+ * dark blotch" yasağı ("no unexplained dark blotch, black smudge, dirty
+ * patch or hard shadow" — bkz. buildEditPrompt'taki LIGHTING bölümü) yalnızca
+ * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
+ * genişletildi.
  */
 function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
@@ -1059,7 +1069,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "QUALITY: the face sits under the scene's existing light; add none of your own. The result must " +
     "look like an ordinary unedited phone photo — real skin texture, no airbrush, beauty filter or " +
     "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
-    "scars, beard)."
+    "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
+    "blotch, smudge or patchy shadow stuck on a joint or knuckle — skin there must read as evenly and " +
+    "naturally lit as the face, not mottled or dirty-looking."
   );
 }
 
@@ -2245,7 +2257,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -2420,10 +2432,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         // (bkz. prepareTemplate.sourceBuf) — ölçüm her iki durumda da PİKSEL
         // ister, o yüzden buffer'a çözülüyor.
         const tplBuf = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
-        const st = await assessSkinToneConsistency(buf, tplBuf);
+        const st = await assessSkinToneConsistency(buf, tplBuf, refSkinTone);
         const rt = st.ratio != null ? st.ratio.toFixed(3) : "null";
         const fd = st.faceDelta != null ? st.faceDelta.toFixed(1) : "null";
-        console.log(`TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${st.ok ? (st.reason ? `ÖLÇÜLEMEDİ[${st.reason}]` : "GEÇTİ") : "RED[skin]"} eskiTonOranı=${rt} yüzFarkı=${fd} örnek=${st.sampled ?? "null"}`);
+        // ref=selfie: hedef ton kullanıcının gerçek selfie'sinden geldi (yüz
+        // de tarandı). ref=çıktı: eski davranış (selfie tonu çıkarılamadı).
+        const refSrc = refSkinTone ? "selfie" : "çıktı";
+        console.log(`TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${st.ok ? (st.reason ? `ÖLÇÜLEMEDİ[${st.reason}]` : "GEÇTİ") : "RED[skin]"} eskiTonOranı=${rt} yüzFarkı=${fd} örnek=${st.sampled ?? "null"} ref=${refSrc}`);
         if (!st.ok) {
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "skin-tone", distance: mathDist,
@@ -2572,6 +2587,7 @@ exports.prepareReferencePhotos = onCall(
     let orderedRefUrls = refUrls;
     let refDescriptor = null;
     let refEyeOpenness = null;
+    let refSkinTone = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers, {
@@ -2643,6 +2659,12 @@ exports.prepareReferencePhotos = onCall(
       if (analysis.refEyeOpenness != null) {
         refEyeOpenness = analysis.refEyeOpenness;
       }
+      // Kullanıcının GERÇEK ten tonu — ten kapısı artık çıktının kendi
+      // yüzüne değil buna güvenebiliyor (bkz. assessSkinToneConsistency
+      // başlığı, 2026-08-09 gerçek vaka).
+      if (Array.isArray(analysis.refSkinTone)) {
+        refSkinTone = analysis.refSkinTone;
+      }
       // NOT (2026-07-27): daha önce burada en net yüzden kırpılmış ek bir
       // referans (faceCropUrl, postProcess.cropFaceRegion) üretilip listenin
       // başına ekleniyordu. KALDIRILDI — kırpılmış kare doğal bir fotoğraf
@@ -2701,6 +2723,7 @@ exports.prepareReferencePhotos = onCall(
       ...(refUrls[0] ? { primaryFaceUrl: refUrls[0] } : {}),
       ...(refDescriptor ? { refDescriptor } : {}),
       ...(refEyeOpenness != null ? { refEyeOpenness } : {}),
+      ...(refSkinTone ? { refSkinTone } : {}),
       ...(bodyCaption ? { bodyCaption } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
     });
@@ -2798,6 +2821,9 @@ exports.startPhotoGeneration = onCall(
     // Kişinin KENDİ göz açıklığı normali — çıktı göz kapısı mutlak eşik yerine
     // bunu referans alır (bkz. faceQuality.eyesLookClosedVsReference).
     const refEyeOpenness = prepData.refEyeOpenness != null ? prepData.refEyeOpenness : null;
+    // Kullanıcının GERÇEK ten tonu [L,a,b] — ten kapısı bunu hedef ton olarak
+    // kullanır (bkz. faceQuality.assessSkinToneConsistency başlığı).
+    const refSkinTone = Array.isArray(prepData.refSkinTone) ? prepData.refSkinTone : null;
 
     // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç (havuz boşsa kredi
     // harcanmadan net hata). Kategoriler kaldırıldı (2026-08-02): tek düz
@@ -2963,7 +2989,7 @@ exports.startPhotoGeneration = onCall(
             const urls = await Promise.all(candidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
-              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness
+              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone
             );
           }));
         }));
