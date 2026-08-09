@@ -2191,7 +2191,12 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
     }
     if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
       console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
-      return { ...noCrop, faceRatio: face.ratio };
+      // sourceBuf: kırpma YAPILMADIĞINDA `input` bir URL STRING'idir (üretim
+      // API'si URL kabul ettiği için bilinçli). Ama ten rengi kapısı taban
+      // görselin PİKSELLERİNE ihtiyaç duyuyor ve string'i sharp'a verince
+      // "Input file is missing" ile patlıyordu (2026-08-09 canlı log). Buffer
+      // burada zaten indirilmişti, atmak yerine ölçüm için taşınıyor.
+      return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf };
     }
 
     const { cropForFaceRatio, computeFaceCropGeometry } = require("./postProcess");
@@ -2199,7 +2204,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
       cropForFaceRatio(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
       computeFaceCropGeometry(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
     ]);
-    if (!cropped || !geo) return { ...noCrop, faceRatio: face.ratio };
+    if (!cropped || !geo) return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf };
     console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO}`);
     // Kırpma sonrası ETKİN oran hedeftir — kalite kapısı kırpılmış tuvale
     // baktığı için karşılaştırma da onunla yapılmalı.
@@ -2239,7 +2244,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     console.warn(`ŞABLON: hiçbir aday uygun değil (style=${styleId}, chunk=${chunkIdx}) — birincil ile devam ediliyor`);
     prepared = await prepareTemplate(urls[0], styleId, chunkIdx);
   }
-  let { input: templateInput, restore, faceRatio: templateFaceRatio } = prepared;
+  let { input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = prepared;
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
@@ -2251,7 +2256,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     if (attempt > 1) {
       const next = await prepareNextUsable();
       if (next) {
-        ({ input: templateInput, restore, faceRatio: templateFaceRatio } = next);
+        ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
@@ -2382,7 +2387,11 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // kimlik mesafesi ölçümüyle aynı yaklaşım.
       try {
         const { assessSkinToneConsistency } = require("./faceQuality");
-        const st = await assessSkinToneConsistency(buf, templateInput);
+        // templateInput kırpma yapıldıysa Buffer, yapılmadıysa URL string'idir
+        // (bkz. prepareTemplate.sourceBuf) — ölçüm her iki durumda da PİKSEL
+        // ister, o yüzden buffer'a çözülüyor.
+        const tplBuf = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+        const st = await assessSkinToneConsistency(buf, tplBuf);
         const rt = st.ratio != null ? st.ratio.toFixed(3) : "null";
         const fd = st.faceDelta != null ? st.faceDelta.toFixed(1) : "null";
         console.log(`TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${st.ok ? (st.reason ? `ÖLÇÜLEMEDİ[${st.reason}]` : "GEÇTİ") : "RED[skin]"} eskiTonOranı=${rt} yüzFarkı=${fd} örnek=${st.sampled ?? "null"}`);
