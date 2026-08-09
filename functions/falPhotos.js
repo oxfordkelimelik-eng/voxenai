@@ -994,6 +994,16 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * every visible limb one by one"). Kanıtlanmış ifade oradan alındı.
  * Etkisi TEN ÖLÇÜM loglarından sayıyla izlenebilir: bu cümle işe yarıyorsa
  * RED[skin] oranı ve buna bağlı retry sayısı düşmeli.
+ *
+ * 5. MADDEYE EKLENEN "gözler açık ve canlı" CÜMLESİ (2026-08-09): kullanıcı
+ * çıktılarda gözlerin yarı kapalı/uykulu çıktığını bildirdi. p800 gözden
+ * yalnızca üç yerde söz ediyordu (yapıyı kopyala, bakış yönü, gözlük kaldır);
+ * göz KALİTESİ hakkında tek kelime yoktu. Tam prompt'ta ise var ("never a
+ * blank dead-eyed stare... natural catch-light"), bir başka varyantta "never
+ * ... half-closed or dead-eyed" olarak geçiyor — ifade oradan alındı.
+ * KRİTİK: "gözleri büyüt" DENMEZ; tam prompt bunu açıkça yasaklıyor ("their
+ * real eye shape IS their identity"). Cümle yalnızca artefaktı (yarı kapalı /
+ * kırpma anı) yasaklar ve gözü büyütmeyi ayrıca men eder.
  */
 function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
@@ -1035,7 +1045,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
     "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
     "toward the camera to make the face easier is a failure. Ignore how the target is posed or where " +
-    "they look in their own selfies.\n\n" +
+    "they look in their own selfies. The eyes must be open, clear and alert, with visible pupils and " +
+    "natural catch-light — never half-closed, caught mid-blink, droopy or dead-eyed. Keep their own " +
+    "natural eye shape and size; do not widen or enlarge the eyes to achieve this.\n\n" +
     "6) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
     "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
     "anatomically correct." +
@@ -2233,7 +2245,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -2300,12 +2312,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       let mathOk = true;
       let mathDist = null;
       let mathReason = null;
+      let outEyeOpenness = null;
       try {
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor, templateFaceRatio);
         mathOk = q.ok;
         mathDist = q.distance;
         mathReason = q.reason;
+        outEyeOpenness = q.eyeOpenness != null ? q.eyeOpenness : null;
         // ÖLÇÜM (2026-07-28): GEÇEN kareler de loglanıyor. Eskiden sadece
         // elenenler loglanıyordu, bu yüzden "geçen bir kare hangi mesafedeydi"
         // sorusuna veri yoktu ve FACE_MATCH_THRESHOLD tahminle ayarlanıyordu.
@@ -2421,6 +2435,33 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       } catch (e) {
         console.error("OpenAI yolu: ten rengi kontrolü hata verdi (bu katman atlanıyor):", e);
       }
+
+      // DÖRDÜNCÜ KAPI — GÖZ AÇIKLIĞI (deterministik, göreceli).
+      // Kullanıcı şikâyeti: çıktıda gözler yarı kapalı, kişi uykulu duruyor.
+      // MUTLAK eşik YOK — çıktı, kişinin KENDİ referans selfie'lerindeki göz
+      // açıklığıyla karşılaştırılır. Doğal dar gözlü kullanıcı böylece
+      // cezalandırılmaz; yalnızca kendi normalinden belirgin kapalı çıkan
+      // kareler (modelin artefaktı) elenir. Ölçülemezse kapı sessizce
+      // devre dışı (fail-safe) — bkz. eyesLookClosedVsReference.
+      try {
+        const { eyesLookClosedVsReference } = require("./faceQuality");
+        const oe = outEyeOpenness != null ? outEyeOpenness.toFixed(3) : "null";
+        const re = refEyeOpenness != null ? refEyeOpenness.toFixed(3) : "null";
+        const closed = eyesLookClosedVsReference(outEyeOpenness, refEyeOpenness);
+        // GEÇEN kareler de loglanıyor — eşikler ancak gerçek dağılım
+        // görülerek kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
+        console.log(`GÖZ ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${closed ? "RED[eyes]" : (outEyeOpenness == null || refEyeOpenness == null ? "ÖLÇÜLEMEDİ" : "GEÇTİ")} çıktı=${oe} referans=${re}`);
+        if (closed) {
+          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+            mode, gate: "eyes-closed", distance: mathDist,
+            detail: `çıktı=${oe} referans=${re}`,
+          });
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: göz açıklığı kontrolü hata verdi (bu katman atlanıyor):", e);
+      }
     }
 
     finalBuf = buf;
@@ -2530,6 +2571,7 @@ exports.prepareReferencePhotos = onCall(
     // kapısı da devre dışı kalır).
     let orderedRefUrls = refUrls;
     let refDescriptor = null;
+    let refEyeOpenness = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers, {
@@ -2576,12 +2618,30 @@ exports.prepareReferencePhotos = onCall(
           { duplicatePhotoIndices: analysis.duplicateIndices }
         );
       }
+      // Gözü APAÇIK kapalı kare (kırpma anı). Kısık/dar göz buraya GİRMEZ —
+      // eşik bilinçli olarak çok düşük (bkz. faceQuality CLOSED_EYE_MAX).
+      // Mesaj suçlayıcı değil yardımcı: kullanıcı neyi değiştireceğini bilsin.
+      if (analysis.closedEyeIndices && analysis.closedEyeIndices.length > 0) {
+        const { label, many } = posLabel(analysis.closedEyeIndices);
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} gözler kapalı görünüyor. Üretilen fotoğraflarda bakışın ` +
+          `canlı çıkması için ${many ? "bunları" : "bunu"} gözlerin açık ` +
+          `olduğu bir kareyle değiştir.`,
+          { closedEyePhotoIndices: analysis.closedEyeIndices }
+        );
+      }
       if (analysis.bestIndex != null && refUrls[analysis.bestIndex]) {
         const best = refUrls[analysis.bestIndex];
         orderedRefUrls = [best, ...refUrls.filter((u) => u !== best)];
       }
       if (analysis.refDescriptor) {
         refDescriptor = Array.from(analysis.refDescriptor); // Firestore için düz dizi
+      }
+      // Kişinin KENDİ göz açıklığı normali — çıktı kapısı bunu referans alır
+      // (mutlak eşik kullanılmaz, bkz. eyesLookClosedVsReference).
+      if (analysis.refEyeOpenness != null) {
+        refEyeOpenness = analysis.refEyeOpenness;
       }
       // NOT (2026-07-27): daha önce burada en net yüzden kırpılmış ek bir
       // referans (faceCropUrl, postProcess.cropFaceRegion) üretilip listenin
@@ -2640,6 +2700,7 @@ exports.prepareReferencePhotos = onCall(
       // falInferenceWebhook + faceSwap). fal CDN kopyası; Storage silinse de kalır.
       ...(refUrls[0] ? { primaryFaceUrl: refUrls[0] } : {}),
       ...(refDescriptor ? { refDescriptor } : {}),
+      ...(refEyeOpenness != null ? { refEyeOpenness } : {}),
       ...(bodyCaption ? { bodyCaption } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
     });
@@ -2734,6 +2795,9 @@ exports.startPhotoGeneration = onCall(
     const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
     const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
+    // Kişinin KENDİ göz açıklığı normali — çıktı göz kapısı mutlak eşik yerine
+    // bunu referans alır (bkz. faceQuality.eyesLookClosedVsReference).
+    const refEyeOpenness = prepData.refEyeOpenness != null ? prepData.refEyeOpenness : null;
 
     // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç (havuz boşsa kredi
     // harcanmadan net hata). Kategoriler kaldırıldı (2026-08-02): tek düz
@@ -2899,7 +2963,7 @@ exports.startPhotoGeneration = onCall(
             const urls = await Promise.all(candidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
-              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode
+              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness
             );
           }));
         }));

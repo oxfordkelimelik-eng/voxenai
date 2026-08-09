@@ -286,7 +286,13 @@ async function descriptorFromBuffer(buf) {
       }))
       .withFaceLandmarks()
       .withFaceDescriptor();
-    return result ? result.descriptor : null;
+    if (!result) return null;
+    // Nirengi noktaları BU çağrıda zaten çıkarıldı — göz açıklığını buradan
+    // okumak ek bir model geçişi gerektirmiyor (bkz. EAR başlığı).
+    return {
+      descriptor: result.descriptor,
+      eyeOpenness: eyeOpennessFromLandmarks(result.landmarks),
+    };
   } finally {
     tensor.dispose();
   }
@@ -323,9 +329,66 @@ async function descriptorAndBoxFromBuffer(buf) {
       descriptor: result.descriptor,
       faceRatio,
       profileDegree: profileDegreeFromLandmarks(result.landmarks),
+      eyeOpenness: eyeOpennessFromLandmarks(result.landmarks),
     };
   } finally {
     tensor.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GÖZ AÇIKLIĞI (EAR — Eye Aspect Ratio)
+//
+// SORUN (2026-08-09, kullanıcı geri bildirimi): çıktılarda gözler yarı kapalı
+// görünüp kişi "uykulu/ölü bakışlı" çıkabiliyor. Kaynak iki yerde olabilir:
+// (a) referans selfie'de gözler zaten kısık — model onu KİMLİK sanıp kopyalar
+// (prompt zaten "gözlerin gerçek şekli kimliktir" diyor), (b) model kareyi
+// göz kırpma anındaymış gibi üretir.
+//
+// EAR = göz yüksekliğinin genişliğine oranı; 68 nirengi noktasından hesaplanır
+// ve ÖLÇEKTEN BAĞIMSIZDIR (oran). Noktalar zaten çıkarılıyor, ek maliyet yok.
+//
+// ADALET UYARISI — BURASI ÖNEMLİ: göz açıklığı kişiden kişiye, etnik kökene,
+// gülümsemeye ve kamera açısına göre büyük ölçüde değişir. SABİT bir eşikle
+// "gözün yeterince açık değil" demek, doğal olarak dar gözlü kullanıcıları
+// sistematik biçimde reddeder. Bu yüzden:
+//   - Referans elemesi yalnızca APAÇIK kapalı göz için (CLOSED_EYE_MAX çok
+//     düşük tutuldu — kırpma anı/kapalı göz, "kısık göz" değil).
+//   - Çıktı kapısı MUTLAK eşik kullanmaz; kişinin KENDİ referansıyla
+//     karşılaştırır (bkz. eyesLookClosedVsReference).
+// ---------------------------------------------------------------------------
+
+// Bunun ALTI "göz fiilen kapalı / kırpma anı" sayılır. Açık göz tipik olarak
+// 0.25-0.35 bandındadır, kapalı göz 0.05-0.12. 0.13 bilinçli olarak DÜŞÜK:
+// amaç kısık gözü elemek değil, yalnızca kapalı gözü yakalamak.
+const CLOSED_EYE_MAX = 0.13;
+// "Rahat açık" kabul edilen bant — yalnızca en iyi referans PUANLAMASINDA
+// normalizasyon için kullanılır, eleme eşiği DEĞİLDİR.
+const EYE_OPEN_GOOD = 0.28;
+
+function eyeAspectRatio(p1, p2, p3, p4, p5, p6) {
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const width = d(p1, p4);
+  if (!isFinite(width) || width < 1e-6) return null;
+  return (d(p2, p6) + d(p3, p5)) / (2 * width);
+}
+
+/**
+ * İki gözün ortalama EAR'ını döner (0'a yakın = kapalı). Ölçülemezse null.
+ * 68-nokta şemasında sol göz 36-41, sağ göz 42-47 indislerindedir.
+ */
+function eyeOpennessFromLandmarks(landmarks) {
+  try {
+    const lm = landmarks && landmarks.positions;
+    if (!lm || lm.length < 48) return null;
+    const left = eyeAspectRatio(lm[36], lm[37], lm[38], lm[39], lm[40], lm[41]);
+    const right = eyeAspectRatio(lm[42], lm[43], lm[44], lm[45], lm[46], lm[47]);
+    if (left == null && right == null) return null;
+    if (left == null) return right;
+    if (right == null) return left;
+    return (left + right) / 2;
+  } catch (e) {
+    return null; // fail-safe: ölçemezsek kontrol devre dışı kalır
   }
 }
 
@@ -369,6 +432,12 @@ function profileDegreeFromLandmarks(landmarks) {
 async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
   const unclearIndices = [];
   const notFullBodyIndices = [];
+  // Gözü APAÇIK kapalı (kırpma anı) yüz kareleri — kullanıcıdan değiştirmesi
+  // istenir. Gözü kısık olanlar buraya GİRMEZ (bkz. CLOSED_EYE_MAX).
+  const closedEyeIndices = [];
+  // Yüz karelerinin göz açıklıkları — çıktı kapısının "bu kişinin KENDİ
+  // normali" referansı (bkz. eyesLookClosedVsReference).
+  const faceEyeOpenness = [];
   let bestIndex = null;
   let bestArea = -1;
   let bestBox = null;
@@ -412,25 +481,54 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     } catch (e) {
       console.error("Görsel kalite kontrolü başarısız (yalnızca yüz tespiti uygulanıyor):", e);
     }
-    // Yüz crop / bestIndex: yalnızca yüz karelerinden (tam boy hariç).
-    if (!isBodyRef && detection.area > bestArea) {
-      bestArea = detection.area;
-      bestIndex = idx;
-      bestBox = detection.box;
-    }
+    // Kimlik vektörü + göz açıklığı TEK geçişte çıkarılır (bkz.
+    // descriptorFromBuffer). bestIndex puanlaması göz açıklığını kullandığı
+    // için bu adım artık puanlamadan ÖNCE yapılıyor.
+    let eyeOpenness = null;
     try {
-      const d = await descriptorFromBuffer(buffers[idx]);
+      const r = await descriptorFromBuffer(buffers[idx]);
       // Kimlik ortalamasına yüz karelerini önceliklendir; beden karesi
       // düşük çözünürlüklü yüzle ortalamayı bozmasın.
-      if (d && !isBodyRef) {
-        descriptors.push(d);
-        faceDescriptors.push({ idx, d });
-      } else if (d && isBodyRef && descriptors.length === 0) {
-        descriptors.push(d);
+      if (r && !isBodyRef) {
+        eyeOpenness = r.eyeOpenness;
+        descriptors.push(r.descriptor);
+        faceDescriptors.push({ idx, d: r.descriptor });
+      } else if (r && isBodyRef && descriptors.length === 0) {
+        descriptors.push(r.descriptor);
       }
     } catch {
       // Descriptor çıkarılamaması bu referansı net-değil saymaz (tespit zaten
       // geçti) — yalnızca ortalamaya katkısı olmaz.
+    }
+
+    // GÖZÜ KAPALI YÜZ KARESİ: yalnızca APAÇIK kapalı olanlar (kırpma anı)
+    // işaretlenir — kısık/dar göz DEĞİL (bkz. CLOSED_EYE_MAX'taki adalet
+    // notu). Tam boy karesinde göz aranmaz: orada yüz zaten uzak ve küçük,
+    // ölçüm güvenilmez.
+    if (!isBodyRef && eyeOpenness != null && eyeOpenness < CLOSED_EYE_MAX) {
+      closedEyeIndices.push(idx);
+      faceEyeOpenness.push(eyeOpenness);
+      continue; // bu kare bestIndex yarışına girmesin
+    }
+    if (!isBodyRef && eyeOpenness != null) faceEyeOpenness.push(eyeOpenness);
+
+    // EN İYİ REFERANS PUANI: eskiden SADECE yüz alanına bakılıyordu. Göz
+    // açıklığı ikincil çarpan olarak eklendi — yüz büyüklüğünün YERİNİ
+    // ALMIYOR (büyük yüz kimlik sadakati için kritik: yüksek çözünürlüklü
+    // kırpma oradan çıkıyor), yalnızca yakın yarışları gözü açık olanın
+    // lehine çeviriyor. Çarpan 0.6-1.0 bandında: en kötü ihtimalde %40
+    // ceza, yani belirgin daha büyük bir yüz yine kazanır. Ölçülemeyen
+    // göz nötr (1.0) sayılır — ölçememek ceza sebebi değildir.
+    if (!isBodyRef) {
+      const eyeFactor = eyeOpenness == null
+        ? 1
+        : 0.6 + 0.4 * Math.min(1, eyeOpenness / EYE_OPEN_GOOD);
+      const score = detection.area * eyeFactor;
+      if (score > bestArea) {
+        bestArea = score;
+        bestIndex = idx;
+        bestBox = detection.box;
+      }
     }
   }
 
@@ -457,10 +555,21 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     refDescriptor = avg;
   }
 
+  // Kişinin KENDİ göz açıklığı normali (medyan — tek bir kısık kare
+  // ortalamayı kaydırmasın). Çıktı kapısı mutlak eşik yerine bunu kullanır,
+  // böylece doğal dar gözlü kullanıcılar cezalandırılmaz.
+  let refEyeOpenness = null;
+  if (faceEyeOpenness.length > 0) {
+    const sorted = [...faceEyeOpenness].sort((a, b) => a - b);
+    refEyeOpenness = sorted[Math.floor(sorted.length / 2)];
+  }
+
   return {
     unclearIndices,
     notFullBodyIndices,
     duplicateIndices,
+    closedEyeIndices,
+    refEyeOpenness,
     bestIndex,
     bestBox,
     refDescriptor,
@@ -475,12 +584,12 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
  */
 async function matchesIdentity(buf, refDescriptor) {
   const faceapi = await ensureModelsLoaded();
-  const d = await descriptorFromBuffer(buf);
-  if (!d) return { match: false, distance: null };
+  const r = await descriptorFromBuffer(buf);
+  if (!r) return { match: false, distance: null };
   const ref = refDescriptor instanceof Float32Array
     ? refDescriptor
     : Float32Array.from(refDescriptor);
-  const distance = faceapi.euclideanDistance(ref, d);
+  const distance = faceapi.euclideanDistance(ref, r.descriptor);
   return { match: distance < FACE_MATCH_THRESHOLD, distance };
 }
 
@@ -637,7 +746,38 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
   } catch (e) {
     console.error("assessOutputFace netlik kontrolü başarısız (netlik atlanıyor):", e);
   }
-  return { ok: true, distance, faceRatio, blurScore, reason: null, profileDegree: db.profileDegree };
+  // eyeOpenness yalnızca ÖLÇÜM olarak taşınır — bu fonksiyon onunla kare
+  // ELEMEZ. Kararı çağıran taraf verir, çünkü eşik kişinin kendi referans
+  // açıklığına göreceli (bkz. eyesLookClosedVsReference).
+  return {
+    ok: true, distance, faceRatio, blurScore, reason: null,
+    profileDegree: db.profileDegree, eyeOpenness: db.eyeOpenness,
+  };
+}
+
+// ÇIKTI GÖZ KAPISI — MUTLAK EŞİK YOK, KİŞİNİN KENDİ NORMALİNE GÖRECELİ.
+//
+// Neden göreceli: doğal olarak dar gözlü bir kullanıcı sabit eşikte HER
+// karede elenirdi. Referansı kendi selfie'lerinden aldığımız için "dar göz"
+// onun normali sayılır; yalnızca çıktı kendi normalinden BELİRGİN daha kapalı
+// olduğunda müdahale ederiz — o zaman bu kimlik değil, modelin artefaktıdır.
+//
+// İKİ ŞART BİRDEN aranır (VE): hem orana hem mutlak tabana takılmalı. Tek
+// başına oran, referansı zaten geniş olan birinde çok hassas olurdu; tek
+// başına mutlak taban ise dar gözlüleri cezalandırırdı.
+const OUTPUT_EYE_MIN_RATIO = 0.62;
+const OUTPUT_EYE_ABS_FLOOR = 0.20;
+
+/**
+ * Döner: true = çıktı gözleri kişinin kendi referansına göre kapalı sayılır.
+ * Ölçülemeyen her durumda false (fail-safe: kapı sessizce devre dışı kalır,
+ * asla iyi bir kareyi kanıtsız elemez).
+ */
+function eyesLookClosedVsReference(outputEyeOpenness, refEyeOpenness) {
+  if (outputEyeOpenness == null || refEyeOpenness == null) return false;
+  if (!(refEyeOpenness > 0)) return false;
+  return outputEyeOpenness < refEyeOpenness * OUTPUT_EYE_MIN_RATIO
+    && outputEyeOpenness < OUTPUT_EYE_ABS_FLOOR;
 }
 
 /**
@@ -893,6 +1033,8 @@ async function assessSkinToneConsistency(outputBuf, templateBuf) {
 module.exports = {
   analyzeReferences,
   assessSkinToneConsistency,
+  eyesLookClosedVsReference,
+  CLOSED_EYE_MAX,
   matchesIdentity,
   assessOutputFace,
   detectMainFace,

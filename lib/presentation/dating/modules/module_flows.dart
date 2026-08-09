@@ -1268,6 +1268,27 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               'talimatı uygula (daha çok çevir / ortala / ışık).',
               style: TextStyle(
                   fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
+          // Gözler kısık/kapalı olan bir referans, üretilen fotoğraflara
+          // "uykulu bakış" olarak yansıyor: model gözün gerçek şeklini KİMLİK
+          // sayıp birebir kopyalıyor. Sunucu tarafında gözü apaçık kapalı
+          // kareler zaten eleniyor (faceQuality.CLOSED_EYE_MAX) — bu not,
+          // kullanıcı o elemeye hiç takılmasın diye önden uyarır.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Icon(Icons.visibility_outlined,
+                  size: 14, color: AppColors.gold),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                    'Gözlerin tamamen açık olsun — kısık ya da kapalı gözle '
+                    'çekilen kareler, üretilen fotoğraflarda da uykulu görünür.',
+                    style: TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary)),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
           if (_facePhotos.isEmpty)
             Container(
