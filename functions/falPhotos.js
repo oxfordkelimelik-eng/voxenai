@@ -981,6 +981,19 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * ~800 KELİME — pratikte en verimli kabul edilen bandın ortası.
  * P300 ile aynı iskelet, ama her maddeye modelin en sık yaptığı hataya karşı
  * tek bir netleştirici cümle eklenmiş (tekrar değil, ayrıntı).
+ *
+ * A/B KAZANANI: 6 mod karşılaştırıldı, bu en tutarlı sonucu verdi ve tek buton
+ * artık bunu gönderiyor (bkz. module_flows.dart Buton-5). Bu yüzden BÜTÜN
+ * OLARAK korunmalı — mod değiştirmek yerine, gözlenen somut bir hataya karşı
+ * tek cümle eklemek tercih edilir.
+ *
+ * 3. MADDEYE EKLENEN "uzuv uzuv kontrol" CÜMLESİ (2026-08-09): gerçek çıktıda
+ * yüz ve boyun doğru tonda, ELLER taban kişinin tonunda kaldı. p800'ün ten
+ * talimatı hatayı TANIMLIYORDU ama "bitirmeden önce tek tek kontrol et" adımı
+ * yoktu — o adım yalnızca tam prompt'ta vardı (buildEditPrompt, "re-check
+ * every visible limb one by one"). Kanıtlanmış ifade oradan alındı.
+ * Etkisi TEN ÖLÇÜM loglarından sayıyla izlenebilir: bu cümle işe yarıyorsa
+ * RED[skin] oranı ve buna bağlı retry sayısı düşmeli.
  */
 function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
@@ -1005,7 +1018,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
     "they do not have is as wrong as giving them someone else's nose.\n\n" +
     "3) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
-    "person's tone, or a two-tone patchwork, is a serious error. No brightening, whitening, glow or " +
+    "person's tone, or a two-tone patchwork, is a serious error. Before you finish, check the hands, " +
+    "fingers, arms, neck and legs one by one: if any of them still carries a trace of the base " +
+    "person's tone, recolour it to match the face exactly. No brightening, whitening, glow or " +
     "sheen.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     "4) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
