@@ -1075,9 +1075,406 @@ async function assessSkinToneConsistency(outputBuf, templateBuf, refSkinTone = n
   }
 }
 
+// ---------------------------------------------------------------------------
+// UZUV KROMA DÜZELTİCİSİ (correctLimbChroma)
+//
+// NEDEN: assessSkinToneConsistency bozuk kareyi YAKALAR ama düzeltemez — kare
+// atılır ve (retry hakkı varsa) yeniden üretilir, yani para yanar. Oysa hatanın
+// kendisi deterministik olarak çözülebilir: model doğru yüzü üretmiş, sadece
+// uzuvların RENGİ eski kişiden kalmış. Renk kaydırmak üretmekten hem bedava
+// hem risksiz (kimliğe dokunmaz).
+//
+// SADECE a*/b* KAYDIRILIR, L* ASLA: L* sahnenin ışığını taşır. Gerçek bir
+// fotoğrafta yüz parlak ışıkta, eller gölgede olabilir — bu DOĞRU ve
+// korunmalı. L*'yi de eşitlersek el "yapıştırılmış" görünür. Bozuk olan ışık
+// değil, ton.
+//
+// HEDEF TON, SELFIE DEĞİL ÇIKTININ KENDİ YÜZÜDÜR: refSkinTone selfie'nin
+// NÖTR ışığında ölçüldü; sahne ışığı altında ona zorlamak yüzü sahneyle
+// çatıştırır. Fotoğrafın kendi içinde tutarlı olması için doğru referans,
+// aynı ışığı almış olan çıktının kendi yüzüdür. refSkinTone yalnızca "bu
+// piksel eski kişiden mi kalmış?" ayrımında kullanılır.
+//
+// NEDEN BAĞLANTILI BİLEŞEN, NEDEN DOĞRUDAN "leftover" DEĞİL: leftover kümesi
+// düzeltmek istediğimiz hatanın KENDİSİYLE tanımlı. Ton hatası ön kolda
+// kademeliyse (genelde öyledir) yalnızca "yanlış" pikselleri kaydırmak kolun
+// ortasından geçen bir DİKİŞ bırakır. Bu yüzden leftover yalnızca kaydırma
+// MİKTARINI ve hangi bileşenin bozuk olduğunu belirler; kaydırma o bileşenin
+// TAMAMINA tek tip uygulanır.
+//
+// ALAN TAVANI (fail-safe): isSkinLike'ın bilinen yanlış pozitifleri var (kum,
+// ahşap, bej kumaş — bkz. isSkinLike başlığı). Bej bir takım elbise, taban
+// kişi açık tenliyken "leftover" koşulunu sağlayabilir. Düzeltilecek alan
+// karenin belli bir oranını aşarsa kıyafet/arka plan yakalanmış demektir ve
+// HİÇBİR ŞEY yapılmaz — takımı lekelemektense düzeltmeyi atlamak yeğdir.
+// ---------------------------------------------------------------------------
+
+// Tam eşleme bilinçli olarak YAPILMAZ: gerçek insanlarda el ve ön kol güneş
+// yüzünden yüzden bir tık daha koyu/kırmızıdır. Tam eşitlemek yapay okunur.
+const CHROMA_FIX_STRENGTH = 0.9;
+// Bir bileşenin "bozuk" sayılması için içindeki leftover piksel oranı.
+const CHROMA_FIX_COMPONENT_LEFTOVER_MIN = 0.35;
+// Bundan küçük bileşenler (çalışma çözünürlüğünde piksel) gürültüdür.
+const CHROMA_FIX_MIN_COMPONENT_PX = 120;
+// Düzeltilen alan karenin bu oranını aşarsa düzeltme HİÇ uygulanmaz.
+const CHROMA_FIX_MAX_AREA_RATIO = 0.25;
+// Bu kadarlık bir kaydırma gözle görünmez; boşuna JPEG'i yeniden kodlama.
+const CHROMA_FIX_MIN_SHIFT = 1.5;
+// Delikleri kapatıp bileşeni bütünleştiren morfolojik yarıçap.
+const CHROMA_FIX_CLOSE_RADIUS = 2;
+
+/** CIELAB -> sRGB (rgbToLab'in tersi, D65). */
+function labToRgb(L, a, b) {
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  const inv = (t) => (t > 0.206893 ? t * t * t : (t - 16 / 116) / 7.787);
+  const X = inv(fx) * 0.95047, Y = inv(fy), Z = inv(fz) * 1.08883;
+  const R = X * 3.2406 + Y * -1.5372 + Z * -0.4986;
+  const G = X * -0.9689 + Y * 1.8758 + Z * 0.0415;
+  const B = X * 0.0557 + Y * -0.2040 + Z * 1.0570;
+  const enc = (c) => {
+    const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(v * 255)));
+  };
+  return [enc(R), enc(G), enc(B)];
+}
+
+/** Kullanıcının selfie tonunu prompt'a gömmek için hex'e çevirir (#RRGGBB). */
+function labToHex(lab) {
+  if (!Array.isArray(lab) || lab.length !== 3) return null;
+  const [r, g, b] = labToRgb(lab[0], lab[1], lab[2]);
+  const h = (v) => v.toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`.toUpperCase();
+}
+
+// Yalnızca renklilik farkı (a*/b*). L* bilinçli olarak DIŞARIDA: ışık farkını
+// "hata" saymak istemiyoruz (bkz. başlıktaki gerekçe).
+function chromaDistance(p, q) {
+  const da = p[1] - q[1], db = p[2] - q[2];
+  return Math.sqrt(da * da + db * db);
+}
+
+function medianOf(values) {
+  if (values.length === 0) return null;
+  const a = Float64Array.from(values).sort();
+  return a[Math.floor(a.length / 2)];
+}
+
+// Ayrılabilir kutu dilate/erode — r küçük olduğu için bu yeterince hızlı.
+function boxMorph(src, W, H, r, dilate) {
+  const hit = dilate ? 1 : 0;
+  const tmp = new Uint8Array(W * H), dst = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let v = dilate ? 0 : 1;
+      for (let d = -r; d <= r; d++) {
+        const xx = x + d;
+        if (xx < 0 || xx >= W) continue;
+        if (src[y * W + xx] === hit) { v = hit; break; }
+      }
+      tmp[y * W + x] = v;
+    }
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let v = dilate ? 0 : 1;
+      for (let d = -r; d <= r; d++) {
+        const yy = y + d;
+        if (yy < 0 || yy >= H) continue;
+        if (tmp[yy * W + x] === hit) { v = hit; break; }
+      }
+      dst[y * W + x] = v;
+    }
+  }
+  return dst;
+}
+
+/**
+ * Uzuvlardaki (yüz HARİÇ) ten renginin çıktının kendi yüz tonuna uymadığı
+ * bölgeleri deterministik olarak düzeltir.
+ *
+ * outputBuf   : üretilen kare
+ * templateBuf : üretimde kullanılan taban fotoğraf (eski kişinin tonu için)
+ * refSkinTone : [L,a,b] kullanıcının gerçek selfie tonu
+ *
+ * Döner: { applied, reason, buf, deltaBefore, deltaAfter, areaRatio, shift }
+ *   applied:false -> buf null, çağıran orijinali kullanmaya devam eder.
+ *
+ * FAIL-SAFE: her hata/kararsızlık durumunda applied:false. Bu düzeltici ASLA
+ * teknik bir aksaklık yüzünden kareyi bozmaz (dosyadaki diğer katmanlarla
+ * aynı felsefe).
+ */
+async function correctLimbChroma(outputBuf, templateBuf, refSkinTone) {
+  const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, ...extra });
+  try {
+    if (!outputBuf || !templateBuf) return skip("insufficient-input");
+    if (!Array.isArray(refSkinTone) || refSkinTone.length !== 3) return skip("no-ref-tone");
+
+    const [outFace, tplFace] = await Promise.all([
+      detectMainFace(outputBuf), detectMainFace(templateBuf),
+    ]);
+    if (!outFace || !tplFace) return skip("no-face");
+
+    const [outPx, tplPx] = await Promise.all([rawPixels(outputBuf), rawPixels(templateBuf)]);
+    if (!outPx || !tplPx) return skip("insufficient-input");
+
+    const baseTone = sampleFaceTone(tplPx, tplFace.box);  // eski (taban) kişi
+    const faceTone = sampleFaceTone(outPx, outFace.box);  // HEDEF: çıktının kendi yüzü
+    if (!baseTone || !faceTone) return skip("insufficient-sample");
+
+    // Taban ile kullanıcı tonu zaten aynıysa "eski ton kalmış" kavramı
+    // ölçülemez (bkz. SKIN_MIN_DISCRIMINATION gerekçesi).
+    if (labDistance(refSkinTone, baseTone) < SKIN_MIN_DISCRIMINATION) {
+      return skip("indistinguishable");
+    }
+
+    const W = outPx.width, H = outPx.height, N = W * H;
+    const s = outPx.scale;
+    // Yüz kutusu DÜZELTİLMEZ — o, hedef tonun kaynağı.
+    const fx0 = outFace.box.x * s, fx1 = (outFace.box.x + outFace.box.width) * s;
+    const fy0 = outFace.box.y * s, fy1 = (outFace.box.y + outFace.box.height) * s;
+
+    const skin = new Uint8Array(N), leftover = new Uint8Array(N);
+    const labA = new Float32Array(N), labB = new Float32Array(N);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue;
+        const i = y * W + x, o = i * 3;
+        const r = outPx.data[o], g = outPx.data[o + 1], b = outPx.data[o + 2];
+        if (!isSkinLike(r, g, b)) continue;
+        skin[i] = 1;
+        const lab = rgbToLab(r, g, b);
+        labA[i] = lab[1]; labB[i] = lab[2];
+        if (labDistance(lab, baseTone) + SKIN_LEFTOVER_MARGIN < labDistance(lab, refSkinTone)) {
+          leftover[i] = 1;
+        }
+      }
+    }
+
+    // Düzeltme ÖNCESİ ölçüm: tüm uzuv teni ile yüz arasındaki renklilik farkı.
+    const allA = [], allB = [];
+    for (let i = 0; i < N; i++) if (skin[i]) { allA.push(labA[i]); allB.push(labB[i]); }
+    if (allA.length < SKIN_MIN_SAMPLE_PIXELS) return skip("insufficient-sample");
+    const limbTone = [0, medianOf(allA), medianOf(allB)];
+    const deltaBefore = chromaDistance(faceTone, limbTone);
+
+    // Delikleri kapat: bileşen bütün bir uzuv olsun, delik deşik olmasın.
+    const closed = boxMorph(
+      boxMorph(skin, W, H, CHROMA_FIX_CLOSE_RADIUS, true),
+      W, H, CHROMA_FIX_CLOSE_RADIUS, false,
+    );
+
+    // Bağlantılı bileşenler (8-komşuluk, yığınla BFS — özyineleme yok).
+    const label = new Int32Array(N).fill(-1);
+    const selected = new Uint8Array(N);
+    let selectedCount = 0;
+    const stack = [];
+    for (let start = 0; start < N; start++) {
+      if (!closed[start] || label[start] !== -1) continue;
+      label[start] = start;
+      stack.length = 0; stack.push(start);
+      const members = [];
+      let leftoverCount = 0;
+      while (stack.length) {
+        const i = stack.pop();
+        members.push(i);
+        if (leftover[i]) leftoverCount++;
+        const x = i % W, y = (i / W) | 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || xx >= W || yy < 0 || yy >= H) continue;
+            const j = yy * W + xx;
+            if (closed[j] && label[j] === -1) { label[j] = start; stack.push(j); }
+          }
+        }
+      }
+      if (members.length < CHROMA_FIX_MIN_COMPONENT_PX) continue;
+      if (leftoverCount / members.length < CHROMA_FIX_COMPONENT_LEFTOVER_MIN) continue;
+      // Bu bileşen bozuk: TAMAMI kaydırılır (dikiş olmasın).
+      for (const i of members) { selected[i] = 1; selectedCount++; }
+    }
+
+    if (selectedCount === 0) {
+      return skip("nothing-to-fix", { deltaBefore, areaRatio: 0 });
+    }
+    const areaRatio = selectedCount / N;
+    if (areaRatio > CHROMA_FIX_MAX_AREA_RATIO) {
+      // Muhtemelen kıyafet/arka plan yakalandı — hiçbir şey yapma.
+      return skip("area-too-large", { deltaBefore, areaRatio });
+    }
+
+    // Kaydırma miktarı LEFTOVER piksellerden gelir (bozukluğun kendisinden),
+    // ama uygulaması yukarıda bileşenin tamamına yayıldı.
+    const lefA = [], lefB = [];
+    for (let i = 0; i < N; i++) if (selected[i] && leftover[i]) { lefA.push(labA[i]); lefB.push(labB[i]); }
+    if (lefA.length < SKIN_MIN_SAMPLE_PIXELS) {
+      return skip("insufficient-sample", { deltaBefore, areaRatio });
+    }
+    const shiftA = (faceTone[1] - medianOf(lefA)) * CHROMA_FIX_STRENGTH;
+    const shiftB = (faceTone[2] - medianOf(lefB)) * CHROMA_FIX_STRENGTH;
+    if (Math.sqrt(shiftA * shiftA + shiftB * shiftB) < CHROMA_FIX_MIN_SHIFT) {
+      return skip("shift-negligible", { deltaBefore, areaRatio });
+    }
+
+    // Düzeltme SONRASI beklenen ölçüm (aynı piksel kümesi üzerinde).
+    const afterA = [], afterB = [];
+    for (let i = 0; i < N; i++) {
+      if (!skin[i]) continue;
+      afterA.push(labA[i] + (selected[i] ? shiftA : 0));
+      afterB.push(labB[i] + (selected[i] ? shiftB : 0));
+    }
+    const deltaAfter = chromaDistance(faceTone, [0, medianOf(afterA), medianOf(afterB)]);
+
+    // Maskeyi tam çözünürlüğe taşı ve kenarları yumuşat (bant oluşmasın).
+    const meta = await sharp(outputBuf).metadata();
+    if (!meta.width || !meta.height) return skip("insufficient-input", { deltaBefore, areaRatio });
+    const maskWork = Buffer.alloc(N);
+    for (let i = 0; i < N; i++) maskWork[i] = selected[i] ? 255 : 0;
+    const feather = Math.max(1, Math.round(Math.max(meta.width, meta.height) / 260));
+    const maskFull = await sharp(maskWork, { raw: { width: W, height: H, channels: 1 } })
+      .resize(meta.width, meta.height, { fit: "fill" })
+      .blur(feather)
+      .raw().toBuffer();
+
+    const { data, info } = await sharp(outputBuf).removeAlpha()
+      .raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < info.width * info.height; i++) {
+      const alpha = maskFull[i] / 255;
+      if (alpha <= 0.004) continue;
+      const o = i * 3;
+      const lab = rgbToLab(data[o], data[o + 1], data[o + 2]);
+      // L* KORUNUR — yalnızca renklilik kayar (bkz. başlık).
+      const [r, g, b] = labToRgb(lab[0], lab[1] + shiftA * alpha, lab[2] + shiftB * alpha);
+      data[o] = r; data[o + 1] = g; data[o + 2] = b;
+    }
+    const buf = await sharp(data, {
+      raw: { width: info.width, height: info.height, channels: 3 },
+    }).jpeg({ quality: 95 }).toBuffer();
+
+    return {
+      applied: true, reason: null, buf,
+      deltaBefore, deltaAfter, areaRatio,
+      shift: Math.sqrt(shiftA * shiftA + shiftB * shiftB),
+    };
+  } catch (e) {
+    console.error("Uzuv kroma düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);
+    return skip("error");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KAFA YERLEŞİMİ ÖLÇÜMÜ (measureHeadPlacement) — ÖLÇER, ELEMEZ
+//
+// NEDEN: kullanıcının bildirdiği asıl sorun "kafayı tam olması gereken yere
+// yerleştirememesi — bazen çok önde bazen çok arkada". Mevcut kapılar kafanın
+// BOYUTUNU (faceRatio, büyüme) ve AÇISINI (profileDegree) ölçüyor ama
+// KONUMUNU hiç ölçmüyor. Bu fonksiyon o boşluğu kapatır.
+//
+// HİÇBİR KAREYİ ELEMEZ. Sebep: "önde/arkada" en az üç ayrı nedenden olabilir
+// ve düzeltmeleri birbirinden tamamen farklıdır:
+//   1) Karede öteleme          -> dx/dy    -> geometrik hizalama çözer
+//   2) Baş açısı (pitch)       -> pitch    -> hizalama ÇÖZMEZ, prompt işi
+//   3) Ölçek                   -> scale    -> mevcut büyüme kapısıyla çakışır
+// Hangisi olduğu bilinmeden düzeltme yazmak yanlış problemi çözme riskidir.
+//
+// TUZAK (ölçümü okurken): dy ile pitch birbirini TAKLİT EDER — kafa aşağı
+// eğilince yüz kutusunun merkezi de aşağı kayar, yani pitch değişimi dy'de
+// sahte bir sinyal üretir. dx bundan etkilenmez ve en temiz göstergedir
+// (yalnızca yaw'dan etkilenir, o da ayrıca ölçülüyor).
+//
+// BİRİM: dx/dy piksel değil, ŞABLONUN YÜZ GENİŞLİĞİ cinsindendir ("kafa
+// genişliği"). Farklı boyutlu görseller arasında karşılaştırılabilir olsun
+// diye; piksel cinsinden loglamak dağılımı okunamaz yapardı.
+// ---------------------------------------------------------------------------
+
+/**
+ * Kafanın yukarı/aşağı eğimi için vekil ölçü: burun ucunun, göz hattı ile çene
+ * ucu arasındaki göreli dikey konumu. Nötrde ~0.5; kafa aşağı eğilince alt yüz
+ * kısalır ve oran büyür, yukarı kalkınca küçülür. profileDegree yaw'ı ölçüyor,
+ * bu onun pitch karşılığı. Ölçülemezse null (fail-safe).
+ */
+function pitchRatioFromLandmarks(landmarks) {
+  try {
+    const lm = landmarks && landmarks.positions;
+    if (!lm || lm.length < 68) return null;
+    const eyeY = (lm[36].y + lm[45].y) / 2; // dış göz köşeleri
+    const span = lm[8].y - eyeY;            // göz hattı -> çene ucu
+    if (!isFinite(span) || Math.abs(span) < 1e-6) return null;
+    return (lm[30].y - eyeY) / span;        // burun ucunun göreli yeri
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Yüz kutusunu NORMALİZE koordinatlarda (0-1) + açı vekilleriyle döner. */
+async function detectPlacement(buf) {
+  const faceapi = await ensureModelsLoaded();
+  const { tensor } = await bufferToTensorScaled(buf);
+  try {
+    const [h, w] = tensor.shape;
+    const result = await faceapi
+      .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
+        minConfidence: MIN_DETECTION_CONFIDENCE,
+      }))
+      .withFaceLandmarks();
+    if (!result) return null;
+    const b = result.detection.box;
+    return {
+      cx: (b.x + b.width / 2) / w,
+      cy: (b.y + b.height / 2) / h,
+      wNorm: b.width / w,
+      pitch: pitchRatioFromLandmarks(result.landmarks),
+      yaw: profileDegreeFromLandmarks(result.landmarks),
+    };
+  } finally {
+    tensor.dispose();
+  }
+}
+
+/**
+ * Çıktıdaki kafanın, ŞABLONDAKİ kafaya göre nereye oturduğunu ölçer.
+ *
+ * ÖNEMLİ: iki görsel AYNI koordinat uzayında olmalı — kırpılmış çıktıyı
+ * kırpılmamış şablonla karşılaştırmak, kırpmanın geometri dönüşümünü "kayma"
+ * sanmaya yol açar. Çağıran taraf doğru eşi seçmekle yükümlü (bkz. çağrı yeri).
+ *
+ * Döner: { ok, reason, dx, dy, scale, pitch, tplPitch, yaw, tplYaw }
+ *   dx>0: çıktının kafası şablona göre SAĞDA. dy>0: AŞAĞIDA.
+ */
+async function measureHeadPlacement(outputBuf, templateBuf) {
+  try {
+    if (!outputBuf || !templateBuf) return { ok: false, reason: "insufficient-input" };
+    const [o, t] = await Promise.all([
+      detectPlacement(outputBuf), detectPlacement(templateBuf),
+    ]);
+    if (!o || !t) {
+      return { ok: false, reason: !o && !t ? "no-face-both" : (!o ? "no-face-output" : "no-face-template") };
+    }
+    const unit = t.wNorm; // 1 birim = şablonun yüz genişliği
+    if (!(unit > 1e-6)) return { ok: false, reason: "degenerate" };
+    return {
+      ok: true, reason: null,
+      dx: (o.cx - t.cx) / unit,
+      dy: (o.cy - t.cy) / unit,
+      scale: o.wNorm / t.wNorm,
+      pitch: o.pitch, tplPitch: t.pitch,
+      yaw: o.yaw, tplYaw: t.yaw,
+    };
+  } catch (e) {
+    console.error("Kafa yerleşimi ölçümü hata verdi (atlanıyor):", e.message || e);
+    return { ok: false, reason: "error" };
+  }
+}
+
 module.exports = {
   analyzeReferences,
   assessSkinToneConsistency,
+  correctLimbChroma,
+  measureHeadPlacement,
+  labToHex,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,
   matchesIdentity,

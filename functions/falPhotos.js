@@ -1015,12 +1015,11 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
  * genişletildi.
  */
-function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex = null) {
   return (
     "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
-    "output a reference photo — if your result lacks the first image's background and framing, you " +
-    "edited the wrong image.\n\n" +
+    "output a reference photo.\n\n" +
     "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build; ignore its face. " +
     "The others are close-up face photos, the only source of truth for facial identity and hair. " +
     "References tell you the person's face, hair, skin and build — never their clothing, accessories " +
@@ -1037,20 +1036,35 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "person and never invented: their hairline, density, length, texture and colour. If the target is " +
     "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
     "they do not have is as wrong as giving them someone else's nose.\n\n" +
-    "3) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
-    "person's tone, or a two-tone patchwork, is a serious error. Before you finish, check the hands, " +
-    "fingers, arms, neck and legs one by one: if any of them still carries a trace of the base " +
-    "person's tone, recolour it to match the face exactly. No brightening, whitening, glow or " +
-    "sheen.\n\n" +
+    // SAYISAL TON ÇAPASI: "the target's true colour" modele hiçbir kısıt
+    // vermiyor; hex ölçülebilir bir hedef. ÖNEMLİ — hex, selfie'nin NÖTR
+    // ışığında ölçüldü (bkz. analyzeReferences.refSkinTone), sahne ışığında
+    // değil. Literal olarak zorlanırsa sıcak/altın ışıklı bir şablonda yüz
+    // sahneyle çatışıp "yapıştırılmış" görünür — bu yüzden açıkça sahne
+    // ışığına tabi kılınıyor.
+    (skinHex
+      ? `3) SKIN TONE — approximately ${skinHex} in neutral light, rendered under the scene's own ` +
+        "lighting. One single uniform tone across every visible area of skin: face, neck, arms, " +
+        "hands, fingers and legs all read as the same person's skin. No brightening, whitening, " +
+        "glow or sheen.\n\n"
+      : "3) SKIN TONE — the target's true colour, one single uniform tone across every visible area " +
+        "of skin: face, neck, arms, hands, fingers and legs all read as the same person's skin " +
+        "under the scene's light. No brightening, whitening, glow or sheen.\n\n") +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "4) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
-    "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
-    "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
-    "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
-    "a head kept at its old size on narrowed shoulders reads as oversized. Never enlarge the head or " +
-    "puff the face. The close-up references are zoomed in for detail only — never take head scale from " +
-    "them.\n\n" +
-    "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
+    "4) HEAD SIZE — the head stays in scale with the shoulders it sits on: narrow shoulders carry a " +
+    "SMALLER head. If reshaping the body narrows the shoulders, the head shrinks by the same " +
+    "proportion. When the head changes size it scales around the base of the neck: the neck–collar " +
+    "junction stays at its original point in the frame and the crown moves. Never enlarge the head or " +
+    "puff the face. The close-up references are zoomed in for detail only — never take head scale " +
+    "from them.\n\n" +
+    // KONUM TALİMATI (2026-08-11): kullanıcının bildirdiği asıl sorun kafanın
+    // yanlış yere oturması ("bazen çok önde bazen çok arkada"). Prompt'ta kafa
+    // AÇISI ve BOYUTU için kural vardı ama KONUM için hiç yoktu. Soyut "aynı
+    // yerde kalsın" yerine isimli landmark verilmesi bilinçli — ölçülebilir
+    // bir çapa, modelin yorumuna bırakılmış bir ifade değil.
+    "5) HEAD PLACEMENT, ANGLE AND GAZE: the head sits at the same point in the frame as in the first " +
+    "image — the chin, the ear line and the hairline all keep their original positions, and the head " +
+    "meets the neck at the same spot. Keep the head's rotation and tilt exactly as in the first image, on all " +
     "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
     "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
@@ -1081,9 +1095,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
  * için birer kısa madde ekler (bu maddelerin hepsi gözlemlenmiş sorunlardan
  * gelir, "her ihtimale karşı" yazılmış değildir).
  */
-function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile, skinHex = null) {
   return (
-    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) + "\n\n" +
+    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex) + "\n\n" +
     "OBSERVED FAILURE MODES — each of these has actually happened before; check your result against " +
     "every one of them before finishing:\n\n" +
     "- WRONG CANVAS: the output came back as the user's own reference photo, almost unedited. Verify " +
@@ -2094,7 +2108,7 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
   return { buf: prev, dist: prevDist };
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor, skinHex = null) {
   const { faceUrls, bodyUrl } = splitRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Tam görsel seti: taban + TÜM yüz açıları + tam boy.
@@ -2157,7 +2171,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_P1400]: buildEditPromptP1400,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
-  const prompt = build(identityCaption, bodyCaption, bodyProfile);
+  const prompt = build(identityCaption, bodyCaption, bodyProfile, skinHex);
   return await generateWithOpenAI(prompt, fullSet);
 }
 
@@ -2285,6 +2299,16 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   }
   let { input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = prepared;
 
+  // Kullanıcının gerçek ten tonunun hex karşılığı — prompt'a SAYISAL çapa
+  // olarak gömülür (bkz. buildEditPromptP800 skinHex). Selfie'den bir kez
+  // ölçüldüğü için deneme başına yeniden hesaplanmaz.
+  let skinHex = null;
+  try {
+    skinHex = require("./faceQuality").labToHex(refSkinTone);
+  } catch (e) {
+    console.warn("Ten tonu hex'e çevrilemedi (prompt çapasız devam edecek):", e.message || e);
+  }
+
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI
@@ -2299,9 +2323,10 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
-    const buf = await generateForMode(
+    // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
+    let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor
+      refDescriptor, skinHex
     );
     if (!buf) {
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
@@ -2418,6 +2443,36 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         break;
       }
 
+      // templateInput kırpma yapıldıysa Buffer, yapılmadıysa URL string'idir
+      // (bkz. prepareTemplate.sourceBuf) — ölçüm her iki durumda da PİKSEL
+      // ister, o yüzden buffer'a çözülüyor. Hem düzeltici hem ten kapısı
+      // kullanır.
+      const tplBuf = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+
+      // UZUV KROMA DÜZELTMESİ — ten kapısından ÖNCE, bilinçli olarak.
+      // Kapı, hatayı yalnızca YAKALAR: kareyi atar ve (hak varsa) yeniden
+      // üretir, yani kredi yakar. Oysa "eller eski tonda kalmış" hatası
+      // deterministik olarak düzeltilebilir (bkz. correctLimbChroma) — üretim
+      // maliyeti sıfır, kimliğe dokunmaz. Düzeltici önce çalışırsa kapı
+      // DÜZELTİLMİŞ kareyi ölçer ve düzelticinin bedavaya kurtardığı kareler
+      // için retry harcanmaz. Kapı yine de yerinde duruyor: düzeltmenin
+      // atlandığı (alan tavanı, ölçülemedi) ya da yetmediği kareleri eler.
+      try {
+        const { correctLimbChroma } = require("./faceQuality");
+        const cc = await correctLimbChroma(buf, tplBuf, refSkinTone);
+        const db = cc.deltaBefore != null ? cc.deltaBefore.toFixed(1) : "null";
+        const da = cc.deltaAfter != null ? cc.deltaAfter.toFixed(1) : "null";
+        const ar = cc.areaRatio != null ? cc.areaRatio.toFixed(3) : "null";
+        // ÖNCE/SONRA birlikte loglanıyor — düzeltmenin gerçekten iyileştirip
+        // iyileştirmediği ancak böyle görülür. Eşikler (leftover oranı, alan
+        // tavanı) gerçek dağılım görüldükten sonra kalibre edilecek; dosyadaki
+        // diğer kapılarla aynı usul.
+        console.log(`KROMA DÜZELTME (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${cc.applied ? "UYGULANDI" : `ATLANDI[${cc.reason}]`} yüzUzuvFarkıÖnce=${db} sonra=${da} alanOranı=${ar}${cc.shift != null ? ` kayma=${cc.shift.toFixed(1)}` : ""}`);
+        if (cc.applied && cc.buf) buf = cc.buf;
+      } catch (e) {
+        console.error("OpenAI yolu: uzuv kroma düzeltmesi hata verdi (atlanıyor):", e);
+      }
+
       // ÜÇÜNCÜ KAPI — TEN RENGİ (deterministik, LLM yargısına bağlı DEĞİL).
       // Gerekçe: bu kareyi Vision'a zaten sorduk ve Vision "consistent skin
       // tone" deyip geçirdi (bkz. assessSkinToneConsistency başlığı, gerçek
@@ -2428,10 +2483,6 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // kimlik mesafesi ölçümüyle aynı yaklaşım.
       try {
         const { assessSkinToneConsistency } = require("./faceQuality");
-        // templateInput kırpma yapıldıysa Buffer, yapılmadıysa URL string'idir
-        // (bkz. prepareTemplate.sourceBuf) — ölçüm her iki durumda da PİKSEL
-        // ister, o yüzden buffer'a çözülüyor.
-        const tplBuf = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
         const st = await assessSkinToneConsistency(buf, tplBuf, refSkinTone);
         const rt = st.ratio != null ? st.ratio.toFixed(3) : "null";
         const fd = st.faceDelta != null ? st.faceDelta.toFixed(1) : "null";
@@ -2498,14 +2549,49 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     // taban fotoğrafa geri yerleştirilir — böylece taban fotoğrafın arka
     // planı/kompozisyonu HİÇBİR ZAMAN kırpılmış hâliyle kullanıcıya gitmez.
     let deliverBuf = finalBuf;
+    let recompositedOk = false;
     if (restore) {
       const recomposited = await recompositeIntoOriginal(finalBuf, restore.originalBuf, restore.geo);
       if (recomposited) {
         deliverBuf = recomposited;
+        recompositedOk = true;
         console.log(`ŞABLON GERİ YERLEŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}): orijinal boyuta döndürüldü`);
       } else {
         console.warn(`ŞABLON GERİ YERLEŞTİRME BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}) — kırpılmış sonuç kullanılıyor`);
       }
+    }
+
+    // KAFA YERLEŞİMİ ÖLÇÜMÜ — yalnızca ÖLÇER, hiçbir kareyi elemez, hiçbir
+    // pikseli değiştirmez (bkz. measureHeadPlacement başlığı: "önde/arkada"
+    // en az üç ayrı nedenden olabilir, hangisi olduğu bilinmeden düzeltme
+    // yazmak yanlış problemi çözme riskidir).
+    //
+    // KOORDİNAT UZAYI EŞLEŞMESİ ZORUNLU: kırpılmış çıktıyı kırpılmamış
+    // şablonla karşılaştırmak, kırpmanın geometri dönüşümünü "kayma" sanmaya
+    // yol açar. Bu yüzden şablon eşi, çıktının HANGİ uzayda olduğuna göre
+    // seçiliyor; doğru eş yoksa ölçüm sessizce yanlış referansla yapılmaz,
+    // atlanır ve sebebi loglanır.
+    try {
+      const { measureHeadPlacement } = require("./faceQuality");
+      let refTpl = null;
+      if (recompositedOk) refTpl = restore.originalBuf;            // ikisi de orijinal uzayda
+      else if (restore) refTpl = Buffer.isBuffer(templateInput) ? templateInput : null; // ikisi de kırpılmış
+      else refTpl = templateSourceBuf;                              // hiç kırpma olmadı
+      if (!refTpl) {
+        console.log(`KONUM ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-original]`);
+      } else {
+        const p = await measureHeadPlacement(deliverBuf, refTpl);
+        const n = (v, d = 2) => (v != null ? v.toFixed(d) : "null");
+        if (!p.ok) {
+          console.log(`KONUM ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${p.reason}]`);
+        } else {
+          // dx/dy birimi: ŞABLONUN YÜZ GENİŞLİĞİ. dx>0 sağa, dy>0 aşağı kaymış.
+          // dx en temiz sinyal; dy pitch'ten etkilenir (bkz. başlıktaki tuzak).
+          console.log(`KONUM ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}): dx=${n(p.dx)} dy=${n(p.dy)} ölçek=${n(p.scale)} pitch=${n(p.pitch)} yaw=${n(p.yaw)} [şablon: pitch=${n(p.tplPitch)} yaw=${n(p.tplYaw)}]`);
+        }
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: kafa yerleşimi ölçümü hata verdi (atlanıyor):", e);
     }
 
     const textured = await addPhoneCameraTexture(deliverBuf);
