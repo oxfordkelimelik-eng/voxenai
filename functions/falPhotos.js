@@ -2027,6 +2027,29 @@ async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, me
 // yok — bu tek bir senkron çağrı zinciri, döngü aynı fonksiyon içinde).
 const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
 
+// YAW (KAFANIN YANA DÖNÜKLÜĞÜ) SAPMA SINIRI (2026-08-11).
+//
+// SORUN: kullanıcı şikâyeti "kafa doğru yere bakmıyor". KONUM ÖLÇÜM verisi bunu
+// doğruladı — ölçülen sapmaların en büyüğü konum/boyut değil, YAW.
+// Gerçek eşleştirilmiş veri (10 kare, şablon yaw -> çıktı yaw):
+//   0.19->0.43  0.12->0.37  0.80->0.67  1.00->0.80  0.03->0.17
+//   0.70->0.48  0.06->0.44  1.00->1.00  0.29->0.69  0.06->0.07
+//   sapma:  +0.24 +0.25 -0.13 -0.20 +0.14 -0.22 +0.38 0.00 +0.40 +0.01
+//
+// ÖRÜNTÜ: model kafayı ORTAYA çekiyor (regression to the mean) — şablon önden
+// bakıyorsa (yaw<0.5) çıktı 6/6 vakada DAHA ÇOK yana dönmüş; şablon profildeyse
+// 3/4 vakada kameraya DAHA ÇOK dönmüş.
+//
+// NEDEN KAPI, NEDEN DÜZELTME DEĞİL: yaw 3B bir dönüştür, 2B karede geometrik
+// olarak düzeltilemez (kafayı döndüremezsin). Tek deterministik çare, sapan
+// kareyi eleyip mevcut retry'a bırakmak — retry zaten FARKLI ŞABLON deniyor
+// (bkz. prepareNextUsable), yani ikinci çekilişte düzgün çıkma şansı var.
+//
+// 0.30: gözlenen 10 sapmanın 2'sini (0.38 ve 0.40) eler, normal varyasyona
+// (<=0.25) dokunmaz. Foto kaybı riski düşük tutuldu — eşik gerçek dağılım
+// büyüdükçe kalibre edilecek (dosyadaki diğer kapılarla aynı usul).
+const OUTPUT_YAW_DRIFT_MAX = 0.30;
+
 /**
  * refUrls'i yüz kareleri ve tam boy karesi olarak ayırır.
  * prepareReferencePhotos sırayı garanti ediyor: [en iyi yüz, diğer yüzler...,
@@ -2295,6 +2318,11 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   }
   let { input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = prepared;
 
+  // Şablonun yaw'ı (yana dönüklüğü) — YAW KAPISI için şablon başına BİR KEZ
+  // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
+  // Şablon değişirse aşağıda undefined'a döndürülür ki yeniden ölçülsün.
+  let templateYaw;
+
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI
@@ -2306,6 +2334,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       const next = await prepareNextUsable();
       if (next) {
         ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
+        templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
@@ -2336,6 +2365,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       let mathDist = null;
       let mathReason = null;
       let outEyeOpenness = null;
+      let outYaw = null;
       try {
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor, templateFaceRatio);
@@ -2343,6 +2373,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         mathDist = q.distance;
         mathReason = q.reason;
         outEyeOpenness = q.eyeOpenness != null ? q.eyeOpenness : null;
+        outYaw = q.profileDegree != null ? q.profileDegree : null;
         // ÖLÇÜM (2026-07-28): GEÇEN kareler de loglanıyor. Eskiden sadece
         // elenenler loglanıyordu, bu yüzden "geçen bir kare hangi mesafedeydi"
         // sorusuna veri yoktu ve FACE_MATCH_THRESHOLD tahminle ayarlanıyordu.
@@ -2384,6 +2415,38 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           ? `yüz PROFİLDEN görünüyor, kimlik mesafesi (${mathDist != null ? mathDist.toFixed(3) : "?"}) güvenilmez`
           : "yüz tespit edilemedi (gözlük/açı olabilir)";
         console.warn(`KALITE: ${why} — kare atılmıyor, karar Vision'a devredildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+      }
+
+      // YAW KAPISI — kafa şablondakinden BAŞKA yöne bakıyor mu?
+      // (bkz. OUTPUT_YAW_DRIFT_MAX: gerçek veri + "modelin kafayı ortaya
+      // çekmesi" örüntüsü). Vision'dan ÖNCE, bilinçli: elenecek kare için
+      // boşuna gpt-4o çağrısı yapılmasın.
+      // Şablon yaw'ı ŞABLON BAŞINA bir kez ölçülür (deneme başına değil);
+      // şablon değişince yeniden ölçülür (bkz. yukarıdaki sıfırlama).
+      try {
+        const { headYawOf } = require("./faceQuality");
+        const tplBufForYaw = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+        if (templateYaw === undefined) templateYaw = await headYawOf(tplBufForYaw);
+        // Fail-safe: ikisinden biri ölçülemediyse kapı sessizce devre dışı.
+        if (templateYaw != null && outYaw != null) {
+          const drift = outYaw - templateYaw;
+          const bad = Math.abs(drift) > OUTPUT_YAW_DRIFT_MAX;
+          // GEÇEN kareler de loglanıyor — eşik ancak gerçek dağılım görülerek
+          // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[yaw-drift]" : "GEÇTİ"} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX}`);
+          if (bad) {
+            await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+              mode, gate: "yaw-drift", distance: mathDist,
+              detail: `çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)}`,
+            });
+            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            break;
+          }
+        } else {
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ÖLÇÜLEMEDİ çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"}`);
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: yaw kapısı hata verdi (bu katman atlanıyor):", e);
       }
 
       let visionOk = true;

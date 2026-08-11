@@ -1427,6 +1427,21 @@ async function detectPlacement(buf) {
 }
 
 /**
+ * Yalnızca yaw (kafanın yana dönüklüğü) ölçer: 0 = tam önden, 1 = tam profil.
+ * Ölçülemezse null (fail-safe — çağıran kapı sessizce devre dışı kalır).
+ */
+async function headYawOf(buf) {
+  try {
+    if (!buf) return null;
+    const p = await detectPlacement(buf);
+    return p ? p.yaw : null;
+  } catch (e) {
+    console.error("Yaw ölçümü hata verdi (atlanıyor):", e.message || e);
+    return null;
+  }
+}
+
+/**
  * Çıktıdaki kafanın, ŞABLONDAKİ kafaya göre nereye oturduğunu ölçer.
  *
  * ÖNEMLİ: iki görsel AYNI koordinat uzayında olmalı — kırpılmış çıktıyı
@@ -1466,6 +1481,7 @@ module.exports = {
   assessSkinToneConsistency,
   correctLimbChroma,
   measureHeadPlacement,
+  headYawOf,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,
   matchesIdentity,
