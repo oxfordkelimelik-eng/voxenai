@@ -1140,14 +1140,6 @@ function labToRgb(L, a, b) {
   return [enc(R), enc(G), enc(B)];
 }
 
-/** Kullanıcının selfie tonunu prompt'a gömmek için hex'e çevirir (#RRGGBB). */
-function labToHex(lab) {
-  if (!Array.isArray(lab) || lab.length !== 3) return null;
-  const [r, g, b] = labToRgb(lab[0], lab[1], lab[2]);
-  const h = (v) => v.toString(16).padStart(2, "0");
-  return `#${h(r)}${h(g)}${h(b)}`.toUpperCase();
-}
-
 // Yalnızca renklilik farkı (a*/b*). L* bilinçli olarak DIŞARIDA: ışık farkını
 // "hata" saymak istemiyoruz (bkz. başlıktaki gerekçe).
 function chromaDistance(p, q) {
@@ -1474,7 +1466,6 @@ module.exports = {
   assessSkinToneConsistency,
   correctLimbChroma,
   measureHeadPlacement,
-  labToHex,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,
   matchesIdentity,

@@ -1015,7 +1015,7 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
  * genişletildi.
  */
-function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex = null) {
+function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
     "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
@@ -1036,20 +1036,14 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex 
     "person and never invented: their hairline, density, length, texture and colour. If the target is " +
     "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
     "they do not have is as wrong as giving them someone else's nose.\n\n" +
-    // SAYISAL TON ÇAPASI: "the target's true colour" modele hiçbir kısıt
-    // vermiyor; hex ölçülebilir bir hedef. ÖNEMLİ — hex, selfie'nin NÖTR
-    // ışığında ölçüldü (bkz. analyzeReferences.refSkinTone), sahne ışığında
-    // değil. Literal olarak zorlanırsa sıcak/altın ışıklı bir şablonda yüz
-    // sahneyle çatışıp "yapıştırılmış" görünür — bu yüzden açıkça sahne
-    // ışığına tabi kılınıyor.
-    (skinHex
-      ? `3) SKIN TONE — approximately ${skinHex} in neutral light, rendered under the scene's own ` +
-        "lighting. One single uniform tone across every visible area of skin: face, neck, arms, " +
-        "hands, fingers and legs all read as the same person's skin. No brightening, whitening, " +
-        "glow or sheen.\n\n"
-      : "3) SKIN TONE — the target's true colour, one single uniform tone across every visible area " +
-        "of skin: face, neck, arms, hands, fingers and legs all read as the same person's skin " +
-        "under the scene's light. No brightening, whitening, glow or sheen.\n\n") +
+    // 2026-08-11: hex ton çapası ("approximately #RRGGBB") denendi ve geri
+    // alındı — kullanıcı bildirimi: cilt "yapay/oynanmış" görünmeye başladı.
+    // Muhtemel sebep: görüntü modelleri hex kodunu çok literal yorumluyor,
+    // sahne ışığına rağmen cildi düz/boyanmış render edebiliyor. Ölçülebilir
+    // çapa fikri cazip ama doğrulanmadan üretime çıkmıştı — geri alındı.
+    "3) SKIN TONE — the target's true colour, one single uniform tone across every visible area of " +
+    "skin: face, neck, arms, hands, fingers and legs all read as the same person's skin under the " +
+    "scene's light. No brightening, whitening, glow or sheen.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     "4) HEAD SIZE — the head stays in scale with the shoulders it sits on: narrow shoulders carry a " +
     "SMALLER head. If reshaping the body narrows the shoulders, the head shrinks by the same " +
@@ -1057,14 +1051,14 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex 
     "junction stays at its original point in the frame and the crown moves. Never enlarge the head or " +
     "puff the face. The close-up references are zoomed in for detail only — never take head scale " +
     "from them.\n\n" +
-    // KONUM TALİMATI (2026-08-11): kullanıcının bildirdiği asıl sorun kafanın
-    // yanlış yere oturması ("bazen çok önde bazen çok arkada"). Prompt'ta kafa
-    // AÇISI ve BOYUTU için kural vardı ama KONUM için hiç yoktu. Soyut "aynı
-    // yerde kalsın" yerine isimli landmark verilmesi bilinçli — ölçülebilir
-    // bir çapa, modelin yorumuna bırakılmış bir ifade değil.
-    "5) HEAD PLACEMENT, ANGLE AND GAZE: the head sits at the same point in the frame as in the first " +
-    "image — the chin, the ear line and the hairline all keep their original positions, and the head " +
-    "meets the neck at the same spot. Keep the head's rotation and tilt exactly as in the first image, on all " +
+    // 2026-08-11: "chin/ear-line/hairline sabit kalsın" konum kilidi denendi
+    // ve geri alındı — kullanıcı bildirimi: fotoğraflar "yapay/oynanmış"
+    // görünmeye başladı. Muhtemel sebep: aynı geçişte hem vücudu yeniden
+    // şekillendirmesini hem üç landmark'ı piksel bazında sabit tutmasını
+    // istemek boyun/omuz bölgesinde gerilme/sertlik yaratabiliyor. Kafa
+    // KONUMU hâlâ ölçülüyor (bkz. measureHeadPlacement, log-only) — asıl
+    // düzeltme, veri toplandıktan sonra deterministik olarak yazılacak.
+    "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
     "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
     "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
@@ -1095,9 +1089,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex 
  * için birer kısa madde ekler (bu maddelerin hepsi gözlemlenmiş sorunlardan
  * gelir, "her ihtimale karşı" yazılmış değildir).
  */
-function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile, skinHex = null) {
+function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
   return (
-    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile, skinHex) + "\n\n" +
+    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) + "\n\n" +
     "OBSERVED FAILURE MODES — each of these has actually happened before; check your result against " +
     "every one of them before finishing:\n\n" +
     "- WRONG CANVAS: the output came back as the user's own reference photo, almost unedited. Verify " +
@@ -2108,7 +2102,7 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
   return { buf: prev, dist: prevDist };
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor, skinHex = null) {
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
   const { faceUrls, bodyUrl } = splitRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Tam görsel seti: taban + TÜM yüz açıları + tam boy.
@@ -2171,7 +2165,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_P1400]: buildEditPromptP1400,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
-  const prompt = build(identityCaption, bodyCaption, bodyProfile, skinHex);
+  const prompt = build(identityCaption, bodyCaption, bodyProfile);
   return await generateWithOpenAI(prompt, fullSet);
 }
 
@@ -2299,16 +2293,6 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   }
   let { input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = prepared;
 
-  // Kullanıcının gerçek ten tonunun hex karşılığı — prompt'a SAYISAL çapa
-  // olarak gömülür (bkz. buildEditPromptP800 skinHex). Selfie'den bir kez
-  // ölçüldüğü için deneme başına yeniden hesaplanmaz.
-  let skinHex = null;
-  try {
-    skinHex = require("./faceQuality").labToHex(refSkinTone);
-  } catch (e) {
-    console.warn("Ten tonu hex'e çevrilemedi (prompt çapasız devam edecek):", e.message || e);
-  }
-
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI
@@ -2326,7 +2310,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor, skinHex
+      refDescriptor
     );
     if (!buf) {
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
