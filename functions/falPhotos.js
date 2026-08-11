@@ -1019,7 +1019,8 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
   return (
     "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
-    "output a reference photo.\n\n" +
+    "output a reference photo — if your result lacks the first image's background and framing, you " +
+    "edited the wrong image.\n\n" +
     "REFERENCES: the LAST one is a distant full-body photo — use it ONLY for build; ignore its face. " +
     "The others are close-up face photos, the only source of truth for facial identity and hair. " +
     "References tell you the person's face, hair, skin and build — never their clothing, accessories " +
@@ -1036,28 +1037,29 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "person and never invented: their hairline, density, length, texture and colour. If the target is " +
     "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
     "they do not have is as wrong as giving them someone else's nose.\n\n" +
-    // 2026-08-11: hex ton çapası ("approximately #RRGGBB") denendi ve geri
-    // alındı — kullanıcı bildirimi: cilt "yapay/oynanmış" görünmeye başladı.
-    // Muhtemel sebep: görüntü modelleri hex kodunu çok literal yorumluyor,
-    // sahne ışığına rağmen cildi düz/boyanmış render edebiliyor. Ölçülebilir
-    // çapa fikri cazip ama doğrulanmadan üretime çıkmıştı — geri alındı.
-    "3) SKIN TONE — the target's true colour, one single uniform tone across every visible area of " +
-    "skin: face, neck, arms, hands, fingers and legs all read as the same person's skin under the " +
-    "scene's light. No brightening, whitening, glow or sheen.\n\n" +
+    // 2026-08-11: bu maddede iki deney yapıldı ve İKİSİ DE geri alındı —
+    // kullanıcı bildirimi: fotoğraflar "yapay/oynanmış" görünmeye başladı,
+    // kollarda silüet/artefakt kaldı. (1) hex ton çapası ("approximately
+    // #RRGGBB") — görüntü modelleri hex'i çok literal yorumlayıp cildi düz/
+    // boyanmış render edebiliyor. (2) kafa ölçeğinde "neck-collar junction
+    // sabit kalsın" çapası — vücut yeniden şekillenirken bir noktayı zorla
+    // sabit tutmak omuz/kol bölgesinde gerilim yaratmış olabilir. İkisi de
+    // doğrulanmadan (A/B testsiz) üretime çıkmıştı; şimdi 4df232c'deki
+    // (App Store reddi düzeltmesinden ÖNCEKİ, sorun bildirilmeyen) metne
+    // BİREBİR dönüldü — referans noktası temizlensin diye.
+    "3) SKIN TONE — the target's true colour on every visible area of skin. Any limb left in the base " +
+    "person's tone, or a two-tone patchwork, is a serious error. Before you finish, check the hands, " +
+    "fingers, arms, neck and legs one by one: if any of them still carries a trace of the base " +
+    "person's tone, recolour it to match the face exactly. No brightening, whitening, glow or " +
+    "sheen.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "4) HEAD SIZE — the head stays in scale with the shoulders it sits on: narrow shoulders carry a " +
-    "SMALLER head. If reshaping the body narrows the shoulders, the head shrinks by the same " +
-    "proportion. When the head changes size it scales around the base of the neck: the neck–collar " +
-    "junction stays at its original point in the frame and the crown moves. Never enlarge the head or " +
-    "puff the face. The close-up references are zoomed in for detail only — never take head scale " +
-    "from them.\n\n" +
-    // 2026-08-11: "chin/ear-line/hairline sabit kalsın" konum kilidi denendi
-    // ve geri alındı — kullanıcı bildirimi: fotoğraflar "yapay/oynanmış"
-    // görünmeye başladı. Muhtemel sebep: aynı geçişte hem vücudu yeniden
-    // şekillendirmesini hem üç landmark'ı piksel bazında sabit tutmasını
-    // istemek boyun/omuz bölgesinde gerilme/sertlik yaratabiliyor. Kafa
-    // KONUMU hâlâ ölçülüyor (bkz. measureHeadPlacement, log-only) — asıl
-    // düzeltme, veri toplandıktan sonra deterministik olarak yazılacak.
+    "4) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
+    "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
+    "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
+    "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
+    "a head kept at its old size on narrowed shoulders reads as oversized. Never enlarge the head or " +
+    "puff the face. The close-up references are zoomed in for detail only — never take head scale from " +
+    "them.\n\n" +
     "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
     "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
