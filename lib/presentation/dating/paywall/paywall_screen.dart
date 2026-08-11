@@ -198,8 +198,6 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                             : () => _buy(DatingConfig.photoPremiumProductId),
                       ),
                     ],
-                    const SizedBox(height: 24),
-                    _review(),
                   ],
                 ),
               ),
@@ -228,44 +226,6 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _review() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-                5,
-                (_) => const Icon(Icons.star_rounded,
-                    color: AppColors.gold, size: 20)),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-              '"Eşleşme sayım gerçekten arttı. Fotoğraflar çok iyi."',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontStyle: FontStyle.italic,
-                  color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          const Text('— Temsili kullanıcı yorumu',
-              style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
-          const SizedBox(height: 4),
-          Text(
-            DatingConfig.representativeNote,
-            style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
-          ),
-        ],
       ),
     );
   }

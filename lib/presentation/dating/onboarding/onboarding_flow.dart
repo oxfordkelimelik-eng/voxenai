@@ -24,8 +24,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   bool _blockedUnder18 = false;
 
   // Sorular: cinsiyet, yaş, vücut tipi, boy, uygulamalar, eşleşme + auth…
-  // → 16 adım (vücut tipi + boy AI foto üretiminde kullanılır).
-  static const int _totalSteps = 16;
+  // → 15 adım (vücut tipi + boy AI foto üretiminde kullanılır).
+  static const int _totalSteps = 15;
   bool _signedIn = false;
 
   void _next() {
@@ -79,8 +79,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       () => _qMatches(answers), // 12
       () => _authStep(), // 13 — Google/Apple ile giriş (formlar sonrası)
       () => _beforeAfter(), // 14 — 7 kat fazla eşleşme
-      () => _top1Review(), // 15
-      () => _preparing(), // 16
+      () => _preparing(), // 15
     ];
 
     return PopScope(
@@ -365,79 +364,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
         ),
         title: 'Bizimle birlikte günde 7 kat fazla eşleşme',
         subtitle: 'Farkı hisset — veya iade al.',
-      );
-
-  // === EKRAN 15 — Top %1 + önce/sonra telefon + yorum (arkada foto) ===
-  Widget _top1Review() => _info(
-        visual: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const BeforeAfterPhones(),
-            const SizedBox(height: 20),
-            // Yorum kartı — arkasında silik gerçek profil fotosu
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Opacity(
-                      opacity: 0.18,
-                      child: VoxenPhoto(index: 3),
-                    ),
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.surface.withValues(alpha: 0.82),
-                      border: Border.all(color: AppColors.borderGold),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(
-                              5,
-                              (_) => const Icon(Icons.star_rounded,
-                                  color: AppColors.gold, size: 22)),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                            '"İlk haftada eşleşmelerim ikiye katlandı."',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontStyle: FontStyle.italic,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            ClipOval(
-                              child: SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: VoxenPhoto(index: 5, male: true)),
-                            ),
-                            const SizedBox(width: 6),
-                            const Text('Kaan, 27',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.textSecondary)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        title: 'Dating marketinin top %1\'ine gir',
-        subtitle: 'Bizimle birlikte en üst lige çık.',
       );
 
   // === EKRAN 14 — Hazırlanıyor (loading) → modül vitrini ===
