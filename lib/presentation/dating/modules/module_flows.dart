@@ -1593,8 +1593,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   Expanded(
                     child: Text(
                       'Bu üretimde beklenenden az fotoğraf çıktı, bu yüzden '
-                      'hakkını geri yükledik. Dilediğin zaman 5 fotoğrafı '
-                      'yeniden oluşturabilirsin.',
+                      'hakkını geri yükledik. Dilediğin zaman '
+                      '${DatingConfig.photosPerSet} fotoğrafı yeniden '
+                      'oluşturabilirsin.',
                       style: TextStyle(
                           fontSize: 12,
                           height: 1.35,
@@ -1641,10 +1642,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   /// Ücretsiz denemede üretilmeyen (bkz. lockedCount) foto için kilit kartı.
   /// Bu iş zaten TAMAMLANDI (1 ücretsiz foto teslim edildi) — aynı işe kalan
-  /// 4'ü "eklenemez". Bunun yerine: pakete git, satın alınca AYNI selfie'lerle
-  /// (yeniden çekmeye gerek yok — _facePhotos/_bodyPhoto hâlâ bellekte) YENİ
-  /// bir iş açılır ve artık ücretsiz kota değil gerçek paket hakkı kullanılıp
-  /// tam 5 foto üretilir (bkz. falPhotos.js FREE_TIER_CHUNK_COUNT).
+  /// diğerleri "eklenemez". Bunun yerine: pakete git, satın alınca AYNI
+  /// selfie'lerle (yeniden çekmeye gerek yok — _facePhotos/_bodyPhoto hâlâ
+  /// bellekte) YENİ bir iş açılır ve artık ücretsiz kota değil gerçek paket
+  /// hakkı kullanılıp tam DatingConfig.photosPerSet foto üretilir (bkz.
+  /// falPhotos.js FREE_TIER_CHUNK_COUNT).
   Widget _lockedTile() {
     return Material(
       color: AppColors.surface,

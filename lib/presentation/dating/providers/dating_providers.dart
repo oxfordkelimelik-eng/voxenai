@@ -448,8 +448,8 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
   /// EN SON üretimde açılmamış (kilitli) fotoğraf kaldı mı?
   ///
   /// Cüzdandan türetmek YANILTICI olurdu: "ücretsiz hak kullanıldı + bakiye 0"
-  /// koşulu, paket alıp tam 5 fotoluk üretim yapmış ve bakiyesi bitmiş
-  /// kullanıcıda da doğru çıkar — o kişiye "fotoğrafların kilitli" demek
+  /// koşulu, paket alıp tam bir set (DatingConfig.photosPerSet) üretim yapmış
+  /// ve bakiyesi bitmiş kullanıcıda da doğru çıkar — o kişiye "fotoğrafların kilitli" demek
   /// yanlış olur. Bu yüzden gerçek kaynağa bakılıyor: son işin lockedCount'u
   /// (bkz. falPhotos.js — yalnızca ücretsiz üretimde yazılır).
   Future<bool> _latestJobHasLockedPhotos() async {

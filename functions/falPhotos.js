@@ -8,7 +8,7 @@ const {
 
 // HIZ SINIRLARI — her ikisi de GERÇEK PARA harcayan uç noktalar.
 // Değerler normal kullanımın belirgin üstünde, otomatik istismarın belirgin
-// altında: bir kullanıcı 5 fotoluk bir üretimi hazırlayıp başlatır, hata
+// altında: bir kullanıcı 10 fotoluk bir üretimi hazırlayıp başlatır, hata
 // olursa birkaç kez tekrar dener. Saatte 10 hazırlık / 8 üretim bunu rahat
 // karşılar; döngüye alınmış bir script ise ilk dakikada durur.
 const RL_PREPARE = { max: 10, windowMs: 60 * 60 * 1000,
@@ -138,10 +138,13 @@ const PHOTO_MODES = [
   PHOTO_MODE_P300, PHOTO_MODE_P800, PHOTO_MODE_P1400,
 ];
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
-// STYLE_SCENES) — aynı sahnenin 5 kopyası değil, 5 ayrı gerçek ortam.
-const IMAGES_PER_STYLE = 5; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
-// Ücretsiz ilk deneme artık TÜM stili (5 foto) değil, tek bir stildeki TEK
-// fotoğrafı üretir — kalan 4'ü hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
+// STYLE_SCENES) — aynı sahnenin kopyası değil, ayrı gerçek ortamlar.
+// STYLE_SCENES'te stil başına 20 varyant var, bu yüzden 10'a çıkmak
+// (2026-08-12, eskiden 5) tekrarsız çeşitliliği bozmuyor — pickScene'in
+// modulo'su 20'nin altında hiç devreye girmiyor.
+const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// Ücretsiz ilk deneme artık TÜM stili (10 foto) değil, tek bir stildeki TEK
+// fotoğrafı üretir — kalanı hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
 // yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
 // IMAGES_PER_STYLE ile çalışır. Bkz. startPhotoGeneration + finalizeChunk.
 const FREE_TIER_CHUNK_COUNT = 1;
@@ -390,11 +393,12 @@ function mulberry32(seed) {
 
 /**
  * Bir stilin sahne havuzundan (stil başına 20 varyant) jobId+styleId'e göre
- * DETERMİNİSTİK ama İŞE ÖZGÜ karışık bir sıra üretir. Aynı iş içindeki 5
- * chunk (variantIdx 0-4) bu karışık sıradan İLK 5'i alır — set içinde hiç
- * tekrar olmaz. Farklı bir iş (farklı jobId) aynı stili seçse bile FARKLI
- * bir alt küme/sıra kullanır — böylece aynı stili tekrar tekrar test etmek
- * artık hep aynı 5 arka planı vermez (bkz. "arka planları hep aynı
+ * DETERMİNİSTİK ama İŞE ÖZGÜ karışık bir sıra üretir. Aynı iş içindeki
+ * IMAGES_PER_STYLE (10) chunk (variantIdx 0-9) bu karışık sıradan İLK 10'unu
+ * alır — set içinde hiç tekrar olmaz (havuz 20 olduğu için hâlâ bol pay
+ * kalır). Farklı bir iş (farklı jobId) aynı stili seçse bile FARKLI bir alt
+ * küme/sıra kullanır — böylece aynı stili tekrar tekrar test etmek artık
+ * hep aynı arka planları vermez (bkz. "arka planları hep aynı
  * üretiyorsun" şikayeti — kök neden buydu: eskiden sabit ilk-5 seçilirdi).
  */
 function pickScene(styleId, jobId, variantIdx) {
@@ -1465,8 +1469,9 @@ async function uploadReferencePhotos(uid, jobId) {
  * fal.ai queue API'sine bir Seedream edit işi gönderir (tek görsel). Bir stilin
  * TEK bir chunk'ı için çağrılır — chunkIdx hem webhook'un hangi sonucu
  * işleyeceğini belirler HEM DE hangi sahne varyantının üretileceğini seçer
- * (chunk 0..4 -> STYLE_SCENES[style][0..4]). Böylece bir stildeki 5 foto
- * birbirinin kopyası değil, 5 farklı gerçek ortam olur.
+ * (chunk 0..IMAGES_PER_STYLE-1 -> STYLE_SCENES[style][aynı aralık]). Böylece
+ * bir stildeki IMAGES_PER_STYLE (10) foto birbirinin kopyası değil, 10 farklı
+ * gerçek ortam olur.
  *
  * Kullanıcının TÜM referans fotoğrafları (yüz-crop dahil 4 adet) image_urls
  * ile gönderilir — model kişiyi birden fazla açıdan gördüğü için kimlik
@@ -3573,7 +3578,7 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       // ve iade almıyordu, tek bir fotoğraf bile üretilmişse — yani 5 fotoluk
       // ödeme yapıp 4 alan kullanıcı hiçbir şey geri almıyordu. Artık teslim
       // edilen foto sayısı BEKLENENDEN azsa o stilin birimi geri veriliyor;
-      // kullanıcı 5 fotoyu baştan üretebiliyor.
+      // kullanıcı setin tamamını (IMAGES_PER_STYLE) baştan üretebiliyor.
       //
       // "Beklenen" = o stil için AÇILAN chunk sayısı. Bu tanım ücretsiz
       // denemeyi ve kilitli fotoğrafları doğru şekilde dışarıda bırakır:
