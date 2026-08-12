@@ -1792,25 +1792,35 @@ async function assessOutputWithVision(buf, referenceImages) {
          "F) NECK/HEAD ATTACHMENT — look specifically at where the head meets the neck and shoulders. " +
          "It fails if the neck looks unnaturally stretched or elongated, the head sits behind the " +
          "body's own depth plane as if pasted from a different photo, there is a visible seam, gap or " +
-         "floating disconnect at the neck, or the head-to-shoulder connection is structurally wrong. " +
-         "Normal head tilts, turns and ordinary neck length are fine — only classify a clear " +
-         "structural problem below.\n\n" +
-         "Reply on exactly four lines:\n" +
+         "floating disconnect at the neck, OR the head/neck is pushed noticeably backward relative to " +
+         "the torso — as if the head were set further back in depth than the shoulders it sits on, " +
+         "reading as detached or sunken rather than resting naturally atop the spine. Normal head " +
+         "tilts, turns and ordinary neck length are fine — only classify a clear structural problem " +
+         "below.\n" +
+         "G) GAZE DIRECTION — does the eye/gaze direction match the head's own rotation and the " +
+         "scene? It fails if the eyes point somewhere that makes no sense for how the head and body " +
+         "are turned (e.g. head turned one way but eyes clearly pointing a different, disconnected " +
+         "direction), or the gaze looks wall-eyed, cross-eyed, or otherwise structurally wrong. A " +
+         "person simply looking away from the camera, looking down, or looking at something off-frame " +
+         "is completely normal — only classify a gaze that looks anatomically broken.\n\n" +
+         "Reply on exactly five lines:\n" +
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
-         "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED>\n" +
+         "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
+         "GAZE_DIRECTION: <NATURAL | WRONG_DIRECTION>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first three lines before the verdict. Binding rules — the verdict MUST match " +
+         "Decide the first four lines before the verdict. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
-         "STRETCHED_OR_DETACHED -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. Check every " +
-         "question before answering GOOD. Verdict is one of:\n" +
+         "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
+         "WRONG_DIRECTION -> BAD_GAZE. Check every question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
          "BAD_HAIR: <e.g. hair added to a bald person>\n" +
          "BAD_PROPORTION: <e.g. head too large for the shoulders>\n" +
-         "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body>")
+         "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
+         "BAD_GAZE: <e.g. eyes point a different way than the head is turned>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1892,15 +1902,24 @@ async function assessOutputWithVision(buf, referenceImages) {
     // sınıflandırma eklenmeden önce gerçek bir vakada (elleri koyu kalmış bir
     // kare) "GEÇTİ" demişti; HEAD_VS_SHOULDERS'ı düzelten aynı yöntem
     // (zorunlu sınıf + bağlayıcı kural) burada da uygulanıyor.
+    // GAZE_DIRECTION (2026-08-12): AYNI yöntem, aynı gerekçe — kullanıcı
+    // örneği, kafa açısı/YAW ölçümü temiz çıktığı hâlde bakış yönü gözle
+    // yanlış duran bir kare bildirdi. NECK_ATTACHMENT'a PUSHED_BACK eklendi
+    // (aynı olayda "boyun çok geride" tarifi STRETCHED_OR_DETACHED'e girmiyordu).
     const isNeckLine = (l) => /^NECK_ATTACHMENT/.test(l.toUpperCase());
     const isSkinLine = (l) => /^SKIN_TONE/.test(l.toUpperCase());
+    const isGazeLine = (l) => /^GAZE_DIRECTION/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
     const neckLine = lines.find(isNeckLine);
     const skinLine = lines.find(isSkinLine);
-    const verdictLine = lines.find((l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l)) || "";
+    const gazeLine = lines.find(isGazeLine);
+    const verdictLine = lines.find(
+      (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l)
+    ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
     if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
     if (skinLine) console.log(`VISION ÖLÇÜM (ten rengi): ${skinLine}`);
+    if (gazeLine) console.log(`VISION ÖLÇÜM (bakış yönü): ${gazeLine}`);
 
     const verdictDetail = () =>
       verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
@@ -1911,17 +1930,27 @@ async function assessOutputWithVision(buf, referenceImages) {
     if (headsLine && /HEAD_LARGE/i.test(headsLine)) {
       return { ok: false, reason: "proportion", detail: verdictDetail() || "HEAD_LARGE", inconclusive: false };
     }
-    // STRETCHED_OR_DETACHED bağlayıcıdır — aynı gerekçe: boyun/kafa bağlantı
-    // sorunu ana prompt'ta yasaklanıyor ama önceden onu doğrulayan hiçbir
-    // ikinci katman yoktu (bkz. kullanıcı örneği, elegance_4_0.jpg).
-    if (neckLine && /STRETCHED_OR_DETACHED/i.test(neckLine)) {
-      return { ok: false, reason: "attachment", detail: verdictDetail() || "STRETCHED_OR_DETACHED", inconclusive: false };
+    // STRETCHED_OR_DETACHED / PUSHED_BACK bağlayıcıdır — aynı gerekçe: boyun/
+    // kafa bağlantı sorunu ana prompt'ta yasaklanıyor ama önceden onu
+    // doğrulayan hiçbir ikinci katman yoktu (bkz. kullanıcı örneği, elegance_4_0.jpg
+    // ve 2026-08-12 "boyun çok geride" bildirimi — PUSHED_BACK bu ikincisi için
+    // eklendi, STRETCHED_OR_DETACHED'in kapsamadığı ayrı bir hata türü).
+    if (neckLine && /STRETCHED_OR_DETACHED|PUSHED_BACK/i.test(neckLine)) {
+      const which = /PUSHED_BACK/i.test(neckLine) ? "PUSHED_BACK" : "STRETCHED_OR_DETACHED";
+      return { ok: false, reason: "attachment", detail: verdictDetail() || which, inconclusive: false };
     }
     // HANDS_OR_ARMS_MISMATCH bağlayıcıdır — aynı gerekçe: serbest metindeki
     // BAD_SKIN kategorisi gerçek bir vakada (elegance_0_0.jpg, eller koyu
     // kalmış) modelin kendi sorusuna rağmen "GEÇTİ" demesine engel olamadı.
     if (skinLine && /HANDS_OR_ARMS_MISMATCH/i.test(skinLine)) {
       return { ok: false, reason: "skin", detail: verdictDetail() || "HANDS_OR_ARMS_MISMATCH", inconclusive: false };
+    }
+    // WRONG_DIRECTION bağlayıcıdır — aynı yöntem: 2026-08-12'de kullanıcı,
+    // sayısal YAW ölçümü eşiğin (0.30) altında kaldığı hâlde kafanın "olması
+    // gereken yere bakmadığını" bildirdi. Sayısal ölçüm kafa DÖNÜKLÜĞÜNÜ,
+    // bu soru ise gözün/bakışın kendisini değerlendiriyor — farklı sinyaller.
+    if (gazeLine && /WRONG_DIRECTION/i.test(gazeLine)) {
+      return { ok: false, reason: "gaze", detail: verdictDetail() || "WRONG_DIRECTION", inconclusive: false };
     }
 
     const answer = verdictLine.toUpperCase();
@@ -1952,6 +1981,9 @@ async function assessOutputWithVision(buf, referenceImages) {
     // diye verdict satırından ayrıca güvence — aynı "identity" dışı, hakem
     // tarafından geçersiz kılınamaz sebep ailesi.
     if (answer.startsWith("BAD_ATTACHMENT")) return { ok: false, reason: "attachment", detail, inconclusive: false };
+    // BAD_GAZE: GAZE_DIRECTION satırı yakalayamazsa diye verdict satırından
+    // ayrıca güvence — NECK_ATTACHMENT/BAD_ATTACHMENT ile aynı desen.
+    if (answer.startsWith("BAD_GAZE")) return { ok: false, reason: "gaze", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };

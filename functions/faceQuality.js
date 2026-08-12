@@ -1113,7 +1113,14 @@ async function assessSkinToneConsistency(outputBuf, templateBuf, refSkinTone = n
 // yüzünden yüzden bir tık daha koyu/kırmızıdır. Tam eşitlemek yapay okunur.
 const CHROMA_FIX_STRENGTH = 0.9;
 // Bir bileşenin "bozuk" sayılması için içindeki leftover piksel oranı.
-const CHROMA_FIX_COMPONENT_LEFTOVER_MIN = 0.35;
+// GERÇEK OLAY (2026-08-12): 0.35'te bir kullanıcı karesinde eskiTonOranı
+// (TEN ÖLÇÜM, tüm gövde) %18.8 çıktı — göze görünür bir el lekesi — ama bu
+// düzeltici o bölgeyi "yalnızca %0.7 alan, ihmal edilebilir" diyerek büyük
+// ölçüde atladı (leftoverCount/members.length eşiği geçemedi, muhtemelen
+// bölgenin bir kısmı zaten doğru tondaydı ve oranı seyreltti). 0.20'ye
+// düşürmek daha dağınık/küçük lekeleri de yakalar; alan tavanı (aşağıda)
+// kıyafeti yanlışlıkla lekelemeye karşı zaten koruma sağlıyor.
+const CHROMA_FIX_COMPONENT_LEFTOVER_MIN = 0.20;
 // Bundan küçük bileşenler (çalışma çözünürlüğünde piksel) gürültüdür.
 const CHROMA_FIX_MIN_COMPONENT_PX = 120;
 // Düzeltilen alan karenin bu oranını aşarsa düzeltme HİÇ uygulanmaz.
