@@ -3126,7 +3126,19 @@ exports.startPhotoGeneration = onCall(
             // (i ve IMAGES_PER_STYLE+i konumları), böylece paralel çalışan
             // chunk'lar aynı yedeğe düşüp aynı kareyi üretmez.
             const candidates = [file, spares[i], spares[IMAGES_PER_STYLE + i]].filter(Boolean);
-            const urls = await Promise.all(candidates.map(signedDownloadUrl));
+            // TEKİLLEŞTİRME (2026-08-12): havuz IMAGES_PER_STYLE*3'ten küçükse
+            // (ör. test için elle küçültülmüş bir havuz) pickTemplatesFromPool
+            // aynı dosyayı döngüsel tekrarla dolduruyor — bu durumda birincil
+            // ve "yedekler" AYNI GCS nesnesine işaret edebiliyor. signedDownloadUrl
+            // her çağrıda dosyanın metadata'sına yeni bir token YAZIYOR
+            // (file.setMetadata); aynı nesneye 2-3 eşzamanlı yazma isteği
+            // GERÇEK bir olay: "metadata was edited during the operation" 409
+            // hatasıyla çöküyordu. İsme göre tekilleştirip her benzersiz dosya
+            // için TEK imzalı URL üretmek çakışmayı kökten kaldırıyor.
+            const uniqueCandidates = [
+              ...new Map(candidates.map((f) => [f.name, f])).values(),
+            ];
+            const urls = await Promise.all(uniqueCandidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
               bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone
