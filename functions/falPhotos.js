@@ -2166,10 +2166,14 @@ const OUTPUT_YAW_DRIFT_MAX = 0.30;
 // aynı mantık, bkz. yukarıdaki not).
 // Gerçek olay: kullanıcı "kafa tam oturmamış" dediği bir kare bildirdi;
 // job'daki 9 kareden 8'inin dx'i 0.01-0.09 bandındayken, şikayet edilen kare
-// dx=0.26 ölçülmüştü ve hiçbir kapıya takılmadan teslim edilmişti. Eşik 0.15:
-// gözlenen normal bandın üstünde, gerçek hatanın altında — dağılım büyüdükçe
-// kalibre edilecek (dosyadaki diğer kapılarla aynı usul).
-const OUTPUT_HEAD_DX_MAX = 0.15;
+// dx=0.26 ölçülmüştü ve hiçbir kapıya takılmadan teslim edilmişti.
+//
+// 0.15 -> 0.22 GEVŞETİLDİ (2026-08-13, aynı gün): 0.15 bir sonraki gerçek
+// üretimde dx=0.18 ölçülen bir kareyi eledi — kullanıcı o kareyi gözle
+// inceleyip UYUMLU/iyi olarak onayladı (yanlış pozitif). 0.22, 0.18'i rahat
+// geçirir (0.04 pay) ve orijinal kötü örneği (0.26) yine eler — iki gerçek
+// veri noktası arasında kalan bir değer.
+const OUTPUT_HEAD_DX_MAX = 0.22;
 
 /**
  * refUrls'i yüz kareleri ve tam boy karesi olarak ayırır.

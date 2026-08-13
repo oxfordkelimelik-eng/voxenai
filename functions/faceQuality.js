@@ -882,15 +882,15 @@ const SKIN_LEFTOVER_MARGIN = 6;
 // kare reddedilir. Muhafazakâr seçildi: yanlış pozitif, İYİ bir karenin
 // ücretli olarak yeniden üretilmesi demek (bkz. 2026-07-22 kredi olayı).
 //
-// 0.30 -> 0.15 SIKILAŞTIRILDI (2026-08-13, gerçek olay): kullanıcı, taban
-// kişi siyahi olduğu hâlde çıktıda parmak ucunun eski (koyu) tonda kaldığını
-// bildirdi. O kare eskiTonOranı=0.190 ile GEÇMİŞTİ — correctLimbChroma
-// düzeltme uyguladı ama zayıf kaldı (yüzUzuvFarkı 12.4->11.2, aynı işteki
-// başka bir chunk'ın 7.7->1.1'lik güçlü düzeltmesinin aksine). Aynı işte bir
-// başka chunk da 0.253 ile (onaylanmamış ama şüpheli) geçmişti. 0.30 bu
-// ikisini de örtüyordu — yani eşik, göze görünür kalıntıyı geçiriyordu. 0.15,
-// temiz çıkan kareleri (ör. 0.114) hâlâ geçirirken bu iki örneği eler.
-const SKIN_MISMATCH_RATIO_MAX = 0.15;
+// 0.30 -> 0.15 SIKILAŞTIRILDI (2026-08-13), SONRA 0.30'A GERİ ALINDI (aynı
+// gün): 0.15 denemesi bir sonraki gerçek üretimde İYİ kareleri (kullanıcı
+// tarafından gözle onaylı: eskiTonOranı=0.169 ve 0.457 ile reddedilen iki
+// kare aslında ten tonu tutarlıydı) yanlış pozitif olarak elemeye başladı.
+// Asıl vaka (parmak ucunun eski tonda kalması) zaten farklı bir kök nedene
+// bağlıydı — kullanıcı o taban fotoğrafı (kolun kadrajın çok sağında kalıp
+// algılanamadığı bir şablon) havuzdan kaldıracak; eşiği sıkılaştırmak o
+// vakayı çözmeden iyi kareleri feda ediyordu. 0.30'a dönüldü.
+const SKIN_MISMATCH_RATIO_MAX = 0.30;
 // Bu sayıdan az ten benzeri piksel varsa (ör. sadece yüz görünüyor, vücut
 // kadraj dışı/giyinik) kanıt yetersizdir — ölçüm yapılmaz, kare GEÇER.
 const SKIN_MIN_SAMPLE_PIXELS = 300;
