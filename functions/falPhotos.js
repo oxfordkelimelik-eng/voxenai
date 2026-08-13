@@ -2730,6 +2730,16 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // başlığı: kırpılmışı kırpılmamışla kıyaslamak kaymayı yanlış ölçer.
       // Yalnızca dx elenir (en temiz sinyal — dy pitch'ten etkilenir, dy'nin
       // kendisi bu yüzden bağlayıcı DEĞİL, yalnızca loglanır).
+      //
+      // PITCH FARKI DA LOGLANIYOR (2026-08-13, henüz ELEMEYEN ek ölçüm):
+      // dy'yi tek başına kapı yapmak riskli çünkü kafa pitch'i (yukarı/aşağı
+      // eğim) ŞABLONDAN FARKLI OLABİLİR — bu bir hata değil, prompt'un
+      // bilerek izin verdiği bir şey ("only the head's angle/gaze may
+      // differ"). dy'deki bir sapmanın gerçek kayma mı yoksa meşru pitch
+      // farkı mı olduğunu ayırt edebilmek için pitchFarkı = pitch - şablon
+      // pitch de burada loglanıyor. Yaw'da yaptığımız gibi (ayrı ölç, kapıla,
+      // sonra dx'i güvenle kullan) — dy için de aynı yolu izleyebilmek için
+      // önce (pitchFarkı, dy) çiftlerinin gerçek dağılımını görmemiz lazım.
       try {
         const { measureHeadPlacement } = require("./faceQuality");
         const p = await measureHeadPlacement(buf, tplBuf);
@@ -2737,7 +2747,8 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${p.reason}]`);
         } else {
           const bad = Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;
-          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[head-dx]" : "GEÇTİ"} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} eşik=${OUTPUT_HEAD_DX_MAX}`);
+          const pitchFarki = (p.pitch != null && p.tplPitch != null) ? (p.pitch - p.tplPitch) : null;
+          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[head-dx]" : "GEÇTİ"} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} pitchFarkı=${pitchFarki != null ? pitchFarki.toFixed(2) : "null"} eşik=${OUTPUT_HEAD_DX_MAX}`);
           if (bad) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: "head-dx", distance: mathDist,
