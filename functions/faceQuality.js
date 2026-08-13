@@ -1131,13 +1131,26 @@ const CHROMA_FIX_STRENGTH = 0.9;
 // kıyafeti yanlışlıkla lekelemeye karşı zaten koruma sağlıyor.
 const CHROMA_FIX_COMPONENT_LEFTOVER_MIN = 0.20;
 // Bundan küçük bileşenler (çalışma çözünürlüğünde piksel) gürültüdür.
-const CHROMA_FIX_MIN_COMPONENT_PX = 120;
+// 120 -> 60 (2026-08-13, gerçek olay): kullanıcı, parmak ucunun eski tonda
+// kaldığı bir kare bildirdi — SKIN_MISMATCH_RATIO_MAX %15'e çekildikten
+// SONRA bile. Parmak ucu gibi küçük/ayrık bir leke, elin geri kalanından
+// (SKIN_WORK_MAX_DIM=384 çalışma çözünürlüğünde) bağlantısı kopup 120px
+// eşiğinin altında kalıp bileşen olarak hiç seçilmemiş olabilir. 60,
+// gerçek bir parmak ucu lekesini hâlâ yakalar; gürültü/tek piksel
+// yanlış-pozitifleri CHROMA_FIX_COMPONENT_LEFTOVER_MIN (0.20) ve alan
+// tavanı (aşağıda) zaten eliyor.
+const CHROMA_FIX_MIN_COMPONENT_PX = 60;
 // Düzeltilen alan karenin bu oranını aşarsa düzeltme HİÇ uygulanmaz.
 const CHROMA_FIX_MAX_AREA_RATIO = 0.25;
 // Bu kadarlık bir kaydırma gözle görünmez; boşuna JPEG'i yeniden kodlama.
 const CHROMA_FIX_MIN_SHIFT = 1.5;
 // Delikleri kapatıp bileşeni bütünleştiren morfolojik yarıçap.
-const CHROMA_FIX_CLOSE_RADIUS = 2;
+// 2 -> 3 (2026-08-13, aynı olay): ince parmak siluetleri elin ana
+// gövdesinden birkaç pikselle kopabiliyor (gölge/parlama boşluğu) — 2
+// yarıçap bu boşluğu her zaman kapatmıyordu. 3, ince şekilleri ana
+// bileşene bağlama şansını artırır; küçük alan tavanı (0.25) yine de
+// kıyafeti yanlışlıkla birleştirmeye karşı korur.
+const CHROMA_FIX_CLOSE_RADIUS = 3;
 
 /** CIELAB -> sRGB (rgbToLab'in tersi, D65). */
 function labToRgb(L, a, b) {
@@ -1502,11 +1515,139 @@ async function measureHeadPlacement(outputBuf, templateBuf) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// UZUV NETLİK ÖLÇÜMÜ (measureLimbSharpness) — ÖLÇER, ELEMEZ (henüz)
+//
+// SORUN (2026-08-13, gerçek olay): kullanıcı elin/parmakların silik/bulanık
+// çıktığı bir kare bildirdi. Mevcut netlik kapısı (BLUR_VARIANCE_MIN, bkz.
+// assessImageQuality) TÜM KAREYE bakıyor — arka plan ve yüz keskin olduğu
+// sürece elin LOKAL bulanıklığı ortalamayı boğuyor, kapı hiç tetiklenmiyor.
+// Vision'a eklenen HAND_QUALITY sorusu (bkz. falPhotos.js) bunu bir ölçüde
+// yakalıyor ama LLM yargısı tek başına güvenilir bir eşik değil.
+//
+// Bu fonksiyon, yüz DIŞINDAKİ en büyük ten-benzeri bağlı bileşeni (genelde
+// bir el/kol) bulup O BÖLGEDE ayrı bir Laplacian varyansı ölçer ve kare
+// genelininkiyle kıyaslar. HENÜZ HİÇBİR KAREYİ ELEMİYOR — measureHeadPlacement
+// dx'inin bağlayıcı kapıya dönüşmeden önceki izlediği aynı yol: önce gerçek
+// dağılımı (kaç karede oran ne kadar düşük çıkıyor) gör, sonra eşik belirle
+// (dosyadaki diğer kapılarla aynı usul).
+// ---------------------------------------------------------------------------
+
+// Bundan küçük bileşenler (çalışma çözünürlüğünde piksel) güvenilir bir
+// "uzuv" sayılmaz — correctLimbChroma'daki CHROMA_FIX_MIN_COMPONENT_PX ile
+// aynı mertebede, ama bağımsız bir sabit (ikisi farklı kararlar veriyor).
+const LIMB_SHARPNESS_MIN_COMPONENT_PX = 150;
+
+/** Görselin BELİRLİ bir bölgesinde (orijinal piksel koordinatı) Laplacian varyansı. */
+async function laplacianVarianceOfRegion(buf, box) {
+  const region = await sharp(buf)
+    .extract({
+      left: Math.max(0, Math.round(box.x)),
+      top: Math.max(0, Math.round(box.y)),
+      width: Math.max(1, Math.round(box.width)),
+      height: Math.max(1, Math.round(box.height)),
+    })
+    .grayscale()
+    .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], offset: 128 })
+    .raw()
+    .toBuffer();
+  let mean = 0;
+  for (let i = 0; i < region.length; i++) mean += region[i];
+  mean /= region.length;
+  let variance = 0;
+  for (let i = 0; i < region.length; i++) {
+    const d = region[i] - mean;
+    variance += d * d;
+  }
+  return variance / region.length;
+}
+
+/**
+ * Döner: { ok, localVar, frameVar, ratio, box } | { ok:false, reason }.
+ * ratio = localVar/frameVar — düşük oran, o bölgenin kare geneline göre
+ * belirgin daha bulanık olduğunu gösterir. Eşik YOK, yalnızca ölçüm.
+ */
+async function measureLimbSharpness(outputBuf) {
+  try {
+    const face = await detectMainFace(outputBuf);
+    if (!face) return { ok: false, reason: "no-face" };
+    const px = await rawPixels(outputBuf);
+    if (!px) return { ok: false, reason: "insufficient-input" };
+
+    const s = px.scale;
+    const fx0 = face.box.x * s, fx1 = (face.box.x + face.box.width) * s;
+    const fy0 = face.box.y * s, fy1 = (face.box.y + face.box.height) * s;
+
+    const skin = new Uint8Array(px.width * px.height);
+    for (let y = 0; y < px.height; y++) {
+      for (let x = 0; x < px.width; x++) {
+        if (x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue; // yüz hariç
+        const o = (y * px.width + x) * 3;
+        if (isSkinLike(px.data[o], px.data[o + 1], px.data[o + 2])) {
+          skin[y * px.width + x] = 1;
+        }
+      }
+    }
+    const closed = boxMorph(
+      boxMorph(skin, px.width, px.height, 2, true),
+      px.width, px.height, 2, false,
+    );
+
+    // Bağlı bileşenler (8-komşuluk, yığınla BFS) — en büyüğü "uzuv" sayılır.
+    const label = new Int32Array(px.width * px.height).fill(-1);
+    let best = null;
+    const stack = [];
+    for (let start = 0; start < closed.length; start++) {
+      if (!closed[start] || label[start] !== -1) continue;
+      label[start] = start;
+      stack.length = 0; stack.push(start);
+      let minX = px.width, maxX = 0, minY = px.height, maxY = 0, count = 0;
+      while (stack.length) {
+        const i = stack.pop();
+        count++;
+        const x = i % px.width, y = (i / px.width) | 0;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || xx >= px.width || yy < 0 || yy >= px.height) continue;
+            const j = yy * px.width + xx;
+            if (closed[j] && label[j] === -1) { label[j] = start; stack.push(j); }
+          }
+        }
+      }
+      if (count < LIMB_SHARPNESS_MIN_COMPONENT_PX) continue;
+      if (!best || count > best.count) best = { count, minX, maxX, minY, maxY };
+    }
+    if (!best) return { ok: false, reason: "no-limb" };
+
+    // Çalışma-uzayı kutusunu orijinal piksel koordinatına geri çevir.
+    const box = {
+      x: best.minX / s, y: best.minY / s,
+      width: (best.maxX - best.minX + 1) / s, height: (best.maxY - best.minY + 1) / s,
+    };
+
+    const [localVar, quality] = await Promise.all([
+      laplacianVarianceOfRegion(outputBuf, box),
+      assessImageQuality(outputBuf),
+    ]);
+    const frameVar = quality.blurScore;
+    const ratio = frameVar > 0 ? localVar / frameVar : null;
+    return { ok: true, localVar, frameVar, ratio, box };
+  } catch (e) {
+    console.error("Uzuv netlik ölçümü hata verdi (atlanıyor):", e.message || e);
+    return { ok: false, reason: "error" };
+  }
+}
+
 module.exports = {
   analyzeReferences,
   assessSkinToneConsistency,
   correctLimbChroma,
   measureHeadPlacement,
+  measureLimbSharpness,
   headYawOf,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,

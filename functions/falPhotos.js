@@ -1603,6 +1603,36 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrl
   return await resp.json(); // { request_id, ... }
 }
 
+// Eşzamanlı OpenAI images/edits çağrısını sınırlar — acquireFaceSwapSlot ile
+// BİREBİR AYNI desen (bkz. FACE_SWAP_MAX_CONCURRENCY başlığı). OpenAI
+// gpt-image-2 bu endpoint için "5 input-images per min" limiti uyguluyor;
+// mimarimiz IMAGES_PER_STYLE (10) chunk'ı Promise.all ile paralel ürettiği
+// için (bkz. startPhotoGeneration'daki dispatch) bu limit aşılıyordu.
+// GERÇEK OLAY (2026-08-13): bir chunk hem 1. hem 2. denemesinde 429'u
+// tüketip TAMAMEN sessizce kayboldu (hiçbir log satırı bırakmadan) —
+// kullanıcı 10 yerine 8 foto aldı. fal'ınkinden (10) daha sıkı bir limit
+// olduğu için tavan 2'ye sabitlendi — bu kuyruk PROCESS-İÇİ olduğundan
+// (Cloud Functions yük altında 2. bir instance açarsa o da kendi kuyruğunu
+// çalıştırır) pay bırakmak için düşük tutuldu; 429 yine gelirse mevcut
+// retry (aşağıda) devreye girer.
+const OPENAI_IMAGE_MAX_CONCURRENCY = 2;
+let _openaiImageActive = 0;
+const _openaiImageWaitQueue = [];
+
+function acquireOpenAiImageSlot() {
+  if (_openaiImageActive < OPENAI_IMAGE_MAX_CONCURRENCY) {
+    _openaiImageActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => _openaiImageWaitQueue.push(resolve));
+}
+
+function releaseOpenAiImageSlot() {
+  const next = _openaiImageWaitQueue.shift();
+  if (next) next();
+  else _openaiImageActive--;
+}
+
 /**
  * OpenAI'nin KENDİ images/edits endpoint'ine doğrudan senkron istek atar.
  * fal.ai'nin aksine SUNUCU görsel URL'i değil, ham görsel BAYTLARINI
@@ -1646,6 +1676,22 @@ async function generateWithOpenAI(prompt, imageUrls) {
       form.append("image[]", new Blob([buf], { type: "image/jpeg" }), `ref_${i}.jpg`);
     });
 
+    return await postOpenAiImageEdit(form, buffers.length);
+  } catch (e) {
+    console.error("OpenAI images/edits hata:", e.message || e);
+    return null;
+  }
+}
+
+/**
+ * generateWithOpenAI'nin ağ isteği kısmı — eşzamanlılık kuyruğuna (bkz.
+ * OPENAI_IMAGE_MAX_CONCURRENCY) ayrı bir fonksiyon olarak çıkarıldı ki slot
+ * alma/bırakma try/finally ile HER çıkış yolunda (başarı, hata, tükenen
+ * retry) garanti olsun.
+ */
+async function postOpenAiImageEdit(form, refCount) {
+  await acquireOpenAiImageSlot();
+  try {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const resp = await fetch(OPENAI_IMAGE_EDIT_URL, {
@@ -1694,15 +1740,14 @@ async function generateWithOpenAI(prompt, imageUrls) {
           `MALIYET GORSEL: girdi=${u.input_tokens ?? "?"} ` +
           `(metin=${d.text_tokens ?? "?"} gorsel=${d.image_tokens ?? "?"}) ` +
           `cikti=${u.output_tokens ?? "?"} toplam=${u.total_tokens ?? "?"} ` +
-          `kalite=medium referansSayisi=${buffers.length}`
+          `kalite=medium referansSayisi=${refCount}`
         );
       }
       return Buffer.from(b64, "base64");
     }
     return null;
-  } catch (e) {
-    console.error("OpenAI images/edits hata:", e.message || e);
-    return null;
+  } finally {
+    releaseOpenAiImageSlot();
   }
 }
 
@@ -2420,6 +2465,11 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       refDescriptor
     );
     if (!buf) {
+      // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
+      // OpenAI 429'unu iki denemesinde de tüketip TAMAMEN sessizce
+      // kayboluyordu — loglarda o chunk'ın var olduğu bile görünmüyordu,
+      // sebep ancak diğer tüm chunk'lar tek tek elenerek bulunabiliyordu.
+      console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak)`);
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
       break;
     }
@@ -2652,6 +2702,23 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         }
       } catch (e) {
         console.error("OpenAI yolu: göz açıklığı kontrolü hata verdi (bu katman atlanıyor):", e);
+      }
+
+      // EL/UZUV NETLİK ÖLÇÜMÜ (measureLimbSharpness) — ÖLÇER, ELEMEZ (henüz).
+      // bkz. faceQuality.js başlığı: kullanıcı elin silik/bulanık çıktığı bir
+      // kare bildirdi, tüm-kare netlik kapısı bunu görmüyordu. Gerçek dağılım
+      // toplanana kadar bağlayıcı kapı YAPILMIYOR (KONUM KAPISI/dx'in eşiğe
+      // bağlanmadan önce izlediği aynı yol).
+      try {
+        const { measureLimbSharpness } = require("./faceQuality");
+        const ls = await measureLimbSharpness(buf);
+        if (!ls.ok) {
+          console.log(`EL NETLİK ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${ls.reason}]`);
+        } else {
+          console.log(`EL NETLİK ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): yerel=${ls.localVar.toFixed(1)} kareGeneli=${ls.frameVar.toFixed(1)} oran=${ls.ratio != null ? ls.ratio.toFixed(2) : "null"}`);
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: el netlik ölçümü hata verdi (bu katman atlanıyor):", e);
       }
 
       // BEŞİNCİ KAPI — KAFA YERLEŞİMİ (dx, deterministik). tplBuf ile AYNI
