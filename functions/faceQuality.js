@@ -1365,19 +1365,29 @@ async function correctLimbChroma(outputBuf, templateBuf, refSkinTone) {
 }
 
 // ---------------------------------------------------------------------------
-// KAFA YERLEŞİMİ ÖLÇÜMÜ (measureHeadPlacement) — ÖLÇER, ELEMEZ
+// KAFA YERLEŞİMİ ÖLÇÜMÜ (measureHeadPlacement) — ÖLÇER, DÜZELTMEZ
 //
 // NEDEN: kullanıcının bildirdiği asıl sorun "kafayı tam olması gereken yere
 // yerleştirememesi — bazen çok önde bazen çok arkada". Mevcut kapılar kafanın
 // BOYUTUNU (faceRatio, büyüme) ve AÇISINI (profileDegree) ölçüyor ama
 // KONUMUNU hiç ölçmüyor. Bu fonksiyon o boşluğu kapatır.
 //
-// HİÇBİR KAREYİ ELEMEZ. Sebep: "önde/arkada" en az üç ayrı nedenden olabilir
-// ve düzeltmeleri birbirinden tamamen farklıdır:
+// BU FONKSİYON HİÇBİR KAREYİ ELEMEZ/DÜZELTMEZ — SADECE ÖLÇER. Sebep:
+// "önde/arkada" en az üç ayrı nedenden olabilir ve DÜZELTMELERİ birbirinden
+// tamamen farklıdır:
 //   1) Karede öteleme          -> dx/dy    -> geometrik hizalama çözer
 //   2) Baş açısı (pitch)       -> pitch    -> hizalama ÇÖZMEZ, prompt işi
 //   3) Ölçek                   -> scale    -> mevcut büyüme kapısıyla çakışır
-// Hangisi olduğu bilinmeden düzeltme yazmak yanlış problemi çözme riskidir.
+// Hangisi olduğu bilinmeden DÜZELTME yazmak yanlış problemi çözme riskidir —
+// bu yüzden fonksiyon düzeltme yapmıyor.
+//
+// AMA ELEME (retry) FARKLI BİR KARAR, NEDEN BİLİNMEDEN DE GÜVENLİ (2026-08-13
+// gerçek olay): dx büyükse kare zaten kötü demektir — nedeni bilmeden de
+// atıp yeniden üretmek (yaw kapısıyla aynı mantık) risksiz. Çağıran taraf
+// (falPhotos.js runOpenAiDirectChunk) bunu KIRPILMIŞ çalışma görselinde
+// (recomposite ÖNCESİ) tekrar ölçüp dx için bağlayıcı bir eşik uyguluyor —
+// bkz. OUTPUT_HEAD_DX_MAX. Buradaki çağrı (post-recomposite, orijinal
+// koordinat uzayında) hâlâ yalnızca teşhis/log amaçlı.
 //
 // TUZAK (ölçümü okurken): dy ile pitch birbirini TAKLİT EDER — kafa aşağı
 // eğilince yüz kutusunun merkezi de aşağı kayar, yani pitch değişimi dy'de

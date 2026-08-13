@@ -2087,6 +2087,19 @@ const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
 // büyüdükçe kalibre edilecek (dosyadaki diğer kapılarla aynı usul).
 const OUTPUT_YAW_DRIFT_MAX = 0.30;
 
+// KAFA YERLEŞİMİ (dx) KAPISI (2026-08-13, gerçek olay): measureHeadPlacement
+// eskiden yalnızca ÖLÇÜYORDU, hiçbir kareyi elemiyordu (bkz. faceQuality.js
+// başlığı — "önde/arkada" üç ayrı nedenden olabilir, hangisi bilinmeden
+// DÜZELTME yazmak riskli). Ama ELEMEK bu riski taşımıyor — bariz aykırı bir
+// kareyi atıp retry'a bırakmak, nedeni bilmeden de yapılabilir (yaw kapısıyla
+// aynı mantık, bkz. yukarıdaki not).
+// Gerçek olay: kullanıcı "kafa tam oturmamış" dediği bir kare bildirdi;
+// job'daki 9 kareden 8'inin dx'i 0.01-0.09 bandındayken, şikayet edilen kare
+// dx=0.26 ölçülmüştü ve hiçbir kapıya takılmadan teslim edilmişti. Eşik 0.15:
+// gözlenen normal bandın üstünde, gerçek hatanın altında — dağılım büyüdükçe
+// kalibre edilecek (dosyadaki diğer kapılarla aynı usul).
+const OUTPUT_HEAD_DX_MAX = 0.15;
+
 /**
  * refUrls'i yüz kareleri ve tam boy karesi olarak ayırır.
  * prepareReferencePhotos sırayı garanti ediyor: [en iyi yüz, diğer yüzler...,
@@ -2613,6 +2626,32 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         }
       } catch (e) {
         console.error("OpenAI yolu: göz açıklığı kontrolü hata verdi (bu katman atlanıyor):", e);
+      }
+
+      // BEŞİNCİ KAPI — KAFA YERLEŞİMİ (dx, deterministik). tplBuf ile AYNI
+      // (kırpılmış) koordinat uzayında ölçülür — bkz. measureHeadPlacement
+      // başlığı: kırpılmışı kırpılmamışla kıyaslamak kaymayı yanlış ölçer.
+      // Yalnızca dx elenir (en temiz sinyal — dy pitch'ten etkilenir, dy'nin
+      // kendisi bu yüzden bağlayıcı DEĞİL, yalnızca loglanır).
+      try {
+        const { measureHeadPlacement } = require("./faceQuality");
+        const p = await measureHeadPlacement(buf, tplBuf);
+        if (!p.ok) {
+          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${p.reason}]`);
+        } else {
+          const bad = Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;
+          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[head-dx]" : "GEÇTİ"} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} eşik=${OUTPUT_HEAD_DX_MAX}`);
+          if (bad) {
+            await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+              mode, gate: "head-dx", distance: mathDist,
+              detail: `dx=${p.dx.toFixed(2)}`,
+            });
+            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            break;
+          }
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: kafa yerleşimi kapısı hata verdi (bu katman atlanıyor):", e);
       }
     }
 
