@@ -881,7 +881,16 @@ const SKIN_LEFTOVER_MARGIN = 6;
 // Yüz DIŞINDAKİ ten benzeri piksellerin bu oranı "eski tona ait" çıkarsa
 // kare reddedilir. Muhafazakâr seçildi: yanlış pozitif, İYİ bir karenin
 // ücretli olarak yeniden üretilmesi demek (bkz. 2026-07-22 kredi olayı).
-const SKIN_MISMATCH_RATIO_MAX = 0.30;
+//
+// 0.30 -> 0.15 SIKILAŞTIRILDI (2026-08-13, gerçek olay): kullanıcı, taban
+// kişi siyahi olduğu hâlde çıktıda parmak ucunun eski (koyu) tonda kaldığını
+// bildirdi. O kare eskiTonOranı=0.190 ile GEÇMİŞTİ — correctLimbChroma
+// düzeltme uyguladı ama zayıf kaldı (yüzUzuvFarkı 12.4->11.2, aynı işteki
+// başka bir chunk'ın 7.7->1.1'lik güçlü düzeltmesinin aksine). Aynı işte bir
+// başka chunk da 0.253 ile (onaylanmamış ama şüpheli) geçmişti. 0.30 bu
+// ikisini de örtüyordu — yani eşik, göze görünür kalıntıyı geçiriyordu. 0.15,
+// temiz çıkan kareleri (ör. 0.114) hâlâ geçirirken bu iki örneği eler.
+const SKIN_MISMATCH_RATIO_MAX = 0.15;
 // Bu sayıdan az ten benzeri piksel varsa (ör. sadece yüz görünüyor, vücut
 // kadraj dışı/giyinik) kanıt yetersizdir — ölçüm yapılmaz, kare GEÇER.
 const SKIN_MIN_SAMPLE_PIXELS = 300;
