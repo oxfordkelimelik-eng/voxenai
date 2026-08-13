@@ -1802,17 +1802,24 @@ async function assessOutputWithVision(buf, referenceImages) {
          "are turned (e.g. head turned one way but eyes clearly pointing a different, disconnected " +
          "direction), or the gaze looks wall-eyed, cross-eyed, or otherwise structurally wrong. A " +
          "person simply looking away from the camera, looking down, or looking at something off-frame " +
-         "is completely normal — only classify a gaze that looks anatomically broken.\n\n" +
-         "Reply on exactly five lines:\n" +
+         "is completely normal — only classify a gaze that looks anatomically broken.\n" +
+         "H) HAND QUALITY — look specifically at any visible hand or fingers. It fails if they look " +
+         "blurry, smeared, soft/melted compared to the rest of the sharply-rendered photo, or " +
+         "anatomically wrong (extra or missing fingers, fused fingers, an impossible joint). Hands " +
+         "resting, clasped, holding an object, or partly hidden are completely normal — only classify " +
+         "a hand that is rendered badly.\n\n" +
+         "Reply on exactly six lines:\n" +
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
          "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
          "GAZE_DIRECTION: <NATURAL | WRONG_DIRECTION>\n" +
+         "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first four lines before the verdict. Binding rules — the verdict MUST match " +
+         "Decide the first five lines before the verdict. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
-         "WRONG_DIRECTION -> BAD_GAZE. Check every question before answering GOOD. Verdict is one of:\n" +
+         "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. Check every question before " +
+         "answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
@@ -1820,7 +1827,8 @@ async function assessOutputWithVision(buf, referenceImages) {
          "BAD_HAIR: <e.g. hair added to a bald person>\n" +
          "BAD_PROPORTION: <e.g. head too large for the shoulders>\n" +
          "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
-         "BAD_GAZE: <e.g. eyes point a different way than the head is turned>")
+         "BAD_GAZE: <e.g. eyes point a different way than the head is turned>\n" +
+         "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1906,20 +1914,28 @@ async function assessOutputWithVision(buf, referenceImages) {
     // örneği, kafa açısı/YAW ölçümü temiz çıktığı hâlde bakış yönü gözle
     // yanlış duran bir kare bildirdi. NECK_ATTACHMENT'a PUSHED_BACK eklendi
     // (aynı olayda "boyun çok geride" tarifi STRETCHED_OR_DETACHED'e girmiyordu).
+    // HAND_QUALITY (2026-08-13): AYNI yöntem — kullanıcı, netlik kapısının
+    // (tüm kareye bakan Laplacian varyansı) ve ten kapısının (yalnızca RENK
+    // ölçen) yakalamadığı bir "elin silik/bulanık çıkması" örneği bildirdi.
+    // Yerel el kalitesini deterministik ölçen bir katman yok — bu soru Vision'a
+    // ekleniyor (aynı çağrı, ek maliyet yok).
     const isNeckLine = (l) => /^NECK_ATTACHMENT/.test(l.toUpperCase());
     const isSkinLine = (l) => /^SKIN_TONE/.test(l.toUpperCase());
     const isGazeLine = (l) => /^GAZE_DIRECTION/.test(l.toUpperCase());
+    const isHandLine = (l) => /^HAND_QUALITY/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
     const neckLine = lines.find(isNeckLine);
     const skinLine = lines.find(isSkinLine);
     const gazeLine = lines.find(isGazeLine);
+    const handLine = lines.find(isHandLine);
     const verdictLine = lines.find(
-      (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l)
+      (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) && !isHandLine(l)
     ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
     if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
     if (skinLine) console.log(`VISION ÖLÇÜM (ten rengi): ${skinLine}`);
     if (gazeLine) console.log(`VISION ÖLÇÜM (bakış yönü): ${gazeLine}`);
+    if (handLine) console.log(`VISION ÖLÇÜM (el kalitesi): ${handLine}`);
 
     const verdictDetail = () =>
       verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
@@ -1951,6 +1967,13 @@ async function assessOutputWithVision(buf, referenceImages) {
     // bu soru ise gözün/bakışın kendisini değerlendiriyor — farklı sinyaller.
     if (gazeLine && /WRONG_DIRECTION/i.test(gazeLine)) {
       return { ok: false, reason: "gaze", detail: verdictDetail() || "WRONG_DIRECTION", inconclusive: false };
+    }
+    // BLURRY_OR_MALFORMED bağlayıcıdır — aynı yöntem: 2026-08-13'te kullanıcı,
+    // tüm-kare netlik kapısı ve RENK-odaklı ten kapısı geçtiği hâlde elin
+    // silik/bulanık çıktığı bir kare bildirdi. İkisi de yerel el detayını
+    // ölçmüyor — bu soru o boşluğu kapatıyor.
+    if (handLine && /BLURRY_OR_MALFORMED/i.test(handLine)) {
+      return { ok: false, reason: "hands", detail: verdictDetail() || "BLURRY_OR_MALFORMED", inconclusive: false };
     }
 
     const answer = verdictLine.toUpperCase();
@@ -1984,6 +2007,9 @@ async function assessOutputWithVision(buf, referenceImages) {
     // BAD_GAZE: GAZE_DIRECTION satırı yakalayamazsa diye verdict satırından
     // ayrıca güvence — NECK_ATTACHMENT/BAD_ATTACHMENT ile aynı desen.
     if (answer.startsWith("BAD_GAZE")) return { ok: false, reason: "gaze", detail, inconclusive: false };
+    // BAD_HANDS: HAND_QUALITY satırı yakalayamazsa diye verdict satırından
+    // ayrıca güvence — aynı desen.
+    if (answer.startsWith("BAD_HANDS")) return { ok: false, reason: "hands", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
