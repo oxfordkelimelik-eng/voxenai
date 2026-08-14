@@ -890,7 +890,14 @@ const SKIN_LEFTOVER_MARGIN = 6;
 // bağlıydı — kullanıcı o taban fotoğrafı (kolun kadrajın çok sağında kalıp
 // algılanamadığı bir şablon) havuzdan kaldıracak; eşiği sıkılaştırmak o
 // vakayı çözmeden iyi kareleri feda ediyordu. 0.30'a dönüldü.
-const SKIN_MISMATCH_RATIO_MAX = 0.30;
+//
+// 0.30 -> 0.55 -> 0.60 (2026-08-14): elegance c1, hem deneme=1
+// (eskiTonOranı=0.570) hem deneme=2'de (0.511) elendi; kullanıcı gözle ten
+// tutarsızlığı görmedi, Vision da SKIN_TONE: CONSISTENT demişti (kroma
+// sonrası ölçüm şişmesi / yanlış pozitif). 0.60, bu onaylı iki false-
+// positive'i (0.570 ve 0.511) rahat geçirir; vücudun %60'ından fazlası hâlâ
+// "eski ton" sayılırsa kesmeye devam eder.
+const SKIN_MISMATCH_RATIO_MAX = 0.60;
 // Bu sayıdan az ten benzeri piksel varsa (ör. sadece yüz görünüyor, vücut
 // kadraj dışı/giyinik) kanıt yetersizdir — ölçüm yapılmaz, kare GEÇER.
 const SKIN_MIN_SAMPLE_PIXELS = 300;
