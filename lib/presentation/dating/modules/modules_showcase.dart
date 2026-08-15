@@ -318,8 +318,8 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                         bullets: [
                           'Stile özel arka plan',
                           'İlk fotoğraf ücretsiz önizleme',
-                          '${DatingConfig.photoStandardPhotos} veya '
-                              '${DatingConfig.photoPremiumPhotos} fotoğraf paketleri',
+                          '${DatingConfig.photoStandardPhotosMin}-${DatingConfig.photoStandardPhotos} veya '
+                              '${DatingConfig.photoPremiumPhotosMin}-${DatingConfig.photoPremiumPhotos} fotoğraf paketleri',
                         ],
                       ),
                     ),
@@ -396,7 +396,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.auto_awesome,
                               title: 'AI Foto Standart',
                               sub:
-                                  '${DatingConfig.photoStandardPhotos} foto · 1 stil',
+                                  '${DatingConfig.photoStandardPhotosMin}-${DatingConfig.photoStandardPhotos} foto · 1 stil',
                               price: _price(
                                 DatingConfig.photoStandardProductId,
                                 DatingConfig.photoStandardPriceLabel,
@@ -411,7 +411,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.workspace_premium_rounded,
                               title: 'AI Foto Premium',
                               sub:
-                                  '${DatingConfig.photoPremiumPhotos} foto · 5 stil',
+                                  '${DatingConfig.photoPremiumPhotosMin}-${DatingConfig.photoPremiumPhotos} foto · 5 stil',
                               price: _price(
                                 DatingConfig.photoPremiumProductId,
                                 DatingConfig.photoPremiumPriceLabel,

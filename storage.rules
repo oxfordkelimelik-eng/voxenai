@@ -22,6 +22,15 @@ service firebase.storage {
       allow write: if false;
     }
 
+    // Reddedilen kareler: teşhis + kullanıcıya "Elenen Kareler" panelinde
+    // gösterim (2026-08-15, bkz. functions/falPhotos.js saveRejectedFrame).
+    // dating_results ile aynı kural: yalnızca Cloud Functions yazar, sahibi
+    // okur.
+    match /dating_rejected/{userId}/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

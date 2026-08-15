@@ -27,7 +27,12 @@ class DatingConfig {
   // (bkz. functions/falPhotos.js STYLE_SCENES — havuzda stil başına 20 varyant
   // var, 10 fotoya çıkmak tekrarsız çeşitliliği bozmuyor).
   // functions/falPhotos.js IMAGES_PER_STYLE ile EL İLE senkron tutulmalı.
-  static const int photosPerSet = 10; // tek üretimde/stilde çıkan foto sayısı
+  static const int photosPerSet = 10; // denenen/azami — tek üretimde/stilde
+  // "7-10 foto" VAADİ (2026-08-15): kalite kapıları bazı kareleri eler, bu
+  // yüzden gerçek teslim genelde 10'un altında — kullanıcıya azami değil
+  // ARALIK gösterilir. Yalnızca bu tabanın ALTINA düşülürse hak iade edilir
+  // (bkz. functions/falPhotos.js IMAGES_PER_STYLE_MIN, EL İLE senkron).
+  static const int photosPerSetMin = 7;
 
   // AI foto üretimi referansları:
   //   3 canlı yüz (ön / sağ / sol) + 1 zorunlu tam boy.
@@ -56,13 +61,15 @@ class DatingConfig {
   // ve mağaza kaydına bağlı olduğu için hiç değişmedi — şimdi isimleri gerçek
   // teslim edilen miktarla yeniden örtüşüyor. Kullanıcıya gösterilen sayı her
   // zaman photoStandardPhotos / photoPremiumPhotos üzerinden gelir.
-  static const int photoStandardSets = 1; // Standart: 1 stil (10 foto)
-  static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 10
+  static const int photoStandardSets = 1; // Standart: 1 stil (7-10 foto)
+  static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 10 (azami)
+  static const int photoStandardPhotosMin = photosPerSetMin * photoStandardSets; // 7 (taban)
   static const String photoStandardPriceLabel = '₺249';
   static const String photoStandardProductId = 'dating_pack_photo10';
 
-  static const int photoPremiumSets = 5; // Premium: 5 stil (50 foto)
-  static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 50
+  static const int photoPremiumSets = 5; // Premium: 5 stil (35-50 foto)
+  static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 50 (azami)
+  static const int photoPremiumPhotosMin = photosPerSetMin * photoPremiumSets; // 35 (taban)
   static const String photoPremiumPriceLabel = '₺999';
   static const String photoPremiumProductId = 'dating_pack_photo50';
 

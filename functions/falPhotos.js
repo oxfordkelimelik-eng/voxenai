@@ -142,7 +142,13 @@ const PHOTO_MODES = [
 // STYLE_SCENES'te stil başına 20 varyant var, bu yüzden 10'a çıkmak
 // (2026-08-12, eskiden 5) tekrarsız çeşitliliği bozmuyor — pickScene'in
 // modulo'su 20'nin altında hiç devreye girmiyor.
-const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (denenen/azami sayı)
+// "7-10 foto" VAADİ (2026-08-15): kalite kapıları (kimlik, yaw, ten tonu,
+// göz, dx) tasarım gereği bazı kareleri eler — tam 10 teslim nadir. Eskiden
+// HERHANGİ bir eksiklik (9/10 bile) hak iadesi tetikliyordu; artık yalnızca
+// bu tabanın ALTINA düşülürse iade edilir (bkz. finalizeChunk). IMAGES_PER_STYLE
+// (denenen chunk sayısı) DEĞİŞMEDİ — DatingConfig.photosPerSetMin ile senkron.
+const IMAGES_PER_STYLE_MIN = 7;
 // Ücretsiz ilk deneme artık TÜM stili (10 foto) değil, tek bir stildeki TEK
 // fotoğrafı üretir — kalanı hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
 // yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
@@ -2091,20 +2097,51 @@ function visionRejectionOverridden(visionReason, distance) {
     && distance < VISION_OVERRIDE_MAX_DISTANCE;
 }
 
-// A/B karşılaştırma dönemi boyunca REDDEDİLEN kareler Storage'a yazılır ki
-// "Vision haklı mı?" sorusu gözle doğrulanabilsin. Karşılaştırma bitince
-// false yapılıp bu depolama kapatılabilir.
+// Reddedilen kareler Storage'a yazılır. Başlangıçta yalnızca A/B teşhisi
+// içindi ("Vision haklı mı?" sorusu gözle doğrulanabilsin diye); 2026-08-15
+// itibariyle AYRICA kullanıcıya gösteriliyor (bkz. saveRejectedFrame'in
+// Firestore yazımı + module_flows.dart'taki "Elenen Kareler" paneli) — artık
+// yalnızca teşhis değil, ürün özelliğinin bir parçası, false yapılamaz.
 const SAVE_REJECTED_FRAMES = true;
 const DEBUG_ROOT = "dating_rejected";
 
+// gate string -> kullanıcıya gösterilecek Türkçe gerekçe. saveRejectedFrame
+// çağrılarındaki TÜM gate değerlerini kapsar (hem runOpenAiDirectChunk'taki
+// "math-...", "yaw-drift", "skin-tone", "eyes-closed", "head-dx" hem fal
+// webhook yolundaki "vision-..." — bkz. assessOutputWithVision reason'ları).
+const REJECTION_REASON_LABELS = {
+  "math-identity": "Yüz, referans fotoğraflarınla yeterince eşleşmedi",
+  "yaw-drift": "Baş açısı şablondan çok saptı",
+  "math-no-face+vision-inconclusive": "Yüz net tespit edilemedi",
+  "skin-tone": "Ten tonu tutarsızlığı tespit edildi",
+  "eyes-closed": "Gözler kapalı/yarı kapalı çıktı",
+  "head-dx": "Baş konumu şablona göre kaydı",
+  "vision-proportion": "Kafa/omuz oranı doğal görünmüyor",
+  "vision-attachment": "Boyun/baş bağlantısı doğal görünmüyor",
+  "vision-skin": "Ten tonu tutarsızlığı tespit edildi",
+  "vision-gaze": "Bakış yönü doğal görünmüyor",
+  "vision-hands": "Eller bulanık/bozuk çıktı",
+  "vision-identity": "Yüz hatları referansla yeterince eşleşmedi",
+  "vision-hair": "Saç uyumsuzluğu tespit edildi",
+  "vision-quality": "Genel görsel kalite yetersiz",
+  "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
+};
+const DEFAULT_REJECTION_REASON_LABEL = "Kalite kontrolünden geçemedi";
+function humanRejectionReason(gate) {
+  return REJECTION_REASON_LABELS[gate] || DEFAULT_REJECTION_REASON_LABEL;
+}
+
 /**
- * Reddedilen bir kareyi teşhis için saklar. Dosya adı kararın TÜM bağlamını
- * taşır (mod, chunk, deneme, hangi kapı, mesafe) — böylece görsele bakarken
- * neden elendiği ayrıca aranmaz. Tamamen fail-safe: kaydetme hatası üretimi
- * etkilemez, yalnızca loglanır.
+ * Reddedilen bir kareyi teşhis + kullanıcıya gösterim için saklar. Dosya adı
+ * kararın TÜM bağlamını taşır (mod, chunk, deneme, hangi kapı, mesafe) —
+ * böylece görsele bakarken neden elendiği ayrıca aranmaz. Storage yazımı
+ * tamamen fail-safe: hata üretimi etkilemez, yalnızca loglanır. Firestore
+ * yazımı (kullanıcının göreceği kayıt) AYRI bir fail-safe katman — o
+ * başarısız olsa bile kare zaten Storage'da durur, sadece panelde görünmez.
  */
 async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, meta) {
   if (!SAVE_REJECTED_FRAMES) return;
+  let path;
   try {
     const parts = [
       `${styleId}_c${chunkIdx}_att${attempt}`,
@@ -2112,11 +2149,28 @@ async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, me
       `gate-${meta.gate || "?"}`,
       meta.distance != null ? `dist-${meta.distance.toFixed(3)}` : null,
     ].filter(Boolean);
-    const path = `${DEBUG_ROOT}/${uid}/${jobId}/${parts.join("__")}.jpg`;
+    path = `${DEBUG_ROOT}/${uid}/${jobId}/${parts.join("__")}.jpg`;
     await bucket().file(path).save(buf, { metadata: { contentType: "image/jpeg" } });
     console.log(`REDDEDİLEN KARE KAYDEDİLDİ: ${path}${meta.detail ? ` | Vision gerekçesi: ${meta.detail}` : ""}`);
   } catch (e) {
     console.error("Reddedilen kare kaydedilemedi (teşhis kaybı, üretim etkilenmedi):", e.message || e);
+    return;
+  }
+  try {
+    // FieldValue.serverTimestamp() arrayUnion İÇİNDE kullanılamaz (Firestore
+    // hata verir) — bu yüzden Timestamp.now() (Cloud Functions'ta sunucu
+    // saatiyle aynı, güvenilir).
+    await db.doc(`users/${uid}/private/genData/genJobs/${jobId}`).set({
+      rejectedFrames: admin.firestore.FieldValue.arrayUnion({
+        path, gsUrl: `gs://${bucket().name}/${path}`,
+        styleId, chunkIdx, attempt, gate: meta.gate || "?",
+        reason: humanRejectionReason(meta.gate),
+        detail: meta.detail || null,
+        rejectedAt: admin.firestore.Timestamp.now(),
+      }),
+    }, { merge: true });
+  } catch (e) {
+    console.error("Reddedilen kare Firestore kaydı başarısız (panelde görünmeyecek):", e.message || e);
   }
 }
 
@@ -3765,10 +3819,11 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         (k) => results[k]?.status === "failed"
       ).length;
 
-      // EKSİK TESLİM = HAK İADESİ (2026-08-04). Bir stil "done" sayılıyordu
+      // EKSİK TESLİM = HAK İADESİ (2026-08-04, taban 2026-08-15'te 7'ye
+      // gevşetildi — bkz. IMAGES_PER_STYLE_MIN). Bir stil "done" sayılıyordu
       // ve iade almıyordu, tek bir fotoğraf bile üretilmişse — yani 5 fotoluk
       // ödeme yapıp 4 alan kullanıcı hiçbir şey geri almıyordu. Artık teslim
-      // edilen foto sayısı BEKLENENDEN azsa o stilin birimi geri veriliyor;
+      // edilen foto sayısı TABANIN ALTINDAysa o stilin birimi geri veriliyor;
       // kullanıcı setin tamamını (IMAGES_PER_STYLE) baştan üretebiliyor.
       //
       // "Beklenen" = o stil için AÇILAN chunk sayısı. Bu tanım ücretsiz
@@ -3777,6 +3832,13 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       // açılıyor (kilitli 4 foto hiç chunk değil), dolayısıyla 1/1 teslim
       // "tam" sayılır. Ayrıca packUnitsCharged>0 koşulu, ücretsiz denemede
       // (charged=0) iade yapılmasını ayrıca engeller.
+      //
+      // TABAN: yalnızca TAM pakette (expected === IMAGES_PER_STYLE) "7-10
+      // foto" vaadinin tabanı (IMAGES_PER_STYLE_MIN) geçerli — kalite kapıları
+      // 1-3 kareyi elemeyi tasarım gereği normal sayıyor (bkz. o sabitin
+      // gerekçesi), her eksiklikte iade artık kullanıcı deneyimini bozuyordu.
+      // Kısmi/ücretsiz durumlarda (expected < IMAGES_PER_STYLE) "aralık"
+      // kavramı anlamsız — eski davranış (herhangi bir eksiklik = iade) korunur.
       const expectedChunkCount = (k) => {
         if (k === styleId) return chunkKeys.length;
         const ch = (j.results || {})[k]?.chunks;
@@ -3786,7 +3848,9 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         const r = results[k];
         if (r?.status !== "done" || !Array.isArray(r.photoUrls)) return false;
         const expected = expectedChunkCount(k);
-        return expected > 0 && r.photoUrls.length < expected;
+        if (expected <= 0) return false;
+        const minAcceptable = expected === IMAGES_PER_STYLE ? IMAGES_PER_STYLE_MIN : expected;
+        return r.photoUrls.length < minAcceptable;
       }).length;
 
       if (successCount > 0) {

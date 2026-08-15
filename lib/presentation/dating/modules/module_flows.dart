@@ -185,6 +185,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
   Map<String, dynamic>? _jobData;
+  // startPhotoGeneration çağrısı network hatasıyla düşerse (bkz. _generate)
+  // sunucunun gerçekte işi başlatıp başlatmadığı belirsizdir; bu süre
+  // dolmadan Firestore'dan 'generating'/'done'/'failed' gelmezse asıl hata
+  // gösterilir (aksi halde kullanıcı sonsuza kadar loading'de kalır).
+  Timer? _jobTimeoutTimer;
+  // Sonuç ekranındaki "Fotoğraflar" / "Elenen Kareler" geçişi — yalnızca
+  // _rejectedFrames doluyken görünür (bkz. _resultStep).
+  bool _showRejected = false;
 
   // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
   // sonuçlanır (eğitim aşaması yok).
@@ -198,6 +206,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // Her seçilen stil DatingConfig.photosPerSet foto üretir (ör. 1 stil → 10,
   // 5 stil → 50). Paket bakiyesi de "stil" cinsinden tutulur.
   int get _photoCount => _styles.length * DatingConfig.photosPerSet;
+  // "7-10 foto" vaadinin taban ucu (bkz. DatingConfig.photosPerSetMin) —
+  // kalite kapıları bazı kareleri elediği için gerçek teslim genelde bu
+  // aralıkta kalır, kullanıcıya azami yerine aralık gösterilir.
+  int get _photoCountMin => _styles.length * DatingConfig.photosPerSetMin;
 
   /// Erişim etiketi: paket bakiyesi varsa kalan hak, yoksa nazik bir davet.
   String get _accessLabel {
@@ -209,6 +221,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   @override
   void dispose() {
     _jobSub?.cancel();
+    _jobTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -351,6 +364,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _listenToJob(uid, jobId);
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
+      // 'deadline-exceeded'/'unavailable' istemcinin bağlantıyı/isteği
+      // kaybettiği anlamına gelir — SUNUCUYA ulaşmış olabilir (bkz.
+      // startPhotoGeneration: bakiye düşümü + job='generating' yazımı TEK
+      // transaction, istemcinin ardından bağlantıyı kaybetmesinden bağımsız
+      // sürer, bkz. 2026-08-15 "network connection lost" olayı — job arka
+      // planda 10/10 tamamlandı ama istemci hiç görmedi). Doğrudan hata
+      // göstermek yerine aynı jobId ile gerçek durumu bekleyelim.
+      if (e.code == 'deadline-exceeded' || e.code == 'unavailable') {
+        _listenToJob(uid, jobId, fallbackErrorMessage: e.message?.trim());
+        return;
+      }
       setState(() {
         _stage = _AiStage.error;
         final detail = e.message?.trim();
@@ -366,15 +390,29 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _stage = _AiStage.error;
-        _errorMessage = 'Üretim başlatılamadı. Lütfen tekrar dene.';
-      });
+      // FirebaseFunctionsException DIŞINDA (soket kopması, DNS hatası vb.)
+      // de aynı belirsizlik geçerli — yukarıdaki gerekçeyle aynı fallback.
+      _listenToJob(uid, jobId, fallbackErrorMessage: 'Üretim başlatılamadı. Lütfen tekrar dene.');
     }
   }
 
-  void _listenToJob(String uid, String jobId) {
+  void _listenToJob(String uid, String jobId, {String? fallbackErrorMessage}) {
     _jobSub?.cancel();
+    _jobTimeoutTimer?.cancel();
+    // İstek sunucuya hiç ulaşmadıysa (gerçek network kopması) Firestore'da
+    // hiçbir zaman bu jobId için doküman oluşmaz — sonsuza kadar loading'de
+    // kalınmasın diye bir süre sonra asıl hatayı göster.
+    if (fallbackErrorMessage != null) {
+      _jobTimeoutTimer = Timer(const Duration(seconds: 90), () {
+        if (!mounted) return;
+        if (_stage == _AiStage.loading) {
+          setState(() {
+            _stage = _AiStage.error;
+            _errorMessage = fallbackErrorMessage;
+          });
+        }
+      });
+    }
     _jobSub = FirebaseFirestore.instance
         .doc('users/$uid/private/genData/genJobs/$jobId')
         .snapshots()
@@ -385,14 +423,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         _jobData = data;
         final status = data['status'] as String?;
         if (status == 'failed') {
+          _jobTimeoutTimer?.cancel();
           _stage = _AiStage.error;
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
         } else if (status == 'done' || _resultUrls.isNotEmpty) {
+          _jobTimeoutTimer?.cancel();
           // Üretim yalnızca ödenen (veya ücretsiz hakla açılan) stiller için
           // çalıştı; dolayısıyla dönen TÜM fotolar zaten ödenmiştir — hepsi
           // açık gösterilir, ekstra kilit/blur yok.
           _stage = _AiStage.result;
+        } else if (status == 'generating') {
+          // Sunucuya gerçekten ulaşmıştı — job canlı, fallback'e gerek yok.
+          _jobTimeoutTimer?.cancel();
         }
       });
     });
@@ -422,8 +465,16 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     return urls;
   }
 
+  /// Kalite kapılarından geçemeyip elenen kareler (bkz. functions/falPhotos.js
+  /// saveRejectedFrame'in Firestore yazımı) — "gerçek çıktı" sayısına dahil
+  /// DEĞİL, yalnızca "Elenen Kareler" panelinde gösterilir.
+  List<Map<String, dynamic>> get _rejectedFrames =>
+      (_jobData?['rejectedFrames'] as List?)?.cast<Map<String, dynamic>>() ??
+      const [];
+
   void _reset() {
     _jobSub?.cancel();
+    _jobTimeoutTimer?.cancel();
     setState(() {
       // Stil seçimi kalktı — başlangıç adımı doğrudan selfie/paket adımı
       // ve sabit tek birim (bkz. _defaultStyleId).
@@ -434,6 +485,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         ..clear()
         ..add(_defaultStyleId);
       _jobData = null;
+      _showRejected = false;
       _errorMessage = null;
       _preparing = false;
       _prepareError = null;
@@ -1244,11 +1296,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 // Stil kategorileri kaldırıldı — "N stil" ve stil rozetleri
                 // artık kullanıcı için anlamsız (hiç stil seçmiyor), sadece
                 // üretilecek foto sayısı gösteriliyor.
-                Text('$_photoCount fotoğraf',
+                //
+                // ARALIK, azami değil (2026-08-15): kalite kapıları bazı
+                // kareleri eler, tam sayı vaat etmek gerçek davranışla
+                // örtüşmüyordu (bkz. DatingConfig.photosPerSetMin).
+                Text('$_photoCountMin-$_photoCount fotoğraf',
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.w900)),
+                const SizedBox(height: 2),
+                const Text(
+                    'Kalite kontrolünden geçemeyen kareler otomatik elenir, '
+                    'bu yüzden çıktı bu aralıkta değişebilir.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
                 const SizedBox(height: 4),
                 Text(_accessLabel,
                     style: const TextStyle(color: Colors.white70)),
@@ -1535,6 +1596,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   Widget _resultStep() {
     final urls = _resultUrls;
     final locked = _lockedCount;
+    final rejected = _rejectedFrames;
+    final showingRejected = _showRejected && rejected.isNotEmpty;
     final stillGenerating = (_jobData?['status'] as String?) == 'generating';
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -1573,9 +1636,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               ],
             ),
           ],
-          // EKSİK TESLİM: sunucu, beklenenden az foto üretilen işlerde hakkı
-          // iade ediyor (bkz. falPhotos.js "EKSİK TESLİM"). Kullanıcı bunu
-          // bilmezse iade edilen hakkı kullanmaz — bu yüzden açıkça söyleniyor.
+          // EKSİK TESLİM: sunucu, artık YALNIZCA photosPerSetMin (7) altına
+          // düşen işlerde hakkı iade ediyor — 7-9 arası normal, iade tetiklemez
+          // (bkz. falPhotos.js "EKSİK TESLİM" + IMAGES_PER_STYLE_MIN). Kullanıcı
+          // bunu bilmezse iade edilen hakkı kullanmaz — bu yüzden açıkça söyleniyor.
           if (!stillGenerating && _jobData?['incompleteDelivery'] == true) ...[
             const SizedBox(height: 12),
             Container(
@@ -1592,8 +1656,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Bu üretimde beklenenden az fotoğraf çıktı, bu yüzden '
-                      'hakkını geri yükledik. Dilediğin zaman '
+                      'Bu üretimde ${DatingConfig.photosPerSetMin} fotoğrafın '
+                      'altında çıktı, bu yüzden hakkını geri yükledik. '
+                      'Dilediğin zaman ${DatingConfig.photosPerSetMin}-'
                       '${DatingConfig.photosPerSet} fotoğrafı yeniden '
                       'oluşturabilirsin.',
                       style: TextStyle(
@@ -1607,6 +1672,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ],
           const SizedBox(height: 12),
+          // Elenen kareler (bkz. _rejectedFrames) YALNIZCA varsa gösterilir —
+          // çoğu üretimde hiç yok, o zaman geçiş de hiç görünmez.
+          if (rejected.isNotEmpty) ...[
+            _resultTabToggle(acceptedCount: urls.length, rejectedCount: rejected.length),
+            const SizedBox(height: 12),
+          ],
+          if (showingRejected) ...[
+            const Text(
+                'Bu kareler kalite kontrolünden geçemedi, bu yüzden çıktı '
+                'sayısına dahil edilmedi. Yine de dilersen indirip '
+                'kullanabilirsin.',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 10),
+          ],
           GridView.count(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -1618,11 +1697,16 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             // ayırır, içerik 3:4 diye ortalanıp küçülür ve hücrenin kenar
             // boşluklarında görünmez/tıklanamaz bir alan kalır.
             childAspectRatio: 3 / 4,
-            children: [
-              for (int i = 0; i < urls.length; i++)
-                _resultTile(urls[i], index: i),
-              for (int i = 0; i < locked; i++) _lockedTile(),
-            ],
+            children: showingRejected
+                ? [
+                    for (int i = 0; i < rejected.length; i++)
+                      _rejectedTile(rejected, i),
+                  ]
+                : [
+                    for (int i = 0; i < urls.length; i++)
+                      _resultTile(urls[i], index: i),
+                    for (int i = 0; i < locked; i++) _lockedTile(),
+                  ],
           ),
           const SizedBox(height: 16),
           Center(
@@ -1639,6 +1723,67 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   Widget _resultTile(String gsUrl, {required int index}) =>
       GeneratedPhotoTile(gsUrl: gsUrl, allGsUrls: _resultUrls, index: index);
+
+  /// Elenen kare hücresi — kabul edilen fotoğraflarla AYNI görüntüleme/indirme
+  /// akışını kullanır (GeneratedPhotoTile), yalnızca gerekçe rozeti eklenir.
+  /// `allGsUrls` kasıtlı olarak yalnızca elenen kareler — tam ekranda kaydırma
+  /// kabul edilenlerle karışmaz.
+  Widget _rejectedTile(List<Map<String, dynamic>> frames, int index) {
+    final frame = frames[index];
+    return GeneratedPhotoTile(
+      gsUrl: frame['gsUrl'] as String,
+      allGsUrls: [for (final f in frames) f['gsUrl'] as String],
+      index: index,
+      badgeLabel: (frame['reason'] as String?) ?? 'Kalite kontrolünden geçemedi',
+    );
+  }
+
+  /// Sonuç ekranındaki "Fotoğraflar" / "Elenen Kareler" pil geçişi. Bu
+  /// modülde gerçek bir TabBar/SegmentedButton yok (bkz. keşif) — mevcut
+  /// pill-buton estetiğiyle tutarlı hafif bir Row/InkWell çifti.
+  Widget _resultTabToggle({required int acceptedCount, required int rejectedCount}) {
+    Widget segment(String label, bool selected, VoidCallback onTap) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? AppColors.gold : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: selected ? Colors.white : AppColors.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderGold.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          segment('Fotoğraflar ($acceptedCount)', !_showRejected,
+              () => setState(() => _showRejected = false)),
+          segment('Elenen Kareler ($rejectedCount)', _showRejected,
+              () => setState(() => _showRejected = true)),
+        ],
+      ),
+    );
+  }
 
   /// Ücretsiz denemede üretilmeyen (bkz. lockedCount) foto için kilit kartı.
   /// Bu iş zaten TAMAMLANDI (1 ücretsiz foto teslim edildi) — aynı işe kalan
@@ -1691,11 +1836,16 @@ class GeneratedPhotoTile extends StatelessWidget {
   final String gsUrl;
   final List<String> allGsUrls;
   final int index;
+  // "Elenen Kareler" panelinde reddedilme gerekçesini gösterir (bkz.
+  // functions/falPhotos.js REJECTION_REASON_LABELS) — kabul edilen
+  // fotoğraflarda null, tile normal davranır.
+  final String? badgeLabel;
   const GeneratedPhotoTile({
     super.key,
     required this.gsUrl,
     required this.allGsUrls,
     required this.index,
+    this.badgeLabel,
   });
 
   @override
@@ -1750,6 +1900,39 @@ class GeneratedPhotoTile extends StatelessWidget {
                 );
               },
             ),
+            if (badgeLabel != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
+                    decoration: BoxDecoration(
+                      borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(14)),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0),
+                          Colors.black.withValues(alpha: 0.72),
+                        ],
+                      ),
+                    ),
+                    child: Text(
+                      badgeLabel!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2),
+                    ),
+                  ),
+                ),
+              ),
             // Büyütme ipucu — fotoğrafın tıklanabilir olduğunu belli eder.
             Positioned(
               right: 6,
