@@ -11,12 +11,15 @@
 const sharp = require("sharp");
 
 // Gerçek telefon kamerası JPEG'lerine yakın kalite. AI çıktıları genelde
-// bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar. 86 -> 90:
-// GPT Image 2 "medium" kalite katmanı zaten nano-banana-pro'dan daha az
-// detaylı/keskin çıkıyor olabilir; üstüne 86 gibi belirgin bir sıkıştırma
-// eklemek "netlik düşük" şikayetini büyütüyor olabilir — 90 hâlâ "temiz AI"
-// hissini kırıyor ama gereksiz ek netlik kaybı eklemiyor.
-const JPEG_QUALITY = 90;
+// bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar. 86 -> 90
+// (2026-08-xx, "netlik düşük" şikayeti) -> 94 (2026-08-16, kullanıcı geri
+// bildirimi: fotoğraflar kalitesiz gelmeye başladı, artık dating profillerinde
+// insanlar profesyonel kameralarla da çekim yapıyor — "amatör telefon fotosu"
+// varsayımı eskisi kadar güçlü değil). 94 hâlâ AI'nin ~95+ nativesinin altında
+// (tamamen "temiz" hissi kırılıyor) ama 90'a göre belirgin daha az sıkıştırma
+// kaybı var. Yüz bölgesinde grain de artık AYRICA maskelendiği için (bkz.
+// buildGrainLayer) bu ikisi birlikte netlik şikayetini hedefliyor.
+const JPEG_QUALITY = 94;
 // Referans selfie'ler fal'a gitmeden önce yeniden kodlanırken kullanılan
 // kalite — yön düzeltmesi kimlik sinyalini bozmamalı (yüksek tut).
 const REF_JPEG_QUALITY = 92;
@@ -28,32 +31,69 @@ const REF_JPEG_QUALITY = 92;
 // kadrajın büyük kısmı). Yalnızca KÜÇÜLTÜR (withoutEnlargement).
 const REF_MAX_DIM = 2048;
 // Grain katmanının opaklığı (0-255). Çok düşük tutulmalı — amaç fark
-// edilmeyen bir doku, göze batan bir efekt değil.
-const GRAIN_ALPHA = 22;
+// edilmeyen bir doku, göze batan bir efekt değil. 22 -> 14 (2026-08-16,
+// "kalitesiz görünüyor" geri bildirimi — bkz. JPEG_QUALITY'nin gerekçesi).
+const GRAIN_ALPHA = 14;
 // Gürültü genliği (gri ton ±). Yüksek olursa "bozuk görüntü" gibi durur.
-const GRAIN_AMPLITUDE = 14;
+// 14 -> 9, aynı gerekçeyle.
+const GRAIN_AMPLITUDE = 9;
+
+/**
+ * Yüz bölgesinde grain'i YUMUŞAK KENARLI olarak söndürür (2026-08-16).
+ * NEDEN: "yapay zeka belli oluyor" hissi asıl arka plan/genel doku gibi
+ * yerlerden geliyor — kullanıcının en çok dikkat ettiği yüz bölgesine grain
+ * uygulamak sadece netlik şikayetini büyütüyor, gerçekçilik katkısı azdır.
+ * Kutu değil ELİPS + FEATHER (yumuşak geçiş) kullanılır — sert kenarlı bir
+ * "temiz yama" kendisi bir yapay zeka izi gibi görünürdü. box yoksa (yüz
+ * tespit edilemedi) etki YOK — tüm görsele eskisi gibi düz grain uygulanır
+ * (fail-safe, hiçbir kareyi bu yüzden bozmaz).
+ */
+function faceGrainScale(x, y, box) {
+  if (!box) return 1;
+  const padX = box.width * 0.25;
+  const padY = box.height * 0.30; // çene/saç çizgisini de kapsasın diye biraz fazla
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const rx = box.width / 2 + padX;
+  const ry = box.height / 2 + padY;
+  if (rx <= 0 || ry <= 0) return 1;
+  const nx = (x - cx) / rx;
+  const ny = (y - cy) / ry;
+  const d = Math.sqrt(nx * nx + ny * ny); // 0=merkez, 1=elips kenarı
+  const featherStart = 0.7; // buraya kadar grain neredeyse yok
+  const featherEnd = 1.15; // bu mesafeden sonra grain tam
+  if (d <= featherStart) return 0;
+  if (d >= featherEnd) return 1;
+  return (d - featherStart) / (featherEnd - featherStart);
+}
 
 /**
  * Rastgele luminance gürültüsünden düşük-opaklıklı bir RGBA PNG üretir.
- * sharp'ın composite() ile "overlay" harmanlamasında kullanılır.
+ * sharp'ın composite() ile "overlay" harmanlamasında kullanılır. faceBox
+ * verilirse o bölgede (yumuşak geçişle) grain azaltılır — bkz. faceGrainScale.
  */
-async function buildGrainLayer(width, height) {
+async function buildGrainLayer(width, height, faceBox = null) {
   const buf = Buffer.alloc(width * height * 4);
   for (let p = 0; p < width * height; p++) {
     const v = 128 + Math.round((Math.random() - 0.5) * 2 * GRAIN_AMPLITUDE);
     const gray = Math.max(0, Math.min(255, v));
+    const x = p % width;
+    const y = (p - x) / width;
+    const alpha = Math.round(GRAIN_ALPHA * faceGrainScale(x, y, faceBox));
     const off = p * 4;
     buf[off] = gray;
     buf[off + 1] = gray;
     buf[off + 2] = gray;
-    buf[off + 3] = GRAIN_ALPHA;
+    buf[off + 3] = alpha;
   }
   return sharp(buf, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
 /**
- * Görsele hafif grain + gerçekçi JPEG sıkıştırma uygular. Herhangi bir
- * adımda hata olursa ORİJİNAL buffer'ı döner (üretimi asla bloklamaz).
+ * Görsele hafif grain (yüz bölgesi hariç/azaltılmış) + gerçekçi JPEG
+ * sıkıştırma uygular. Herhangi bir adımda hata olursa ORİJİNAL buffer'ı
+ * döner (üretimi asla bloklamaz) — yüz tespiti başarısız olursa da aynı
+ * fail-safe: grain tüm görsele düz uygulanır, adım hiç iptal edilmez.
  */
 async function addPhoneCameraTexture(buf) {
   try {
@@ -61,7 +101,16 @@ async function addPhoneCameraTexture(buf) {
     const meta = await image.metadata();
     if (!meta.width || !meta.height) return buf;
 
-    const grain = await buildGrainLayer(meta.width, meta.height);
+    let faceBox = null;
+    try {
+      const { detectMainFace } = require("./faceQuality");
+      const face = await detectMainFace(buf);
+      if (face) faceBox = face.box;
+    } catch (e) {
+      console.error("Doku için yüz tespiti başarısız (grain düz uygulanacak):", e.message || e);
+    }
+
+    const grain = await buildGrainLayer(meta.width, meta.height, faceBox);
     return await image
       .composite([{ input: grain, blend: "overlay" }])
       .jpeg({ quality: JPEG_QUALITY, chromaSubsampling: "4:2:0", mozjpeg: true })
