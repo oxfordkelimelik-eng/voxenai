@@ -13,10 +13,26 @@ import 'dating_widgets.dart';
 class AiLoadingView extends StatefulWidget {
   final List<String> steps;
   final String hint;
+  // Kısa işlemler (~10-30sn) için VARSAYILANLAR değişmedi: sabit süreli
+  // animasyon, tavana ulaşınca durur (aşağıdaki continuousProgress:false yolu).
+  final Duration progressDuration;
+  final double progressCeiling;
+  final Duration stepInterval;
+  // TRUE olunca ilerleme SABİT bir animasyon süresine değil GEÇEN GERÇEK
+  // SÜREYE dayanır ve ceiling'e üstel olarak yaklaşır — matematiksel olarak
+  // ASLA tam durup donmaz (sadece görünmez derecede yavaşlar). Dakikalarca
+  // sürebilen işler için (bkz. AI foto üretimi çağrı yeri): eski sabit-süreli
+  // animasyon 28sn'de %91'e ulaşıp SONSUZA DEK orada donuyordu — kullanıcı
+  // "takılı kaldı" sanıyordu, oysa üretim hâlâ sürüyordu.
+  final bool continuousProgress;
   const AiLoadingView({
     super.key,
     required this.steps,
     this.hint = 'Bu işlem genelde ~10 saniye sürer',
+    this.progressDuration = const Duration(seconds: 28),
+    this.progressCeiling = 0.91,
+    this.stepInterval = const Duration(milliseconds: 2800),
+    this.continuousProgress = false,
   });
 
   @override
@@ -28,12 +44,14 @@ class _AiLoadingViewState extends State<AiLoadingView>
   late final AnimationController _pulse;
   late final AnimationController _rotate;
   late final AnimationController _progress;
+  late final DateTime _startTime;
   int _stepIndex = 0;
   Timer? _stepTimer;
 
   @override
   void initState() {
     super.initState();
+    _startTime = DateTime.now();
     _pulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
@@ -42,13 +60,16 @@ class _AiLoadingViewState extends State<AiLoadingView>
       vsync: this,
       duration: const Duration(seconds: 14),
     )..repeat();
-    // Asimptotik ilerleme: ~%92'ye yaklaşır, %100'e tam dolmaz (bitiş ekranı
-    // parent'ta değişince loader kapanır — %100'de bozuk görünüm olmaz).
+    // Asimptotik ilerleme: ceiling'e yaklaşır, %100'e tam dolmaz (bitiş
+    // ekranı parent'ta değişince loader kapanır — %100'de bozuk görünüm
+    // olmaz). continuousProgress:true modunda bu controller'ın .value'su
+    // KULLANILMIYOR (bkz. _displayProgress) — yine de AnimatedBuilder'ı
+    // düzenli tetiklemesi zararsız, o yüzden sadeleştirmeye gerek yok.
     _progress = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 28),
+      duration: widget.progressDuration,
     )..forward();
-    _stepTimer = Timer.periodic(const Duration(milliseconds: 2800), (_) {
+    _stepTimer = Timer.periodic(widget.stepInterval, (_) {
       if (!mounted) return;
       setState(() => _stepIndex = (_stepIndex + 1) % widget.steps.length);
     });
@@ -64,10 +85,22 @@ class _AiLoadingViewState extends State<AiLoadingView>
   }
 
   double get _displayProgress {
+    final ceiling = widget.progressCeiling;
+    if (widget.continuousProgress) {
+      // Sabit süreli animasyon yerine GERÇEK GEÇEN SÜREYE dayalı üstel
+      // yaklaşım — bkz. widget.continuousProgress dokümantasyonu. ln(10)≈2.3
+      // katsayısı: t=1 (progressDuration kadar süre geçince) ceiling'in
+      // ~%90'ına ulaşır; sonrasında kalan mesafeye sonsuza dek (görünmez
+      // derecede yavaşlayarak) yaklaşmaya devam eder, asla donmaz.
+      final elapsedMs = DateTime.now().difference(_startTime).inMilliseconds;
+      final t = elapsedMs / widget.progressDuration.inMilliseconds;
+      final eased = 1 - math.exp(-t * 2.3);
+      return (eased * ceiling).clamp(0.0, ceiling);
+    }
     final t = _progress.value;
-    // easeOutCubic benzeri — sona doğru yavaşlar, tavan ~0.91
+    // easeOutCubic benzeri — sona doğru yavaşlar, tavana ulaşınca DURUR.
     final eased = 1 - math.pow(1 - t, 3).toDouble();
-    return (eased * 0.91).clamp(0.0, 0.91);
+    return (eased * ceiling).clamp(0.0, ceiling);
   }
 
   @override

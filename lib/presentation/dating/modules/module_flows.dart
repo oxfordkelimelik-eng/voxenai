@@ -194,12 +194,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // _rejectedFrames doluyken görünür (bkz. _resultStep).
   bool _showRejected = false;
 
-  // Adım adım yükleme mesajları — zero-shot üretim saniyeler içinde
-  // sonuçlanır (eğitim aşaması yok).
+  // Adım adım yükleme mesajları. Üretim (chunk başına kalite kapıları +
+  // gerekirse farklı şablonla yeniden deneme, bkz. falPhotos.js
+  // OPENAI_DIRECT_MAX_ATTEMPTS) genelde 5-6 dakika sürer — mesajlar bunu
+  // bilerek kullanıcıya bekleme süresini önceden söylüyor ve döngü (bkz.
+  // AiLoadingView.stepInterval) birkaç kez tekrar edecek kadar yavaş.
   static const _uploadingSteps = ['Üretim başlatılıyor…'];
   static const _generatingSteps = [
     'Yüzün referans alınıyor…',
+    'Bu üretim genelde 5-6 dakika sürer…',
     'Sahneler uygulanıyor…',
+    'Kalite kontrolleri yapılıyor, düşük kaliteli kareler otomatik eleniyor…',
+    'Bazı kareler daha iyi hâle getiriliyor…',
+    'Hâlâ çalışıyoruz, son adımlar biraz uzun sürebilir…',
     'Son kontroller…',
   ];
 
@@ -901,7 +908,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       body: switch (_stage) {
         _AiStage.style => _styleStep(),
         _AiStage.package => _packageStep(),
-        _AiStage.loading => AiLoadingView(steps: _loadingSteps),
+        _AiStage.loading => AiLoadingView(
+            steps: _loadingSteps,
+            hint: 'Bu işlem genelde 5-6 dakika sürer',
+            // Sabit süreli değil, geçen gerçek süreye dayalı ilerleme —
+            // 5-6 dakikalık gerçek üretim süresince asla %-sinde donmaz
+            // (bkz. AiLoadingView.continuousProgress dokümantasyonu).
+            continuousProgress: true,
+            progressDuration: const Duration(minutes: 5),
+            progressCeiling: 0.97,
+            stepInterval: const Duration(seconds: 14),
+          ),
         _AiStage.result => _resultStep(),
         _AiStage.error => _errorStep(),
         _AiStage.teaser => _teaserStep(),
