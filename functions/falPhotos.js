@@ -142,13 +142,7 @@ const PHOTO_MODES = [
 // STYLE_SCENES'te stil başına 20 varyant var, bu yüzden 10'a çıkmak
 // (2026-08-12, eskiden 5) tekrarsız çeşitliliği bozmuyor — pickScene'in
 // modulo'su 20'nin altında hiç devreye girmiyor.
-const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (denenen/azami sayı)
-// "7-10 foto" VAADİ (2026-08-15): kalite kapıları (kimlik, yaw, ten tonu,
-// göz, dx) tasarım gereği bazı kareleri eler — tam 10 teslim nadir. Eskiden
-// HERHANGİ bir eksiklik (9/10 bile) hak iadesi tetikliyordu; artık yalnızca
-// bu tabanın ALTINA düşülürse iade edilir (bkz. finalizeChunk). IMAGES_PER_STYLE
-// (denenen chunk sayısı) DEĞİŞMEDİ — DatingConfig.photosPerSetMin ile senkron.
-const IMAGES_PER_STYLE_MIN = 7;
+const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
 // Ücretsiz ilk deneme artık TÜM stili (10 foto) değil, tek bir stildeki TEK
 // fotoğrafı üretir — kalanı hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
 // yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
@@ -2183,11 +2177,21 @@ async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, me
  * birlikte çalışmıyor, kod paylaşımı yerine bilinçli olarak ayrı tutuldu (fal
  * webhook'u dış bir HTTP isteği, bu ise doğrudan senkron çağrı zinciri).
  */
-// Chunk başına en fazla deneme (ilk + kalite-tetikli 1 retry) — fal
-// webhook'undaki maybeRetryBadChunk ile AYNI "1 kez yeniden dene" politikası.
-// Firestore bayrağı GEREKMİYOR (fal'daki gibi async/webhook re-entry riski
-// yok — bu tek bir senkron çağrı zinciri, döngü aynı fonksiyon içinde).
-const OPENAI_DIRECT_MAX_ATTEMPTS = 2;
+// Chunk başına en fazla deneme (2026-08-16, 2'den 6'ya çıkarıldı — kullanıcı
+// onayıyla, "10 foto garantisi" isteği). ÖNEMLİ AYRIM (bkz. 2026-07-22 kredi
+// yakma olayı, [[fal-credit-burn-incident]]): bu YALNIZCA KALİTE KAPISI
+// reddi retry'idir (chunk'ın çıktısı kimlik/yaw/ten/dx/göz kapılarından
+// geçemedi) — ALTYAPI/SAĞLAYICI hatası retry'i (fetch failed, 429 vb.) HÂLÂ
+// YASAK ve bu sayaçtan TAMAMEN AYRI (bkz. generateForMode null dönerse
+// "ÜRETİM BAŞARISIZ" log satırı — o da bu sayacı kullanıyor ama asıl 429
+// koruması OPENAI_IMAGE_MAX_CONCURRENCY kuyruğunda, burada değil).
+// Her deneme GERÇEK OpenAI ücreti — 6, chunk başına en kötü ihtimalle ~6x
+// maliyet demek. Bu sayıyı ARTIRMADAN önce mutlaka kullanıcıya danış (aynı
+// kural yaw/dx eşiklerinde de geçerli, dosyanın diğer yerlerine bkz.).
+// Şablon havuzu bu sayıyla SENKRON tutulmalı (bkz. IMAGES_PER_STYLE * 6
+// dispatch'teki pickTemplatesFromPool çağrısı + candidates dizisi) — aksi
+// halde 3. denemeden sonra "farklı şablon" diye aynı şablon tekrar denenir.
+const OPENAI_DIRECT_MAX_ATTEMPTS = 6;
 
 // YAW (KAFANIN YANA DÖNÜKLÜĞÜ) SAPMA SINIRI (2026-08-11).
 //
@@ -3129,11 +3133,20 @@ exports.startPhotoGeneration = onCall(
   // senkron olarak tamamlanıyor (webhook yok) — kimlik kapısı için tfjs/
   // face-api yükleniyor (2GiB gerektiriyor, bkz. faceQuality.js diğer
   // kullanımları) ve OpenAI üretimi + olası 429 backoff'ları zaman alabilir.
+  //
+  // timeoutSeconds 540->900 (2026-08-16): OPENAI_DIRECT_MAX_ATTEMPTS 2->6
+  // olunca en kötü ihtimalde tek bir chunk 6 deneme boyunca (her biri gerçek
+  // bir OpenAI çağrısı + Vision + kapılar) sürebilir; OPENAI_IMAGE_MAX_CONCURRENCY
+  // kuyruğu (=2) 10 chunk'ı sıraya soktuğunda toplam süre eski 540sn sınırını
+  // rahat aşabilir. İstemci tarafı (module_flows.dart HttpsCallableOptions)
+  // BUNUNLA SENKRON tutulmalı — aksi halde istemci sunucudan önce vazgeçip
+  // "network connection lost" görür (bkz. 2026-08-15 gerçek olay, aynı kökten
+  // — client/server timeout uyumsuzluğu).
   {
     secrets: [FAL_KEY, OPENAI_KEY],
     region: "europe-west1",
     memory: "2GiB",
-    timeoutSeconds: 540,
+    timeoutSeconds: 900,
   },
   async (request) => {
     if (!request.auth) {
@@ -3219,19 +3232,27 @@ exports.startPhotoGeneration = onCall(
                     : ` (bant yok — tüm havuz, boy=${bodyProfile.heightRange || "belirtilmemiş"})`)
     );
     const recentNames = await recentTemplateNames(uid);
-    // Her chunk için İKİ YEDEK şablon da seçilir. İki ayrı işe yararlar:
+    // Her chunk için (OPENAI_DIRECT_MAX_ATTEMPTS - 1) YEDEK şablon seçilir
+    // (2026-08-16, 2 yedekten 5 yedeğe çıkarıldı — "10 foto garantisi" için
+    // deneme sayısı 6'ya çıkarılırken BUNUNLA SENKRON tutulmalı, aksi halde
+    // ileri denemeler "farklı şablon" sanıp aynı şablonu tekrar dener). İki
+    // ayrı işe yararlar:
     //  1) birincil KULLANILAMAZSA (yüz yok / yüz çok küçük) atlanıp yedeğe
     //     geçilir — bkz. prepareTemplate,
     //  2) bir deneme kalite kapısını geçemezse SONRAKİ deneme yeni bir
     //     şablonla yapılır — aynı bozuk şablonla tekrar denemek boşuna.
-    // İki yedek, "birincil kullanılamaz + ilk deneme de başarısız" durumunda
-    // bile 2. denemeye taze bir şablon kalmasını garanti eder.
     // Yedekler ayrı tutulur; lockedCount ve ücretsiz-deneme hesabı yalnızca
     // BİRİNCİL listeye bakar, yedeklerin varlığı bu sayıları değiştirmez.
+    // NOT: havuz (files) bu kadar çeşitliliği kaldıramayacak kadar küçükse
+    // pickTemplatesFromPool aynı dosyayı döngüsel tekrarla doldurur (bkz. o
+    // fonksiyonun ve aşağıdaki TEKİLLEŞTİRME'nin gerekçesi) — bazı boy/beden
+    // bantlarında son denemeler yine de aynı şablona düşebilir, fail-safe.
     const templatesByStyle = {};
     const sparesByStyle = {};
     for (const styleId of styles) {
-      const all = pickTemplatesFromPool(files, jobId, IMAGES_PER_STYLE * 3, recentNames);
+      const all = pickTemplatesFromPool(
+        files, jobId, IMAGES_PER_STYLE * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
+      );
       templatesByStyle[styleId] = all.slice(0, IMAGES_PER_STYLE);
       sparesByStyle[styleId] = all.slice(IMAGES_PER_STYLE);
     }
@@ -3355,15 +3376,24 @@ exports.startPhotoGeneration = onCall(
 
           const spares = sparesByStyle[styleId] || [];
           await Promise.all(picked.map(async (file, i) => {
-            // [birincil, yedek1, yedek2] — her chunk'ın KENDİ yedekleri var
-            // (i ve IMAGES_PER_STYLE+i konumları), böylece paralel çalışan
-            // chunk'lar aynı yedeğe düşüp aynı kareyi üretmez.
-            const candidates = [file, spares[i], spares[IMAGES_PER_STYLE + i]].filter(Boolean);
-            // TEKİLLEŞTİRME (2026-08-12): havuz IMAGES_PER_STYLE*3'ten küçükse
-            // (ör. test için elle küçültülmüş bir havuz) pickTemplatesFromPool
-            // aynı dosyayı döngüsel tekrarla dolduruyor — bu durumda birincil
-            // ve "yedekler" AYNI GCS nesnesine işaret edebiliyor. signedDownloadUrl
-            // her çağrıda dosyanın metadata'sına yeni bir token YAZIYOR
+            // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
+            // (i, IMAGES_PER_STYLE+i, 2*IMAGES_PER_STYLE+i, ... konumları),
+            // böylece paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi
+            // üretmez. Yedek sayısı (OPENAI_DIRECT_MAX_ATTEMPTS - 1 = 5) o
+            // sabitle senkron — bkz. tanımının yanındaki gerekçe.
+            const candidates = [
+              file,
+              ...Array.from(
+                { length: OPENAI_DIRECT_MAX_ATTEMPTS - 1 },
+                (_, k) => spares[k * IMAGES_PER_STYLE + i]
+              ),
+            ].filter(Boolean);
+            // TEKİLLEŞTİRME (2026-08-12): havuz IMAGES_PER_STYLE*ATTEMPTS'ten
+            // küçükse (ör. test için elle küçültülmüş bir havuz)
+            // pickTemplatesFromPool aynı dosyayı döngüsel tekrarla dolduruyor
+            // — bu durumda birincil ve "yedekler" AYNI GCS nesnesine işaret
+            // edebiliyor. signedDownloadUrl her çağrıda dosyanın metadata'sına
+            // yeni bir token YAZIYOR
             // (file.setMetadata); aynı nesneye 2-3 eşzamanlı yazma isteği
             // GERÇEK bir olay: "metadata was edited during the operation" 409
             // hatasıyla çöküyordu. İsme göre tekilleştirip her benzersiz dosya
@@ -3819,11 +3849,14 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         (k) => results[k]?.status === "failed"
       ).length;
 
-      // EKSİK TESLİM = HAK İADESİ (2026-08-04, taban 2026-08-15'te 7'ye
-      // gevşetildi — bkz. IMAGES_PER_STYLE_MIN). Bir stil "done" sayılıyordu
-      // ve iade almıyordu, tek bir fotoğraf bile üretilmişse — yani 5 fotoluk
-      // ödeme yapıp 4 alan kullanıcı hiçbir şey geri almıyordu. Artık teslim
-      // edilen foto sayısı TABANIN ALTINDAysa o stilin birimi geri veriliyor;
+      // EKSİK TESLİM = HAK İADESİ (2026-08-04; "7-10 foto" gevşetmesi
+      // 2026-08-16'da geri alındı — bkz. OPENAI_DIRECT_MAX_ATTEMPTS: artık
+      // chunk başarısız olsa bile 6 denemeye kadar FARKLI şablonlarla tekrar
+      // deneniyor, yani eksik teslim tasarım gereği NADİR olmalı; olduğunda
+      // yine tam iade mantıklı). Bir stil "done" sayılıyordu ve iade
+      // almıyordu, tek bir fotoğraf bile üretilmişse — yani 5 fotoluk ödeme
+      // yapıp 4 alan kullanıcı hiçbir şey geri almıyordu. Artık teslim
+      // edilen foto sayısı BEKLENENDEN azsa o stilin birimi geri veriliyor;
       // kullanıcı setin tamamını (IMAGES_PER_STYLE) baştan üretebiliyor.
       //
       // "Beklenen" = o stil için AÇILAN chunk sayısı. Bu tanım ücretsiz
@@ -3832,13 +3865,6 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       // açılıyor (kilitli 4 foto hiç chunk değil), dolayısıyla 1/1 teslim
       // "tam" sayılır. Ayrıca packUnitsCharged>0 koşulu, ücretsiz denemede
       // (charged=0) iade yapılmasını ayrıca engeller.
-      //
-      // TABAN: yalnızca TAM pakette (expected === IMAGES_PER_STYLE) "7-10
-      // foto" vaadinin tabanı (IMAGES_PER_STYLE_MIN) geçerli — kalite kapıları
-      // 1-3 kareyi elemeyi tasarım gereği normal sayıyor (bkz. o sabitin
-      // gerekçesi), her eksiklikte iade artık kullanıcı deneyimini bozuyordu.
-      // Kısmi/ücretsiz durumlarda (expected < IMAGES_PER_STYLE) "aralık"
-      // kavramı anlamsız — eski davranış (herhangi bir eksiklik = iade) korunur.
       const expectedChunkCount = (k) => {
         if (k === styleId) return chunkKeys.length;
         const ch = (j.results || {})[k]?.chunks;
@@ -3848,9 +3874,7 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         const r = results[k];
         if (r?.status !== "done" || !Array.isArray(r.photoUrls)) return false;
         const expected = expectedChunkCount(k);
-        if (expected <= 0) return false;
-        const minAcceptable = expected === IMAGES_PER_STYLE ? IMAGES_PER_STYLE_MIN : expected;
-        return r.photoUrls.length < minAcceptable;
+        return expected > 0 && r.photoUrls.length < expected;
       }).length;
 
       if (successCount > 0) {

@@ -169,7 +169,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         icon: Icons.auto_awesome,
                         title: 'Standart Paket',
                         sub:
-                            '${DatingConfig.photoStandardPhotosMin}-${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
+                            '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
                         price: _price(
                           DatingConfig.photoStandardProductId,
                           DatingConfig.photoStandardPriceLabel,
@@ -185,7 +185,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         icon: Icons.auto_awesome,
                         title: 'Premium Paket',
                         sub:
-                            '${DatingConfig.photoPremiumPhotosMin}-${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
+                            '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
                         price: _price(
                           DatingConfig.photoPremiumProductId,
                           DatingConfig.photoPremiumPriceLabel,

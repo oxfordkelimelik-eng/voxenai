@@ -206,10 +206,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // Her seçilen stil DatingConfig.photosPerSet foto üretir (ör. 1 stil → 10,
   // 5 stil → 50). Paket bakiyesi de "stil" cinsinden tutulur.
   int get _photoCount => _styles.length * DatingConfig.photosPerSet;
-  // "7-10 foto" vaadinin taban ucu (bkz. DatingConfig.photosPerSetMin) —
-  // kalite kapıları bazı kareleri elediği için gerçek teslim genelde bu
-  // aralıkta kalır, kullanıcıya azami yerine aralık gösterilir.
-  int get _photoCountMin => _styles.length * DatingConfig.photosPerSetMin;
 
   /// Erişim etiketi: paket bakiyesi varsa kalan hak, yoksa nazik bir davet.
   String get _accessLabel {
@@ -348,9 +344,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             options: HttpsCallableOptions(
               // GPT2 (OpenAI direct) yolu senkron çalışıyor ve tüm fotoğraflar
               // bitene kadar dönmüyor (bkz. falPhotos.js runOpenAiDirectChunk) —
-              // istemci timeout'u sunucudaki timeoutSeconds (540s) ile eşleşmeli,
-              // yoksa sunucu hâlâ üretirken istemci "deadline-exceeded" fırlatıyor.
-              timeout: const Duration(seconds: 540),
+              // istemci timeout'u sunucudaki timeoutSeconds (900s, 2026-08-16'da
+              // OPENAI_DIRECT_MAX_ATTEMPTS 2->6 olunca 540'tan yükseltildi) ile
+              // eşleşmeli, yoksa sunucu hâlâ üretirken istemci "deadline-exceeded"
+              // fırlatıyor (bkz. 2026-08-15 gerçek olay, aynı kökten uyumsuzluk).
+              timeout: const Duration(seconds: 900),
             ),
           )
           .call({
@@ -1296,20 +1294,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 // Stil kategorileri kaldırıldı — "N stil" ve stil rozetleri
                 // artık kullanıcı için anlamsız (hiç stil seçmiyor), sadece
                 // üretilecek foto sayısı gösteriliyor.
-                //
-                // ARALIK, azami değil (2026-08-15): kalite kapıları bazı
-                // kareleri eler, tam sayı vaat etmek gerçek davranışla
-                // örtüşmüyordu (bkz. DatingConfig.photosPerSetMin).
-                Text('$_photoCountMin-$_photoCount fotoğraf',
+                Text('$_photoCount fotoğraf',
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 22,
                         fontWeight: FontWeight.w900)),
-                const SizedBox(height: 2),
-                const Text(
-                    'Kalite kontrolünden geçemeyen kareler otomatik elenir, '
-                    'bu yüzden çıktı bu aralıkta değişebilir.',
-                    style: TextStyle(color: Colors.white70, fontSize: 11)),
                 const SizedBox(height: 4),
                 Text(_accessLabel,
                     style: const TextStyle(color: Colors.white70)),
@@ -1636,10 +1625,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               ],
             ),
           ],
-          // EKSİK TESLİM: sunucu, artık YALNIZCA photosPerSetMin (7) altına
-          // düşen işlerde hakkı iade ediyor — 7-9 arası normal, iade tetiklemez
-          // (bkz. falPhotos.js "EKSİK TESLİM" + IMAGES_PER_STYLE_MIN). Kullanıcı
-          // bunu bilmezse iade edilen hakkı kullanmaz — bu yüzden açıkça söyleniyor.
+          // EKSİK TESLİM: sunucu, beklenenden az foto üretilen işlerde hakkı
+          // iade ediyor (bkz. falPhotos.js "EKSİK TESLİM"). 2026-08-16'dan
+          // itibaren bu artık NADİR olmalı — chunk başarısız olursa sunucu
+          // 6 denemeye kadar farklı şablonlarla tekrar deniyor (bkz.
+          // OPENAI_DIRECT_MAX_ATTEMPTS). Kullanıcı bunu bilmezse iade edilen
+          // hakkı kullanmaz — bu yüzden açıkça söyleniyor.
           if (!stillGenerating && _jobData?['incompleteDelivery'] == true) ...[
             const SizedBox(height: 12),
             Container(
@@ -1656,9 +1647,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Bu üretimde ${DatingConfig.photosPerSetMin} fotoğrafın '
-                      'altında çıktı, bu yüzden hakkını geri yükledik. '
-                      'Dilediğin zaman ${DatingConfig.photosPerSetMin}-'
+                      'Bu üretimde beklenenden az fotoğraf çıktı, bu yüzden '
+                      'hakkını geri yükledik. Dilediğin zaman '
                       '${DatingConfig.photosPerSet} fotoğrafı yeniden '
                       'oluşturabilirsin.',
                       style: TextStyle(
