@@ -21,13 +21,21 @@ final datingPurchaseServiceProvider = Provider<DatingPurchaseService>((ref) {
   return service;
 });
 
-/// Mağaza fiyatı; ürün henüz yüklenmediyse fallback etiket.
+/// Mağaza fiyatı — App Store / Play Store'dan gelir ve kullanıcının mağaza
+/// ülkesine göre ZATEN yerelleştirilmiştir (Türkiye'de ₺, ABD'de $ görünür).
+///
+/// ÖNEMLİ: ürün henüz yüklenmediyse SABİT BİR FİYAT GÖSTERİLMEZ. Eskiden
+/// DatingConfig'teki ₺ etiketleri (₺99/₺249/₺999) yedek olarak basılıyordu;
+/// bunlar App Store Connect'teki gerçek fiyat basamaklarıyla uyuşmak zorunda
+/// olmadığı için kullanıcıya tahsil edilenden FARKLI bir fiyat gösterme riski
+/// taşıyordu (App Store Review "yanıltıcı fiyat" riski). Artık fiyat yalnızca
+/// mağazadan geldiğinde gösterilir; gelmediyse nötr bir yer tutucu basılır.
 String datingStorePrice(
   DatingPurchaseService service,
-  String productId,
-  String fallback,
-) =>
-    service.productFor(productId)?.price ?? fallback;
+  String productId, [
+  String placeholder = '…',
+]) =>
+    service.productFor(productId)?.price ?? placeholder;
 
 // ============================================================
 // ONBOARDING QUIZ CEVAPLARI (Bölüm 2)

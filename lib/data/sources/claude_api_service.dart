@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:dio/dio.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
@@ -11,37 +10,29 @@ import '../../domain/entities/region_analysis.dart';
 import '../../domain/entities/intake_profile.dart';
 import '../../domain/repositories/repositories.dart';
 
-/// Google Gemini API ile multimodal vision analizi + form tabanlı fallback.
+/// OpenAI (gpt-4o) ile multimodal vision analizi + form tabanlı fallback.
+///
+/// NOT (2026-08-20): sınıf adı ve `analyzeImage`/`chat` Cloud Function adları
+/// tarihsel nedenlerle korunmuştur. Arka uçtaki sağlayıcı Google Gemini'den
+/// OpenAI'ye taşındı (bkz. functions/aiProxy.js) — Gemini projeden tamamen
+/// kaldırıldı, böylece tek AI sağlayıcı kaldı ve kullanıcı fotoğrafları
+/// yalnızca DPA kapsamındaki ücretli bir servise gidiyor.
 class ClaudeApiService {
-  final Dio _dio;
+  // Her ikisi de artık doğrudan kullanılmıyor (istemcide anahtar yok, loglama
+  // sunucu tarafına taşındı) ama bağımlılık enjeksiyonu imzasını ve olası
+  // ileri kullanımı bozmamak için tutuldu.
+  // ignore: unused_field
   final FlutterSecureStorage _secureStorage;
+  // ignore: unused_field
   final Logger _logger = Logger();
 
   ClaudeApiService({required FlutterSecureStorage secureStorage})
-    : _dio = Dio(
-        BaseOptions(
-          baseUrl: ApiConfig.geminiBaseUrl,
-          connectTimeout: const Duration(seconds: ApiConfig.connectTimeout),
-          receiveTimeout: const Duration(seconds: ApiConfig.receiveTimeout),
-          headers: {'content-type': 'application/json'},
-        ),
-      ),
-      _secureStorage = secureStorage;
+    : _secureStorage = secureStorage;
 
-  /// Yalnızca kullanıcının ELLE girdiği anahtarı döner. Gömülü/varsayılan
-  /// anahtar YOKTUR — gerçek anahtar sunucudaki proxy'de gizlidir.
-  Future<String?> _getUserApiKey() async {
-    final stored = await _secureStorage.read(key: StorageKeys.apiKey);
-    if (stored != null && stored.isNotEmpty) return stored;
-    return null;
-  }
-
-  /// AI analizi mümkün mü? Proxy açıksa anahtar gerekmez (sunucu sağlar);
-  /// kapalıysa yalnızca kullanıcı kendi anahtarını girdiyse mümkündür.
-  Future<bool> hasApiKey() async {
-    if (ApiConfig.useProxy) return true;
-    return (await _getUserApiKey()) != null;
-  }
+  /// AI analizi her zaman sunucu proxy'si üzerinden yapılır; istemcide
+  /// anahtar YOKTUR. (2026-08-20: kullanıcının kendi anahtarını girip
+  /// doğrudan Gemini'ye gitmesi yolu kaldırıldığı için burası artık sabit.)
+  Future<bool> hasApiKey() async => true;
 
   // ============================================================
   // YÜZ ANALİZİ (ön + sağ + sol açı)
@@ -162,56 +153,16 @@ class ClaudeApiService {
       });
     }
 
-    // 1) Önce Cloud Function proxy'yi dene (anahtar sunucuda gizli)
-    if (ApiConfig.useProxy) {
-      try {
-        return await _callVisionProxy(images, promptText);
-      } catch (e) {
-        _logger.w('Proxy başarısız, doğrudan API\'ye düşülüyor: $e');
-        // proxy başarısızsa aşağıdaki doğrudan çağrıya devam et
-      }
-    }
-
-    // 2) Doğrudan Gemini API — yalnızca kullanıcı KENDİ anahtarını girdiyse.
-    //    Gömülü anahtar yoktur; aksi halde yetkisiz hatası verilir.
-    final apiKey = await _getUserApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw const UnauthorizedFailure();
-    }
-
-    try {
-      final parts = <Map<String, dynamic>>[
-        {'text': promptText},
-        for (final img in images)
-          {
-            'inline_data': {
-              'mime_type': img['mimeType'],
-              'data': img['data'],
-            },
-          },
-      ];
-      final response = await _dio.post(
-        '/models/${ApiConfig.geminiModel}:generateContent',
-        queryParameters: {'key': apiKey},
-        data: {
-          'contents': [
-            {'parts': parts},
-          ],
-          'generationConfig': {
-            'maxOutputTokens': ApiConfig.maxTokensAnalysis,
-            'temperature': 0.4,
-          },
-        },
-      );
-
-      return _extractText(response.data);
-    } on DioException catch (e) {
-      _logger.e('Dio Hatası: ${e.message}');
-      if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
-        throw const UnauthorizedFailure();
-      }
-      throw NetworkFailure(e.message ?? 'Bağlantı hatası');
-    }
+    // TEK YOL: Cloud Function proxy (anahtar sunucuda gizli).
+    //
+    // DOĞRUDAN API YEDEĞİ KALDIRILDI (2026-08-20): burada eskiden, proxy
+    // başarısız olursa kullanıcının kendi Gemini anahtarıyla doğrudan
+    // generativelanguage.googleapis.com'a giden bir yol vardı. Gemini
+    // projeden tamamen kaldırıldığı için bu yol da kaldırıldı — fotoğrafın
+    // cihazdan çıktığı TEK hedef artık kendi sunucumuz, oradan da yalnızca
+    // OpenAI. Bu, gizlilik politikasındaki "kime gönderiliyor" beyanını
+    // istisnasız doğru tutuyor (App Store 5.1.1(i)/5.1.2(i)).
+    return await _callVisionProxy(images, promptText);
   }
 
   /// Görsel analizini Cloud Function proxy üzerinden yapar (anahtar sunucuda).
@@ -534,40 +485,9 @@ class ClaudeApiService {
       contents.add({'role': role, 'parts': [{'text': text}]});
     }
 
-    // 1) Önce Cloud Function proxy (anahtar sunucuda gizli)
-    if (ApiConfig.useProxy) {
-      try {
-        return await _callChatProxy(contents);
-      } catch (e) {
-        _logger.w('Chat proxy başarısız, doğrudan API deneniyor: $e');
-      }
-    }
-
-    // 2) Doğrudan Gemini — yalnızca kullanıcı kendi anahtarını girdiyse
-    final apiKey = await _getUserApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
-      throw const UnauthorizedFailure();
-    }
-
-    try {
-      final response = await _dio.post(
-        '/models/${ApiConfig.geminiModel}:generateContent',
-        queryParameters: {'key': apiKey},
-        data: {
-          'contents': contents,
-          'generationConfig': {
-            'maxOutputTokens': ApiConfig.maxTokensChat,
-            'temperature': 0.8,
-          },
-        },
-      );
-      return _extractText(response.data);
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
-        throw const UnauthorizedFailure();
-      }
-      throw NetworkFailure(e.message ?? 'Bağlantı hatası');
-    }
+    // TEK YOL: Cloud Function proxy. Doğrudan Gemini yedeği kaldırıldı —
+    // gerekçe için bkz. _callVision.
+    return await _callChatProxy(contents);
   }
 
   /// Sohbeti Cloud Function proxy üzerinden yapar (anahtar sunucuda).
@@ -758,27 +678,6 @@ Türkçe yanıt ver. Yanıtı kısa tut (karakter repliği 1-3 cümle + 1 geri b
   // ============================================================
   // PARSE
   // ============================================================
-  String _extractText(dynamic data) {
-    try {
-      final candidates = data['candidates'] as List;
-      if (candidates.isEmpty) {
-        throw ServerFailure('API yanıtı boş');
-      }
-      final parts = candidates[0]['content']['parts'] as List;
-      final text = parts.firstWhere(
-        (p) => p['text'] != null,
-        orElse: () => throw ServerFailure('API yanıtı boş'),
-      );
-      final rawText = text['text'] as String;
-      _logger.d('Gemini API yanıtı: $rawText');
-      return rawText;
-    } catch (e) {
-      if (e is ServerFailure) rethrow;
-      _logger.e('Yanıt ayrıştırma hatası: $e');
-      throw ServerFailure('API yanıtı ayrıştırılamadı');
-    }
-  }
-
   FaceAnalysisResult _parseFace(String rawText, {required bool fromAi}) {
     final data = _extractJson(rawText);
     if (data['status'] == 'error') {

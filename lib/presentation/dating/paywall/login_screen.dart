@@ -5,6 +5,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/router/dating_routes.dart';
 import '../../providers/app_providers.dart' show authServiceProvider;
 import '../providers/dating_providers.dart';
+import '../widgets/legal_links.dart';
 
 /// Giriş ekranı (Bölüm 3 & 5). Paket satın alma / geri yükleme öncesi.
 /// Apple + Google. Email/şifre YOK. Giriş → satın alımlar hesabına bağlanır.
@@ -165,12 +166,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
             const Padding(
               padding: EdgeInsets.fromLTRB(24, 0, 24, 16),
-              child: Text(
-                'Devam ederek Kullanım Şartları ve Gizlilik Politikası\'nı '
-                'kabul etmiş olursun.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-              ),
+              // Artık gerçekten açılabilir bağlantılar (bkz. LegalLinksText).
+              child: LegalLinksText(),
             ),
           ],
         ),
@@ -192,8 +189,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Fotoğraflarımın yalnızca analiz ve üretim için işlenmesine '
-              'açık rıza veriyorum. (KVKK/GDPR)',
+              'Fotoğraflarımın AI foto üretimi, kalite kontrolü ve fotoğraf '
+              'analizi için OpenAI\'a gönderilmesine ve yalnızca bu işlemler '
+              'için işlenmesine açık rıza veriyorum. (KVKK/GDPR)',
               style: TextStyle(
                   fontSize: 12,
                   color: AppColors.textSecondary,

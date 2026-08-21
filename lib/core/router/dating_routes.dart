@@ -8,5 +8,6 @@ class DatingRoutes {
   static const String login = '/login'; // Apple + Google (abonelik anında)
   static const String hub = '/hub'; // giriş sonrası modül merkezi
   static const String settings = '/settings'; // gizlilik + hesap
+  static const String faq = '/faq'; // sık sorulan sorular
   static const String module = '/module'; // /module/:id
 }

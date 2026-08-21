@@ -23,6 +23,7 @@ import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
 import '../../screens/analysis/guided_capture_screen.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -111,14 +112,20 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
   return x == null ? [] : [File(x.path)];
 }
 
-/// Tam boy referansta tek yüz olmalı (küçük olabilir). Yaw serbest —
-/// canlı yüz açıları GuidedCaptureScreen'de zaten doğrulanır.
+/// Referans karesinde en az bir yüz görünüyor mu? (Hafif, YEREL ön kontrol.)
+///
+/// Yalnızca GALERİDEN seçilen kareler için çalışır — kamerayla çekilenlerin
+/// açısı GuidedCaptureScreen'de zaten doğrulanıyor. Amacı, yüz içermeyen bir
+/// kare yüzünden sunucuya boşuna gidilmesini önlemek.
+///
+/// NOT (2026-08-20): fonksiyon adı tam boy fotoğraf döneminden kalmadır; tam
+/// boy fotoğraf artık istenmiyor, bu kontrol yüz kareleri için kullanılıyor.
 Future<bool> _isValidBodyReferencePhoto(File file) async {
-  // GEVŞETİLDİ (2026-07-26): uzaktan çekilmiş gerçek tam boy karelerde yüz çok
-  // küçük kalıp minFaceSize:0.03 ile tespit edilemiyor, foto boşuna
-  // reddediliyordu. Eşik 0.03 -> 0.01. Ayrıca "tam olarak 1 yüz" katı şartı
-  // yerine "en az 1 yüz" (arkada geçen kişiler yüzünden ret olmasın) — asıl
-  // tek-yüz/+18 kontrolü sunucudaki prepareReferencePhotos'ta zaten var.
+  // GEVŞETİLDİ (2026-07-26): minFaceSize:0.03 ile uzaktan çekilmiş karelerdeki
+  // küçük yüzler tespit edilemeyip foto boşuna reddediliyordu. Eşik 0.03 ->
+  // 0.01. Ayrıca "tam olarak 1 yüz" katı şartı yerine "en az 1 yüz" (arkada
+  // geçen kişiler yüzünden ret olmasın) — asıl tek-yüz/+18 kontrolü
+  // sunucudaki prepareReferencePhotos'ta zaten var.
   final detector = FaceDetector(
     options: FaceDetectorOptions(
       performanceMode: FaceDetectorMode.accurate,
@@ -161,12 +168,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   static const String _defaultStyleId = 'elegance';
   _AiStage _stage = _AiStage.package;
   final Set<String> _styles = {_defaultStyleId};
-  /// Canlı ön / sağ / sol (sıra sabit).
+  /// Canlı ön / sağ / sol (sıra sabit). TEK referans kaynağı — tam boy
+  /// fotoğraf 2026-08-20'de kaldırıldı (bkz. DatingConfig.referencePhotoCount).
   final List<File> _facePhotos = [];
-  /// Zorunlu tam boy (kamera veya galeri).
-  File? _bodyPhoto;
   String? _errorMessage;
-  bool _validatingPhotos = false; // tam boy yüz kontrolü
+  bool _validatingPhotos = false; // galeriden seçimde yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
   String? _prepareError; // doğrulama başarısızsa paket adımında gösterilir
   // Kullanıcının bastığı üretim butonunun modu — bakiye yetmeyip paywall'a
@@ -175,12 +181,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   String _lastMode = 'full';
 
   bool get _refsReady =>
-      _facePhotos.length == DatingConfig.faceCaptureCount && _bodyPhoto != null;
+      _facePhotos.length == DatingConfig.faceCaptureCount;
 
-  List<File> get _allReferencePhotos => [
-        ..._facePhotos,
-        ?_bodyPhoto,
-      ];
+  List<File> get _allReferencePhotos => List<File>.unmodifiable(_facePhotos);
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
@@ -275,6 +278,15 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       });
       return;
     }
+
+    // ÜÇÜNCÜ TARAF AI RIZASI — fotoğraflar cihazdan HİÇ ÇIKMADAN önce alınır
+    // (App Store 5.1.1(i)/5.1.2(i), bkz. ai_consent_gate.dart). Reddedilirse
+    // hiçbir yükleme/üretim yapılmaz, kullanıcı fotoğraf adımında kalır.
+    if (!await ensureAiProcessingConsent(context,
+        kind: AiFlowKind.photoGeneration)) {
+      return;
+    }
+    if (!mounted) return;
 
     final jobId = const Uuid().v4();
     final functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
@@ -485,7 +497,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       // ve sabit tek birim (bkz. _defaultStyleId).
       _stage = _AiStage.package;
       _facePhotos.clear();
-      _bodyPhoto = null;
       _styles
         ..clear()
         ..add(_defaultStyleId);
@@ -524,7 +535,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                         color: AppColors.textPrimary)),
                 const SizedBox(height: 6),
                 const Text(
-                    'Boy ve vücut tipin tam boy fotoğraflarda oran için kullanılır.',
+                    'Boy ve vücut tipin, üretilen fotoğraflarda doğru vücut '
+                    'oranını yakalamak için kullanılır.',
                     style: TextStyle(
                         fontSize: 13, color: AppColors.textSecondary)),
                 const SizedBox(height: 14),
@@ -713,89 +725,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
   }
 
-  Future<void> _pickFullBody() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Tam boy fotoğraf',
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              const Text(
-                  'Başın ve ayakların kadrajda olsun. Tek kişi, dikey çekim.',
-                  style: TextStyle(
-                      fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(ctx, 'camera'),
-                icon: const Icon(Icons.photo_camera_outlined,
-                    color: AppColors.gold),
-                label: const Text('Kamerayla çek',
-                    style: TextStyle(color: AppColors.gold)),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(ctx, 'gallery'),
-                icon: const Icon(Icons.photo_library_outlined,
-                    color: AppColors.gold),
-                label: const Text('Galeriden seç',
-                    style: TextStyle(color: AppColors.gold)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (choice == null || !mounted) return;
-
-    File? file;
-    if (choice == 'camera') {
-      final files = await Navigator.of(context).push<List<File>>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const GuidedCaptureScreen(
-            kind: CaptureKind.body,
-            angles: [CaptureAngle.front],
-          ),
-        ),
-      );
-      if (files != null && files.isNotEmpty) file = files.first;
-    } else {
-      final picked =
-          await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked != null) file = File(picked.path);
-    }
-    if (file == null || !mounted) return;
-
-    setState(() => _validatingPhotos = true);
-    final ok = await _isValidBodyReferencePhoto(file);
-    if (!mounted) return;
-    setState(() => _validatingPhotos = false);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'Tam boy fotoğrafta net, tek bir yüz görünmeli. Lütfen başka bir '
-            'kare dene (baş ve ayaklar kadrajda olsun).'),
-      ));
-      return;
-    }
-    setState(() {
-      _bodyPhoto = file;
-      _prepareError = null;
-    });
-  }
 
   void _openStyleSheet(PhotoStyle style) {
     final selected = _styles.contains(style.id);
@@ -1324,7 +1253,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           ),
           const SizedBox(height: 16),
           const Text(
-              '1) Yüz — canlı çekim (ön / sağ / sol)',
+              'Yüz — canlı çekim (ön / sağ / sol)',
               style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -1403,68 +1332,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     : _facePhotos.isEmpty
                         ? 'Yüz çekimini başlat'
                         : 'Yüz çekimini tekrarla',
-                style: const TextStyle(color: AppColors.gold)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.borderGold),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-          const SizedBox(height: 22),
-          const Text(
-              '2) Tam boy — zorunlu',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          const Text(
-              'Baştan ayağa görünsün. Kamerayla çekebilir veya galeriden seçebilirsin.',
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 10),
-          if (_bodyPhoto == null)
-            Container(
-              height: 90,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.borderSubtle),
-              ),
-              child: const Text('Henüz tam boy foto yok',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
-            )
-          else
-            Align(
-              alignment: Alignment.centerLeft,
-              child: _RemovableThumb(
-                file: _bodyPhoto!,
-                onRemove: () => setState(() {
-                  _bodyPhoto = null;
-                  _prepareError = null;
-                }),
-              ),
-            ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: (_preparing || _validatingPhotos) ? null : _pickFullBody,
-            icon: _validatingPhotos
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppColors.gold),
-                  )
-                : const Icon(Icons.accessibility_new_rounded,
-                    color: AppColors.gold),
-            label: Text(
-                _validatingPhotos
-                    ? 'Kontrol ediliyor…'
-                    : (_bodyPhoto == null
-                        ? 'Tam boy ekle'
-                        : 'Tam boyu değiştir'),
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
@@ -1795,7 +1662,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// Ücretsiz denemede üretilmeyen (bkz. lockedCount) foto için kilit kartı.
   /// Bu iş zaten TAMAMLANDI (1 ücretsiz foto teslim edildi) — aynı işe kalan
   /// diğerleri "eklenemez". Bunun yerine: pakete git, satın alınca AYNI
-  /// selfie'lerle (yeniden çekmeye gerek yok — _facePhotos/_bodyPhoto hâlâ
+  /// selfie'lerle (yeniden çekmeye gerek yok — _facePhotos hâlâ
   /// bellekte) YENİ bir iş açılır ve artık ücretsiz kota değil gerçek paket
   /// hakkı kullanılıp tam DatingConfig.photosPerSet foto üretilir (bkz.
   /// falPhotos.js FREE_TIER_CHUNK_COUNT).
@@ -2306,6 +2173,13 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
 
   Future<void> _run() async {
     if (_photos.isEmpty) return;
+    // ÜÇÜNCÜ TARAF AI RIZASI — fotoğraflar Gemini'ye gönderilmeden önce
+    // (App Store 5.1.1(i)/5.1.2(i), bkz. ai_consent_gate.dart).
+    if (!await ensureAiProcessingConsent(context,
+        kind: AiFlowKind.photoAnalysis)) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _stage = 1;
       _errorMessage = null;

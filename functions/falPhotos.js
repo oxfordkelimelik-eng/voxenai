@@ -16,7 +16,10 @@ const RL_PREPARE = { max: 10, windowMs: 60 * 60 * 1000,
 const RL_GENERATE = { max: 8, windowMs: 60 * 60 * 1000,
   message: "Çok fazla üretim isteği gönderdin. Bir saat sonra tekrar dene." };
 
-const { GEMINI_KEY } = require("./identityCaption");
+// NOT (2026-08-20): identityCaption.js (Gemini tabanlı caption üretimi) SİLİNDİ.
+// Gemini projeden tamamen kaldırıldı; kimlik ve beden bilgisi artık yalnızca
+// (a) kullanıcının referans fotoğrafları — OpenAI onları doğrudan görüyor — ve
+// (b) kullanıcının formdaki boy/vücut tipi seçimi (bodyProfile) üzerinden gelir.
 
 const FAL_KEY = defineSecret("FAL_KEY");
 const FAL_QUEUE_BASE = "https://queue.fal.run";
@@ -475,14 +478,11 @@ function bodyProfileHint(bodyProfile) {
  * tam kişi-değişimi edit'i. Arka plan piksel-birebir korunmaz ama edit modeli
  * gerçek taban pikselini gördüğü için metinden üretmeye göre çok daha sadık.
  */
-function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
-  let bodyBlock = "";
-  if (bodyCaption) {
-    bodyBlock +=
-      "REFERENCE BODY (match this build/weight, do not idealise or slim down): " +
-      bodyCaption + "\n\n";
-  }
-  bodyBlock += bodyProfileHint(bodyProfile);
+function buildEditPrompt(identityCaption, bodyProfile) {
+  // Beden bilgisi artık YALNIZCA kullanıcının formdaki seçimi (bodyProfile).
+  // Eskiden burada tam boy fotoğraftan Gemini ile çıkarılan bir "REFERENCE
+  // BODY" cümlesi de vardı; tam boy foto istenmediği için kaldırıldı.
+  const bodyBlock = bodyProfileHint(bodyProfile);
 
   return (
     "#0 RULE — WHICH IMAGE TO EDIT (get this right first): the FIRST image is the ONLY canvas. Your " +
@@ -704,9 +704,8 @@ function buildEditPrompt(identityCaption, bodyCaption, bodyProfile) {
  * gözlemlenen soruna göre madde eklenmeli — baştan her ihtimale karşı
  * doldurmak yerine.
  */
-function buildEditPromptSimple(bodyCaption, bodyProfile) {
+function buildEditPromptSimple(bodyProfile) {
   const bodyBits = [];
-  if (bodyCaption) bodyBits.push(bodyCaption);
   const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
   const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
   if (bt) bodyBits.push(bt);
@@ -741,14 +740,9 @@ function buildEditPromptSimple(bodyCaption, bodyProfile) {
  */
 
 // AŞAMA 1: kimlik — yüz + ten + vücut. Kompozisyon/ışık düzeltmesi YOK.
-function buildStage1Prompt(identityCaption, bodyCaption, bodyProfile) {
-  let bodyBlock = "";
-  if (bodyCaption) {
-    bodyBlock +=
-      "REFERENCE BODY (match this build/weight, do not idealise or slim down): " +
-      bodyCaption + "\n\n";
-  }
-  bodyBlock += bodyProfileHint(bodyProfile);
+function buildStage1Prompt(identityCaption, bodyProfile) {
+  // Bkz. buildEditPrompt — beden bilgisi yalnızca bodyProfile'dan gelir.
+  const bodyBlock = bodyProfileHint(bodyProfile);
 
   return (
     "STAGE 1 of 3 — PERSON REPLACEMENT. Do this one job only.\n\n" +
@@ -912,7 +906,7 @@ const BODY_TYPE_DIRECTIVE = {
  * yalnızca DOĞRULANMIŞSA ve seçimle çelişmeyecek şekilde ek bir gözlem
  * cümlesi olarak veriliyor.
  */
-function shortBodyNote(bodyCaption, bodyProfile) {
+function shortBodyNote(bodyProfile) {
   const bt = bodyProfile && BODY_TYPE_DIRECTIVE[bodyProfile.bodyType];
   const label = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
   const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
@@ -925,23 +919,12 @@ function shortBodyNote(bodyCaption, bodyProfile) {
   // kareler çoğunlukla bel/göğüs üstü, bacaklar görünmüyor, dolayısıyla model
   // bu ölçüyü uygulayamıyordu. Kafa boyutu artık tek bir yerde, OMUZ
   // GENİŞLİĞİNE bağlı olarak yönetiliyor (bkz. prompt'taki "3) HEAD SIZE").
-  let s = `\n\nTARGET BUILD — based on their own full-body reference and their stated build: ` +
-    `${label || ht}.`;
+  // TEK YETKİLİ KAYNAK: kullanıcının formda seçtiği vücut tipi.
+  // (2026-08-20) Tam boy fotoğraf artık istenmiyor; ondan türetilen ikincil
+  // "caption" gözlemi ve onun seçimle çelişme kontrolü kaldırıldı — zaten
+  // çelişki durumunda kullanıcının seçimi kazanıyordu.
+  let s = `\n\nTARGET BUILD — the person's stated build: ${label || ht}.`;
   if (bt) s += ` Reshape the base person's body accordingly: ${bt}.`;
-  // bodyCaption (fotoğraftan otomatik gözlem) YALNIZCA tam bir cümleyse ve
-  // kullanıcının seçimiyle çelişmiyorsa ek bilgi olarak veriliyor; çelişirse
-  // seçim kazanır. Kırık/kesik caption'lar zaten identityCaption.js'te
-  // eleniyor, bu ikinci bir emniyet kemeri.
-  const cap = typeof bodyCaption === "string" ? bodyCaption.trim() : "";
-  const capUsable = cap.length >= 40 && /[.!?]$/.test(cap);
-  const conflicts = capUsable && label &&
-    Object.values(BODY_TYPE_HINTS)
-      .filter((v) => v !== label)
-      .some((v) => cap.toLowerCase().includes(v.split(" ")[0].toLowerCase()));
-  if (capUsable && !conflicts) {
-    s += ` Their own full-body photo also shows: ${cap} Use this only for details the line above does ` +
-      `not cover; where they disagree, the user's stated build wins.`;
-  }
 
   return s;
 }
@@ -951,7 +934,7 @@ function shortBodyNote(bodyCaption, bodyProfile) {
  * Yapı: görev -> korunacaklar -> değişecekler -> kalite. Tekrar YOK; her kural
  * yalnızca bir kez ve en kısa haliyle söylenir.
  */
-function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptP300(identityCaption, bodyProfile) {
   return (
     "TASK: edit the FIRST image — it is your only canvas. Replace the person in it with the person in " +
     "the other reference photos. Never output a reference photo; the result must be the first image, " +
@@ -971,7 +954,7 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
     "- Body: their real build, height and weight, resizing the same clothing to fit. If this makes the " +
     "shoulders narrower than the base person's, scale the HEAD DOWN by the same amount — a head left at " +
     "its original size on a narrowed body looks oversized." +
-    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
+    shortBodyNote(bodyProfile) + "\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
     "QUALITY: an ordinary, unedited phone photo. Natural skin texture, no plastic airbrush, no added " +
     "brightness. Tattoos only if visible in the target's own photos. Eyewear comes ONLY from the first " +
@@ -1019,7 +1002,7 @@ function buildEditPromptP300(identityCaption, bodyCaption, bodyProfile) {
  * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
  * genişletildi.
  */
-function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptP800(identityCaption, bodyProfile) {
   return (
     "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
@@ -1075,7 +1058,7 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
     "6) BODY — reshape it to the target's real build (specified below), resizing the SAME clothing to " +
     "fit the new shape naturally; do not swap or restyle any garment. Keep limbs, fingers and joints " +
     "anatomically correct." +
-    shortBodyNote(bodyCaption, bodyProfile) + "\n\n" +
+    shortBodyNote(bodyProfile) + "\n\n" +
     "EYEWEAR — the output NEVER has glasses or sunglasses. If the base person wears them, drop them " +
     "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
     "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
@@ -1095,9 +1078,9 @@ function buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) {
  * için birer kısa madde ekler (bu maddelerin hepsi gözlemlenmiş sorunlardan
  * gelir, "her ihtimale karşı" yazılmış değildir).
  */
-function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptP1400(identityCaption, bodyProfile) {
   return (
-    buildEditPromptP800(identityCaption, bodyCaption, bodyProfile) + "\n\n" +
+    buildEditPromptP800(identityCaption, bodyProfile) + "\n\n" +
     "OBSERVED FAILURE MODES — each of these has actually happened before; check your result against " +
     "every one of them before finishing:\n\n" +
     "- WRONG CANVAS: the output came back as the user's own reference photo, almost unedited. Verify " +
@@ -1136,9 +1119,8 @@ function buildEditPromptP1400(identityCaption, bodyCaption, bodyProfile) {
   );
 }
 
-function buildEditPromptShort(identityCaption, bodyCaption, bodyProfile) {
+function buildEditPromptShort(identityCaption, bodyProfile) {
   const bodyBits = [];
-  if (bodyCaption) bodyBits.push(bodyCaption);
   const bt = bodyProfile && BODY_TYPE_HINTS[bodyProfile.bodyType];
   const ht = bodyProfile && HEIGHT_HINTS[bodyProfile.heightRange];
   if (bt) bodyBits.push(bt);
@@ -1414,8 +1396,16 @@ async function recentTemplateNames(uid, limit = 40) {
 }
 
 /**
- * Referans selfie'lerini Storage'dan okur, fal.ai CDN'e (veya imzalı GCS
- * URL'sine) yükler. Döner: { urls: string[], buffers: Buffer[] }
+ * Referans selfie'lerini Storage'dan okur, OpenAI'nin çekebileceği imzalı bir
+ * Firebase Storage URL'i üretir. Döner: { urls: string[], buffers: Buffer[] }
+ *
+ * NOT (2026-08-20): eskiden burada önce fal.ai CDN'e yüklenip (uploadToFalStorage)
+ * başarısız olursa imzalı URL'e düşülüyordu. Üretim artık her zaman doğrudan
+ * OpenAI'ye gittiği için (bkz. useOpenAiDirect, hep true) fal.ai bu adımda
+ * gereksiz bir ara durak/round-trip'ten ibaretti — imzalı URL zaten OpenAI
+ * tarafından sorunsuz çekilebiliyor, doğrudan o kullanılıyor artık. fal.ai bu
+ * akıştan tamamen çıkarıldı (FAL_KEY bu handler'ın secrets listesinden de
+ * kaldırıldı, bkz. prepareReferencePhotos).
  */
 async function uploadReferencePhotos(uid, jobId) {
   const prefix = `dating_training/${uid}/${jobId}/`;
@@ -1434,7 +1424,7 @@ async function uploadReferencePhotos(uid, jobId) {
     const { normalizeExifOrientation } = require("./postProcess");
     const buf = await normalizeExifOrientation(raw);
 
-    // +18/uygunsuz içerik kapısı — fal.ai'ye hiçbir görsel gönderilmeden önce.
+    // +18/uygunsuz içerik kapısı — OpenAI'ye hiçbir görsel gönderilmeden önce.
     // Vision API'nin kendisi hata verirse fail-open (loglanır, engellenmez);
     // gerçek bir tespit ise her zaman engeller (bkz. contentModeration.js).
     try {
@@ -1452,14 +1442,7 @@ async function uploadReferencePhotos(uid, jobId) {
       console.error("İçerik moderasyonu kontrolü başarısız (filtresiz devam ediliyor):", e);
     }
 
-    let url;
-    try {
-      url = await uploadToFalStorage(buf, `ref_${idx}.jpg`);
-    } catch (e) {
-      // fal CDN düşerse imzalı Firebase URL ile devam et (fal dış URL kabul eder).
-      console.warn("fal upload başarısız, signed URL kullanılıyor:", e.message || e);
-      url = await signedDownloadUrl(file);
-    }
+    const url = await signedDownloadUrl(file);
     return { url, buf };
   }));
   return { urls: results.map((r) => r.url), buffers: results.map((r) => r.buf) };
@@ -1574,10 +1557,10 @@ async function faceSwap(faceUrl, targetUrl, gender) {
 // arka planı koruyup kadrajdaki kişiyi kullanıcıya dönüştürür (yüz + TEN RENGİ +
 // KİLO/VÜCUT dahil — face-swap'in yapamadığı tam kişi değişimi). İş bitince fal
 // webhook'u çağırır (indir + kimlik kapısı + texture + kaydet).
-async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId = DEFAULT_MODEL_ID) {
+async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrls, identityCaption, bodyProfile, modelId = DEFAULT_MODEL_ID) {
   const webhookUrl = `${FUNCTIONS_BASE}/falInferenceWebhook?uid=${uid}&jobId=${jobId}&style=${styleId}&chunk=${chunkIdx}`;
   const model = MODEL_CATALOG[modelId] || MODEL_CATALOG[DEFAULT_MODEL_ID];
-  const prompt = buildEditPrompt(identityCaption, bodyCaption, bodyProfile);
+  const prompt = buildEditPrompt(identityCaption, bodyProfile);
   const seed = Math.floor(Math.random() * 2147483647);
   // İLK sıra taban (düzenlenecek sahne), sonrası kullanıcı referansları (kimlik).
   const input = model.buildInput(prompt, [templateUrl, ...refUrls], seed);
@@ -2234,15 +2217,17 @@ const OUTPUT_YAW_DRIFT_MAX = 0.30;
 const OUTPUT_HEAD_DX_MAX = 0.22;
 
 /**
- * refUrls'i yüz kareleri ve tam boy karesi olarak ayırır.
- * prepareReferencePhotos sırayı garanti ediyor: [en iyi yüz, diğer yüzler...,
- * tam boy] — bestIndex her zaman yüz karelerinden seçildiği için tam boy
- * asla öne alınmaz, hep sonda kalır (bkz. analyzeReferences).
+ * refUrls'in TAMAMI artık yüz karesidir.
+ *
+ * DEĞİŞİKLİK (2026-08-20): eskiden son kare tam boy fotoğraftı ve buradan
+ * `bodyUrl` olarak ayrılıyordu. Tam boy fotoğraf artık kullanıcıdan
+ * İSTENMİYOR (boy/vücut tipi onboarding formundan alınıyor), dolayısıyla
+ * ayrıma gerek kalmadı. Fonksiyon, çağıran taraflarda tek tek değişiklik
+ * gerekmesin diye aynı şekli döndürmeye devam ediyor (bodyUrl daima null).
  */
 function splitRefUrls(refUrls) {
   if (!Array.isArray(refUrls) || refUrls.length === 0) return { faceUrls: [], bodyUrl: null };
-  if (refUrls.length === 1) return { faceUrls: [refUrls[0]], bodyUrl: null };
-  return { faceUrls: refUrls.slice(0, -1), bodyUrl: refUrls[refUrls.length - 1] };
+  return { faceUrls: refUrls, bodyUrl: null };
 }
 
 /**
@@ -2310,7 +2295,7 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
   return { buf: prev, dist: prevDist };
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
   const { faceUrls, bodyUrl } = splitRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Tam görsel seti: taban + TÜM yüz açıları + tam boy.
@@ -2327,7 +2312,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // kimliği tolerans üstünde bozduysa çıktısı ATILIR (bkz.
     // acceptStageIfIdentityHolds). Ölçüm yereldir, API maliyeti yoktur.
     const s1 = await generateWithOpenAI(
-      buildStage1Prompt(identityCaption, bodyCaption, bodyProfile),
+      buildStage1Prompt(identityCaption, bodyProfile),
       fullSet
     );
     if (!s1) {
@@ -2373,7 +2358,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_P1400]: buildEditPromptP1400,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
-  const prompt = build(identityCaption, bodyCaption, bodyProfile);
+  const prompt = build(identityCaption, bodyProfile);
   return await generateWithOpenAI(prompt, fullSet);
 }
 
@@ -2473,7 +2458,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -2523,7 +2508,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     }
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
     let buf = await generateForMode(
-      mode, templateInput, refUrls, identityCaption, bodyCaption, bodyProfile, styleId, chunkIdx,
+      mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
       refDescriptor
     );
     if (!buf) {
@@ -2922,10 +2907,12 @@ exports.prepareReferencePhotos = onCall(
   // selfie tensörleriyle OOM oluyordu). minInstances:1 ile soğuk başlangıç
   // (model yeniden yükleme) gecikmesi ortadan kaldırıldı.
   {
-    secrets: [FAL_KEY, GEMINI_KEY],
+    // SECRET GEREKMİYOR (2026-08-20): tek secret'ı GEMINI_KEY idi, o da
+    // caption üretimi içindi; Gemini kaldırıldı. Bu fonksiyon artık yalnızca
+    // Cloud Vision moderasyonu (ADC ile) ve YEREL yüz analizi yapıyor.
     region: "europe-west1",
     memory: "2GiB",
-    // Gemini kimlik + beden + wardrobe paralel; soğuk başlangıçta 120 sn yetmeyebilir.
+    // Yüz modeli yüklemesi + moderasyon; soğuk başlangıçta 120 sn yetmeyebilir.
     timeoutSeconds: 180,
     minInstances: 1,
   },
@@ -2953,7 +2940,7 @@ exports.prepareReferencePhotos = onCall(
         }
       : null;
     // Referansları indir (+ içerik moderasyonu, bkz. uploadReferencePhotos) ve
-    // fal'a yükle. Buradaki HttpsError doğrudan kullanıcıya gider.
+    // imzalı URL üret. Buradaki HttpsError doğrudan kullanıcıya gider.
     const { urls: refUrls, buffers: refBuffers } = await uploadReferencePhotos(uid, jobId);
 
     // Net/tek yüz kapısı (+ bulanıklık/aşırı pozlama) + en iyi referansın
@@ -2989,17 +2976,10 @@ exports.prepareReferencePhotos = onCall(
           { unclearPhotoIndices: analysis.unclearIndices }
         );
       }
-      // Tam boy karesinde gövde görünmüyor (yakın selfie gönderilmiş).
-      if (analysis.notFullBodyIndices && analysis.notFullBodyIndices.length > 0) {
-        const { label, many } = posLabel(analysis.notFullBodyIndices);
-        throw new HttpsError(
-          "invalid-argument",
-          `${label} tam boy değil — yüz çok yakın, gövden görünmüyor. Lütfen ` +
-          `baştan (en azından belden) aşağısı kadrajda olan, gövdeni gösteren ` +
-          `bir fotoğraf ${many ? "bunlarla" : "bununla"} değiştir.`,
-          { notFullBodyPhotoIndices: analysis.notFullBodyIndices }
-        );
-      }
+      // TAM BOY KAPISI KALDIRILDI (2026-08-20): kullanıcıdan artık tam boy
+      // fotoğraf istenmiyor, dolayısıyla "bu kare tam boy değil" kontrolünün
+      // denetleyeceği bir kare de yok. analyzeReferences hâlâ
+      // notFullBodyIndices döndürüyor olabilir; bilinçli olarak yok sayılıyor.
       // İki yüz karesi neredeyse aynı açıda — farklı açı iste.
       if (analysis.duplicateIndices && analysis.duplicateIndices.length > 0) {
         const { label, many } = posLabel(analysis.duplicateIndices);
@@ -3056,33 +3036,21 @@ exports.prepareReferencePhotos = onCall(
       console.error("Yüz kontrolü başarısız (kimlik kapısı devre dışı, üretim engellenmiyor):", e);
     }
 
-    // Gemini ön-işlem (fail-safe): tam boy beden tarifi.
+    // METİN CAPTION ADIMI TAMAMEN KALDIRILDI (2026-08-20).
     //
-    // identityCaption KALDIRILDI (2026-08-02, kullanıcı kararı): Gemini'nin
-    // yüz/ten/yaş tarifini prompt'a ekleyen bu adım hem yavaşlık riski
-    // taşıyordu (3 model sırayla deneniyordu, gerçek olayda tek bir modelin
-    // cevabı 1dk45sn sürüp "deadline exceeded"e yol açtı) hem de üretilen
-    // tarifler sıklıkla kırık/kullanılamaz çıkıyordu (bkz. isUsableCaption).
-    // Kimlik artık YALNIZCA referans fotoğrafların kendisinden geliyor —
-    // OpenAI zaten görselleri doğrudan görüyor, ayrı bir metin tarifine
-    // ihtiyaç yok. bodyCaption KORUNDU: boy/beden seçimi zaten kullanıcının
-    // formundan (bodyProfile) geliyor ve öncelikli sayılıyor (bkz.
-    // shortBodyNote), bodyCaption yalnızca tam cümleyse ek bilgi olarak
-    // ekleniyor — riski aynı ama katkısı identityCaption'dan farklı ve
-    // ikincil konumda olduğu için tutuldu.
-    // styleWardrobes de KALDIRILDI: hiçbir prompt fonksiyonuna hiç
-    // geçmiyordu, yalnızca Firestore'a yazılıp duran kullanılmayan bir
-    // Gemini çağrısıydı.
-    let bodyCaption = null;
-    try {
-      const { describeBodyBuild } = require("./identityCaption");
-      const bodyBuffer = refBuffers.length > FACE_PHOTO_COUNT
-        ? refBuffers[refBuffers.length - 1]
-        : null;
-      bodyCaption = await describeBodyBuild(bodyBuffer);
-    } catch (e) {
-      console.error("Gemini ön-işlem başarısız (caption'sız devam):", e);
-    }
+    // Geçmiş: identityCaption (yüz/ten/yaş tarifi) 2026-08-02'de, bodyCaption
+    // (tam boydan beden oranı tarifi) ise bugün kaldırıldı; ikisi de Gemini
+    // çağrısıydı ve Gemini artık projede yok.
+    //
+    // Neden gerek kalmadı:
+    //   - Kimlik: OpenAI referans fotoğrafları DOĞRUDAN görüyor; ayrı bir metin
+    //     tarifine ihtiyaç yok (caption'lar zaten sıklıkla kırık geliyordu).
+    //   - Beden: tam boy fotoğraf artık İSTENMİYOR (kullanıcı kararı) — boy ve
+    //     vücut tipi onboarding formundan alınıyor ve `shortBodyNote` bunu
+    //     ZATEN tek yetkili kaynak sayıyordu; caption yalnızca ikincil bir
+    //     gözlemdi ve seçimle çeliştiğinde eleniyordu.
+    // Kazanç: bir dış bağımlılık, bir gecikme kaynağı (gerçek olayda 1dk45sn
+    // gecikip "deadline exceeded"e yol açmıştı) ve bir maliyet kalemi gitti.
 
     // Tüm kapılar geçildi — işi 'ready' olarak hazırla. Bakiye HENÜZ düşülmez;
     // o startPhotoGeneration'ın (adım 2/2) işi.
@@ -3094,14 +3062,13 @@ exports.prepareReferencePhotos = onCall(
       errorMessage: null,
       // Yüz crop'u (varsa) en başta, ardından en net orijinal — bkz. submitStyleJob.
       falRefUrls: orderedRefUrls,
-      // Face swap kaynağı: ilk kare = ön yüz (çekim sırası ön/sağ/sol/tamboy).
+      // Face swap kaynağı: ilk kare = ön yüz (çekim sırası ön/sağ/sol).
       // Swap cepheden en iyi çalıştığı için ön kareyi kullanıyoruz (bkz.
-      // falInferenceWebhook + faceSwap). fal CDN kopyası; Storage silinse de kalır.
+      // falInferenceWebhook + faceSwap).
       ...(refUrls[0] ? { primaryFaceUrl: refUrls[0] } : {}),
       ...(refDescriptor ? { refDescriptor } : {}),
       ...(refEyeOpenness != null ? { refEyeOpenness } : {}),
       ...(refSkinTone ? { refSkinTone } : {}),
-      ...(bodyCaption ? { bodyCaption } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
     });
 
@@ -3201,7 +3168,6 @@ exports.startPhotoGeneration = onCall(
     const prepData = prepSnap.data();
     // Kişi-değişimi edit'i için kullanıcı referansları + kimlik/beden metni.
     const identityCaption = prepData.identityCaption || null;
-    const bodyCaption = prepData.bodyCaption || null;
     const bodyProfile = prepData.bodyProfile || {};
     const refDescriptor = prepData.refDescriptor || null; // OpenAI yolunda kimlik kapısı için
     // Kişinin KENDİ göz açıklığı normali — çıktı göz kapısı mutlak eşik yerine
@@ -3404,7 +3370,7 @@ exports.startPhotoGeneration = onCall(
             const urls = await Promise.all(uniqueCandidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
-              bodyCaption, bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone
+              bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone
             );
           }));
         }));
@@ -3418,7 +3384,7 @@ exports.startPhotoGeneration = onCall(
             picked.map(async (file, i) => {
               const templateUrl = await signedDownloadUrl(file);
               const falJob = await submitStyleJob(
-                uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyCaption, bodyProfile, modelId
+                uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyProfile, modelId
               );
               return [String(i), {
                 requestId: falJob.request_id,
@@ -3765,7 +3731,7 @@ async function maybeRetryBadChunk(uid, jobId, styleId, chunkIdx, chunk, job, job
     const modelId = job.model || DEFAULT_MODEL_ID;
     const falJob = await submitStyleJob(
       uid, jobId, styleId, chunkIdx, templateUrl, refUrls,
-      job.identityCaption || null, job.bodyCaption || null, job.bodyProfile || {}, modelId
+      job.identityCaption || null, job.bodyProfile || {}, modelId
     );
     await jobRef.set({
       results: { [styleId]: { chunks: { [chunkIdx]: {

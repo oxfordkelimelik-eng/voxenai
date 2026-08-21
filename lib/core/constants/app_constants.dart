@@ -1,19 +1,21 @@
-/// Rise Up — Gemini API Yapılandırması
+/// Rise Up — AI API Yapılandırması (sağlayıcı: OpenAI, bkz. functions/aiProxy.js)
 class ApiConfig {
   ApiConfig._();
 
-  /// Gemini API anahtarı güvenli depolamadan okunur
-  static const String geminiBaseUrl =
-      'https://generativelanguage.googleapis.com/v1beta';
-  static const String geminiModel = 'gemini-2.5-flash';
+  /// Kullanıcıya gösterilen model adı (yalnızca bilgi amaçlı — Ayarlar
+  /// ekranında görünür). Gerçek çağrı sunucuda yapılır, bkz. functions/aiProxy.js.
+  ///
+  /// DEĞİŞİKLİK (2026-08-20): Google Gemini projeden tamamen kaldırıldı; tek
+  /// AI sağlayıcı OpenAI. Eski `geminiBaseUrl` / `geminiModel` sabitleri
+  /// SİLİNDİ — istemci artık hiçbir AI sağlayıcısına doğrudan istek atmıyor.
+  static const String aiModelLabel = 'GPT-4o (OpenAI)';
 
   /// Uygulamaya GÖMÜLÜ anahtar YOKTUR. Anahtar yalnızca Cloud Function
-  /// (Firebase Secret: GEMINI_KEY) içinde tutulur; APK/kaynak kodda görünmez.
-  /// İsteğe bağlı olarak kullanıcı kendi anahtarını ayarlardan girebilir;
-  /// bu anahtar yalnızca o cihazda güvenli depoda saklanır.
+  /// (Firebase Secret: OPENAI_API_KEY) içinde tutulur; APK/kaynak kodda
+  /// görünmez ve istemciye hiçbir zaman iletilmez.
 
-  /// true: foto/sohbet çağrıları Cloud Function proxy üzerinden gider (anahtar
-  /// sunucuda gizli kalır). Üretimde her zaman true olmalı.
+  /// AI çağrıları her zaman Cloud Function proxy'si üzerinden gider.
+  /// Doğrudan-API yolu kaldırıldığı için bu artık tek seçenektir.
   static const bool useProxy = true;
 
   /// Cloud Functions bölgesi (index.js ile aynı olmalı)

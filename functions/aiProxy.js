@@ -2,8 +2,25 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { admin, db, enforceRateLimit, checkAppAttestation } = require("./_shared");
 
+// ============================================================
+// AI PROXY — OpenAI (eski adı gemini.js)
+// ------------------------------------------------------------
+// GEÇMİŞ (2026-08-20): bu dosya eskiden Google Gemini'yi (Generative Language
+// API) çağırıyordu. Gemini PROJEDEN TAMAMEN KALDIRILDI; tek AI sağlayıcı artık
+// OpenAI. Gerekçe iki katlı:
+//   1) Bağımlılığı teke indirmek — foto üretimi zaten OpenAI'ye gidiyordu.
+//   2) Gemini anahtarı ÜCRETSİZ tier'daydı; Google'ın ücretsiz kotasında
+//      gönderilen içerik (burada: kullanıcıların YÜZ FOTOĞRAFLARI) ürün/model
+//      geliştirmede kullanılabiliyor ve insan gözden geçiriciler tarafından
+//      incelenebiliyor. Bu, gizlilik politikamızdaki "yalnızca ilgili işlem
+//      için işlenir" taahhüdüyle ve App Store 5.1.2(i) ile çelişiyordu.
+//
+// Dışa açılan fonksiyon ADLARI ve veri sözleşmeleri BİLEREK DEĞİŞTİRİLMEDİ
+// (analyzeImage / chat) — istemci tarafında hiçbir değişiklik gerekmesin diye.
+// ============================================================
+
 // HIZ SINIRLARI — her iki uç nokta da istemciden gelen SERBEST metni
-// (analyzeImage: prompt, chat: contents) Gemini'ye iletiyor. Sınır olmadan
+// (analyzeImage: prompt, chat: contents) modele iletiyor. Sınır olmadan
 // bunlar bizim kotamız üzerinden çalışan ücretsiz bir LLM proxy'sine dönüşür:
 // geçerli bir kimlik belirteci olan biri, uygulamayla hiç ilgisi olmayan
 // istekleri döngüde gönderebilir. Sınırlar gerçek kullanımın üstünde
@@ -13,66 +30,78 @@ const RL_ANALYZE = { max: 30, windowMs: 60 * 60 * 1000,
 const RL_CHAT = { max: 60, windowMs: 60 * 60 * 1000,
   message: "Çok fazla mesaj gönderdin. Biraz sonra tekrar dene." };
 
-// Gemini anahtarı Firebase Secret olarak saklanır (kodda/APK'da görünmez)
-const GEMINI_KEY = defineSecret("GEMINI_KEY");
+// OpenAI anahtarı Firebase Secret olarak saklanır (kodda/APK'da görünmez).
+// falPhotos.js ile AYNI secret — tek anahtar, tek fatura.
+const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
+
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+// falPhotos.js'teki VISION_MODEL ile aynı model — çıktı kalite kapısında
+// zaten bu kullanılıyor, çok görselli karşılaştırmada güvenilir.
+const VISION_MODEL = "gpt-4o";
 
 // Foto analizinde ömür boyu ücretsiz gösterilen foto sayısı (hesap başına 1).
 // dating_constants.dart DatingConfig.freePreviewCount ile senkron tutulmalı.
 const FREE_ANALYSIS_PHOTOS = 1;
 
-// Sıralı denenecek modeller — biri meşgulse (503) sıradakine geçilir.
-const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-flash-latest",
-  "gemini-2.0-flash-lite",
-];
-const geminiUrl = (model, key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-
 /**
- * Gemini'yi çağırır; 503/429 durumunda hem yeniden dener hem de model değiştirir.
- * Böylece bir model aşırı yüklüyse başka bir modelle yanıt üretilir.
+ * OpenAI chat/completions çağrısı; 429/5xx'te kısa bekleyip yeniden dener.
+ * Gemini sürümündeki "model değiştir" mantığının karşılığı: OpenAI'de tek
+ * model yeterli, geçici hatalar backoff ile çözülüyor.
  */
-async function callGeminiWithRetry(key, body) {
+async function callOpenAiWithRetry(key, body) {
+  const maxAttempts = 3;
   let lastStatus = 0;
-  for (const model of GEMINI_MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const resp = await fetch(geminiUrl(model, key), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (resp.ok) {
-        console.log(`Gemini yanıt: ${model}`);
-        return await resp.json();
+  let lastBody = "";
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const resp = await fetch(OPENAI_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) return await resp.json();
+
+    lastStatus = resp.status;
+    lastBody = await resp.text().catch(() => "");
+    // Kalıcı hata (400/401/403) — tekrar denemenin anlamı yok.
+    if ([400, 401, 403].includes(resp.status)) {
+      console.error(`OpenAI kalıcı hata: ${resp.status} ${lastBody.slice(0, 200)}`);
+      throw new HttpsError("internal", `AI hatası: ${resp.status}`);
+    }
+    console.warn(`OpenAI ${resp.status} (deneme ${attempt}/${maxAttempts})`);
+    if (attempt < maxAttempts) {
+      // 429'da OpenAI ne kadar bekleneceğini cevabın içinde söyleyebiliyor.
+      let waitMs = attempt * 1500;
+      const m = lastBody.match(/try again in ([\d.]+)\s*(ms|s)\b/i);
+      if (m) {
+        const v = parseFloat(m[1]);
+        waitMs = Math.min((/ms/i.test(m[2]) ? v : v * 1000) + 500, 20000);
       }
-      lastStatus = resp.status;
-      const txt = await resp.text();
-      console.warn(`Model ${model} -> ${resp.status} (deneme ${attempt + 1})`);
-      // Kalıcı hata (400/401/403) ise model değiştirmenin anlamı yok
-      if ([400, 401, 403].includes(resp.status)) {
-        throw new HttpsError("internal", `Gemini hatası: ${resp.status} ${txt.slice(0, 80)}`);
-      }
-      // Geçici hata: kısa bekle, sonra aynı modelde 1 kez daha, olmazsa sıradaki model
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, waitMs));
     }
   }
   throw new HttpsError(
     "unavailable",
-    `Tüm modeller meşgul (son durum ${lastStatus}). Lütfen biraz sonra tekrar deneyin.`
+    `AI servisi şu an meşgul (son durum ${lastStatus}). Lütfen biraz sonra tekrar deneyin.`
   );
 }
 
+function firstText(json) {
+  const text = json?.choices?.[0]?.message?.content;
+  return typeof text === "string" && text.trim() ? text : null;
+}
+
 /**
- * Foto analizi proxy'si: istemci görseli + prompt gönderir, anahtar burada eklenir.
- * Sadece giriş yapmış (anonim dahil) kullanıcılar çağırabilir.
+ * Foto analizi proxy'si: istemci görseli + prompt gönderir, anahtar burada
+ * eklenir. Sadece giriş yapmış kullanıcılar çağırabilir.
  *
- * data: { prompt: string, imageBase64: string, mimeType: string }
- * dönüş: { text: string }  (Gemini'nin ham metin yanıtı)
+ * data: { prompt: string, images?: [{data, mimeType}], imageBase64?, mimeType? }
+ * dönüş: { text: string }  (modelin ham metin yanıtı)
  */
 exports.analyzeImage = onCall(
-  { secrets: [GEMINI_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 120 },
+  { secrets: [OPENAI_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 120 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -91,28 +120,40 @@ exports.analyzeImage = onCall(
       throw new HttpsError("invalid-argument", "prompt ve en az bir görsel zorunlu.");
     }
 
-    const body = {
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            ...imgList.map((img) => ({
-              inline_data: { mime_type: img.mimeType || "image/jpeg", data: img.data },
-            })),
-          ],
+    // detail:"high" — analizde yüz ayrıntısı şart; "low" (512px) kadraj/ışık
+    // dışındaki nüansları ayırt etmeye yetmiyor.
+    const content = [
+      { type: "text", text: prompt },
+      ...imgList.map((img) => ({
+        type: "image_url",
+        image_url: {
+          url: `data:${img.mimeType || "image/jpeg"};base64,${img.data}`,
+          detail: "high",
         },
-      ],
-      generationConfig: { maxOutputTokens: 8192, temperature: 0.4 },
+      })),
+    ];
+
+    const body = {
+      model: VISION_MODEL,
+      messages: [{ role: "user", content }],
+      max_tokens: 8192,
+      temperature: 0.4,
     };
 
     try {
-      const json = await callGeminiWithRetry(GEMINI_KEY.value(), body);
-      const parts = json?.candidates?.[0]?.content?.parts || [];
-      const textPart = parts.find((p) => typeof p.text === "string");
-      if (!textPart) {
-        throw new HttpsError("internal", "Gemini yanıtı boş.");
+      const json = await callOpenAiWithRetry(OPENAI_KEY.value(), body);
+      const text = firstText(json);
+      if (!text) {
+        throw new HttpsError("internal", "AI yanıtı boş.");
       }
-      return { text: textPart.text };
+      if (json.usage) {
+        console.log(
+          `MALIYET ANALIZ: girdi=${json.usage.prompt_tokens ?? "?"} ` +
+          `cikti=${json.usage.completion_tokens ?? "?"} ` +
+          `model=${VISION_MODEL} gorselSayisi=${imgList.length}`
+        );
+      }
+      return { text };
     } catch (e) {
       if (e instanceof HttpsError) throw e;
       console.error("analyzeImage hata:", e);
@@ -123,11 +164,16 @@ exports.analyzeImage = onCall(
 
 /**
  * Sohbet (sosyal antrenman) proxy'si.
- * data: { contents: [...], systemPrompt?: string }
+ *
+ * İstemci hâlâ Gemini'nin `contents` biçimini gönderiyor
+ * ([{role:'user'|'model', parts:[{text}]}]) — istemciyi değiştirmemek için
+ * dönüşüm BURADA yapılıyor: 'model' rolü OpenAI'de 'assistant' olur.
+ *
+ * data: { contents: [...] }
  * dönüş: { text: string }
  */
 exports.chat = onCall(
-  { secrets: [GEMINI_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
+  { secrets: [OPENAI_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -145,16 +191,31 @@ exports.chat = onCall(
       throw new HttpsError("invalid-argument", "Mesaj geçmişi çok uzun.");
     }
 
+    const messages = contents.map((c) => {
+      const text = (c?.parts || [])
+        .map((p) => (typeof p?.text === "string" ? p.text : ""))
+        .join("\n")
+        .trim();
+      return {
+        role: c?.role === "model" ? "assistant" : "user",
+        content: text,
+      };
+    }).filter((m) => m.content);
+
+    if (messages.length === 0) {
+      throw new HttpsError("invalid-argument", "Boş mesaj geçmişi.");
+    }
+
     const body = {
-      contents,
-      generationConfig: { maxOutputTokens: 2048, temperature: 0.8 },
+      model: VISION_MODEL,
+      messages,
+      max_tokens: 2048,
+      temperature: 0.8,
     };
 
     try {
-      const json = await callGeminiWithRetry(GEMINI_KEY.value(), body);
-      const parts = json?.candidates?.[0]?.content?.parts || [];
-      const textPart = parts.find((p) => typeof p.text === "string");
-      return { text: textPart ? textPart.text : "" };
+      const json = await callOpenAiWithRetry(OPENAI_KEY.value(), body);
+      return { text: firstText(json) || "" };
     } catch (e) {
       if (e instanceof HttpsError) throw e;
       console.error("chat hata:", e);
@@ -168,6 +229,9 @@ exports.chat = onCall(
  * TARAFINDA atomik olarak belirler ve tüketir. İstemcinin yerel bakiyeyle
  * oynamasını engeller (analiz "kredi/hak" taşıyan bir kaynaktır).
  *
+ * NOT: AI sağlayıcısıyla ilgisi yoktur; tarihsel olarak bu dosyada durduğu
+ * için burada bırakıldı (adı ve sözleşmesi değişmedi).
+ *
  * Kural:
  *  - Hesap başına ömür boyu ilk [FREE_ANALYSIS_PHOTOS] foto ücretsiz açılır
  *    (freeAnalysisUsed bir kez true olur, bir daha ücretsiz verilmez).
@@ -175,12 +239,7 @@ exports.chat = onCall(
  *  - Bakiye yetmezse yetebildiği kadar açılır; gerisi kilitli (blur) kalır.
  *
  * data: { requested: number, alreadyUnlocked?: number }
- *   requested       = sonuç setindeki toplam foto sayısı
- *   alreadyUnlocked = bu set için DAHA ÖNCE (bu istekten önce) açılmış sayı;
- *                     yalnızca (requested - alreadyUnlocked) kadarı için yeni
- *                     hak/bakiye tüketilir (çift-sayım/çift-düşüm önlenir).
  * dönüş: { unlocked: number, usedFree: boolean, analysisBalance: number }
- *   unlocked = bu istekten sonra TOPLAM açık sayı (alreadyUnlocked dahil).
  */
 exports.consumeAnalysis = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },

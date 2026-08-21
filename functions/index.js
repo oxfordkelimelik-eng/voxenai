@@ -1,12 +1,15 @@
 // Barrel dosyası — gerçek implementasyonlar konuya göre ayrılmış dosyalarda:
-//   gemini.js       — Gemini proxy (analyzeImage, chat)
+//   aiProxy.js      — OpenAI proxy (analyzeImage, chat) + consumeAnalysis
 //   payments.js     — satın alma doğrulama + hesap silme
-//   falPhotos.js    — fal.ai AI foto üretimi (hazırlık + üretim + webhook)
-const gemini = require("./gemini");
+//   falPhotos.js    — AI foto üretimi (hazırlık + üretim + webhook)
+//
+// NOT (2026-08-20): eski gemini.js SİLİNDİ. Google Gemini projeden tamamen
+// kaldırıldı; tek AI sağlayıcı OpenAI (bkz. aiProxy.js dosya başı notu).
+const aiProxy = require("./aiProxy");
 const payments = require("./payments");
 const falPhotos = require("./falPhotos");
 
-Object.assign(exports, gemini, payments);
+Object.assign(exports, aiProxy, payments);
 
 // falPhotos'un yalnızca GERÇEK Cloud Function'larını dışa aç.
 for (const name of [

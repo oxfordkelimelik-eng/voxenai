@@ -6,6 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/dating_widgets.dart';
+import '../widgets/legal_links.dart';
 import '../widgets/voxen_visuals.dart';
 
 /// VOXEN AI onboarding funnel'ı (Bölüm 1 & 2).
@@ -488,6 +489,10 @@ class _AuthOnboardingScreenState
                           child: CircularProgressIndicator(
                               color: AppColors.gold)),
                     ],
+                    const SizedBox(height: 22),
+                    // Hesap oluşturma noktasında Şartlar/Politika ERİŞİLEBİLİR
+                    // olmalı (App Store 5.1.1) — bkz. LegalLinksText.
+                    const LegalLinksText(),
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -513,8 +518,9 @@ class _AuthOnboardingScreenState
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Fotoğraflarımın yalnızca analiz ve üretim için işlenmesine '
-              'açık rıza veriyorum. (KVKK/GDPR)',
+              'Fotoğraflarımın AI foto üretimi, kalite kontrolü ve fotoğraf '
+              'analizi için OpenAI\'a gönderilmesine ve yalnızca bu işlemler '
+              'için işlenmesine açık rıza veriyorum. (KVKK/GDPR)',
               style: TextStyle(
                   fontSize: 12,
                   color: AppColors.textSecondary,

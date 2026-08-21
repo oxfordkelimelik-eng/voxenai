@@ -33,12 +33,16 @@ class DatingConfig {
   // (2026-08-15 denemesi) bu yüzden geri alındı.
   static const int photosPerSet = 10; // tek üretimde/stilde çıkan foto sayısı
 
-  // AI foto üretimi referansları:
-  //   3 canlı yüz (ön / sağ / sol) + 1 zorunlu tam boy.
-  // functions/falPhotos.js REFERENCE_PHOTO_COUNT ile senkron.
+  // AI foto üretimi referansları: 3 canlı yüz (ön / sağ / sol).
+  //
+  // TAM BOY FOTOĞRAF KALDIRILDI (2026-08-20, kullanıcı kararı): boy ve vücut
+  // tipi zaten onboarding formundan alınıyor (bodyProfile) ve sunucu tarafında
+  // ZATEN tek yetkili kaynak sayılıyordu (bkz. falPhotos.js shortBodyNote) —
+  // tam boy fotoğraftan türetilen gözlem yalnızca ikincildi ve çelişki
+  // durumunda eleniyordu. Kullanıcıdan bir adım daha az istiyoruz.
+  // functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
   static const int faceCaptureCount = 3;
-  static const int bodyPhotoCount = 1;
-  static const int referencePhotoCount = faceCaptureCount + bodyPhotoCount; // 4
+  static const int referencePhotoCount = faceCaptureCount; // 3
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç
@@ -46,6 +50,15 @@ class DatingConfig {
   static const int freePreviewCount = 1;
 
   // --- Foto Analizi paketleri ---
+  //
+  // UYARI (2026-08-20): aşağıdaki *PriceLabel sabitleri artık ARAYÜZDE
+  // KULLANILMIYOR; yalnızca hangi fiyat basamağının hedeflendiğini belgeleyen
+  // referanslardır. Kullanıcıya gösterilen fiyat HER ZAMAN mağazadan
+  // (ProductDetails.price) gelir ve kullanıcının ülkesine göre yerelleşir.
+  // Bunları tekrar UI'a bağlama: App Store Connect'teki gerçek fiyat
+  // basamağıyla uyuşmazlarsa kullanıcıya tahsil edilenden farklı bir fiyat
+  // gösterilir (App Store "yanıltıcı fiyat" reddi riski).
+  // Bkz. datingStorePrice — dating_providers.dart.
   static const int analysisSingleRuns = 1; // Tekli
   static const String analysisSinglePriceLabel = '₺99';
   static const String analysisSingleProductId = 'dating_pack_analysis1';
@@ -183,6 +196,11 @@ class DatingKeys {
   static const String credits = 'dating_credits';
   static const String signedInProvider = 'dating_signin_provider';
   static const String consentGiven = 'dating_consent';
+  // Üçüncü taraf AI sağlayıcısına (OpenAI) fotoğraf
+  // gönderilmeden ÖNCE alınan açık rıza — App Store 5.1.1(i)/5.1.2(i) gereği
+  // akış başına ayrı tutulur (bkz. ai_consent_gate.dart).
+  static const String aiConsentPhoto = 'dating_ai_consent_photo';
+  static const String aiConsentAnalysis = 'dating_ai_consent_analysis';
   // Modül başına ücretsiz deneme hakkı kullanıldı mı?
   static const String freePhotoUsed = 'dating_free_photo_used';
   static const String freeAnalysisUsed = 'dating_free_analysis_used';

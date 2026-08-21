@@ -40,7 +40,7 @@ class SettingsScreen extends ConsumerWidget {
               _SettingsTile(
                 icon: Icons.model_training_rounded,
                 title: 'AI Modeli',
-                subtitle: ApiConfig.geminiModel,
+                subtitle: ApiConfig.aiModelLabel,
                 trailingIcon: null,
               ),
             ],

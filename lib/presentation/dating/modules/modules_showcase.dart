@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
+import '../paywall/purchase_auth_gate.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/voxen_visuals.dart';
 import '../widgets/shared_widgets.dart';
@@ -68,10 +69,9 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
     if (mounted) setState(() {});
   }
 
-  String _price(String productId, String fallback) => datingStorePrice(
+  String _price(String productId) => datingStorePrice(
         ref.read(datingPurchaseServiceProvider),
         productId,
-        fallback,
       );
 
   @override
@@ -98,6 +98,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
       _PackKind.photo10 => DatingConfig.photoStandardProductId,
       _PackKind.photo50 => DatingConfig.photoPremiumProductId,
     };
+    // Bu ekran GİRİŞSİZ gezilebiliyor; mağaza akışı başlamadan önce giriş şart
+    // (bkz. purchase_auth_gate.dart — 2026-08-19 App Store 2.1(b) reddi).
+    if (!await ensureSignedInForPurchase(context, ref)) return;
+    if (!mounted) return;
     setState(() => _busy = true);
     final ok =
         await ref.read(datingPurchaseServiceProvider).purchaseAndWait(productId);
@@ -337,8 +341,8 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                         bullets: [
                           'Çekicilik skoru',
                           'İlk analiz ücretsiz',
-                          '${_price(DatingConfig.analysisSingleProductId, DatingConfig.analysisSinglePriceLabel)} tekli · '
-                              '${_price(DatingConfig.analysisStandardProductId, DatingConfig.analysisStandardPriceLabel)} standart',
+                          '${_price(DatingConfig.analysisSingleProductId)} tekli · '
+                              '${_price(DatingConfig.analysisStandardProductId)} standart',
                         ],
                       ),
                     ),
@@ -368,10 +372,8 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.insights,
                               title: 'Tekli Analiz',
                               sub: '1 analiz',
-                              price: _price(
-                                DatingConfig.analysisSingleProductId,
-                                DatingConfig.analysisSinglePriceLabel,
-                              ),
+                              price:
+                                  _price(DatingConfig.analysisSingleProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.analysis1),
                             ),
@@ -383,9 +385,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               title: 'Standart Analiz',
                               sub: '5 analiz · Avantajlı',
                               price: _price(
-                                DatingConfig.analysisStandardProductId,
-                                DatingConfig.analysisStandardPriceLabel,
-                              ),
+                                  DatingConfig.analysisStandardProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.analysis5),
                             ),
@@ -397,10 +397,8 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               title: 'AI Foto Standart',
                               sub:
                                   '${DatingConfig.photoStandardPhotos} foto · 1 stil',
-                              price: _price(
-                                DatingConfig.photoStandardProductId,
-                                DatingConfig.photoStandardPriceLabel,
-                              ),
+                              price:
+                                  _price(DatingConfig.photoStandardProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo10),
                             ),
@@ -412,10 +410,8 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               title: 'AI Foto Premium',
                               sub:
                                   '${DatingConfig.photoPremiumPhotos} foto · 5 stil',
-                              price: _price(
-                                DatingConfig.photoPremiumProductId,
-                                DatingConfig.photoPremiumPriceLabel,
-                              ),
+                              price:
+                                  _price(DatingConfig.photoPremiumProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo50),
                             ),

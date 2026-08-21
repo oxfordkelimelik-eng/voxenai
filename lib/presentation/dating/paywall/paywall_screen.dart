@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../providers/dating_providers.dart';
+import 'purchase_auth_gate.dart';
 
 /// Hangi paket grubunun gösterileceği.
 enum PaywallMode { all, analysis, aiPhoto }
@@ -38,10 +39,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     if (mounted) setState(() {});
   }
 
-  String _price(String productId, String fallback) => datingStorePrice(
+  String _price(String productId) => datingStorePrice(
         ref.read(datingPurchaseServiceProvider),
         productId,
-        fallback,
       );
 
   String get _title => switch (widget.mode) {
@@ -60,6 +60,11 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       };
 
   Future<void> _buy(String productId) async {
+    // Mağaza akışı BAŞLAMADAN önce giriş şart: sunucu doğrulaması
+    // (`verifyPurchase`) oturum ister; giriş olmadan satın alma tamamlanır ama
+    // hesaba tanımlanamaz ve işlem askıda kalır (bkz. purchase_auth_gate.dart).
+    if (!await ensureSignedInForPurchase(context, ref)) return;
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _busyProductId = productId;
@@ -132,10 +137,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Tekli Analiz',
                         sub:
                             '${DatingConfig.analysisSingleRuns} fotoğraf analizi',
-                        price: _price(
-                          DatingConfig.analysisSingleProductId,
-                          DatingConfig.analysisSinglePriceLabel,
-                        ),
+                        price: _price(DatingConfig.analysisSingleProductId),
                         busy: _busyProductId ==
                             DatingConfig.analysisSingleProductId,
                         onTap: _busy
@@ -148,10 +150,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Standart Analiz',
                         sub:
                             '${DatingConfig.analysisStandardRuns} fotoğraf analizi',
-                        price: _price(
-                          DatingConfig.analysisStandardProductId,
-                          DatingConfig.analysisStandardPriceLabel,
-                        ),
+                        price: _price(DatingConfig.analysisStandardProductId),
                         badge: 'AVANTAJLI',
                         busy: _busyProductId ==
                             DatingConfig.analysisStandardProductId,
@@ -170,10 +169,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Standart Paket',
                         sub:
                             '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
-                        price: _price(
-                          DatingConfig.photoStandardProductId,
-                          DatingConfig.photoStandardPriceLabel,
-                        ),
+                        price: _price(DatingConfig.photoStandardProductId),
                         busy: _busyProductId ==
                             DatingConfig.photoStandardProductId,
                         onTap: _busy
@@ -186,10 +182,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         title: 'Premium Paket',
                         sub:
                             '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
-                        price: _price(
-                          DatingConfig.photoPremiumProductId,
-                          DatingConfig.photoPremiumPriceLabel,
-                        ),
+                        price: _price(DatingConfig.photoPremiumProductId),
                         badge: 'EN İYİ DEĞER',
                         busy: _busyProductId ==
                             DatingConfig.photoPremiumProductId,
@@ -206,6 +199,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
               onPressed: _busy
                   ? null
                   : () async {
+                      // Geri yükleme de sunucu doğrulaması yapar → oturum şart.
+                      if (!await ensureSignedInForPurchase(context, ref)) return;
+                      if (!context.mounted) return;
                       await ref.read(entitlementProvider.notifier).restore();
                       await ref.read(datingPurchaseServiceProvider).restore();
                       if (!context.mounted) return;

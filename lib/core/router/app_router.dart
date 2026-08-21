@@ -8,6 +8,7 @@ import '../../presentation/dating/modules/module_screen.dart';
 import '../../presentation/dating/paywall/paywall_screen.dart';
 import '../../presentation/dating/paywall/login_screen.dart';
 import '../../presentation/dating/settings/dating_settings_screen.dart';
+import '../../presentation/dating/settings/dating_faq_screen.dart';
 import 'dating_routes.dart';
 
 // ============================================================
@@ -93,6 +94,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: DatingRoutes.settings,
         builder: (c, s) => const DatingSettingsScreen(),
+      ),
+      // Sık sorulan sorular
+      GoRoute(
+        path: DatingRoutes.faq,
+        builder: (c, s) => const DatingFaqScreen(),
       ),
     ],
   );

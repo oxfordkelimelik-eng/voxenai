@@ -1,7 +1,7 @@
 # Rise Up — Uygulama Çalışma Mantığı (Taslak Doküman)
 
 > **Rise Up**: AI destekli erkek kişisel gelişim & "looksmaxxing" platformu.
-> Flutter (Dart) + Firebase + Google Gemini Vision API üzerine kurulu, yerel-öncelikli (offline-first) bir mobil uygulama.
+> Flutter (Dart) + Firebase + OpenAI (GPT-4o Vision) üzerine kurulu, yerel-öncelikli (offline-first) bir mobil uygulama.
 
 ---
 
@@ -18,11 +18,11 @@ Kullanıcı bir anket doldurur ve isteğe bağlı yüz/vücut fotoğrafı yükle
 | Framework | Flutter (Dart SDK ^3.11) |
 | State Management | Riverpod (`flutter_riverpod`) |
 | Navigasyon | `go_router` |
-| Network | `dio` (Gemini REST), `cloud_functions` (proxy) |
+| Network | `cloud_functions` (AI proxy — istemcide doğrudan AI çağrısı YOK) |
 | Kimlik | Firebase Auth (anonim + Google) |
 | Bulut DB | Cloud Firestore |
 | Sunucu | Firebase Cloud Functions (Node.js, `europe-west1`) |
-| AI | Google Gemini Vision (`gemini-2.5-flash` + yedek modeller) |
+| AI | OpenAI GPT-4o (üretim: `gpt-image-2`) — **tek sağlayıcı** |
 | Yerel depolama | `shared_preferences` (durum), `flutter_secure_storage` (API anahtarı) |
 | Ödeme | Google Play Billing (`in_app_purchase`) |
 | Medya | `image_picker` |
@@ -49,7 +49,7 @@ lib/
 │   └── repositories/         → Failure tipleri (Network/Unauthorized/Server...)
 │
 ├── data/                     → Dış dünyaya bağlanan katman
-│   └── sources/              → auth_service, claude_api_service (Gemini),
+│   └── sources/              → auth_service, claude_api_service (OpenAI proxy),
 │                               sync_service (Firestore), billing_service
 │
 └── presentation/             → UI
@@ -58,7 +58,7 @@ lib/
     └── widgets/              → Tekrar kullanılan parçalar (streak, xp bar...)
 ```
 
-**Veri akışı yönü:** `presentation` → `providers` → `data/sources` → (Firebase / Gemini).
+**Veri akışı yönü:** `presentation` → `providers` → `data/sources` → (Firebase / OpenAI).
 `domain` katmanı hiçbir şeye bağımlı değildir; her şey ona bağımlıdır.
 
 ---
@@ -128,8 +128,8 @@ Splash ekranı (`/`) 2.5 sn sonra şu karara göre yönlendirir:
 
 Anket bittiğinde: `IntakeProfile` kaydedilir → `surveyDone=true` → deneme başlatılır → görevler üretilir → analiz ekranına geçilir.
 
-### 6.2 AI Foto Analizi (ClaudeApiService — Gemini kullanır)
-> Not: Sınıf adı `ClaudeApiService` ama aslında **Google Gemini** API'sini çağırır.
+### 6.2 AI Foto Analizi (ClaudeApiService — OpenAI kullanır)
+> Not: Sınıf adı `ClaudeApiService` tarihseldir; 2026-08-20'den beri **OpenAI GPT-4o** çağırır (öncesinde Gemini'ydi).
 
 İki analiz türü:
 - **Yüz analizi:** yüz şekli, çene hattı/cilt/genel skor, asimetri, gonial açı, mewing rehberi, masseter egzersizleri, cilt rutini, saç/sakal kılavuzu.
@@ -137,7 +137,7 @@ Anket bittiğinde: `IntakeProfile` kaydedilir → `surveyDone=true` → deneme b
 
 **Çağrı stratejisi (`_callVision`):**
 1. Önce **Cloud Function proxy** (`analyzeImage`) denenir — API anahtarı sunucuda gizli kalır.
-2. Proxy başarısızsa → doğrudan Gemini REST API (gömülü yedek anahtarla).
+2. Proxy TEK yoldur — doğrudan-API yedeği 2026-08-20'de kaldırıldı (istemcide anahtar yok).
 3. Tümü başarısızsa → **form tabanlı fallback** (`fallbackFace` / `fallbackBody`): anket verisinden kaba ama tutarlı skor üretir (internet/AI gerekmez).
 
 AI yanıtı katı JSON formatında istenir; `_extractJson` ile ayrıştırılıp entity'e dönüştürülür.
@@ -168,7 +168,7 @@ Her görev: başlık, açıklama, **rationale (neden)**, zorluk, süre, XP ödü
 Kullanıcının seçtiği her bağımlılık için "temiz kal" sayaçları ve günlük kurtulma görevleri (`_addictionTasks`). Her bağımlılık tipinin emoji'si, motivasyon cümlesi ve kurtulma adımları vardır.
 
 ### 6.6 Sosyal Simülatör (AI Chat)
-Gemini ile **daygame/sosyal antrenman** rol-yapma. AI hem gerçekçi bir kadın karakteri canlandırır hem de koç olarak `[GERİ BİLDİRİM]` ve `[EQ_SKOR]` üretir. Senaryolar: sokak, kafe, market, etkinlik. Seviyeler: dolaylı / ileri (daygame).
+OpenAI ile **daygame/sosyal antrenman** rol-yapma. AI hem gerçekçi bir kadın karakteri canlandırır hem de koç olarak `[GERİ BİLDİRİM]` ve `[EQ_SKOR]` üretir. Senaryolar: sokak, kafe, market, etkinlik. Seviyeler: dolaylı / ileri (daygame).
 
 ---
 
@@ -189,7 +189,7 @@ Gemini ile **daygame/sosyal antrenman** rol-yapma. AI hem gerçekçi bir kadın 
 - Fotoğraf yolları cihaza özeldir, **buluta gönderilmez**.
 - **Güvenlik (Firestore rules):** Her kullanıcı yalnızca kendi `users/{uid}` dokümanına erişebilir; diğer her şey kapalı.
 
-**Hassas veri:** Gemini API anahtarı `flutter_secure_storage` ile şifreli tutulur. Üretimde anahtar Cloud Function'da **Firebase Secret** (`GEMINI_KEY`) olarak saklanır ve APK'da görünmez.
+**Hassas veri:** İstemcide AI anahtarı YOKTUR. Anahtar yalnızca Cloud Function'da **Firebase Secret** (`OPENAI_API_KEY`) olarak saklanır ve APK/IPA'da görünmez.
 
 ---
 
@@ -199,11 +199,11 @@ Gemini ile **daygame/sosyal antrenman** rol-yapma. AI hem gerçekçi bir kadın 
 
 | Fonksiyon | Görev |
 |-----------|-------|
-| `analyzeImage` | Foto + prompt alır, gizli anahtarla Gemini'yi çağırır, ham metni döner |
-| `chat` | Sosyal simülatör mesajlarını Gemini'ye iletir |
+| `analyzeImage` | Foto + prompt alır, gizli anahtarla OpenAI'yi çağırır, ham metni döner |
+| `chat` | Sosyal simülatör mesajlarını OpenAI'ye iletir |
 
 - Sadece **giriş yapmış** (anonim dahil) kullanıcı çağırabilir (`request.auth` kontrolü).
-- **Dayanıklılık:** Model meşgulse (503/429) önce kısa bekleyip yeniden dener, olmazsa sıradaki yedek modele geçer (`gemini-2.5-flash → 2.0-flash → flash-latest → 2.0-flash-lite`).
+- **Dayanıklılık:** 429/5xx'te üstel backoff ile 3 kez yeniden denenir; OpenAI'nin yanıtındaki "try again in Xs" ipucu varsa ona uyulur.
 
 ---
 
@@ -220,13 +220,13 @@ Gemini ile **daygame/sosyal antrenman** rol-yapma. AI hem gerçekçi bir kadın 
 ## 10. Özet Akış Şeması
 
 ```
-Kullanıcı                 Uygulama                      Firebase/Gemini
+Kullanıcı                 Uygulama                      Firebase/OpenAI
    │                         │                                │
    │── açılış ──────────────▶│── anonim giriş ───────────────▶│ Auth
    │                         │── bulut verisi indir ─────────▶│ Firestore
    │── anket doldur ────────▶│── IntakeProfile kaydet         │
    │                         │── görevleri üret (TaskGen)     │
-   │── foto yükle ──────────▶│── analyzeImage proxy ─────────▶│ Cloud Fn → Gemini
+   │── foto yükle ──────────▶│── analyzeImage proxy ─────────▶│ Cloud Fn → OpenAI
    │                         │◀─ skorlar + öneriler ──────────│
    │                         │── görevleri zenginleştir       │
    │── görev tamamla ───────▶│── +XP, +streak, geçmiş         │
@@ -259,7 +259,7 @@ Kullanıcı                 Uygulama                      Firebase/Gemini
 ## 12. Kalan Teknik Borç
 
 1. **İsimlendirme tutarsızlığı:** `ClaudeApiService` ve `claude_api_service.dart`
-   aslında **Gemini** kullanır — yanıltıcı (işlevsel sorun değil).
+   aslında **OpenAI** kullanır — yanıltıcı (işlevsel sorun değil).
 2. **İstemci tarafı satın alma doğrulaması:** Play Developer API ile sunucu
    tarafı doğrulama henüz yok (kodda not düşülmüş).
 ```

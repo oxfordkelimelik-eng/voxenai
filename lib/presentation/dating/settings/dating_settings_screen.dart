@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/ai_consent_gate.dart';
 
 /// Ayarlar & Gizlilik (Bölüm 9). Politika, şartlar, paketler, restore,
 /// hesap/veri silme, destek. KVKK/GDPR + App Store gerekleri.
@@ -56,6 +57,11 @@ class DatingSettingsScreen extends ConsumerWidget {
 
           const SizedBox(height: 20),
           _section('GİZLİLİK & YASAL'),
+          // Hangi verinin hangi AI sağlayıcısına gittiğini gösterir ve rızanın
+          // geri çekilmesine izin verir (App Store 5.1.1(i)/5.1.2(i)).
+          _tile(Icons.smart_toy_outlined, 'Yapay Zekâ Veri Paylaşımı',
+              subtitle: 'Ne gönderiliyor, kime gönderiliyor · rızanı yönet',
+              onTap: () => showAiDataSharingSettings(context)),
           _tile(Icons.privacy_tip_outlined, 'Gizlilik Politikası',
               onTap: () => _openLegal(
                     context,
@@ -299,10 +305,11 @@ class DatingSettingsScreen extends ConsumerWidget {
       '• Toplanan veriler: fotoğraflar, kullanım verisi, satın alma bilgisi.\n'
       '• İşleme amacı: AI foto üretimi, fotoğraf analizi, looksmaxxing önerileri, '
       'coach/rizz/bio yardımcıları.\n'
-      '• Üçüncü taraf işleme: Fotoğraflarınız AI üretimi ve kalite kontrolü '
-      'için OpenAI\'a, metin/analiz üretimi için Google Gemini\'ye ve bazı '
-      'üretim akışlarında fal.ai\'ye iletilir. Bu sağlayıcılar verileri '
-      'yalnızca ilgili işlemi gerçekleştirmek için kullanır.\n'
+      '• Üçüncü taraf işleme: Fotoğraflarınız AI üretimi, kalite kontrolü ve '
+      'fotoğraf analizi için OpenAI\'a iletilir; OpenAI tek yapay zekâ '
+      'sağlayıcımızdır. Verilerinizi yalnızca ilgili işlemi gerçekleştirmek '
+      'için kullanır, bu politikadaki koruma düzeyine eşit ya da denk koruma '
+      'sağlar ve kendi amaçları için kullanma yetkisi verilmez.\n'
       '• Saklama: Ürettiğiniz içerik hesabınızda saklanır; istediğinizde '
       'silebilirsiniz.\n'
       '• Haklarınız (KVKK/GDPR): erişim, düzeltme, silme. "Hesabımı ve '
