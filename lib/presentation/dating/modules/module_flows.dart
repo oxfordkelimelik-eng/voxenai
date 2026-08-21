@@ -1599,7 +1599,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       GeneratedPhotoTile(gsUrl: gsUrl, allGsUrls: _resultUrls, index: index);
 
   /// Elenen kare hücresi — kabul edilen fotoğraflarla AYNI görüntüleme/indirme
-  /// akışını kullanır (GeneratedPhotoTile), yalnızca gerekçe rozeti eklenir.
+  /// akışını kullanır (GeneratedPhotoTile). Gerekçe rozeti KASITLI OLARAK
+  /// gösterilmiyor (2026-08-22, kullanıcı kararı) — fotoğrafın üzerine metin
+  /// yazılmıyor; gerekçe hâlâ Firestore'daki `reason` alanında duruyor,
+  /// yalnızca UI'da gösterilmiyor.
   /// `allGsUrls` kasıtlı olarak yalnızca elenen kareler — tam ekranda kaydırma
   /// kabul edilenlerle karışmaz.
   Widget _rejectedTile(List<Map<String, dynamic>> frames, int index) {
@@ -1608,7 +1611,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       gsUrl: frame['gsUrl'] as String,
       allGsUrls: [for (final f in frames) f['gsUrl'] as String],
       index: index,
-      badgeLabel: (frame['reason'] as String?) ?? 'Kalite kontrolünden geçemedi',
     );
   }
 
