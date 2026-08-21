@@ -2102,6 +2102,9 @@ const REJECTION_REASON_LABELS = {
   "vision-hair": "Saç uyumsuzluğu tespit edildi",
   "vision-quality": "Genel görsel kalite yetersiz",
   "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
+  "no-face-template": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
+  "no-face-output": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
+  "no-face-both": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
 };
 const DEFAULT_REJECTION_REASON_LABEL = "Kalite kontrolünden geçemedi";
 function humanRejectionReason(gate) {
@@ -2786,7 +2789,22 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       try {
         const { measureHeadPlacement } = require("./faceQuality");
         const p = await measureHeadPlacement(buf, tplBuf);
-        if (!p.ok) {
+        // no-face-* İÇİN ATLAMA YERİNE RED (2026-08-21): ana kimlik kapısı
+        // (assessOutputFace) "yüz yok" durumunu zaten doğrudan red sayıyor
+        // (bkz. faceQuality.js:726) — burada aynı durumu sessizce geçirmek
+        // tutarsızdı. Gerçek olay: chunk'ta yüz bulunamayınca kroma/ten
+        // ölçümleri de aynı anda çöküyordu (üç BAĞIMSIZ ölçümün aynı anda
+        // "yüz yok" demesi gürültü değil, gerçek bozukluk işareti) — bkz.
+        // 2026-08-21 kalite incelemesi (netlik=69.8, şablon yüzOranı=0.071).
+        if (!p.ok && p.reason && p.reason.startsWith("no-face")) {
+          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[${p.reason}]`);
+          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+            mode, gate: p.reason, distance: mathDist,
+            detail: "yüz tespit edilemedi (kroma/ten ölçümleri de muhtemelen aynı sebeple çökmüştür)",
+          });
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        } else if (!p.ok) {
           console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${p.reason}]`);
         } else {
           const bad = Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;
