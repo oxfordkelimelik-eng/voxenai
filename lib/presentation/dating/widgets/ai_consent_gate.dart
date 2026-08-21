@@ -89,12 +89,18 @@ class _AiConsentSheet extends StatelessWidget {
   String get _whatIsSent => switch (kind) {
         AiFlowKind.photoGeneration =>
           'Çektiğin ${DatingConfig.faceCaptureCount} yüz fotoğrafı '
-              '(ön / sağ / sol).',
+              '(ön / sağ / sol); yüz analizi, sahne kompozisyonu, ön '
+              'işleme ve kalite kontrolden geçirildikten sonra işlenmek '
+              'üzere OpenAI altyapısına iletilir.',
         AiFlowKind.photoAnalysis =>
-          'Analiz için seçtiğin fotoğraflar.',
+          'Analiz için seçtiğin fotoğraflar, çok kriterli skorlama '
+              'modelimiz üzerinden işlenmek üzere OpenAI altyapısına '
+              'iletilir.',
         null =>
-          'AI foto üretiminde çektiğin yüz fotoğrafları; foto analizinde '
-              'analiz için seçtiğin fotoğraflar.',
+          'Foto üretiminde çektiğin yüz fotoğrafları ile foto analizinde '
+              'seçtiğin fotoğraflar; kompozisyon, kalite kontrolü ve '
+              'skorlama içeren işleme hatlarımızdan geçirilip OpenAI '
+              'altyapısına iletilir.',
       };
 
   Future<void> _openPolicy() async {
@@ -114,7 +120,7 @@ class _AiConsentSheet extends StatelessWidget {
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text(
-          'Rızan geri çekildi. Fotoğrafların yapay zekâya gönderilmeyecek.'),
+          'Rızan geri çekildi. Fotoğrafların gönderilmeyecek.'),
     ));
   }
 
@@ -145,9 +151,7 @@ class _AiConsentSheet extends StatelessWidget {
                   color: AppColors.gold, size: 40),
               const SizedBox(height: 14),
               Text(
-                _isSettingsMode
-                    ? 'Yapay Zekâ Veri Paylaşımı'
-                    : 'Fotoğrafların yapay zekâya gönderilecek',
+                _isSettingsMode ? 'Veri Paylaşımı' : 'Fotoğrafların gönderilecek',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontSize: 19,
@@ -158,10 +162,10 @@ class _AiConsentSheet extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 _isSettingsMode
-                    ? 'Fotoğraflarının hangi yapay zekâ sağlayıcılarına, ne '
-                        'için gönderildiği aşağıda açıklanmıştır.'
-                    : 'Devam etmeden önce ne gönderildiğini ve kime '
-                        'gönderildiğini bilmeni istiyoruz.',
+                    ? 'Fotoğraflarının kime, ne için gönderildiği aşağıda '
+                        'açıklanmıştır.'
+                    : 'Devam etmeden önce ne gönderildiğini bilmeni '
+                        'istiyoruz.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontSize: 13,
@@ -171,18 +175,9 @@ class _AiConsentSheet extends StatelessWidget {
               const SizedBox(height: 22),
               _Row(
                 icon: Icons.photo_library_outlined,
-                title: 'Ne gönderiliyor?',
-                body: _whatIsSent,
-              ),
-              const _Divider(),
-              const _Row(
-                icon: Icons.corporate_fare_rounded,
-                title: 'Kime gönderiliyor?',
-                body: '• OpenAI — AI fotoğrafın üretimi, üretilen karenin '
-                    'kalite kontrolü ve fotoğraf analizi. Tek yapay zekâ '
-                    'sağlayıcımız.\n'
-                    '• Google Firebase — işlem sürerken geçici depolama '
-                    '(altyapı sağlayıcımız; yapay zekâ işlemesi yapmaz).',
+                title: 'Ne gönderiliyor, kime?',
+                body: '$_whatIsSent\nFirebase, işlem sürerken geçici '
+                    'depolama için kullanılır (altyapı sağlayıcımız).',
               ),
               const _Divider(),
               const _Row(

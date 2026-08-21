@@ -59,7 +59,7 @@ class DatingSettingsScreen extends ConsumerWidget {
           _section('GİZLİLİK & YASAL'),
           // Hangi verinin hangi AI sağlayıcısına gittiğini gösterir ve rızanın
           // geri çekilmesine izin verir (App Store 5.1.1(i)/5.1.2(i)).
-          _tile(Icons.smart_toy_outlined, 'Yapay Zekâ Veri Paylaşımı',
+          _tile(Icons.smart_toy_outlined, 'Veri Paylaşımı',
               subtitle: 'Ne gönderiliyor, kime gönderiliyor · rızanı yönet',
               onTap: () => showAiDataSharingSettings(context)),
           _tile(Icons.privacy_tip_outlined, 'Gizlilik Politikası',

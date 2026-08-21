@@ -2173,7 +2173,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
 
   Future<void> _run() async {
     if (_photos.isEmpty) return;
-    // ÜÇÜNCÜ TARAF AI RIZASI — fotoğraflar Gemini'ye gönderilmeden önce
+    // ÜÇÜNCÜ TARAF AI RIZASI — fotoğraflar OpenAI'a gönderilmeden önce
     // (App Store 5.1.1(i)/5.1.2(i), bkz. ai_consent_gate.dart).
     if (!await ensureAiProcessingConsent(context,
         kind: AiFlowKind.photoAnalysis)) {

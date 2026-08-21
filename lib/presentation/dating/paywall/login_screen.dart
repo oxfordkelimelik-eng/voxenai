@@ -176,30 +176,60 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Widget _consentRow() {
-    return GestureDetector(
-      onTap: () => setState(() => _consent = !_consent),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-              _consent
-                  ? Icons.check_box_rounded
-                  : Icons.check_box_outline_blank_rounded,
-              color: _consent ? AppColors.gold : AppColors.textMuted),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text(
-              'Fotoğraflarımın AI foto üretimi, kalite kontrolü ve fotoğraf '
-              'analizi için OpenAI\'a gönderilmesine ve yalnızca bu işlemler '
-              'için işlenmesine açık rıza veriyorum. (KVKK/GDPR)',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                  height: 1.4),
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _consent = !_consent),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                  _consent
+                      ? Icons.check_box_rounded
+                      : Icons.check_box_outline_blank_rounded,
+                  color: _consent ? AppColors.gold : AppColors.textMuted),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Fotoğraflarımın; foto üretimi, analiz ve kalite kontrol '
+                  'sürecinde kendi işleme hatlarımızdan (yüz analizi, '
+                  'kompozisyon, ön işleme, kalite kontrol) geçirilerek '
+                  'OpenAI altyapısına iletilmesine ve yalnızca bu işlemler '
+                  'için kullanılmasına açık rıza veriyorum. (KVKK/GDPR)',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      height: 1.4),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        const Padding(
+          padding: EdgeInsets.only(left: 34),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lock_clock_outlined,
+                  size: 14, color: AppColors.textMuted),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Verilerin güvendedir: kaynak fotoğrafların işlem '
+                  'tamamlanır tamamlanmaz sunucularımızdan kalıcı olarak '
+                  'silinir.',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.textMuted,
+                      height: 1.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
