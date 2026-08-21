@@ -639,7 +639,21 @@ const OUTPUT_FACE_RATIO_MAX = 0.45;
 // DÜRÜST SINIR: bu kontrol KABA büyümeyi yakalar; "dar omuzda kafa büyük
 // duruyor" gibi ince oransızlığı YAKALAMAZ, çünkü yüz kutusu omuz genişliği
 // hakkında bilgi taşımaz. O iş Vision'ın HEAD_VS_SHOULDERS sınıfına ait.
-const OUTPUT_FACE_GROWTH_MAX = 1.45;
+//
+// 1.45 -> 1.15 (2026-08-21, KULLANICI GÖRSEL DOĞRULAMASI): gerçek üretimde
+// büyüme=1.16 ölçülen bir kare (elegance chunk=6, yüzOranı=0.200 — aynı
+// settekilerin en yükseği) kullanıcı tarafından gözle incelendi ve "kafa
+// gerçekten çok büyümüş" olarak onaylandı. Vision'ın HEAD_VS_SHOULDERS
+// sınıfı o kare için HEAD_NORMAL demişti, yani ince oransızlığı yakalaması
+// beklenen katman da kaçırdı — bu yüzden sayısal kapı sıkılaştırılıyor.
+//
+// BİLİNEN ÇELİŞKİ (bilinçli kabul): yukarıdaki 13 karelik eski ölçüm setinde
+// 1.15 / 1.22 / 1.23 değerleri var ve bunların görsel kalitesi HİÇ
+// DOĞRULANMADI — yeni eşik onları da elerdi. Bu risk kabul edildi çünkü bu
+// kapının yanlış-pozitif MALİYETİ düşük: kare atılmıyor, retry FARKLI bir
+// şablonla yeniden üretiliyor (~$0.05 ek maliyet, foto kaybı yok). Gerçek
+// dağılım büyüdükçe yeniden kalibre edilecek.
+const OUTPUT_FACE_GROWTH_MAX = 1.15;
 
 // Bu derecenin üstünde kafa yana dönüktür ve kimlik mesafesi güvenilmez
 // sayılır (bkz. profileDegreeFromLandmarks). 0.45, gerçek ölçümde önden

@@ -1779,14 +1779,50 @@ const VISION_MODEL = "gpt-4o";
 // belirgin yükseltir.
 const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
 
+/**
+ * Vision kalite kontrolü — KARARSIZ KALMAMASI için iki aşamalı.
+ *
+ * AŞAMA 1: referanslı (tam) prompt, VISION_INCONCLUSIVE_MAX_ATTEMPTS kez.
+ *   Reddin deterministik olmaması sayesinde ikinci deneme çoğu zaman gerçek
+ *   bir cevap getiriyor.
+ *
+ * AŞAMA 2 (2026-08-21): hepsi kararsız kaldıysa REFERANSSIZ prompt'a düşülür.
+ *   Neden işe yarar: politika reddini tetikleyen şey, referans fotoğraflarla
+ *   KİŞİ KARŞILAŞTIRMASI yapılması (bkz. aşağıdaki ÇERÇEVELEME NOTU).
+ *   Referanssız prompt kimlik sormaz, yalnızca "bu yüz deforme/bozuk mu?"
+ *   diye sorar — bu yüzden reddedilme olasılığı çok daha düşük.
+ *   KAYIP: kimlik/hat sadakati, ten tutarlılığı, kafa-omuz oranı gibi
+ *   referans gerektiren kontroller bu aşamada YAPILAMAZ. Ama artefakt/
+ *   deformasyon kontrolü çalışır — yani kapı tamamen kör kalmaktansa kısmi
+ *   çalışır. Kimlik tarafını zaten sayısal kapı (assessOutputFace) ölçüyor.
+ */
 async function assessOutputWithVision(buf, referenceImages, attempt = 1) {
   const result = await assessOutputWithVisionOnce(buf, referenceImages);
-  if (result.inconclusive && attempt < VISION_INCONCLUSIVE_MAX_ATTEMPTS) {
+  if (!result.inconclusive) return result;
+
+  if (attempt < VISION_INCONCLUSIVE_MAX_ATTEMPTS) {
     console.warn(
       `Vision kararsız/reddedilmiş cevap verdi — tekrar deneniyor ` +
       `(deneme ${attempt + 1}/${VISION_INCONCLUSIVE_MAX_ATTEMPTS})`
     );
     return assessOutputWithVision(buf, referenceImages, attempt + 1);
+  }
+
+  // Referanslı sorular tükendi. Referans VARSA, kimlik karşılaştırması
+  // içermeyen sade prompt'la son bir deneme yap.
+  const hadRefs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
+    .filter((r) => r != null).length > 0;
+  if (hadRefs) {
+    console.warn(
+      "Vision referanslı prompt'ta ısrarla kararsız kaldı — kimlik " +
+      "karşılaştırması İÇERMEYEN sade prompt'a düşülüyor (artefakt kontrolü)"
+    );
+    const fallback = await assessOutputWithVisionOnce(buf, []);
+    if (!fallback.inconclusive) {
+      console.log(`VISION ÖLÇÜM (referanssız yedek): ${fallback.ok ? "GEÇTİ" : "RED[" + fallback.reason + "]"}`);
+      return fallback;
+    }
+    console.warn("Vision referanssız yedekte de kararsız — fail-safe kabul");
   }
   return result;
 }
@@ -1856,18 +1892,34 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
          "blurry, smeared, soft/melted compared to the rest of the sharply-rendered photo, or " +
          "anatomically wrong (extra or missing fingers, fused fingers, an impossible joint). Hands " +
          "resting, clasped, holding an object, or partly hidden are completely normal — only classify " +
-         "a hand that is rendered badly.\n\n" +
-         "Reply on exactly six lines:\n" +
+         "a hand that is rendered badly.\n" +
+         "I) FACE EXPOSURE — look at the brightness of the face itself, compared to the rest of the " +
+         "photo. It fails if the face is BLOWN OUT: washed out, glowing, lit far brighter than the " +
+         "scene around it, with facial detail lost to flat white areas on the forehead, nose or " +
+         "cheeks, as if a light were shining only on the face. Normal bright daylight, natural " +
+         "highlights and ordinary skin sheen are fine — only classify a face that has visibly lost " +
+         "detail to overexposure or looks unnaturally luminous versus its own scene.\n" +
+         "J) HEAD ORIENTATION FIT — does the head sit in the scene the way the body and setting " +
+         "imply it should? It fails if the head is turned to an angle that does not fit the body's " +
+         "posture or what the person is meant to be facing in the scene — e.g. the torso, shoulders " +
+         "and situation point one way but the head is rotated somewhere unrelated, so the person " +
+         "looks like they are facing the wrong way for the photo. Ordinary candid angles, looking " +
+         "off-camera, and relaxed head tilts are fine — only classify a head whose orientation " +
+         "clearly does not belong to the body/scene it was placed in.\n\n" +
+         "Reply on exactly eight lines:\n" +
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
          "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
          "GAZE_DIRECTION: <NATURAL | WRONG_DIRECTION>\n" +
          "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
+         "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
+         "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first five lines before the verdict. Binding rules — the verdict MUST match " +
+         "Decide the first seven lines before the verdict. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
-         "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. Check every question before " +
+         "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
+         "WRONG_FOR_SCENE -> BAD_ORIENTATION. Check every question before " +
          "answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_FEATURES: <which feature shapes differ>\n" +
@@ -1877,7 +1929,9 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
          "BAD_PROPORTION: <e.g. head too large for the shoulders>\n" +
          "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
          "BAD_GAZE: <e.g. eyes point a different way than the head is turned>\n" +
-         "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>")
+         "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
+         "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
+         "BAD_ORIENTATION: <e.g. head turned away from what the body faces>")
       : ("You are a strict photo quality checker for AI-generated portrait photos. " +
          "Look ONLY at the main person's face and body. Is the face natural and " +
          "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
@@ -1972,19 +2026,34 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
     const isSkinLine = (l) => /^SKIN_TONE/.test(l.toUpperCase());
     const isGazeLine = (l) => /^GAZE_DIRECTION/.test(l.toUpperCase());
     const isHandLine = (l) => /^HAND_QUALITY/.test(l.toUpperCase());
+    // FACE_EXPOSURE / HEAD_ORIENTATION (2026-08-21): AYNI yöntem, aynı gerekçe
+    // — kullanıcı, tüm kapıları geçmiş bir karede (elegance chunk=3) "yüz çok
+    // parlak çıkmış" ve "yüz doğru yere bakacak şekilde oturamamış" bildirdi.
+    // Parlaklık için deterministik bir çıktı kapısı YOK (assessImageQuality'nin
+    // isOverexposed'u yalnızca GİRDİ selfie'lerinde kullanılıyor ve TÜM KAREYE
+    // bakıyor — sahne normalken yalnızca yüzü parlayan kareyi göremez).
+    // Yönelim için de YAW kapısı var ama o şablonla sayısal farkı ölçüyor;
+    // "kafa gövdenin/sahnenin baktığı yere bakmıyor" başka bir sorudur.
+    const isExposureLine = (l) => /^FACE_EXPOSURE/.test(l.toUpperCase());
+    const isOrientationLine = (l) => /^HEAD_ORIENTATION/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
     const neckLine = lines.find(isNeckLine);
     const skinLine = lines.find(isSkinLine);
     const gazeLine = lines.find(isGazeLine);
     const handLine = lines.find(isHandLine);
+    const exposureLine = lines.find(isExposureLine);
+    const orientationLine = lines.find(isOrientationLine);
     const verdictLine = lines.find(
-      (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) && !isHandLine(l)
+      (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) &&
+             !isHandLine(l) && !isExposureLine(l) && !isOrientationLine(l)
     ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
     if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
     if (skinLine) console.log(`VISION ÖLÇÜM (ten rengi): ${skinLine}`);
     if (gazeLine) console.log(`VISION ÖLÇÜM (bakış yönü): ${gazeLine}`);
     if (handLine) console.log(`VISION ÖLÇÜM (el kalitesi): ${handLine}`);
+    if (exposureLine) console.log(`VISION ÖLÇÜM (yüz parlaklığı): ${exposureLine}`);
+    if (orientationLine) console.log(`VISION ÖLÇÜM (kafa yönelimi): ${orientationLine}`);
 
     const verdictDetail = () =>
       verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
@@ -2024,6 +2093,18 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
     if (handLine && /BLURRY_OR_MALFORMED/i.test(handLine)) {
       return { ok: false, reason: "hands", detail: verdictDetail() || "BLURRY_OR_MALFORMED", inconclusive: false };
     }
+    // BLOWN_OUT bağlayıcıdır — kullanıcı vakası (elegance chunk=3): yüz aşırı
+    // parlak çıkmıştı, hiçbir sayısal kapı bunu ölçmüyor (bkz. isExposureLine
+    // tanımının yanındaki gerekçe).
+    if (exposureLine && /BLOWN_OUT/i.test(exposureLine)) {
+      return { ok: false, reason: "exposure", detail: verdictDetail() || "BLOWN_OUT", inconclusive: false };
+    }
+    // WRONG_FOR_SCENE bağlayıcıdır — aynı kullanıcı vakası: kafa, gövdenin/
+    // sahnenin baktığı yere bakmıyordu. YAW kapısı (şablonla sayısal fark)
+    // bunu geçirmişti (sapma -0.16, eşik 0.30).
+    if (orientationLine && /WRONG_FOR_SCENE/i.test(orientationLine)) {
+      return { ok: false, reason: "orientation", detail: verdictDetail() || "WRONG_FOR_SCENE", inconclusive: false };
+    }
 
     const answer = verdictLine.toUpperCase();
     // Gerekçe: verdict satırındaki iki nokta üst üstesinden sonrası (yoksa boş).
@@ -2059,6 +2140,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
     // BAD_HANDS: HAND_QUALITY satırı yakalayamazsa diye verdict satırından
     // ayrıca güvence — aynı desen.
     if (answer.startsWith("BAD_HANDS")) return { ok: false, reason: "hands", detail, inconclusive: false };
+    // BAD_EXPOSURE / BAD_ORIENTATION: sınıflandırma satırı yakalayamazsa
+    // (beklenmedik format) diye verdict satırından ayrıca güvence — diğer
+    // "identity" dışı sebeplerle aynı desen (hakem tarafından geçersiz
+    // kılınamaz, bkz. visionRejectionOverridden).
+    if (answer.startsWith("BAD_EXPOSURE")) return { ok: false, reason: "exposure", detail, inconclusive: false };
+    if (answer.startsWith("BAD_ORIENTATION")) return { ok: false, reason: "orientation", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
@@ -2123,6 +2210,8 @@ const REJECTION_REASON_LABELS = {
   "vision-hair": "Saç uyumsuzluğu tespit edildi",
   "vision-quality": "Genel görsel kalite yetersiz",
   "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
+  "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
+  "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
   "no-face-template": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
   "no-face-output": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
   "no-face-both": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
