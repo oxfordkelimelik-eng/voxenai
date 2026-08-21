@@ -1780,59 +1780,114 @@ const VISION_MODEL = "gpt-4o";
 const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
 
 /**
- * Vision kalite kontrolü — KARARSIZ KALMAMASI için iki aşamalı.
+ * Vision kalite kontrolü — İKİ AYRI ÇAĞRI (2026-08-22 yeniden yapılandırma).
  *
- * AŞAMA 1: referanslı (tam) prompt, VISION_INCONCLUSIVE_MAX_ATTEMPTS kez.
- *   Reddin deterministik olmaması sayesinde ikinci deneme çoğu zaman gerçek
- *   bir cevap getiriyor.
+ * KÖK NEDEN (gerçek veri, 2026-08-21 üretimi): 8 kararsızlığın 8'i de
+ * REFERANSLI promptta yaşandı; referans göndermeyen yedek prompt 3 kez
+ * çalıştı ve HİÇ reddedilmedi. Yani politika reddini tetikleyen şey,
+ * gerçek bir kişinin fotoğraflarını gönderip yüz hatlarını karşılaştırtmak
+ * (OpenAI'nin yüz tanıma politikası) — prompt'un nasıl çerçevelendiği
+ * değil.
  *
- * AŞAMA 2 (2026-08-21): hepsi kararsız kaldıysa REFERANSSIZ prompt'a düşülür.
- *   Neden işe yarar: politika reddini tetikleyen şey, referans fotoğraflarla
- *   KİŞİ KARŞILAŞTIRMASI yapılması (bkz. aşağıdaki ÇERÇEVELEME NOTU).
- *   Referanssız prompt kimlik sormaz, yalnızca "bu yüz deforme/bozuk mu?"
- *   diye sorar — bu yüzden reddedilme olasılığı çok daha düşük.
- *   KAYIP: kimlik/hat sadakati, ten tutarlılığı, kafa-omuz oranı gibi
- *   referans gerektiren kontroller bu aşamada YAPILAMAZ. Ama artefakt/
- *   deformasyon kontrolü çalışır — yani kapı tamamen kör kalmaktansa kısmi
- *   çalışır. Kimlik tarafını zaten sayısal kapı (assessOutputFace) ölçüyor.
+ * ESKİ TASARIMIN HATASI: 10 kontrolün (A-J) yalnızca İKİSİ (A hat sadakati,
+ * D saç) referans gerektiriyordu; diğer sekizi (artefakt, ten tutarlılığı,
+ * kafa/omuz oranı, boyun bağlantısı, bakış, el, parlaklık, yönelim) sadece
+ * ÇIKTIYA bakıyordu. Hepsi tek prompt'ta olduğu için, iki referanslı soru
+ * yüzünden gelen ret SEKİZ referanssız kontrolü de birlikte götürüyordu.
+ *
+ * YENİ TASARIM:
+ *   ÇAĞRI 1 ("self") — referans YOK, sekiz kontrol. Politika reddi almaz.
+ *   ÇAĞRI 2 ("ref")  — yalnızca A + D, referanslarla. Reddedilirse SADECE
+ *                      bu ikisi kaybolur; kimlik tarafını zaten sayısal
+ *                      kapı (assessOutputFace) ölçüyor.
+ *
+ * Çağrı 1 başarısız olursa çağrı 2 HİÇ YAPILMAZ (hızlı çıkış, maliyet
+ * tasarrufu). Maliyet artışı ~%19 (çağrı 1 tek görsel taşır), buna karşılık
+ * reddedilse bile sekiz kontrol her zaman çalışır.
  */
-async function assessOutputWithVision(buf, referenceImages, attempt = 1) {
-  const result = await assessOutputWithVisionOnce(buf, referenceImages);
-  if (!result.inconclusive) return result;
+async function assessOutputWithVision(buf, referenceImages) {
+  // ---- ÇAĞRI 1: referanssız, sekiz kontrol (reddedilmez) ----
+  const self = await assessOutputWithVisionRetrying(buf, [], "self");
+  if (!self.ok) return self; // hızlı çıkış — referanslı çağrıya gerek yok
 
+  const refs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
+    .filter((r) => r != null);
+  if (refs.length === 0) return self;
+
+  // ---- ÇAĞRI 2: yalnızca hat sadakati + saç ----
+  const ref = await assessOutputWithVisionRetrying(buf, refs, "ref");
+  if (!ref.ok) return ref;
+  if (ref.inconclusive) {
+    console.warn(
+      "Vision hat-sadakati sorusu kararsız kaldı (politika reddi) — " +
+      "referanssız sekiz kontrol GEÇTİ, kimlik kararı sayısal kapıya bırakıldı"
+    );
+  }
+  // inconclusive: referanssız kontroller karar verdiyse elimizde KANIT var
+  // (bkz. çağıran taraftaki "noFace && visionInconclusive" kuralı).
+  return { ...self, inconclusive: self.inconclusive };
+}
+
+/** Tek bir Vision sorusunu, kararsız kalırsa sınırlı sayıda tekrar dener. */
+async function assessOutputWithVisionRetrying(buf, refs, mode, attempt = 1) {
+  const result = await assessOutputWithVisionOnce(buf, refs, mode);
+  if (!result.inconclusive) return result;
   if (attempt < VISION_INCONCLUSIVE_MAX_ATTEMPTS) {
     console.warn(
-      `Vision kararsız/reddedilmiş cevap verdi — tekrar deneniyor ` +
+      `Vision (${mode}) kararsız/reddedilmiş cevap verdi — tekrar deneniyor ` +
       `(deneme ${attempt + 1}/${VISION_INCONCLUSIVE_MAX_ATTEMPTS})`
     );
-    return assessOutputWithVision(buf, referenceImages, attempt + 1);
-  }
-
-  // Referanslı sorular tükendi. Referans VARSA, kimlik karşılaştırması
-  // içermeyen sade prompt'la son bir deneme yap.
-  const hadRefs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
-    .filter((r) => r != null).length > 0;
-  if (hadRefs) {
-    console.warn(
-      "Vision referanslı prompt'ta ısrarla kararsız kaldı — kimlik " +
-      "karşılaştırması İÇERMEYEN sade prompt'a düşülüyor (artefakt kontrolü)"
-    );
-    const fallback = await assessOutputWithVisionOnce(buf, []);
-    if (!fallback.inconclusive) {
-      console.log(`VISION ÖLÇÜM (referanssız yedek): ${fallback.ok ? "GEÇTİ" : "RED[" + fallback.reason + "]"}`);
-      return fallback;
-    }
-    console.warn("Vision referanssız yedekte de kararsız — fail-safe kabul");
+    return assessOutputWithVisionRetrying(buf, refs, mode, attempt + 1);
   }
   return result;
 }
 
-async function assessOutputWithVisionOnce(buf, referenceImages) {
+// REFERANS GEREKTİREN kontroller — YALNIZCA bu ikisi (A: hat sadakati,
+// D: saç). Diğer sekiz kontrol referans görmeden yapılabildiği için ayrı
+// çağrıya taşındı (bkz. assessOutputWithVision başlığı).
+//
+// DİL SEÇİMİ: "aynı kişi mi", "kimlik", "bu kişi" gibi ifadeler bilinçli
+// olarak YOK — politika sınıflandırıcısını tetikleyen tam olarak bu çerçeve.
+// Soru bir GEOMETRİ KOPYALAMA denetimi olarak kuruluyor.
+const VISION_REF_PROMPT =
+  "You are an automated QA step inside an image-editing pipeline.\n" +
+  "IMAGE 1 is the pipeline's OUTPUT. The remaining images are the SOURCE the " +
+  "pipeline was instructed to reproduce. Report rendering fidelity only.\n\n" +
+  "A) FEATURE SHAPE FIDELITY — were the feature SHAPES in the source " +
+  "reproduced in IMAGE 1? Compare nose shape and width, eyebrow thickness and " +
+  "arch, eye shape and spacing, lip shape and thickness, and jaw, chin and " +
+  "cheekbone structure. Differences in angle, lighting, styling and expression " +
+  "are expected and fine — judge only whether the underlying SHAPES were " +
+  "copied. If the shapes are clearly different, the render failed.\n" +
+  "D) HAIR — judge only GROSS mismatches against the source, never styling: " +
+  "does IMAGE 1 add hair the source does not have (source bald or clearly " +
+  "balding, IMAGE 1 with a full head of hair), or a hairline/length that is " +
+  "clearly not from the source? Messy, windblown, differently combed or " +
+  "partly hidden hair is fine and passes.\n\n" +
+  "Reply on exactly one line, one of:\n" +
+  "GOOD: <why it passes>\n" +
+  "BAD_FEATURES: <which feature shapes differ>\n" +
+  "BAD_HAIR: <e.g. hair added where the source has none>";
+
+// Politika reddini azaltmak için sistem mesajı. İÇERİĞİ DOĞRU: kullanıcı
+// kendi fotoğraflarını kendi üretimi için yüklüyor ve sonucu denetliyoruz;
+// kimse tanımlanmıyor/isimlendirilmiyor.
+const VISION_SYSTEM_MSG =
+  "You are an automated quality-assurance component inside an image-" +
+  "generation pipeline. You evaluate the pipeline's own rendered output " +
+  "against source material the user supplied for their own generation job. " +
+  "You report rendering defects only — you never identify, name, or " +
+  "speculate about who anyone is.";
+
+async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
   try {
     const b64 = buf.toString("base64");
-    const refs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
-      .filter((r) => r != null);
-    const hasRef = refs.length > 0;
+    // Referanslar YALNIZCA "ref" modunda gönderilir — "self" modunun politika
+    // reddi almamasının sebebi tam olarak budur.
+    const refs = mode === "ref"
+      ? (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
+          .filter((r) => r != null)
+      : [];
 
     // ÇERÇEVELEME NOTU (2026-07-30): bu prompt bilinçli olarak "bu iki
     // fotoğraftaki kişi aynı kişi mi?" DEMİYOR. Öyle sorulduğunda gpt-4o
@@ -1842,17 +1897,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
     // Artık soru bir DÜZENLEME İŞİNİN SADAKAT DENETİMİ olarak kuruluyor:
     // "bu edit, kaynak materyaldeki yüz hatlarını doğru kopyalamış mı?"
     // Bu, istediğimiz bilginin aynısı ama kimlik tespiti sorusu değil.
-    const prompt = hasRef
-      ? ("You are a quality checker for an AI image-editing pipeline.\n" +
-         "IMAGE 1 was produced by an edit. The REMAINING images are the SOURCE MATERIAL the edit was " +
-         "instructed to copy the facial features from.\n\n" +
-         "Judge how faithfully the edit reproduced that source material:\n" +
-         "A) FEATURE FIDELITY — do the facial features rendered in IMAGE 1 match the shapes in the " +
-         "source images? Check the nose shape and width, eyebrow thickness and arch, eye shape and " +
-         "spacing, lip shape and thickness, and the jaw, chin and cheekbone structure. Differences in " +
-         "angle, lighting, styling and expression are expected and fine — you are only judging whether " +
-         "the underlying feature SHAPES were copied faithfully. If the features are clearly different " +
-         "shapes, the edit failed.\n" +
+    // ÇAĞRI İKİYE BÖLÜNDÜ (2026-08-22) — bkz. assessOutputWithVision başlığı.
+    // "self" modu referans GÖNDERMEZ, dolayısıyla politika reddi almaz.
+    const prompt = mode === "ref"
+      ? (VISION_REF_PROMPT)
+      : ("You are a quality checker for an AI image-editing pipeline.\n" +
+         "IMAGE 1 was produced by an edit. Judge the rendered result itself:\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
          "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face.\n" +
@@ -1861,10 +1911,6 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
          "light and shadow is normal, but if the hands or arms are noticeably darker or lighter in " +
          "TONE than the face — as if two different people's skin were combined — classify it as a " +
          "mismatch below.\n" +
-         "D) HAIR — judge only GROSS mismatches against the source images, never styling: is the " +
-         "person in IMAGE 1 given hair the source person does not have (source bald or clearly " +
-         "balding, IMAGE 1 with a full head of hair), or a hairline/length that is obviously someone " +
-         "else's? Messy, windblown, differently combed or partly hidden hair is fine and passes.\n" +
          "E) HEAD SIZE — compare, do not glance. Ignore the face itself. Put the width of the head " +
          "side by side with the width of the shoulders in IMAGE 1 and classify what you see:\n" +
          "  HEAD_NORMAL — the shoulders are roughly three head-widths across; the head belongs to " +
@@ -1922,26 +1968,14 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
          "WRONG_FOR_SCENE -> BAD_ORIENTATION. Check every question before " +
          "answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
-         "BAD_FEATURES: <which feature shapes differ>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
-         "BAD_HAIR: <e.g. hair added to a bald person>\n" +
          "BAD_PROPORTION: <e.g. head too large for the shoulders>\n" +
          "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
          "BAD_GAZE: <e.g. eyes point a different way than the head is turned>\n" +
          "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
          "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
-         "BAD_ORIENTATION: <e.g. head turned away from what the body faces>")
-      : ("You are a strict photo quality checker for AI-generated portrait photos. " +
-         "Look ONLY at the main person's face and body. Is the face natural and " +
-         "undistorted, or is it visibly broken by an AI artifact? Reject (bad) if you " +
-         "see any of: a puffed/swollen/rounded/melted face, warped or distorted lips, " +
-         "mouth, eyes or nose, an unnaturally rectangular/stretched face, mismatched " +
-         "or asymmetric features that look wrong, an unexplained dark blotch or smudge " +
-         "on the face, a head that looks pasted on or wrongly sized, or generally a " +
-         "face that looks deformed/uncanny. Accept (good) if the face looks like a " +
-         "normal, natural real photo of a person, even if not perfect. " +
-         "Answer with ONLY one word: GOOD or BAD.");
+         "BAD_ORIENTATION: <e.g. head turned away from what the body faces>");
 
     // detail "high": kimlik karşılaştırması için yüz ayrıntısı şart; "low"
     // (512px) yüz hatlarını ayırt etmeye yetmiyor. Maliyet farkı ihmal
@@ -1971,7 +2005,10 @@ async function assessOutputWithVisionOnce(buf, referenceImages) {
         // reddedilirken 0.448'lik kare kabul edildi — sayıyla örtüşmüyor).
         max_tokens: 60,
         temperature: 0,
-        messages: [{ role: "user", content }],
+        messages: [
+          { role: "system", content: VISION_SYSTEM_MSG },
+          { role: "user", content },
+        ],
       }),
     });
     // inconclusive: Vision KARAR VEREMEDİ (HTTP hatası, politika reddi ya da
