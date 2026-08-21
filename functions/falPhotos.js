@@ -3080,8 +3080,13 @@ exports.prepareReferencePhotos = onCall(
       }, { merge: true });
     }
 
-    // Referans selfie'ler artık gerekmiyor (fal kopyası var).
-    await deleteTrainingPhotos(uid, jobId);
+    // NOT (2026-08-21): burada ARTIK silinmiyor — fal.ai kaldırıldıktan sonra
+    // "fal kopyası var" varsayımı geçersiz kaldı. Referans selfie'ler,
+    // startPhotoGeneration OpenAI'den senkron olarak tekrar indirdiği için
+    // üretim TAMAMEN bitene kadar Storage'da kalmalı (silinirse OpenAI'nin
+    // indirme isteği 403 alır, TÜM chunk'lar başarısız olur — bkz.
+    // startPhotoGeneration'daki deleteTrainingPhotos çağrısı, gerçek üretim
+    // sonrasına taşındı).
 
     return { ok: true };
   }
@@ -3416,6 +3421,13 @@ exports.startPhotoGeneration = onCall(
       if (e instanceof HttpsError) throw e;
       const msg = (e && e.message) ? String(e.message).slice(0, 160) : "Üretim başlatılamadı.";
       throw new HttpsError("internal", msg);
+    } finally {
+      // Referans selfie'ler artık kesin gerekmiyor: OpenAI doğrudan yolu
+      // (useOpenAiDirect) SENKRON çalışıyor, bu noktaya gelindiğinde her
+      // chunk için tüm indirme/üretim denemeleri (başarılı ya da başarısız)
+      // zaten bitmiştir (bkz. yukarıdaki Promise.all). finally ile hem
+      // başarı hem hata yolunda çalışır — KVKK silme garantisi bozulmaz.
+      await deleteTrainingPhotos(uid, jobId);
     }
 
     return { jobId };
