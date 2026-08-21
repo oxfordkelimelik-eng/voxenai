@@ -1770,7 +1770,28 @@ const VISION_MODEL = "gpt-4o";
  * ASLA iyi bir kareyi hata yüzünden elemez; yalnızca AÇIKÇA reddettiğinde
  * eler). Böylece bu katman çökse bile üretim durmaz.
  */
-async function assessOutputWithVision(buf, referenceImages) {
+// KARARSIZ CEVAP RETRY LİMİTİ (2026-08-21): gpt-4o'nun içerik politikası
+// reddi ("I'm sorry, I can't assist with that") DETERMİNİSTİK DEĞİL — aynı
+// görsel çiftinde bazen reddediyor, bazen normal cevap veriyor. Önceden
+// tek denemede kararsızlık = sessizce kabul demekti, yani bu kapı o karede
+// FİİLEN hiç çalışmamış oluyordu. 2 deneme (orijinal + 1 retry), maliyeti
+// ihmal edilebilir düzeyde artırırken gerçek bir değerlendirme alma şansını
+// belirgin yükseltir.
+const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
+
+async function assessOutputWithVision(buf, referenceImages, attempt = 1) {
+  const result = await assessOutputWithVisionOnce(buf, referenceImages);
+  if (result.inconclusive && attempt < VISION_INCONCLUSIVE_MAX_ATTEMPTS) {
+    console.warn(
+      `Vision kararsız/reddedilmiş cevap verdi — tekrar deneniyor ` +
+      `(deneme ${attempt + 1}/${VISION_INCONCLUSIVE_MAX_ATTEMPTS})`
+    );
+    return assessOutputWithVision(buf, referenceImages, attempt + 1);
+  }
+  return result;
+}
+
+async function assessOutputWithVisionOnce(buf, referenceImages) {
   try {
     const b64 = buf.toString("base64");
     const refs = (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
