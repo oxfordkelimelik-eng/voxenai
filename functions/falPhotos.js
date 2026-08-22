@@ -2249,9 +2249,11 @@ const REJECTION_REASON_LABELS = {
   "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
   "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
   "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
-  "no-face-template": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
-  "no-face-output": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
-  "no-face-both": "Yüz net tespit edilemedi (konum kontrolü yapılamadı)",
+  // NOT: no-face-* etiketleri KALDIRILDI (2026-08-22) — artık eleme sebebi
+  // değiller (bkz. KONUM KAPISI'ndaki geri alma gerekçesi). O kuralın kısa
+  // süre yürürlükte olduğu dönemde kaydedilen kareler etkilenmez: gerekçe
+  // metni Firestore'a KAYIT ANINDA çözülüp yazılıyor, bu haritadan sonradan
+  // okunmuyor.
 };
 const DEFAULT_REJECTION_REASON_LABEL = "Kalite kontrolünden geçemedi";
 function humanRejectionReason(gate) {
@@ -2936,22 +2938,31 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       try {
         const { measureHeadPlacement } = require("./faceQuality");
         const p = await measureHeadPlacement(buf, tplBuf);
-        // no-face-* İÇİN ATLAMA YERİNE RED (2026-08-21): ana kimlik kapısı
-        // (assessOutputFace) "yüz yok" durumunu zaten doğrudan red sayıyor
-        // (bkz. faceQuality.js:726) — burada aynı durumu sessizce geçirmek
-        // tutarsızdı. Gerçek olay: chunk'ta yüz bulunamayınca kroma/ten
-        // ölçümleri de aynı anda çöküyordu (üç BAĞIMSIZ ölçümün aynı anda
-        // "yüz yok" demesi gürültü değil, gerçek bozukluk işareti) — bkz.
-        // 2026-08-21 kalite incelemesi (netlik=69.8, şablon yüzOranı=0.071).
-        if (!p.ok && p.reason && p.reason.startsWith("no-face")) {
-          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[${p.reason}]`);
-          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-            mode, gate: p.reason, distance: mathDist,
-            detail: "yüz tespit edilemedi (kroma/ten ölçümleri de muhtemelen aynı sebeple çökmüştür)",
-          });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
-          break;
-        } else if (!p.ok) {
+        // no-face-* RED KURALI GERİ ALINDI (2026-08-22, KULLANICI GÖRSEL
+        // DOĞRULAMASI). 2026-08-21'de burayı "yüz yok -> RED" yapmıştım;
+        // bir gün sonraki üretimde İKİ yanlış pozitif verdi ve kullanıcı
+        // her ikisinin de gözle GAYET İYİ olduğunu doğruladı:
+        //
+        //  • no-face-template (chunk=6/deneme=2): tespit edilemeyen yüz
+        //    ÇIKTIDA değil, BİZİM ŞABLONUMUZDAydı (log: YAW şablon=null,
+        //    ŞABLON KIRPILDI 0.123->0.17). Çıktının kendisi sorunsuzdu —
+        //    kimlik 0.315, Vision GEÇTİ, göz/el/kroma temiz. Kendi şablon
+        //    havuzumuzdaki bir tespit sorunu için KULLANICININ karesini
+        //    atmak yanlış; ölçüm yapılamaması kusur kanıtı değildir.
+        //
+        //  • no-face-output (chunk=6/deneme=3): burada zaten DOĞRU tasarım
+        //    yukarıda mevcuttu — assessOutputFace "no-face"i sert ret DEĞİL,
+        //    "dedektörüm göremedi" sayıp kararı Vision'a devrediyor (bkz.
+        //    2717-2741, güneş gözlüklü kare olayı). Ben o gerekçeli tasarımı
+        //    burada eziyordum.
+        //
+        // 2026-08-21'deki chunk=8 vakasını yanlış teşhis etmişim: oradaki
+        // gerçek kusur sinyali netlik=69.8 (aşırı bulanık) idi, "yüz yok"
+        // değil. Ayrıca Vision artık kararsız kalmıyor (self/ref ayrımından
+        // sonra 10/10 karar verdi), dolayısıyla "yüz yok" karelerini Vision'a
+        // devretmek güvenli: gerçekten kör kalınan durumu aşağıdaki
+        // "noFace && visionInconclusive" kuralı zaten yakalıyor.
+        if (!p.ok) {
           console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${p.reason}]`);
         } else {
           const bad = Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;

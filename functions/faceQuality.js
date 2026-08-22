@@ -640,20 +640,28 @@ const OUTPUT_FACE_RATIO_MAX = 0.45;
 // duruyor" gibi ince oransızlığı YAKALAMAZ, çünkü yüz kutusu omuz genişliği
 // hakkında bilgi taşımaz. O iş Vision'ın HEAD_VS_SHOULDERS sınıfına ait.
 //
-// 1.45 -> 1.15 (2026-08-21, KULLANICI GÖRSEL DOĞRULAMASI): gerçek üretimde
-// büyüme=1.16 ölçülen bir kare (elegance chunk=6, yüzOranı=0.200 — aynı
-// settekilerin en yükseği) kullanıcı tarafından gözle incelendi ve "kafa
-// gerçekten çok büyümüş" olarak onaylandı. Vision'ın HEAD_VS_SHOULDERS
-// sınıfı o kare için HEAD_NORMAL demişti, yani ince oransızlığı yakalaması
-// beklenen katman da kaçırdı — bu yüzden sayısal kapı sıkılaştırılıyor.
+// 1.15 -> 1.45 GERİ ALINDI (2026-08-22). 2026-08-21'de tek bir görsel
+// doğrulamaya dayanarak 1.45'ten 1.15'e çekmiştim; ertesi günkü üretim bunun
+// YANLIŞ olduğunu kanıtladı:
 //
-// BİLİNEN ÇELİŞKİ (bilinçli kabul): yukarıdaki 13 karelik eski ölçüm setinde
-// 1.15 / 1.22 / 1.23 değerleri var ve bunların görsel kalitesi HİÇ
-// DOĞRULANMADI — yeni eşik onları da elerdi. Bu risk kabul edildi çünkü bu
-// kapının yanlış-pozitif MALİYETİ düşük: kare atılmıyor, retry FARKLI bir
-// şablonla yeniden üretiliyor (~$0.05 ek maliyet, foto kaybı yok). Gerçek
-// dağılım büyüdükçe yeniden kalibre edilecek.
-const OUTPUT_FACE_GROWTH_MAX = 1.15;
+//  • AYNI DEĞER, ZIT YARGI: 2026-08-21'de büyüme=1.16 olan kare kullanıcı
+//    tarafından "kafa çok büyümüş" diye işaretlendi; 2026-08-22'de büyüme=1.16
+//    olan kare (chunk=4) "kafası normal, büyüme yok" diye doğrulandı. Metrik
+//    bu ikisini AYIRAMIYOR.
+//
+//  • NEDEN AYIRAMIYOR: büyüme = çıktı yüzOranı / şablon yüzOranı, yani
+//    GÖRECELİ bir orandır. chunk=4'te çıktının yüzOranı 0.157 idi — kabul
+//    edilen karelerin bandında (0.137-0.269) gayet normal, hatta bazılarından
+//    KÜÇÜK. Yüksek "büyüme" kafanın büyümesinden değil, ŞABLONUN yüzünün
+//    küçük tespit edilmesinden (0.135) geliyordu. Yani bu metrik çoğu zaman
+//    şablon tespitindeki varyansı ölçüyor, gerçek kafa büyümesini değil.
+//
+// Sonuç: eşiği sıkmak gerçek pozitifleri güvenilir şekilde yakalamıyor ama
+// yanlış pozitif üretiyor. 1.45 (yalnızca BARİZ büyütmeyi eler) korunuyor.
+// "Kafa gövdeye göre büyük" işi, en baştan belirtildiği gibi Vision'ın
+// HEAD_VS_SHOULDERS sınıfına ait — orası kaçırıyorsa çözüm o prompt'u
+// güçlendirmek, bu göreceli oranı sıkmak değil.
+const OUTPUT_FACE_GROWTH_MAX = 1.45;
 
 // Bu derecenin üstünde kafa yana dönüktür ve kimlik mesafesi güvenilmez
 // sayılır (bkz. profileDegreeFromLandmarks). 0.45, gerçek ölçümde önden
