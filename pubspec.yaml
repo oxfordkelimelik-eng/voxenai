@@ -1,7 +1,7 @@
 name: rise_up
 description: "AI-Powered Male Self-Improvement & Looksmaxxing Platform"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.11.1
@@ -67,6 +67,10 @@ dependencies:
   sign_in_with_apple: ^7.0.1
   cloud_functions: ^6.3.3
   in_app_purchase: ^3.3.0
+
+  # Meta (Facebook) Ads — satış/ROAS ölçümü için App Events
+  facebook_app_events: ^0.19.3
+  app_tracking_transparency: ^2.0.6+1
 
   # Bildirimler
   firebase_messaging: ^16.0.0

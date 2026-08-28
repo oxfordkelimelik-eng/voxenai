@@ -96,6 +96,45 @@
 				<string>com.googleusercontent.apps.473057059250-mia3vm05de9ht4ebb7ks6cpjcutfvcqn</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- TODO: gerçek Facebook App ID ile değiştirin, ör. fb1234567890 -->
+				<string>fb000000000000000</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Meta (Facebook) App Events — developers.facebook.com'da oluşturulan
+	     gerçek App ID ve Client Token ile değiştirin. -->
+	<key>FacebookAppID</key>
+	<string>000000000000000</string>
+	<key>FacebookClientToken</key>
+	<string>REPLACE_WITH_CLIENT_TOKEN</string>
+	<key>FacebookDisplayName</key>
+	<string>Voxen AI</string>
+	<key>FacebookAutoLogAppEventsEnabled</key>
+	<false/>
+	<key>FacebookAdvertiserIDCollectionEnabled</key>
+	<true/>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Sana daha alakalı reklamlar göstermek ve uygulama deneyimini iyileştirmek için kullanılır.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>fbapi</string>
+		<string>fb-messenger-share-api</string>
+		<string>fbauth2</string>
+		<string>fbshareextension</string>
+	</array>
+	<!-- Meta'nın SKAdNetwork attribution için istediği ağ kimliği.
+	     Güncel liste: developers.facebook.com/docs/SKAdNetwork -->
+	<key>SKAdNetworkItems</key>
+	<array>
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>v9wttpbfk9.skadnetwork</string>
+		</dict>
 	</array>
 </dict>
 </plist>

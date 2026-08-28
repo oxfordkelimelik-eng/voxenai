@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:logger/logger.dart';
 import '../../core/constants/dating_constants.dart';
+import 'meta_events_service.dart';
 
 /// Dating paketleri (tek seferlik, tüketilebilir) için Google Play / App
 /// Store satın alma servisi.
@@ -167,6 +168,10 @@ class DatingPurchaseService {
         if (verified) {
           onPurchaseVerified?.call(p);
           _logger.i('Satın alma doğrulandı: ${p.productID}');
+          final product = productFor(p.productID);
+          if (product != null) {
+            unawaited(MetaEventsService.instance.logPurchaseFromProduct(product));
+          }
         } else {
           onPurchaseError?.call(p);
           _logger.e('Satın alma doğrulanamadı: ${p.productID}');

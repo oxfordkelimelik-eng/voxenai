@@ -7,6 +7,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'app.dart';
+import 'data/sources/meta_events_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,6 +50,14 @@ void main() async {
 
   // Fontları runtime'da indirme — sadece önbellek veya bundle kullan
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  // Meta (Facebook) App Events: satış/ROAS ölçümü için ATT izni + SDK init.
+  // Hata yutuluyor: Meta kurulmadan da uygulama çalışmaya devam etmeli.
+  try {
+    await MetaEventsService.instance.init();
+  } catch (e) {
+    debugPrint('Meta App Events başlatılamadı (uygulama çalışmaya devam ediyor): $e');
+  }
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(

@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:logger/logger.dart';
+import 'meta_events_service.dart';
 
 /// Google Play Billing — Rise Up PRO aboneliği.
 /// Play Console'da tanımlanacak ürün ID'leri aşağıdaki sabitlerle eşleşmeli.
@@ -63,6 +65,10 @@ class BillingService {
         // doğrulanmalı (Play Developer API). Şimdilik istemci tarafı kabul.
         onPurchaseSuccess?.call(p);
         _logger.i('Satın alma başarılı: ${p.productID}');
+        final product = products.where((e) => e.id == p.productID).firstOrNull;
+        if (product != null) {
+          unawaited(MetaEventsService.instance.logPurchaseFromProduct(product));
+        }
       } else if (p.status == PurchaseStatus.error) {
         _logger.e('Satın alma hatası: ${p.error}');
       }
