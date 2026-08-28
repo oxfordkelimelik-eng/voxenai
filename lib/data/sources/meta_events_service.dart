@@ -51,7 +51,14 @@ class MetaEventsService {
       await _events.logPurchase(
         amount: valueUsd,
         currency: currency,
-        parameters: {'product_id': productId},
+        // Meta'nın Events Manager'da beklediği standart parametre adları
+        // (fb_content_id / fb_content_type) — paket sürümünden bağımsız
+        // çalışsın diye AppEventParameterName sabitleri yerine ham anahtar
+        // string'leri kullanılıyor.
+        parameters: {
+          'fb_content_id': productId,
+          'fb_content_type': 'product',
+        },
       );
       _logger.i('Meta logPurchase gönderildi: $productId $valueUsd $currency');
     } catch (e) {
