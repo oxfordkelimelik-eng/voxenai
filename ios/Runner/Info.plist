@@ -101,17 +101,16 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<!-- TODO: gerçek Facebook App ID ile değiştirin, ör. fb1234567890 -->
-				<string>fb000000000000000</string>
+				<string>fb2285584138646210</string>
 			</array>
 		</dict>
 	</array>
 	<!-- Meta (Facebook) App Events — developers.facebook.com'da oluşturulan
 	     gerçek App ID ve Client Token ile değiştirin. -->
 	<key>FacebookAppID</key>
-	<string>000000000000000</string>
+	<string>2285584138646210</string>
 	<key>FacebookClientToken</key>
-	<string>REPLACE_WITH_CLIENT_TOKEN</string>
+	<string>60eb6f5c56af31cc99bd7e1d67bb7846</string>
 	<key>FacebookDisplayName</key>
 	<string>Voxen AI</string>
 	<key>FacebookAutoLogAppEventsEnabled</key>

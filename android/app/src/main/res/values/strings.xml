@@ -2,6 +2,6 @@
 <resources>
     <!-- Meta (Facebook) App Events — developers.facebook.com'da oluşturulan
          gerçek App ID ve Client Token ile değiştirin. -->
-    <string name="facebook_app_id">000000000000000</string>
-    <string name="facebook_client_token">REPLACE_WITH_CLIENT_TOKEN</string>
+    <string name="facebook_app_id">2285584138646210</string>
+    <string name="facebook_client_token">60eb6f5c56af31cc99bd7e1d67bb7846</string>
 </resources>
