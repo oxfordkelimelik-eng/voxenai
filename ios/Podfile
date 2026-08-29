@@ -31,6 +31,12 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # facebook_app_events paketinin izin verdigi araliktaki en guncel FBSDK'yi
+  # zorla — Meta Events Manager, iOS 14+ SKAdNetwork destegi icin belirli bir
+  # minimum surumun altindaki SDK'lari "guncel degil" diye isaretliyor.
+  pod 'FBSDKCoreKit', '>= 17.0.0'
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
