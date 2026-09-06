@@ -1753,6 +1753,85 @@ async function postOpenAiImageEdit(form, refCount) {
 }
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+
+/**
+ * REFERANS FOTOĞRAFTA GÜNEŞ GÖZLÜĞÜ VAR MI? (2026-09-06 kullanıcı kararı)
+ *
+ * Göğüs-üstü iki kare için yükleme anında sorulur. Gerekçe: gözlük, hem
+ * kimlik/bakış sinyalini kapatıyor hem de modelin gözlüğü sahneye taşımasına
+ * zemin hazırlıyor (üretim prompt'unda ayrıca "BORROWED SUNGLASSES" olarak
+ * yasak). Kaynakta hiç olmaması, sonradan temizlemekten daha güvenli.
+ *
+ * NEDEN VISION, NEDEN PİKSEL SEZGİSİ DEĞİL: "koyu göz bölgesi" sezgisi gölge,
+ * koyu ten ve saç gölgesiyle karışıyor. Soru 40 gerçek fotoğrafta denendi ve
+ * gözle doğrulandı: güneş gözlüklü işaretlenen 8 karenin 8'i, gözlüksüz
+ * işaretlenen 8 karenin 8'i doğruydu.
+ *
+ * Maliyet: iş başına 2 çağrı, "low" detail (512px) — yüzdeki gözlük bu
+ * çözünürlükte rahatça görünüyor.
+ *
+ * Döner: "SUNGLASSES" | "CLEAR_GLASSES" | "NONE" | null (ölçülemedi).
+ * ÖNEMLİ: null asla eleme sebebi değildir — ağ/servis hatası kullanıcının
+ * fotoğrafını suçlamaz.
+ */
+async function detectSunglasses(buf) {
+  try {
+    const sharp = require("sharp");
+    // Yüz üstteki yarıda; küçültmek hem token hem gecikme kazandırıyor.
+    const meta = await sharp(buf).metadata();
+    const small = await sharp(buf)
+      .extract({ left: 0, top: 0, width: meta.width, height: Math.round(meta.height * 0.55) })
+      .resize({ width: 512 })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+
+    const prompt =
+      "Look at the person in this photo and answer two questions about their eyes.\n" +
+      "Reply on exactly two lines, nothing else:\n" +
+      "EYEWEAR: <NONE | CLEAR_GLASSES | SUNGLASSES>\n" +
+      "EYES_VISIBLE: <YES | NO>\n\n" +
+      "SUNGLASSES means tinted, dark or mirrored lenses that hide or darken the eyes, " +
+      "including lenses pushed onto the face but still covering the eyes. " +
+      "CLEAR_GLASSES means transparent prescription lenses through which the eyes are plainly visible. " +
+      "NONE means no eyewear on the eyes at all; glasses resting on the head or hanging from " +
+      "a collar count as NONE. Answer EYES_VISIBLE: NO whenever the pupils cannot be seen.";
+
+    const resp = await fetch(OPENAI_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_KEY.value()}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: VISION_MODEL,
+        max_tokens: 20,
+        temperature: 0,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: { url: `data:image/jpeg;base64,${small.toString("base64")}`, detail: "low" },
+            },
+          ],
+        }],
+      }),
+    });
+    if (!resp.ok) {
+      console.error(`Gözlük kontrolü HTTP ${resp.status} — kare elenmiyor`);
+      return null;
+    }
+    const json = await resp.json();
+    const raw = (json?.choices?.[0]?.message?.content || "").trim();
+    const m = /EYEWEAR:\s*([A-Z_]+)/i.exec(raw);
+    const verdict = m ? m[1].toUpperCase() : null;
+    return ["SUNGLASSES", "CLEAR_GLASSES", "NONE"].includes(verdict) ? verdict : null;
+  } catch (e) {
+    console.error("Gözlük kontrolü hata verdi (kare elenmiyor):", e.message || e);
+    return null;
+  }
+}
 // Vision kalite kontrol modeli. gpt-4o görsel yargı için güçlü ve uygun
 // maliyetli: 2 görsel (çıktı + referans selfie) "high" detail ile ~1500-2000
 // giriş token'ı ≈ kare başına ~$0.005-0.01. "low" detail (512px) kimlik
@@ -3379,9 +3458,10 @@ exports.prepareReferencePhotos = onCall(
   // selfie tensörleriyle OOM oluyordu). minInstances:1 ile soğuk başlangıç
   // (model yeniden yükleme) gecikmesi ortadan kaldırıldı.
   {
-    // SECRET GEREKMİYOR (2026-08-20): tek secret'ı GEMINI_KEY idi, o da
-    // caption üretimi içindi; Gemini kaldırıldı. Bu fonksiyon artık yalnızca
-    // Cloud Vision moderasyonu (ADC ile) ve YEREL yüz analizi yapıyor.
+    // OPENAI_KEY GERİ GELDİ (2026-09-06): göğüs-üstü karelerde güneş gözlüğü
+    // kontrolü gpt-4o'ya soruluyor (bkz. detectSunglasses). Aradaki dönemde
+    // secret gerekmiyordu; Cloud Vision moderasyonu hâlâ ADC ile çalışıyor.
+    secrets: [OPENAI_KEY],
     region: "europe-west1",
     memory: "2GiB",
     // Yüz modeli yüklemesi + moderasyon; soğuk başlangıçta 120 sn yetmeyebilir.
@@ -3468,6 +3548,40 @@ exports.prepareReferencePhotos = onCall(
           `yüz selfie'si veya uzak tam boy çekim kabul edilmez. Lütfen ` +
           `${many ? "bunları" : "bunu"} değiştirip tekrar dene.`,
           { notChestUpPhotoIndices: analysis.notFullBodyIndices }
+        );
+      }
+      // Göğüs-üstü kareler yana dönük (2026-09-06 kullanıcı kararı): bu iki
+      // karenin tek işi kafa/omuz oranı ve kişi yana döndüğünde omuz genişliği
+      // perspektifle daralıp ölçümü bozuyor. Selfie'ler bu şarttan muaf.
+      if (analysis.notFrontalIndices && analysis.notFrontalIndices.length > 0) {
+        const { label, many } = posLabel(analysis.notFrontalIndices);
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} yana dönük çekilmiş. Göğüs-üstü kareler tam önden, ` +
+          `omuzlar kameraya dönük olmalı — kafa boyutu omuz genişliğine göre ` +
+          `ölçüldüğü için yan duruş bu ölçümü bozuyor. Lütfen ` +
+          `${many ? "bunları" : "bunu"} cepheden çekilmiş bir kareyle değiştir.`,
+          { notFrontalPhotoIndices: analysis.notFrontalIndices }
+        );
+      }
+      // GÜNEŞ GÖZLÜĞÜ (yalnızca göğüs-üstü kareler, 2026-09-06 kullanıcı
+      // kararı). Yerel kapıların hepsi geçtikten SONRA sorulur: ağ çağrısı
+      // yalnızca gerçekten gerekiyorsa yapılsın. Ölçülemezse eleme yok.
+      const chestBuffers = refBuffers.slice(FACE_PHOTO_COUNT);
+      const eyewear = await Promise.all(chestBuffers.map((b) => detectSunglasses(b)));
+      console.log(`GÖZLÜK KONTROLÜ (göğüs-üstü): ${eyewear.map((e, i) => `${FACE_PHOTO_COUNT + i + 1}. foto=${e || "ölçülemedi"}`).join(", ")}`);
+      const sunglassIndices = eyewear
+        .map((verdict, i) => (verdict === "SUNGLASSES" ? FACE_PHOTO_COUNT + i : null))
+        .filter((i) => i != null);
+      if (sunglassIndices.length > 0) {
+        const { label, many } = posLabel(sunglassIndices);
+        throw new HttpsError(
+          "invalid-argument",
+          `${label} güneş gözlüklü. Göğüs-üstü karelerde gözlerin açıkça ` +
+          `görünmesi gerekiyor — gözlük hem bakışı hem ten tonunu gizliyor ve ` +
+          `üretilen fotoğraflara taşınabiliyor. Lütfen ` +
+          `${many ? "bunları" : "bunu"} gözlüksüz bir kareyle değiştir.`,
+          { sunglassesPhotoIndices: sunglassIndices }
         );
       }
       // İki yüz karesi neredeyse aynı açıda — farklı açı iste.

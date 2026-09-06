@@ -784,7 +784,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
             'Tam olarak ${DatingConfig.chestUpPhotoCount} göğüs-üstü fotoğraf '
-            'seçmelisin (omuzlar ve üst göğüs görünür).'),
+            'seçmelisin (tam önden, güneş gözlüksüz).'),
       ));
       return;
     }
@@ -797,7 +797,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               'Seçtiğin fotoğraflardan birinde yüz görünmüyor. Omuzların ve '
-              'üst göğsün göründüğü, yüzün net olduğu kareler seç.'),
+              'üst göğsün göründüğü, tam önden çekilmiş, güneş gözlüksüz '
+              'kareler seç.'),
         ));
         return;
       }
@@ -1440,6 +1441,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               'kullanılır.',
               style: const TextStyle(
                   fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
+          // Bu iki şart sunucuda da zorunlu (bkz. functions/faceQuality.js
+          // MAX_PROFILE_DEGREE_CHEST ve falPhotos.js detectSunglasses) —
+          // kullanıcı reddi yükleme sonrası değil, seçerken görsün.
+          const Text(
+              'Bu iki karede zorunlu: tam önden çekilmiş olacak (omuzlar '
+              'kameraya dönük, yana dönük duruş kabul edilmez) ve güneş '
+              'gözlüğü olmayacak.',
+              style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.gold)),
           const SizedBox(height: 10),
           if (_chestUpPhotos.isEmpty)
             Container(
