@@ -52,6 +52,10 @@ workflows:
         - push
       branch_patterns:
         - pattern: main
+      # Yeni push gelince eski queued/preparing build'leri iptal et —
+      # aksi halde M4 hatası veya dolu kuyrukta takılı kalan işler yeni
+      # build'i de bekletiyor gibi görünür.
+      cancel_previous_builds: true
     scripts:
       - name: 1. Get dependencies & generate iOS config
         script: |
