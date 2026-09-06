@@ -1814,6 +1814,15 @@ const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
 // gevşetilir — dosyadaki diğer kapılarla aynı usul.
 const VISION_HEAD_SPAN_DROP_MAX = 0.5;
 
+// VISION'IN KAFA REDDİ İÇİN SAYISAL ALT SINIR (2026-09-06).
+// Kapı 77 geçmiş kare üzerinde denendi; tetiklendiği 4 karenin sayısal
+// büyümesi 1.114 / 1.103 / 1.097 ve 0.997 idi (genel medyan 1.02, tüm setin
+// maksimumu 1.26). Sonuncusunda kafa hiç büyümemişti ve gözle de normaldi.
+// 1.05, "hiç büyüme yok" ile "belirgin büyüme" arasını ayırır: sayısal ölçüm
+// bunun altındaysa Vision'ın kafa reddi geçersiz sayılır.
+// Böylece kapı 77 karede 4 değil 3 kareyi eler (%5.2 -> %3.9).
+const VISION_PROPORTION_GROWTH_MIN = 1.05;
+
 /**
  * Vision kalite kontrolü — İKİ AYRI ÇAĞRI (2026-08-22 yeniden yapılandırma).
  *
@@ -2925,6 +2934,10 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       let mathReason = null;
       let outEyeOpenness = null;
       let outYaw = null;
+      // Kafa büyümesi (çıktı yüzOranı / şablon yüzOranı) — Vision'ın kafa
+      // boyutu reddi için SAYISAL HAKEM olarak kullanılıyor (bkz. aşağıdaki
+      // VISION_PROPORTION_GROWTH_MIN).
+      let headGrowth = null;
       try {
         const { assessOutputFace } = require("./faceQuality");
         const q = await assessOutputFace(buf, refDescriptor, templateFaceRatio);
@@ -2943,8 +2956,8 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         // büyüme = çıktı yüz oranı / şablon yüz oranı (bkz.
         // OUTPUT_FACE_GROWTH_MAX). Eşiği veriyle kalibre edebilmek için
         // GEÇEN karelerde de loglanıyor.
-        const gr = (templateFaceRatio && q.faceRatio)
-          ? (q.faceRatio / templateFaceRatio).toFixed(2) : "null";
+        if (templateFaceRatio && q.faceRatio) headGrowth = q.faceRatio / templateFaceRatio;
+        const gr = headGrowth != null ? headGrowth.toFixed(2) : "null";
         const pd = q.profileDegree != null ? q.profileDegree.toFixed(2) : "null";
         console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} profil=${pd} yüzOranı=${fr} büyüme=${gr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
       } catch (e) {
@@ -3116,7 +3129,25 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         console.warn(`VISION REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): mesafe=${mathDist.toFixed(3)} < ${VISION_OVERRIDE_MAX_DISTANCE} — Vision "${visionDetail || "identity"}" demişti, sayısal kanıt güçlü olduğu için kare KABUL edildi`);
         visionOk = true;
       }
-      // VISION TEN REDDİ ARTIK BAĞLAYICI DEĞİL (2026-09-06 kullanıcı kararı).
+          // VISION KAFA BOYUTU REDDİ İÇİN SAYISAL HAKEM (2026-09-06).
+          // Yeni kafa açıklığı ölçümü 77 geçmiş kare üzerinde denendi: 4 kareyi
+          // eledi. Bu 4 karenin sayısal büyümesi 1.114 / 1.103 / 1.097 ve
+          // 0.997 çıktı (genel medyan 1.02). Yani üçünde kafa gerçekten ~%10
+          // büyümüştü, dördüncüsünde HİÇ büyüme yoktu — gözle bakıldığında da
+          // o karede kafa normaldi, Vision yanılmıştı.
+          // Kural: Vision "kafa büyük" derken sayısal ölçüm hiç büyüme
+          // görmüyorsa red geçersiz sayılır. Ölçüm YAPILAMADIYSA hakem yok,
+          // Vision'ın reddi aynen geçerli kalır.
+          if (!visionOk && visionReason === "proportion" &&
+              headGrowth != null && headGrowth < VISION_PROPORTION_GROWTH_MIN) {
+            console.warn(
+              `VISION KAFA REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `büyüme=${headGrowth.toFixed(3)} < ${VISION_PROPORTION_GROWTH_MIN} — sayısal ölçüm kafada büyüme ` +
+              `görmedi, Vision "${visionDetail || "kafa büyük"}" demişti, kare KABUL edildi`
+            );
+            visionOk = true;
+          }
+          // VISION TEN REDDİ ARTIK BAĞLAYICI DEĞİL (2026-09-06 kullanıcı kararı).
       // Gerçek vaka (job 1181577f): elegance c1 ve c3, HANDS_OR_ARMS_MISMATCH
       // ile elendi; kullanıcı iki karede de gözle ten sorunu olmadığını, ikisinin
       // de kabul edilmesi gerektiğini söyledi. Vision'ın bu sorusu ışık/gölgeyi
