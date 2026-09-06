@@ -168,9 +168,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   static const String _defaultStyleId = 'elegance';
   _AiStage _stage = _AiStage.package;
   final Set<String> _styles = {_defaultStyleId};
-  /// Canlı ön / sağ / sol (sıra sabit) + zorunlu 2 göğüs-üstü galeri foto.
+  /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
-  final List<File> _chestUpPhotos = [];
   String? _errorMessage;
   bool _validatingPhotos = false; // galeriden seçimde yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
@@ -181,13 +180,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   String _lastMode = 'full';
 
   bool get _refsReady =>
-      _facePhotos.length == DatingConfig.faceCaptureCount &&
-      _chestUpPhotos.length == DatingConfig.chestUpPhotoCount;
+      _facePhotos.length == DatingConfig.faceCaptureCount;
 
-  List<File> get _allReferencePhotos => List<File>.unmodifiable([
-        ..._facePhotos,
-        ..._chestUpPhotos,
-      ]);
+  List<File> get _allReferencePhotos => List<File>.unmodifiable(_facePhotos);
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
@@ -545,7 +540,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       // ve sabit tek birim (bkz. _defaultStyleId).
       _stage = _AiStage.package;
       _facePhotos.clear();
-      _chestUpPhotos.clear();
       _styles
         ..clear()
         ..add(_defaultStyleId);
@@ -768,44 +762,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     setState(() {
       _validatingPhotos = false;
       _facePhotos
-        ..clear()
-        ..addAll(picked);
-      _prepareError = null;
-    });
-  }
-
-  /// Zorunlu 2 göğüs-üstü (omuz + üst göğüs) — kafa ölçeği / ten / omuz sinyali.
-  Future<void> _pickChestUpPhotos() async {
-    if (_preparing || _validatingPhotos) return;
-    final picked = await _pickImages(
-        multi: true, limit: DatingConfig.chestUpPhotoCount);
-    if (!mounted) return;
-    if (picked.length != DatingConfig.chestUpPhotoCount) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-            'Tam olarak ${DatingConfig.chestUpPhotoCount} göğüs-üstü fotoğraf '
-            'seçmelisin (tam önden, güneş gözlüksüz).'),
-      ));
-      return;
-    }
-    setState(() => _validatingPhotos = true);
-    for (final f in picked) {
-      final ok = await _isValidBodyReferencePhoto(f);
-      if (!mounted) return;
-      if (!ok) {
-        setState(() => _validatingPhotos = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Seçtiğin fotoğraflardan birinde yüz görünmüyor. Omuzların ve '
-              'üst göğsün göründüğü, tam önden çekilmiş, güneş gözlüksüz '
-              'kareler seç.'),
-        ));
-        return;
-      }
-    }
-    setState(() {
-      _validatingPhotos = false;
-      _chestUpPhotos
         ..clear()
         ..addAll(picked);
       _prepareError = null;
@@ -1418,80 +1374,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     : _facePhotos.isEmpty
                         ? 'Yüz çekimini başlat'
                         : 'Yüz çekimini tekrarla',
-                style: const TextStyle(color: AppColors.gold)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.borderGold),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-              'Göğüs-üstü — galeri (zorunlu)',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          Text(
-              'Tam ${DatingConfig.chestUpPhotoCount} foto: omuzlar ve üst '
-              'göğüs görünsün, yüz net olsun. Uzak tam boy veya yalnızca '
-              'yakın yüz kabul edilmez — kafa boyutu, bakış ve ten için '
-              'kullanılır.',
-              style: const TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          // Bu iki şart sunucuda da zorunlu (bkz. functions/faceQuality.js
-          // MAX_PROFILE_DEGREE_CHEST ve falPhotos.js detectSunglasses) —
-          // kullanıcı reddi yükleme sonrası değil, seçerken görsün.
-          const Text(
-              'Bu iki karede zorunlu: tam önden çekilmiş olacak (omuzlar '
-              'kameraya dönük, yana dönük duruş kabul edilmez) ve güneş '
-              'gözlüğü olmayacak.',
-              style: TextStyle(
-                  fontSize: 12,
-                  height: 1.35,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.gold)),
-          const SizedBox(height: 10),
-          if (_chestUpPhotos.isEmpty)
-            Container(
-              height: 90,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.borderSubtle),
-              ),
-              child: const Text('Henüz göğüs-üstü foto yok',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (int i = 0; i < _chestUpPhotos.length; i++)
-                  _RemovableThumb(
-                    file: _chestUpPhotos[i],
-                    onRemove: () => setState(() {
-                      _chestUpPhotos.clear();
-                      _prepareError = null;
-                    }),
-                  ),
-              ],
-            ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed:
-                (_preparing || _validatingPhotos) ? null : _pickChestUpPhotos,
-            icon: const Icon(Icons.photo_library_outlined,
-                color: AppColors.gold),
-            label: Text(
-                _chestUpPhotos.isEmpty
-                    ? 'Göğüs-üstü ${DatingConfig.chestUpPhotoCount} foto seç'
-                    : 'Göğüs-üstü fotoğrafları değiştir',
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),

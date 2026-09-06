@@ -185,9 +185,9 @@ async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
       x: b.x / scale, y: b.y / scale,
       width: b.width / scale, height: b.height / scale,
     };
-    // ratio = yüzün kadrajı kaplama oranı (uzun kenar). Tam boy referansın
-    // GERÇEKTEN tam boy olup olmadığını ayırt etmek için kullanılır
-    // (yüz büyükse = yakın selfie, gövde görünmüyor — bkz. analyzeReferences).
+    // ratio = yüzün kadrajı kaplama oranı (uzun kenar). Kareyi "yakın selfie
+    // mi, uzak çekim mi" diye ayırmak isteyen çağıranlar için döner; referans
+    // analizinde artık kullanılmıyor (bkz. göğüs-üstü referansın kaldırılması).
     const ratio = Math.max(b.width / w, b.height / h);
     return { ok: true, area: (b.width * b.height) / (w * h), ratio, box };
   } finally {
@@ -195,37 +195,18 @@ async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
   }
 }
 
-// Göğüs-üstü (chest-up) beden referansı: omuz + üst göğüs görünür, yüz net.
-// Uzak tam boyda yüz çok küçük; yakın yüz selfie'sinde yüz çok büyük —
-// ikisi de reddedilir. Kaba oran: uzak tam boy ~0.02–0.04, göğüs-üstü
-// ~0.08–0.32, yakın yüz ~0.45+.
-const MIN_FACE_RATIO_CHEST = 0.05;
-const MAX_FACE_RATIO_CHEST = 0.40;
-// Eski isimler — analyzeReferences beden karelerinde chest bandını kullanır.
-const MIN_FACE_RATIO_BODY = MIN_FACE_RATIO_CHEST;
-const MAX_FACE_RATIO_BODY = MAX_FACE_RATIO_CHEST;
-
-/** Göğüs-üstü yüz oranı bandı (birim test / prepare). */
-// GÖĞÜS-ÜSTÜ REFERANSTA "TAM ÖNDEN" SINIRI (2026-09-06).
-// profileDegreeFromLandmarks ölçeğinde: 0 = tam cepheden, 1 = tam profil.
-//
-// 0.35, gerçek fotoğraflara bakılarak seçildi. Elde 77 gerçek şablon
-// fotoğrafının ölçümü vardı; bantlardan örnekler gözle incelendi:
-//   0.06 / 0.08 / 0.09 / 0.14 → hepsi net cepheden
-//   0.16 / 0.21 / 0.22        → cepheden (hafif kıpırdama)
-//   0.27 / 0.31               → hâlâ cepheden okunuyor
-//   0.36 / 0.40 / 0.43        → başlamış dönüş, sınırda
-//   0.48                      → belirgin yana dönük
-// 0.35 bu iki kümenin arasından geçiyor. Dosyanın başka bir yerinde bağımsız
-// olarak kaydedilmiş gözlem de aynı yeri gösteriyor: "önden karelerin
-// oluşturduğu dar küme maks 0.32" (bkz. PROFILE_UNRELIABLE_MIN notu).
-const MAX_PROFILE_DEGREE_CHEST = 0.35;
-
-function isValidChestUpFaceRatio(ratio) {
-  return typeof ratio === "number" &&
-    ratio >= MIN_FACE_RATIO_CHEST &&
-    ratio <= MAX_FACE_RATIO_CHEST;
-}
+// GÖĞÜS-ÜSTÜ BEDEN REFERANSI KALDIRILDI (2026-09-06, kullanıcı kararı).
+// O iki karenin tek işi modele kişinin gerçek kafa/omuz oranını göstermekti;
+// çıktıyı eleyen HİÇBİR kapı onları okumuyordu — kafa boyutunu denetleyen iki
+// kapının ikisi de TABAN fotoğrafı ölçüyor (bkz. falPhotos.js
+// VISION_HEAD_SPAN_DROP_MAX ve aşağıdaki OUTPUT_FACE_GROWTH_MAX). Kimlik, ten
+// tonu ve göz açıklığı referansları zaten aynı gün yalnızca selfie'lere
+// bağlanmıştı. Üstelik çelişki üretiyorlardı: kullanıcının birinci şartı
+// "kafa oranı TABAN fotoğraftaki gibi olsun" iken bu kareler modele "kişinin
+// kendi gerçek oranını kullan" diyordu. Birlikte giden yüz-oranı bandı
+// (0.05–0.40), "tam önden" sınırı (0.35) ve güneş gözlüğü kapısı da kalktı:
+// üçü de yalnızca o iki kareyi denetliyordu, çıktıya bakmıyorlardı.
+// Referans artık yalnızca 3 yüz karesi.
 // Açı çeşitliliği kapısı: iki YÜZ karesinin kimlik vektörü birbirine bu
 // mesafeden yakınsa neredeyse aynı kare/açı sayılır (kullanıcı ör. 3 kez
 // cepheden çekmiş) — farklı açı kimlik sadakatini artırır. MUHAFAZAKÂR:
@@ -442,18 +423,12 @@ function profileDegreeFromLandmarks(landmarks) {
 
 /**
  * Referans fotoğrafları analiz eder.
- * Akış: [ön, sağ, sol, chest1, chest2] — son K kare göğüs-üstü beden
- * referansı (omuz/üst göğüs görünür; uzak tam boy veya salt yüz crop değil).
- * facePhotoCount (varsayılan 3): ilk N kare yüz; kimlik vektörü tercihen
- * bunlardan ortalanır. bestIndex/bestBox yüz karelerinden seçilir.
+ * Akış: [ön, sağ, sol] — hepsi yüz karesi (bkz. göğüs-üstü referansın
+ * kaldırılması, dosyanın başındaki not). Kimlik vektörü bu karelerden
+ * ortalanır; bestIndex/bestBox de bunlar arasından seçilir.
  */
-async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
+async function analyzeReferences(buffers) {
   const unclearIndices = [];
-  // İsim tarihi: eskiden "tam boy değil"; şimdi göğüs-üstü bandı dışı
-  // (çok yakın yüz VEYA çok uzak tam boy). Mesaj prepareReferencePhotos'ta.
-  const notFullBodyIndices = [];
-  // Göğüs-üstü kareler yana dönük çekilmiş (bkz. MAX_PROFILE_DEGREE_CHEST).
-  const notFrontalIndices = [];
   // Gözü APAÇIK kapalı (kırpma anı) yüz kareleri — kullanıcıdan değiştirmesi
   // istenir. Gözü kısık olanlar buraya GİRMEZ (bkz. CLOSED_EYE_MAX).
   const closedEyeIndices = [];
@@ -472,11 +447,10 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
   const faceDescriptors = [];
 
   for (let idx = 0; idx < buffers.length; idx++) {
-    const isBodyRef = idx >= facePhotoCount;
     let detection;
     try {
       detection = await detectSingleFace(buffers[idx], {
-        minFaceRatio: isBodyRef ? MIN_FACE_RATIO_BODY : MIN_FACE_RATIO,
+        minFaceRatio: MIN_FACE_RATIO,
       });
     } catch {
       unclearIndices.push(idx);
@@ -485,30 +459,6 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     if (!detection.ok) {
       unclearIndices.push(idx);
       continue;
-    }
-    // Göğüs-üstü bandı: yüz çok büyükse salt selfie; çok küçükse uzak tam boy.
-    if (isBodyRef &&
-        (detection.ratio > MAX_FACE_RATIO_CHEST ||
-         detection.ratio < MIN_FACE_RATIO_CHEST)) {
-      notFullBodyIndices.push(idx);
-      continue;
-    }
-    // GÖĞÜS-ÜSTÜ KARELER TAM ÖNDEN OLMALI (2026-09-06 kullanıcı kararı).
-    // Bu iki karenin tek işi kafa/omuz oranını ölçmek; kişi yana dönükse
-    // omuz genişliği perspektifle daralır ve ölçüm yanıltıcı olur. Selfie'ler
-    // bu şarttan MUAF — onlarda ön/sağ/sol açı çeşitliliği bilinçli isteniyor.
-    // Fail-safe: açı ölçülemezse kare elenmez.
-    if (isBodyRef) {
-      let profile = null;
-      try {
-        profile = await headYawOf(buffers[idx]);
-      } catch {
-        // ölçülemedi — kapı sessizce devre dışı
-      }
-      if (profile != null && profile > MAX_PROFILE_DEGREE_CHEST) {
-        notFrontalIndices.push(idx);
-        continue;
-      }
     }
     // Yüz var ama fotoğrafın genel kalitesi düşükse (bulanık/aşırı pozlanmış)
     // yine reddedilir — referans, üretimin kalite tavanını belirliyor.
@@ -528,14 +478,12 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     // için bu adım artık puanlamadan ÖNCE yapılıyor.
     let eyeOpenness = null;
     try {
-      // KİMLİK YALNIZCA SELFIE'LERDEN (2026-09-06 kullanıcı kararı): göğüs-üstü
-      // karenin tek işi kafa/omuz oranıdır. Eskiden hiç yüz descriptor'ı
-      // çıkmazsa göğüs-üstü kare kimlik ortalamasına giriyordu; oradaki yüz
-      // küçük ve düşük çözünürlüklü olduğu için kimlik vektörünü zayıflatıp
-      // "math-identity" yanlış redlerini besliyordu.
-      // Göğüs-üstü karede descriptor ARTIK HİÇ ÇIKARILMIYOR: sonucu zaten
-      // kullanılmıyordu, o geçişin yerini yukarıdaki açı ölçümü aldı.
-      const r = isBodyRef ? null : await descriptorFromBuffer(buffers[idx]);
+      // KİMLİK YALNIZCA SELFIE'LERDEN (2026-09-06 kullanıcı kararı): eskiden
+      // hiç yüz descriptor'ı çıkmazsa göğüs-üstü kare kimlik ortalamasına
+      // giriyordu; oradaki yüz küçük ve düşük çözünürlüklü olduğu için kimlik
+      // vektörünü zayıflatıp "math-identity" yanlış redlerini besliyordu. O
+      // kareler tamamen kalktı, geriye yalnızca selfie'ler kaldı.
+      const r = await descriptorFromBuffer(buffers[idx]);
       if (r) {
         eyeOpenness = r.eyeOpenness;
         descriptors.push(r.descriptor);
@@ -550,30 +498,23 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     // (rawPixels + sampleFaceTone, assessSkinToneConsistency'nin taban/çıktı
     // için kullandığı AYNI yöntem — üç taraf aynı ölçekte kıyaslansın diye).
     // Fail-safe: çıkarılamazsa yalnızca ortalamaya katkısı olmaz.
-    // GÖĞÜS-ÜSTÜ KARELER TEN TONUNA KATILMAZ (2026-09-06): o iki karenin tek
-    // görevi kafa/omuz oranı. Galeri fotoğrafları farklı ışıkta çekildiği için
-    // boyun/göğüs örneklemesi hedef tonu kaydırıp "skin-tone" yanlış redlerini
-    // besliyordu.
-    if (!isBodyRef) {
-      try {
-        const px = await rawPixels(buffers[idx]);
-        const tone = px ? sampleFaceTone(px, detection.box) : null;
-        if (tone) faceTones.push(tone);
-      } catch {
-        // yut — bu referansı elemez
-      }
+    try {
+      const px = await rawPixels(buffers[idx]);
+      const tone = px ? sampleFaceTone(px, detection.box) : null;
+      if (tone) faceTones.push(tone);
+    } catch {
+      // yut — bu referansı elemez
     }
 
     // GÖZÜ KAPALI YÜZ KARESİ: yalnızca APAÇIK kapalı olanlar (kırpma anı)
     // işaretlenir — kısık/dar göz DEĞİL (bkz. CLOSED_EYE_MAX'taki adalet
-    // notu). Tam boy karesinde göz aranmaz: orada yüz zaten uzak ve küçük,
-    // ölçüm güvenilmez.
-    if (!isBodyRef && eyeOpenness != null && eyeOpenness < CLOSED_EYE_MAX) {
+    // notu).
+    if (eyeOpenness != null && eyeOpenness < CLOSED_EYE_MAX) {
       closedEyeIndices.push(idx);
       faceEyeOpenness.push(eyeOpenness);
       continue; // bu kare bestIndex yarışına girmesin
     }
-    if (!isBodyRef && eyeOpenness != null) faceEyeOpenness.push(eyeOpenness);
+    if (eyeOpenness != null) faceEyeOpenness.push(eyeOpenness);
 
     // EN İYİ REFERANS PUANI: eskiden SADECE yüz alanına bakılıyordu. Göz
     // açıklığı ikincil çarpan olarak eklendi — yüz büyüklüğünün YERİNİ
@@ -582,16 +523,14 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     // lehine çeviriyor. Çarpan 0.6-1.0 bandında: en kötü ihtimalde %40
     // ceza, yani belirgin daha büyük bir yüz yine kazanır. Ölçülemeyen
     // göz nötr (1.0) sayılır — ölçememek ceza sebebi değildir.
-    if (!isBodyRef) {
-      const eyeFactor = eyeOpenness == null
-        ? 1
-        : 0.6 + 0.4 * Math.min(1, eyeOpenness / EYE_OPEN_GOOD);
-      const score = detection.area * eyeFactor;
-      if (score > bestArea) {
-        bestArea = score;
-        bestIndex = idx;
-        bestBox = detection.box;
-      }
+    const eyeFactor = eyeOpenness == null
+      ? 1
+      : 0.6 + 0.4 * Math.min(1, eyeOpenness / EYE_OPEN_GOOD);
+    const score = detection.area * eyeFactor;
+    if (score > bestArea) {
+      bestArea = score;
+      bestIndex = idx;
+      bestBox = detection.box;
     }
   }
 
@@ -634,8 +573,6 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
 
   return {
     unclearIndices,
-    notFullBodyIndices,
-    notFrontalIndices,
     duplicateIndices,
     closedEyeIndices,
     refEyeOpenness,
@@ -1782,7 +1719,4 @@ module.exports = {
   assessOutputFace,
   detectMainFace,
   FACE_MATCH_THRESHOLD,
-  isValidChestUpFaceRatio,
-  MIN_FACE_RATIO_CHEST,
-  MAX_FACE_RATIO_CHEST,
 };

@@ -151,11 +151,14 @@ const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen v
 // yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
 // IMAGES_PER_STYLE ile çalışır. Bkz. startPhotoGeneration + finalizeChunk.
 const FREE_TIER_CHUNK_COUNT = 1;
-// Kullanıcıdan istenen referans: 3 canlı yüz (ön/sağ/sol) + 2 zorunlu göğüs-üstü.
-// Flutter DatingConfig.faceCaptureCount / chestUpPhotoCount ile senkron.
+// Kullanıcıdan istenen referans: 3 canlı yüz (ön/sağ/sol). Flutter
+// DatingConfig.faceCaptureCount ile senkron.
+// GÖĞÜS-ÜSTÜ 2 KARE KALDIRILDI (2026-09-06, kullanıcı kararı) — gerekçe
+// faceQuality.js'in başındaki notta. Özet: o kareleri okuyan tek yer üretim
+// prompt'uydu, çıktıyı eleyen hiçbir kapı onlara bakmıyordu ve kafa oranı
+// kararını taban fotoğrafla çelişkiye sokuyorlardı.
 const FACE_PHOTO_COUNT = 3;
-const CHEST_UP_PHOTO_COUNT = 2;
-const REFERENCE_PHOTO_COUNT = FACE_PHOTO_COUNT + CHEST_UP_PHOTO_COUNT; // 5
+const REFERENCE_PHOTO_COUNT = FACE_PHOTO_COUNT;
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
 // 0 = HİÇ RETRY YOK (bilinçli tercih): kimlik-kapısı reddi, indirme hatası ya
 // da kayıt hatası — hangi sebeple olursa olsun chunk tek denemede başarısız
@@ -525,12 +528,8 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "where the base photo shows a profile is a FAILURE, even if the resulting face resembles the person " +
     "well. Instead, reconstruct how THIS person's face looks from that same angle.\n\n" +
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
-    "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
-    "Among these reference photos, the LAST TWO are CHEST-UP photos (shoulders and upper chest " +
-    "visible) — use them for ONE thing only: how big the head is relative to the shoulders. Ignore " +
-    "them for facial structure, skin tone, clothing, lighting, pose and gaze. ALL the " +
-    "OTHER reference photos (every one except the base photo and those last two chest-up photos) are " +
-    "close-up views of the target's face — these, and ONLY these, are the source of truth for their " +
+    "The OTHER images are reference photos of a DIFFERENT specific real person (the target person) — " +
+    "all of them close-up views of the target's face. They are the ONLY source of truth for their " +
     "facial identity and structure.\n\n" +
     "TASK: reproduce the BASE PHOTO keeping its background, environment, location, furniture, objects, " +
     "lighting, colours, camera angle, framing, composition and body pose EXACTLY the same — do " +
@@ -545,7 +544,7 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "The ONLY three things that change from the base photo are: the face, the skin tone/colour, and the " +
     "body height/weight/build. Everything else (scene, pose, outfit, accessories) is identical to the base.\n\n" +
     "FACE FIDELITY (most important): copy the TARGET person's face EXACTLY as it appears in their CLOSE-" +
-    "UP FACE reference photos (never the chest-up ones) — identical facial features, identical " +
+    "UP FACE reference photos — identical facial features, identical " +
     "bone structure, eyes, nose, mouth, lips, jawline, eyebrows, hairline and hair, and their SAME " +
     "natural expression. This must clearly and unmistakably be the SAME person as in the reference " +
     "photos, recognisable at a glance. Make only the tiny, minimal adjustment needed to fit the base " +
@@ -593,8 +592,8 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "fingers, natural joints and proportions, nothing merged, missing, duplicated or distorted.\n\n" +
     "EYEWEAR (sunglasses/glasses) — THE BASE PHOTO DECIDES, NEVER THE REFERENCES: if the person in the " +
     "BASE photo is NOT wearing eyewear, the output must have NO glasses or sunglasses whatsoever. The " +
-    "target's reference photos frequently show them wearing sunglasses (especially a chest-up " +
-    "photo) — that eyewear belongs to THEIR photo, not to this scene, and carrying it over is a FAILURE. " +
+    "target's reference photos frequently show them wearing sunglasses — that eyewear belongs to " +
+    "THEIR photo, not to this scene, and carrying it over is a FAILURE. " +
     "Never add, invent or borrow eyewear that the base photo does not already have.\n" +
     "If the person in the base photo DOES wear sunglasses or glasses, keep " +
     "that eyewear EXACTLY as in the base photo — same frame shape, colour, size, position and " +
@@ -646,8 +645,7 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "widen or distort the face or change who the person is.\n\n" +
     "HEAD SIZE (scale it with the body): keep the head in the SAME proportion to the body as the person " +
     "already in the BASE photo. Judge this against SHOULDER WIDTH — on a normal adult the head is about " +
-    "one third of the shoulder span — not against the picture frame. Use the chest-up references as the " +
-    "cue for the target's real head-to-shoulder proportion. CRITICAL when the build changes: you are " +
+    "one third of the shoulder span — not against the picture frame. CRITICAL when the build changes: you are " +
     "also reshaping the body to the target's real build; if that makes the shoulders and torso narrower " +
     "than the base person's, the head MUST shrink by the same proportion. A head left at its original " +
     "size on a narrowed body reads as oversized even though nothing about the head changed. The close-up " +
@@ -684,8 +682,8 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "stretched/warped/distorted or changes structure when turned to an angle or profile, leaving obvious " +
     "acne/blemishes/spots/blotches on the face, a dull/muddy/underexposed or unevenly lit face, harsh " +
     "shadows or blown-out highlights on the face, an artificially glowing/glossy/shiny/luminous/lit-up " +
-    "face, skin that looks brighter or whiter than the reference photos, using a chest-up " +
-    "reference photo's face for facial structure, changing or regenerating the background, keeping the " +
+    "face, skin that looks brighter or whiter than the reference photos, " +
+    "changing or regenerating the background, keeping the " +
     "base person's original skin colour ANYWHERE on the body (especially arms/hands/legs), a two-tone " +
     "patchwork of skin colours, keeping the base person's body shape, ANY change to clothing, outfit, " +
     "glasses, jewellery, watches, hats, belts, bags or shoes compared to the base photo, copying the " +
@@ -761,7 +759,7 @@ function buildStage1Prompt(identityCaption, bodyProfile) {
     "none, the output has none — the target's own photos often show sunglasses and carrying them over " +
     "is a failure.\n\n" +
     "FACE — copy it exactly: reproduce the target's face feature by feature from their close-up " +
-    "reference photos (ignore the chest-up ones for the face). The EXACT nose (bridge width, " +
+    "reference photos. The EXACT nose (bridge width, " +
     "length, tip, nostrils), EXACT eyebrows (thickness, arch, length, spacing), EXACT eyes (shape, size, " +
     "slant, spacing, eyelids), EXACT lips (shape, thickness, width) and the EXACT jaw, chin and " +
     "cheekbone shape. Keep their real face outline and length-to-width ratio — never round, puff, swell, " +
@@ -948,15 +946,14 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
     "clothing item and accessory (glasses, jewellery, watches, bags, shoes). If that person is in " +
     "profile or three-quarter view, stay in that view — never turn or straighten the head toward the " +
     "camera. Ignore how the target is posed or where they look in their own selfies.\n\n" +
-    "CHANGE ONLY THE PERSON, using their close-up face photos (the last two chest-up photos are ONLY " +
-    "for measuring head size against the shoulders — nothing else):\n" +
+    "CHANGE ONLY THE PERSON, using their close-up face photos:\n" +
     "- Face: copy their exact nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline. Same " +
     "shapes, same proportions. Do not beautify, symmetrise, round or puff the face. Keep their own " +
     "natural expression. It must unmistakably be the same person.\n" +
     "- Skin: their true tone from the selfies, applied evenly to every visible area — face, neck, " +
     "chest, arms, hands, legs. Never two-tone, never lightened or given a glow.\n" +
-    "- Head size + gaze: match the BASE head-to-shoulder ratio (chest-up photos give the target's real " +
-    "ratio; never selfie zoom) and the BASE gaze direction exactly.\n" +
+    "- Head size + gaze: match the BASE head-to-shoulder ratio (never selfie zoom) and the BASE gaze " +
+    "direction exactly.\n" +
     "- Body: their real build, height and weight, resizing the same clothing to fit. If this makes the " +
     "shoulders narrower than the base person's, scale the HEAD DOWN by the same amount — a head left at " +
     "its original size on a narrowed body looks oversized." +
@@ -1014,12 +1011,10 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
     "output a reference photo — if your result lacks the first image's background and framing, you " +
     "edited the wrong image.\n\n" +
-    "REFERENCES: the LAST TWO images are CHEST-UP photos (shoulders + upper chest visible). Their ONLY " +
-    "job is ONE measurement: how big the head is relative to the SHOULDERS. Use them for nothing else — " +
-    "not identity, not face, not hair, not skin tone, not lighting, not clothing, not pose, not gaze. " +
-    "All OTHER reference photos are close-up SELFIES of the target — they are the ONLY source of truth " +
-    "for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
-    "accessories, pose, head angle or where the eyes look.\n\n" +
+    "REFERENCES: every other image is a close-up SELFIE of the target — they are the ONLY source of " +
+    "truth for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
+    "accessories, pose, head angle, head size or where the eyes look — the FIRST image decides all of " +
+    "those.\n\n" +
     "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
     "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
     "viewer would not immediately recognise the selfie person, the edit failed.\n" +
@@ -1029,7 +1024,7 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "base is in profile or three-quarter, the output stays at that exact angle. Ignore where the target " +
     "looks in their own selfies — the base decides gaze and angle, always.\n" +
     "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
-    "that same count in the output; cross-check it against the chest-up photos. Never take head scale " +
+    "that same count in the output. Never take head scale " +
     "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
     "bigger, pushed forward, or bobble-like against those shoulders is a failure.\n" +
     "P4 SKIN TONE — ONE continuous tone from face through neck, chest, arms, hands, matching the FACE " +
@@ -1060,7 +1055,7 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
     "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
     "a head kept at its old size on narrowed shoulders reads as oversized. Measure the head-to-shoulder " +
-    "ratio in the chest-up photos and reproduce THAT ratio. Never enlarge the head, puff the face, or " +
+    "ratio in the FIRST image and reproduce THAT ratio. Never enlarge the head, puff the face, or " +
     "push the head forward in the frame. The close-up face references are zoomed in for detail only — " +
     "never take head scale from them.\n\n" +
     "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
@@ -1068,7 +1063,7 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "point in the scene — if the base person looks away from the camera, the output looks away too. " +
     "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
     "toward the camera to make the face easier is a failure. Ignore how the target is posed or where " +
-    "they look in their own selfies or chest-up photos. The eyes must be open, clear and alert, with " +
+    "they look in their own selfies. The eyes must be open, clear and alert, with " +
     "visible pupils and natural catch-light — never half-closed, caught mid-blink, droopy or dead-eyed. " +
     "Keep their own natural eye shape and size; do not widen or enlarge the eyes to achieve this.\n\n" +
     "6) BODY — reshape it to the target's real build from their form answers, resizing the SAME " +
@@ -1123,12 +1118,12 @@ function buildEditPromptP1400(identityCaption, bodyProfile) {
     "- HEAD NOT JOINING THE NECK: the head floated, looked pasted on, or sat at a tilt. It must sit " +
     "upright and firmly on the neck, aligned with the shoulders, with a clean natural join.\n\n" +
     "- OVERSIZED HEAD: the head grew relative to the body. The close-up references are zoomed in for " +
-    "identity detail only — never treat their zoom level as a size reference. Use the chest-up refs " +
-    "for real head-to-shoulder proportion.\n\n" +
+    "identity detail only — never treat their zoom level as a size reference. Take the head-to-shoulder " +
+    "proportion from the base photo.\n\n" +
     "- INVENTED SMILE: an open smile or grin appeared that is not in the target's references. Keep " +
     "whatever calm, natural expression they actually have.\n\n" +
-    "- BORROWED SUNGLASSES: the target wore sunglasses in their own reference photos (often a chest-up " +
-    "shot), and that eyewear was carried into a base scene that had none. Eyewear is decided " +
+    "- BORROWED SUNGLASSES: the target wore sunglasses in their own reference photos, and that " +
+    "eyewear was carried into a base scene that had none. Eyewear is decided " +
     "ONLY by the base photo — if the base person wears none, the output has none.\n\n" +
     "- DUPLICATED FACE: the target's face was pasted onto other people in the scene. The target appears " +
     "exactly once; any background people stay generic and unrelated.\n\n" +
@@ -1754,84 +1749,12 @@ async function postOpenAiImageEdit(form, refCount) {
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 
-/**
- * REFERANS FOTOĞRAFTA GÜNEŞ GÖZLÜĞÜ VAR MI? (2026-09-06 kullanıcı kararı)
- *
- * Göğüs-üstü iki kare için yükleme anında sorulur. Gerekçe: gözlük, hem
- * kimlik/bakış sinyalini kapatıyor hem de modelin gözlüğü sahneye taşımasına
- * zemin hazırlıyor (üretim prompt'unda ayrıca "BORROWED SUNGLASSES" olarak
- * yasak). Kaynakta hiç olmaması, sonradan temizlemekten daha güvenli.
- *
- * NEDEN VISION, NEDEN PİKSEL SEZGİSİ DEĞİL: "koyu göz bölgesi" sezgisi gölge,
- * koyu ten ve saç gölgesiyle karışıyor. Soru 40 gerçek fotoğrafta denendi ve
- * gözle doğrulandı: güneş gözlüklü işaretlenen 8 karenin 8'i, gözlüksüz
- * işaretlenen 8 karenin 8'i doğruydu.
- *
- * Maliyet: iş başına 2 çağrı, "low" detail (512px) — yüzdeki gözlük bu
- * çözünürlükte rahatça görünüyor.
- *
- * Döner: "SUNGLASSES" | "CLEAR_GLASSES" | "NONE" | null (ölçülemedi).
- * ÖNEMLİ: null asla eleme sebebi değildir — ağ/servis hatası kullanıcının
- * fotoğrafını suçlamaz.
- */
-async function detectSunglasses(buf) {
-  try {
-    const sharp = require("sharp");
-    // Yüz üstteki yarıda; küçültmek hem token hem gecikme kazandırıyor.
-    const meta = await sharp(buf).metadata();
-    const small = await sharp(buf)
-      .extract({ left: 0, top: 0, width: meta.width, height: Math.round(meta.height * 0.55) })
-      .resize({ width: 512 })
-      .jpeg({ quality: 85 })
-      .toBuffer();
+// GÜNEŞ GÖZLÜĞÜ KAPISI KALDIRILDI (2026-09-06): gpt-4o'ya sorulan bu kontrol
+// yalnızca göğüs-üstü iki kare için vardı, o kareler kalkınca dayanağı da
+// kalmadı. Selfie'de koyu gözlük zaten yüz tespitini zorlaştırıp "net değil"
+// kapısına takılıyor ve üretim prompt'u gözlüğü sahneye taşımayı ayrıca
+// yasaklıyor ("BORROWED SUNGLASSES").
 
-    const prompt =
-      "Look at the person in this photo and answer two questions about their eyes.\n" +
-      "Reply on exactly two lines, nothing else:\n" +
-      "EYEWEAR: <NONE | CLEAR_GLASSES | SUNGLASSES>\n" +
-      "EYES_VISIBLE: <YES | NO>\n\n" +
-      "SUNGLASSES means tinted, dark or mirrored lenses that hide or darken the eyes, " +
-      "including lenses pushed onto the face but still covering the eyes. " +
-      "CLEAR_GLASSES means transparent prescription lenses through which the eyes are plainly visible. " +
-      "NONE means no eyewear on the eyes at all; glasses resting on the head or hanging from " +
-      "a collar count as NONE. Answer EYES_VISIBLE: NO whenever the pupils cannot be seen.";
-
-    const resp = await fetch(OPENAI_CHAT_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_KEY.value()}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: VISION_MODEL,
-        max_tokens: 20,
-        temperature: 0,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${small.toString("base64")}`, detail: "low" },
-            },
-          ],
-        }],
-      }),
-    });
-    if (!resp.ok) {
-      console.error(`Gözlük kontrolü HTTP ${resp.status} — kare elenmiyor`);
-      return null;
-    }
-    const json = await resp.json();
-    const raw = (json?.choices?.[0]?.message?.content || "").trim();
-    const m = /EYEWEAR:\s*([A-Z_]+)/i.exec(raw);
-    const verdict = m ? m[1].toUpperCase() : null;
-    return ["SUNGLASSES", "CLEAR_GLASSES", "NONE"].includes(verdict) ? verdict : null;
-  } catch (e) {
-    console.error("Gözlük kontrolü hata verdi (kare elenmiyor):", e.message || e);
-    return null;
-  }
-}
 // Vision kalite kontrol modeli. gpt-4o görsel yargı için güçlü ve uygun
 // maliyetli: 2 görsel (çıktı + referans selfie) "high" detail ile ~1500-2000
 // giriş token'ı ≈ kare başına ~$0.005-0.01. "low" detail (512px) kimlik
@@ -1887,10 +1810,12 @@ const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
 // bile elenmedi. Sayısal büyüme kapısı da ölü (bkz. faceQuality
 // OUTPUT_FACE_GROWTH_MAX notu: gözlenen maksimum 1.19, eşik 1.45).
 //
-// KALİBRASYON NOTU: bu eşik ilk kez veri OLMADAN konuluyor (ölçüm satırları
-// da yeni). İlk üretimden sonra "VISION ÖLÇÜM (kafa açıklığı)" logları
-// okunmalı: taban-çıktı farkının dağılımı görülünce eşik ya doğrulanır ya
-// gevşetilir — dosyadaki diğer kapılarla aynı usul.
+// KALİBRASYON: eşik önce veri olmadan kondu, aynı gün (2026-09-06) 77
+// güvenilir geçmiş taban/çıktı çifti üzerinde sınandı — üretim logu
+// beklenmedi. Ölçüm 77 karenin 4'ünü tetikledi (%5.2); bunların sayısal kafa
+// büyümesi 1.114 / 1.103 / 1.097 ve 0.997 çıktı, sonuncusu yanlış pozitifti
+// ve aşağıdaki sayısal hakem (VISION_PROPORTION_GROWTH_MIN) onu eliyor.
+// Kapının fiilî eleme oranı %3.9 ve elenen üç kare gözle de bozuk.
 const VISION_HEAD_SPAN_DROP_MAX = 0.5;
 
 // VISION'IN KAFA REDDİ İÇİN SAYISAL ALT SINIR (2026-09-06).
@@ -1920,8 +1845,7 @@ const VISION_PROPORTION_GROWTH_MIN = 1.05;
  *
  * YENİ TASARIM (+ 2026-09-06 base karşılaştırması):
  *   ÇAĞRI 1 ("base" | "self") — kafa / bakış / ten / bağlantı.
- *     base: çıktı + TABAN (+ isteğe bağlı göğüs-üstü). Bakış ve kafa boyutu
- *     şablonla karşılaştırılır.
+ *     base: çıktı + TABAN. Bakış ve kafa boyutu şablonla karşılaştırılır.
  *     self: yalnızca çıktı (taban yoksa).
  *   ÇAĞRI 2 ("ref")  — yalnızca A + D, yüz referanslarıyla.
  *
@@ -1929,9 +1853,7 @@ const VISION_PROPORTION_GROWTH_MIN = 1.05;
  */
 async function assessOutputWithVision(buf, referenceImages, opts = {}) {
   const baseImage = opts && opts.baseImage != null ? opts.baseImage : null;
-  const chestImages = (opts && Array.isArray(opts.chestImages) ? opts.chestImages : [])
-    .filter((r) => r != null);
-  const baseContext = baseImage ? [baseImage, ...chestImages] : [];
+  const baseContext = baseImage ? [baseImage] : [];
   const mode1 = baseImage ? "base" : "self";
   const self = await assessOutputWithVisionRetrying(buf, baseContext, mode1);
   if (!self.ok) return self;
@@ -2005,7 +1927,7 @@ const VISION_SYSTEM_MSG =
 async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
   try {
     const b64 = buf.toString("base64");
-    // "ref" = yüz kaynakları; "base" = taban (+ göğüs-üstü). "self" = yalnız çıktı.
+    // "ref" = yüz kaynakları; "base" = taban. "self" = yalnız çıktı.
     const refs = (mode === "ref" || mode === "base")
       ? (Array.isArray(referenceImages) ? referenceImages : [referenceImages])
           .filter((r) => r != null)
@@ -2016,10 +1938,7 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
       : mode === "base"
       ? ("You are a quality checker for an AI image-editing pipeline.\n" +
          "IMAGE 1 is the pipeline OUTPUT. IMAGE 2 is the BASE canvas that was edited — it is the " +
-         "source of truth for HEAD SIZE (head vs shoulders) and GAZE (where the eyes look). " +
-         "If further images are present, they are CHEST-UP reference photos of the target. Their ONLY " +
-         "job is head-to-shoulder proportion. Never use them to judge gaze, skin tone, lighting, " +
-         "clothing or who the person is, and never copy their zoom as absolute size.\n\n" +
+         "source of truth for HEAD SIZE (head vs shoulders) and GAZE (where the eyes look).\n\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
          "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face.\n" +
@@ -2692,16 +2611,17 @@ const YAW_TO_CAMERA_DROP_MAX = 0.18;
 const OUTPUT_HEAD_DX_MAX = 0.22;
 
 /**
- * refUrls sırası: [yüz…, göğüs-üstü…]. İlk FACE_PHOTO_COUNT yüz; kalan chest.
- * bodyUrl her zaman null (eski distant full-body sözleşmesi kalktı).
+ * Modele gidecek YÜZ referanslarını verir.
+ *
+ * DİLİM NEDEN DURUYOR: göğüs-üstü kareler 2026-09-06'da kaldırıldı, ama daha
+ * ÖNCE hazırlanmış işlerin dokümanında 5 URL duruyor ve son ikisi göğüs-üstü
+ * kare. O ikisini yüz referansı sanıp modele vermek kimlik sadakatini bozar
+ * (uzaktan çekilmiş, küçük yüz). Bu yüzden liste her hâlükârda ilk
+ * FACE_PHOTO_COUNT kareyle sınırlanıyor.
  */
-function splitRefUrls(refUrls) {
-  if (!Array.isArray(refUrls) || refUrls.length === 0) {
-    return { faceUrls: [], chestUrls: [], bodyUrl: null };
-  }
-  const faceUrls = refUrls.slice(0, FACE_PHOTO_COUNT);
-  const chestUrls = refUrls.slice(FACE_PHOTO_COUNT);
-  return { faceUrls, chestUrls, bodyUrl: null };
+function faceRefUrls(refUrls) {
+  if (!Array.isArray(refUrls) || refUrls.length === 0) return [];
+  return refUrls.slice(0, FACE_PHOTO_COUNT);
 }
 
 /**
@@ -2770,10 +2690,10 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
 }
 
 async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
-  const { faceUrls, chestUrls } = splitRefUrls(refUrls);
+  const faceUrls = faceRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
-  // Taban + yüz açıları + göğüs-üstü beden sinyali (kafa ölçeği / ten / omuz).
-  const fullSet = [templateUrl, ...faceUrls, ...chestUrls];
+  // Taban + yüz açıları. Kafa ölçeği artık yalnızca tabandan okunuyor.
+  const fullSet = [templateUrl, ...faceUrls];
 
   if (mode === PHOTO_MODE_STAGED) {
     // MOD 2 — 3 AŞAMALI PIPELINE. Her aşamanın çıktısı bir sonrakinin TUVALİ.
@@ -3181,11 +3101,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       let visionReason = null;
       let visionInconclusive = true;
       try {
-        const split = splitRefUrls(refUrls);
-        // Taban + göğüs-üstü: kafa boyutu ve bakış şablonla; chest ikincil oran.
-        const v = await assessOutputWithVision(buf, split.faceUrls, {
+        // Taban gönderiliyor: kafa boyutu ve bakış ölçümü ona göre yapılıyor.
+        const v = await assessOutputWithVision(buf, faceRefUrls(refUrls), {
           baseImage: tplBuf,
-          chestImages: split.chestUrls,
         });
         visionOk = v.ok;
         visionDetail = v.detail;
@@ -3458,10 +3376,9 @@ exports.prepareReferencePhotos = onCall(
   // selfie tensörleriyle OOM oluyordu). minInstances:1 ile soğuk başlangıç
   // (model yeniden yükleme) gecikmesi ortadan kaldırıldı.
   {
-    // OPENAI_KEY GERİ GELDİ (2026-09-06): göğüs-üstü karelerde güneş gözlüğü
-    // kontrolü gpt-4o'ya soruluyor (bkz. detectSunglasses). Aradaki dönemde
-    // secret gerekmiyordu; Cloud Vision moderasyonu hâlâ ADC ile çalışıyor.
-    secrets: [OPENAI_KEY],
+    // OPENAI_KEY GEREKMİYOR: buradaki tek OpenAI çağrısı güneş gözlüğü
+    // kontrolüydü ve o kapı kaldırıldı. Cloud Vision moderasyonu ADC ile
+    // çalışıyor, yüz kapıları da yerel (face-api).
     region: "europe-west1",
     memory: "2GiB",
     // Yüz modeli yüklemesi + moderasyon; soğuk başlangıçta 120 sn yetmeyebilir.
@@ -3498,8 +3415,8 @@ exports.prepareReferencePhotos = onCall(
     if (refBuffers.length !== REFERENCE_PHOTO_COUNT) {
       throw new HttpsError(
         "invalid-argument",
-        `Tam olarak ${REFERENCE_PHOTO_COUNT} referans fotoğraf gerekli ` +
-        `(${FACE_PHOTO_COUNT} yüz + ${CHEST_UP_PHOTO_COUNT} göğüs-üstü). ` +
+        `Tam olarak ${REFERENCE_PHOTO_COUNT} yüz fotoğrafı gerekli ` +
+        "(ön, sağ, sol). " +
         `Yüklenen: ${refBuffers.length}.`,
         { expectedCount: REFERENCE_PHOTO_COUNT, actualCount: refBuffers.length }
       );
@@ -3516,9 +3433,7 @@ exports.prepareReferencePhotos = onCall(
     let refSkinTone = null;
     try {
       const { analyzeReferences } = require("./faceQuality");
-      const analysis = await analyzeReferences(refBuffers, {
-        facePhotoCount: FACE_PHOTO_COUNT,
-      });
+      const analysis = await analyzeReferences(refBuffers);
       // Fotoğraf sırası (0-tabanlı) client'a 1-tabanlı sıra no olarak gösterilir.
       const posLabel = (indices) => {
         const positions = indices.map((i) => i + 1);
@@ -3536,52 +3451,6 @@ exports.prepareReferencePhotos = onCall(
           `${many ? "bunları" : "bunu"} net, iyi aydınlatılmış, tek kişinin ` +
           "göründüğü selfie ile değiştirip tekrar dene.",
           { unclearPhotoIndices: analysis.unclearIndices }
-        );
-      }
-      // Göğüs-üstü bandı (son 2 kare): çok yakın yüz crop VEYA çok uzak tam boy.
-      if (analysis.notFullBodyIndices && analysis.notFullBodyIndices.length > 0) {
-        const { label, many } = posLabel(analysis.notFullBodyIndices);
-        throw new HttpsError(
-          "invalid-argument",
-          `${label} göğüs-üstü referans için uygun değil. Omuzların ve üst ` +
-          `göğsün göründüğü, yüzün net olduğu kareler seç — yalnızca yakın ` +
-          `yüz selfie'si veya uzak tam boy çekim kabul edilmez. Lütfen ` +
-          `${many ? "bunları" : "bunu"} değiştirip tekrar dene.`,
-          { notChestUpPhotoIndices: analysis.notFullBodyIndices }
-        );
-      }
-      // Göğüs-üstü kareler yana dönük (2026-09-06 kullanıcı kararı): bu iki
-      // karenin tek işi kafa/omuz oranı ve kişi yana döndüğünde omuz genişliği
-      // perspektifle daralıp ölçümü bozuyor. Selfie'ler bu şarttan muaf.
-      if (analysis.notFrontalIndices && analysis.notFrontalIndices.length > 0) {
-        const { label, many } = posLabel(analysis.notFrontalIndices);
-        throw new HttpsError(
-          "invalid-argument",
-          `${label} yana dönük çekilmiş. Göğüs-üstü kareler tam önden, ` +
-          `omuzlar kameraya dönük olmalı — kafa boyutu omuz genişliğine göre ` +
-          `ölçüldüğü için yan duruş bu ölçümü bozuyor. Lütfen ` +
-          `${many ? "bunları" : "bunu"} cepheden çekilmiş bir kareyle değiştir.`,
-          { notFrontalPhotoIndices: analysis.notFrontalIndices }
-        );
-      }
-      // GÜNEŞ GÖZLÜĞÜ (yalnızca göğüs-üstü kareler, 2026-09-06 kullanıcı
-      // kararı). Yerel kapıların hepsi geçtikten SONRA sorulur: ağ çağrısı
-      // yalnızca gerçekten gerekiyorsa yapılsın. Ölçülemezse eleme yok.
-      const chestBuffers = refBuffers.slice(FACE_PHOTO_COUNT);
-      const eyewear = await Promise.all(chestBuffers.map((b) => detectSunglasses(b)));
-      console.log(`GÖZLÜK KONTROLÜ (göğüs-üstü): ${eyewear.map((e, i) => `${FACE_PHOTO_COUNT + i + 1}. foto=${e || "ölçülemedi"}`).join(", ")}`);
-      const sunglassIndices = eyewear
-        .map((verdict, i) => (verdict === "SUNGLASSES" ? FACE_PHOTO_COUNT + i : null))
-        .filter((i) => i != null);
-      if (sunglassIndices.length > 0) {
-        const { label, many } = posLabel(sunglassIndices);
-        throw new HttpsError(
-          "invalid-argument",
-          `${label} güneş gözlüklü. Göğüs-üstü karelerde gözlerin açıkça ` +
-          `görünmesi gerekiyor — gözlük hem bakışı hem ten tonunu gizliyor ve ` +
-          `üretilen fotoğraflara taşınabiliyor. Lütfen ` +
-          `${many ? "bunları" : "bunu"} gözlüksüz bir kareyle değiştir.`,
-          { sunglassesPhotoIndices: sunglassIndices }
         );
       }
       // İki yüz karesi neredeyse aynı açıda — farklı açı iste.
@@ -3608,18 +3477,14 @@ exports.prepareReferencePhotos = onCall(
           { closedEyePhotoIndices: analysis.closedEyeIndices }
         );
       }
-      // En iyi yüzü öne al — göğüs-üstü karelerin sırası sabit kalsın.
+      // En iyi yüzü listenin başına al: modele verilen ilk referans kimlik
+      // sadakatinde en ağır basan kare (bkz. generateForMode bestFaceUrl).
       if (analysis.bestIndex != null &&
           analysis.bestIndex < FACE_PHOTO_COUNT &&
           refUrls[analysis.bestIndex]) {
         const faceUrls = refUrls.slice(0, FACE_PHOTO_COUNT);
-        const chestUrls = refUrls.slice(FACE_PHOTO_COUNT);
         const best = faceUrls[analysis.bestIndex];
-        orderedRefUrls = [
-          best,
-          ...faceUrls.filter((u) => u !== best),
-          ...chestUrls,
-        ];
+        orderedRefUrls = [best, ...faceUrls.filter((u) => u !== best)];
       }
       if (analysis.refDescriptor) {
         refDescriptor = Array.from(analysis.refDescriptor); // Firestore için düz dizi
@@ -3636,8 +3501,7 @@ exports.prepareReferencePhotos = onCall(
         refSkinTone = analysis.refSkinTone;
       }
       console.log(
-        `HAZIRLIK REFERANS: yüz=${FACE_PHOTO_COUNT} göğüsÜstü=${CHEST_UP_PHOTO_COUNT} ` +
-        `referansSayisi=${orderedRefUrls.length} chestRefCount=${CHEST_UP_PHOTO_COUNT}`
+        `HAZIRLIK REFERANS: yüz=${FACE_PHOTO_COUNT} referansSayisi=${orderedRefUrls.length}`
       );
       // NOT (2026-07-27): daha önce burada en net yüzden kırpılmış ek bir
       // referans (faceCropUrl, postProcess.cropFaceRegion) üretilip listenin
@@ -3688,7 +3552,6 @@ exports.prepareReferencePhotos = onCall(
       ...(refSkinTone ? { refSkinTone } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
       facePhotoCount: FACE_PHOTO_COUNT,
-      chestUpPhotoCount: CHEST_UP_PHOTO_COUNT,
       referencePhotoCount: orderedRefUrls.length,
     });
 
@@ -4195,7 +4058,7 @@ exports.falInferenceWebhook = onRequest(
         // gelen karelere ödenir. Fail-safe: hata durumunda ok:true döner,
         // iyi kareler asla boşuna elenmez.
         if (passed.length > 0) {
-          const refFaces = splitRefUrls(job.falRefUrls).faceUrls;
+          const refFaces = faceRefUrls(job.falRefUrls);
           const visionChecked = await Promise.all(passed.map(async (d) => ({
             d, v: await assessOutputWithVision(d.buf, refFaces),
           })));

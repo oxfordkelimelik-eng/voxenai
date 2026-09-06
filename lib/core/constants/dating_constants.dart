@@ -36,14 +36,13 @@ class DatingConfig {
   // AI foto üretimi referansları: 3 canlı yüz (ön / sağ / sol).
   //
   // TAM BOY FOTOĞRAF KALDIRILDI (2026-08-20, kullanıcı kararı): boy ve vücut
-  // tipi zaten onboarding formundan alınıyor (bodyProfile) ve sunucu tarafında
-  // 3 canlı yüz + 2 zorunlu göğüs-üstü (omuz/üst göğüs) — beden/ten/kafa
-  // ölçeği sinyali. functions/falPhotos.js FACE_PHOTO_COUNT +
-  // CHEST_UP_PHOTO_COUNT ile senkron.
+  // tipi zaten onboarding formundan alınıyor (bodyProfile).
+  // GÖĞÜS-ÜSTÜ 2 KARE DE KALDIRILDI (2026-09-06, kullanıcı kararı): o kareleri
+  // okuyan tek yer üretim prompt'uydu, çıktıyı eleyen hiçbir kapı onlara
+  // bakmıyordu (gerekçe: functions/faceQuality.js başındaki not).
+  // functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
   static const int faceCaptureCount = 3;
-  static const int chestUpPhotoCount = 2;
-  static const int referencePhotoCount =
-      faceCaptureCount + chestUpPhotoCount; // 5
+  static const int referencePhotoCount = faceCaptureCount; // 3
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç
