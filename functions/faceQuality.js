@@ -495,27 +495,29 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     let eyeOpenness = null;
     try {
       const r = await descriptorFromBuffer(buffers[idx]);
-      // Kimlik ortalamasına yüz karelerini önceliklendir; beden karesi
-      // düşük çözünürlüklü yüzle ortalamayı bozmasın.
+      // KİMLİK YALNIZCA SELFIE'LERDEN (2026-09-06 kullanıcı kararı): göğüs-üstü
+      // karenin tek işi kafa/omuz oranıdır. Eskiden hiç yüz descriptor'ı
+      // çıkmazsa göğüs-üstü kare kimlik ortalamasına giriyordu; oradaki yüz
+      // küçük ve düşük çözünürlüklü olduğu için kimlik vektörünü zayıflatıp
+      // "math-identity" yanlış redlerini besliyordu.
       if (r && !isBodyRef) {
         eyeOpenness = r.eyeOpenness;
         descriptors.push(r.descriptor);
         faceDescriptors.push({ idx, d: r.descriptor });
-      } else if (r && isBodyRef && descriptors.length === 0) {
-        descriptors.push(r.descriptor);
       }
     } catch {
       // Descriptor çıkarılamaması bu referansı net-değil saymaz (tespit zaten
       // geçti) — yalnızca ortalamaya katkısı olmaz.
     }
 
-    // TEN TONU: göz durumundan bağımsız, geçen her yüz karesinden toplanır
+    // TEN TONU: göz durumundan bağımsız, geçen her YÜZ karesinden toplanır
     // (rawPixels + sampleFaceTone, assessSkinToneConsistency'nin taban/çıktı
     // için kullandığı AYNI yöntem — üç taraf aynı ölçekte kıyaslansın diye).
     // Fail-safe: çıkarılamazsa yalnızca ortalamaya katkısı olmaz.
-    // Göğüs-üstü karelerden boyun/üst göğüs teni de eklenir — kolların yüzle
-    // aynı tona çekilmesi için hedef ton yalnızca yakın selfie yanaklarına
-    // kilitlenmesin.
+    // GÖĞÜS-ÜSTÜ KARELER TEN TONUNA KATILMAZ (2026-09-06): o iki karenin tek
+    // görevi kafa/omuz oranı. Galeri fotoğrafları farklı ışıkta çekildiği için
+    // boyun/göğüs örneklemesi hedef tonu kaydırıp "skin-tone" yanlış redlerini
+    // besliyordu.
     if (!isBodyRef) {
       try {
         const px = await rawPixels(buffers[idx]);
@@ -523,14 +525,6 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
         if (tone) faceTones.push(tone);
       } catch {
         // yut — bu referansı elemez
-      }
-    } else {
-      try {
-        const px = await rawPixels(buffers[idx]);
-        const tone = px ? sampleChestSkinTone(px, detection.box) : null;
-        if (tone) faceTones.push(tone);
-      } catch {
-        // yut
       }
     }
 
@@ -674,9 +668,22 @@ const OUTPUT_FACE_RATIO_MAX = 0.45;
 // Sonuç: eşiği sıkmak gerçek pozitifleri güvenilir şekilde yakalamıyor ama
 // yanlış pozitif üretiyor. 1.45 (yalnızca BARİZ büyütmeyi eler) korunuyor.
 // "Kafa gövdeye göre büyük" işi, en baştan belirtildiği gibi Vision'ın
-// HEAD_VS_SHOULDERS sınıfına ait — orası kaçırıyorsa çözüm o prompt'u
-// güçlendirmek, bu göreceli oranı sıkmak değil.
-const OUTPUT_FACE_GROWTH_MAX = 1.45;
+// kafa/omuz ölçümüne ait — orası kaçırıyorsa çözüm o prompt'u güçlendirmek,
+// bu göreceli oranı sıkmak değil.
+//
+// 1.45 -> 1.25 (2026-09-06): 21 günlük gerçek dağılım (165 ölçüm) bu kapının
+// FİİLEN ÖLÜ olduğunu gösterdi — min=0.25, p50=0.99, p95=1.13, MAKS=1.19.
+// Yani 1.45 eşiği üç haftada tek bir kareye bile dokunmadı. 1.25, gözlenen
+// maksimumun (1.19) hemen üstünde: bugünkü hiçbir kareyi elemez (yanlış
+// pozitif riski ~0) ama gelecekteki BARİZ bir büyütme artık yakalanır.
+// 1.15 denenmemeli — 2026-08-22'de denendi ve yukarıda anlatılan yanlış
+// pozitifleri üretti.
+//
+// ASIL İŞ YİNE VISION'DA: kullanıcının "kafa çok büyük" dediği kareyi bu
+// oran zaten göremez (yüz kutusu omuz genişliği hakkında bilgi taşımaz).
+// Onun için falPhotos.js'te taban ve çıktının kafa/omuz açıklığı AYRI AYRI
+// ölçülüp kodda karşılaştırılıyor (bkz. VISION_HEAD_SPAN_DROP_MAX).
+const OUTPUT_FACE_GROWTH_MAX = 1.25;
 
 // Bu derecenin üstünde kafa yana dönüktür ve kimlik mesafesi güvenilmez
 // sayılır (bkz. profileDegreeFromLandmarks). 0.45, gerçek ölçümde önden
@@ -1033,27 +1040,6 @@ function sampleFaceTone(px, box) {
 }
 
 /**
- * Göğüs-üstü karede yüzün ALTINDAKI boyun/üst göğüs bandından ten örnekler.
- * Kol/omuz teni için selfie yanak bandından daha iyi sinyal verir.
- */
-function sampleChestSkinTone(px, faceBox) {
-  const s = px.scale;
-  const x0 = Math.max(0, Math.floor((faceBox.x + faceBox.width * 0.10) * s));
-  const x1 = Math.min(px.width, Math.ceil((faceBox.x + faceBox.width * 0.90) * s));
-  const y0 = Math.max(0, Math.floor((faceBox.y + faceBox.height * 0.85) * s));
-  const y1 = Math.min(px.height, Math.ceil((faceBox.y + faceBox.height * 2.4) * s));
-  const samples = [];
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      const o = (y * px.width + x) * 3;
-      const r = px.data[o], g = px.data[o + 1], b = px.data[o + 2];
-      if (isSkinLike(r, g, b)) samples.push(rgbToLab(r, g, b));
-    }
-  }
-  return medianLab(samples);
-}
-
-/**
  * ÇIKTIDAKİ ten renginin vücut genelinde tutarlı olup olmadığını ÖLÇER.
  *
  * outputBuf    : üretilen kare
@@ -1070,10 +1056,16 @@ function sampleChestSkinTone(px, faceBox) {
  * selfie'lerinden bağımsız bir ton çıkarıp ONU referans almak bu kör noktayı
  * kapatıyor; ayrıca artık YÜZ DE teste dahil edilebiliyor (aşağıya bkz.).
  *
- * refSkinTone verilMEZse (eski çağıranlarla geriye dönük uyum, ya da
- * kullanıcının hiçbir selfie'sinden ton çıkarılamadıysa): ESKİ davranışa
- * döner — hedef ton çıktının kendi yüzünden alınır, yüz bölgesi taramadan
- * hariç tutulur (kendisiyle karşılaştırmak anlamsız olurdu).
+ * refSkinTone verilMEZse: hedef ton ÇIKTININ KENDİ YÜZÜNDEN alınır ve yüz
+ * bölgesi taramadan hariç tutulur (kendisiyle karşılaştırmak anlamsız
+ * olurdu) — yani soru "uzuvlar yüzle aynı mı" olur.
+ *
+ * ÜRETİM KAPISI BİLİNÇLİ OLARAK null GEÇİYOR (2026-09-06, falPhotos.js
+ * runOpenAiDirectChunk): kullanıcı kararı "ten yüz ile aynı şekilde
+ * boyanacak, aynıysa reddetme". Selfie tonu NÖTR ışıkta ölçüldüğü için sahne
+ * ışığı altındaki kareyi ona zorlamak oranı şişiriyor ve kendi içinde tutarlı
+ * kareler eleniyordu. Selfie hedefli değer artık yalnızca TEŞHİS amaçlı
+ * loglanıyor — parametre bu yüzden duruyor, "kullanılmıyor" diye SİLİNMEMELİ.
  *
  * Döner: { ok, reason, ratio, sampled, faceDelta }
  *   ok:false + reason:"skin" → vücutta (refSkinTone varsa yüz DAHİL) taban
@@ -1146,6 +1138,38 @@ async function assessSkinToneConsistency(outputBuf, templateBuf, refSkinTone = n
   } catch (e) {
     console.error("Ten rengi kontrolü hata verdi (fail-safe kabul):", e.message || e);
     return { ok: true, reason: "insufficient-sample" };
+  }
+}
+
+/**
+ * TEŞHİS ÖLÇÜMÜ — HİÇBİR KAREYİ ELEMEZ.
+ *
+ * Çıktının KENDİ YÜZ tonu ile kullanıcının selfie tonu (refSkinTone)
+ * arasındaki RENKLİLİK farkını (yalnızca a* ve b*, L* hariç) döner. Soru: "çıktıdaki yüz,
+ * selfie'lerdeki kişinin ten renginde mi?"
+ *
+ * NEDEN SADECE ÖLÇÜM (2026-09-06): kullanıcı bunu bir gereksinim olarak
+ * bildirdi ("ten renginin yüz selfieleri ile aynı olması") ve üretim prompt'u
+ * bunu zaten emrediyor. Ama ELEME eşiği için gerçek dağılım yok — sahne ışığı
+ * yüz tonunu meşru biçimde kaydırabilir, körlemesine bir eşik iyi kareleri
+ * eler (aynı hata 2026-08-13'te bir kez yapıldı, bkz. SKIN_MISMATCH_RATIO_MAX
+ * notu). Önce loglanır, dağılım görülünce kapıya dönüştürülür.
+ *
+ * Döner: { chroma, faceTone } | null (ölçülemedi).
+ */
+async function measureFaceToneVsRef(outputBuf, refSkinTone) {
+  try {
+    if (!outputBuf || !Array.isArray(refSkinTone) || refSkinTone.length !== 3) return null;
+    const face = await detectMainFace(outputBuf);
+    if (!face) return null;
+    const px = await rawPixels(outputBuf);
+    if (!px) return null;
+    const faceTone = sampleFaceTone(px, face.box);
+    if (!faceTone) return null;
+    return { chroma: chromaDistance(faceTone, refSkinTone), faceTone };
+  } catch (e) {
+    console.error("Yüz tonu / selfie karşılaştırması hata verdi (teşhis, yok sayıldı):", e.message || e);
+    return null;
   }
 }
 
@@ -1710,6 +1734,7 @@ async function measureLimbSharpness(outputBuf) {
 module.exports = {
   analyzeReferences,
   assessSkinToneConsistency,
+  measureFaceToneVsRef,
   correctLimbChroma,
   measureHeadPlacement,
   measureLimbSharpness,

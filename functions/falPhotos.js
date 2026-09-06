@@ -466,9 +466,8 @@ function bodyProfileHint(bodyProfile) {
   if (ht) parts.push(ht);
   if (parts.length === 0) return "";
   return (
-    "SECONDARY BODY CUE (form answers — use only to fill gaps; if the chest-up " +
-    "reference photos contradict this, ALWAYS trust the photos, never idealise or " +
-    "reshape the body to match the form): " + parts.join(", ") + ".\n\n"
+    "BODY CUE (the person's own form answers — the source for build; never " +
+    "idealise or slim the body beyond what they stated): " + parts.join(", ") + ".\n\n"
   );
 }
 
@@ -528,8 +527,8 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "You are given several images. The FIRST image is a BASE PHOTO: a scene with a person in it. " +
     "The OTHER images are reference photos of a DIFFERENT specific real person (the target person). " +
     "Among these reference photos, the LAST TWO are CHEST-UP photos (shoulders and upper chest " +
-    "visible) — use them ONLY to judge head-to-shoulder scale, upper-body/arm/chest skin tone, and " +
-    "torso build; their face may be softer, so COMPLETELY IGNORE them for facial structure. ALL the " +
+    "visible) — use them for ONE thing only: how big the head is relative to the shoulders. Ignore " +
+    "them for facial structure, skin tone, clothing, lighting, pose and gaze. ALL the " +
     "OTHER reference photos (every one except the base photo and those last two chest-up photos) are " +
     "close-up views of the target's face — these, and ONLY these, are the source of truth for their " +
     "facial identity and structure.\n\n" +
@@ -576,9 +575,9 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "— consistent and unchanging from photo to photo, never a slightly different or prettier face.\n\n" +
     "SKIN COLOUR — WHOLE BODY, NO EXCEPTIONS: the target person's skin colour must be applied to EVERY " +
     "single piece of visible skin in the photo — face, neck, ears, chest, shoulders, arms, forearms, " +
-    "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. Read face tone " +
-    "from the close-up selfies and arm/chest/shoulder tone from the chest-up references; they must " +
-    "agree. It is a SERIOUS ERROR to change only the face while leaving the arms, hands, legs or any " +
+    "hands, fingers, legs, feet — ALL the same colour as the target person's real skin. Read that tone " +
+    "from the close-up selfies and carry it onto every limb, so the whole body reads as ONE person. " +
+    "It is a SERIOUS ERROR to change only the face while leaving the arms, hands, legs or any " +
     "other body part the base person's original skin colour. This applies to EVERY case regardless of " +
     "how large or subtle the tone difference is — whether the base person is much darker or much " +
     "lighter than the target, or the difference is more subtle (e.g. medium, olive, tan, or any other " +
@@ -949,15 +948,15 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
     "clothing item and accessory (glasses, jewellery, watches, bags, shoes). If that person is in " +
     "profile or three-quarter view, stay in that view — never turn or straighten the head toward the " +
     "camera. Ignore how the target is posed or where they look in their own selfies.\n\n" +
-    "CHANGE ONLY THE PERSON, using their close-up face photos (the last two chest-up photos are for " +
-    "head size, upper-body skin and build only):\n" +
+    "CHANGE ONLY THE PERSON, using their close-up face photos (the last two chest-up photos are ONLY " +
+    "for measuring head size against the shoulders — nothing else):\n" +
     "- Face: copy their exact nose, eyebrows, eyes, lips, jaw, chin, cheekbones and face outline. Same " +
     "shapes, same proportions. Do not beautify, symmetrise, round or puff the face. Keep their own " +
     "natural expression. It must unmistakably be the same person.\n" +
-    "- Skin: their true tone, applied evenly to every visible area — face, neck, chest, arms, hands, " +
-    "legs. Use chest-up refs for arm/chest colour. Never two-tone, never lightened or given a glow.\n" +
-    "- Head size + gaze: match the BASE head-to-shoulder ratio (chest-up refs as cue; never selfie " +
-    "zoom) and the BASE gaze direction exactly.\n" +
+    "- Skin: their true tone from the selfies, applied evenly to every visible area — face, neck, " +
+    "chest, arms, hands, legs. Never two-tone, never lightened or given a glow.\n" +
+    "- Head size + gaze: match the BASE head-to-shoulder ratio (chest-up photos give the target's real " +
+    "ratio; never selfie zoom) and the BASE gaze direction exactly.\n" +
     "- Body: their real build, height and weight, resizing the same clothing to fit. If this makes the " +
     "shoulders narrower than the base person's, scale the HEAD DOWN by the same amount — a head left at " +
     "its original size on a narrowed body looks oversized." +
@@ -1015,21 +1014,27 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
     "output a reference photo — if your result lacks the first image's background and framing, you " +
     "edited the wrong image.\n\n" +
-    "REFERENCES: the LAST TWO images are CHEST-UP photos (shoulders + upper chest visible). Use them " +
-    "ONLY for: (1) HEAD SIZE vs shoulder width, (2) upper-body / arm / chest SKIN TONE, (3) torso build " +
-    "in the shoulders. Ignore their face for identity if soft/distant. All OTHER reference photos are " +
-    "close-up faces — the only source of truth for facial identity, hair and eye SHAPE. References never " +
-    "dictate clothing, accessories, pose, head angle or where the eyes look.\n\n" +
+    "REFERENCES: the LAST TWO images are CHEST-UP photos (shoulders + upper chest visible). Their ONLY " +
+    "job is ONE measurement: how big the head is relative to the SHOULDERS. Use them for nothing else — " +
+    "not identity, not face, not hair, not skin tone, not lighting, not clothing, not pose, not gaze. " +
+    "All OTHER reference photos are close-up SELFIES of the target — they are the ONLY source of truth " +
+    "for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
+    "accessories, pose, head angle or where the eyes look.\n\n" +
     "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
-    "P1 HEAD SIZE — match the BASE person's head-to-shoulder ratio. Use the chest-up refs as the " +
-    "target's real head/shoulder cue; never copy zoom from close-up selfies. If you narrow the body, " +
-    "shrink the head by the same amount. Oversized / bobble / forward-thrust head = failure.\n" +
-    "P2 GAZE — eyes and irises point EXACTLY where the BASE person looks (camera, side, up, down). " +
-    "Ignore selfie gaze. Profile/three-quarter base stays profile/three-quarter — do not turn eyes or " +
-    "head toward the camera to make the face easier.\n" +
-    "P3 SKIN TONE — ONE continuous tone from face through neck, chest, arms, hands (use chest-up refs " +
-    "for arm/chest colour). Leaving base-person tone on arms/hands while the face matches the target " +
-    "is a serious error.\n\n" +
+    "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
+    "viewer would not immediately recognise the selfie person, the edit failed.\n" +
+    "P2 GAZE AND HEAD ANGLE — the eyes must look EXACTLY where the BASE person's eyes look (camera, " +
+    "left, right, up, down) and the head must keep the BASE person's turn angle to the same degree. " +
+    "Do not rotate, straighten or re-centre the head, and do not pull the eyes toward the lens. If the " +
+    "base is in profile or three-quarter, the output stays at that exact angle. Ignore where the target " +
+    "looks in their own selfies — the base decides gaze and angle, always.\n" +
+    "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
+    "that same count in the output; cross-check it against the chest-up photos. Never take head scale " +
+    "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
+    "bigger, pushed forward, or bobble-like against those shoulders is a failure.\n" +
+    "P4 SKIN TONE — ONE continuous tone from face through neck, chest, arms, hands, matching the FACE " +
+    "you just rendered. Leaving base-person tone on arms/hands while the face matches the target is a " +
+    "serious error.\n\n" +
     "CHANGE ONLY THE PERSON — their face, hair, skin tone and body build, per the numbered steps " +
     "below. Everything else stays identical to the first image: background, lighting, camera angle, " +
     "framing, pose, and every clothing item and accessory.\n\n" +
@@ -1042,8 +1047,9 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "person and never invented: their hairline, density, length, texture and colour. If the target is " +
     "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
     "they do not have is as wrong as giving them someone else's nose.\n\n" +
-    "3) SKIN TONE — the target's true colour on every visible area of skin. Read face tone from the " +
-    "close-ups and arm/chest/shoulder tone from the chest-up refs; they must agree as one person. Any " +
+    "3) SKIN TONE — the target's true colour on every visible area of skin. Read the tone from the " +
+    "close-up SELFIES and carry that exact tone onto neck, chest, shoulders, arms, hands and legs, so " +
+    "the whole body reads as ONE person under this scene's light. Any " +
     "limb left in the base person's tone, or a two-tone patchwork, is a serious error. Before you " +
     "finish, check the hands, fingers, arms, neck, chest and legs one by one: if any of them still " +
     "carries a trace of the base person's tone, recolour it to match the face exactly. No brightening, " +
@@ -1053,8 +1059,8 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
     "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
     "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
-    "a head kept at its old size on narrowed shoulders reads as oversized. Cross-check against the " +
-    "chest-up references' real head-to-shoulder proportion. Never enlarge the head, puff the face, or " +
+    "a head kept at its old size on narrowed shoulders reads as oversized. Measure the head-to-shoulder " +
+    "ratio in the chest-up photos and reproduce THAT ratio. Never enlarge the head, puff the face, or " +
     "push the head forward in the frame. The close-up face references are zoomed in for detail only — " +
     "never take head scale from them.\n\n" +
     "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
@@ -1065,8 +1071,8 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "they look in their own selfies or chest-up photos. The eyes must be open, clear and alert, with " +
     "visible pupils and natural catch-light — never half-closed, caught mid-blink, droopy or dead-eyed. " +
     "Keep their own natural eye shape and size; do not widen or enlarge the eyes to achieve this.\n\n" +
-    "6) BODY — reshape it to the target's real build (chest-up refs first, form answers only to fill " +
-    "gaps), resizing the SAME clothing to fit the new shape naturally; do not swap or restyle any " +
+    "6) BODY — reshape it to the target's real build from their form answers, resizing the SAME " +
+    "clothing to fit the new shape naturally; do not swap or restyle any " +
     "garment. Keep limbs, fingers and joints anatomically correct. Head must join the neck cleanly — " +
     "no pasted-on seam, halo or lighting break." +
     shortBodyNote(bodyProfile) + "\n\n" +
@@ -1791,6 +1797,23 @@ const VISION_MODEL = "gpt-4o";
 // belirgin yükseltir.
 const VISION_INCONCLUSIVE_MAX_ATTEMPTS = 2;
 
+// KAFA AÇIKLIĞI DÜŞÜŞ TOLERANSI (2026-09-06). Vision, omuz genişliğine kaç
+// kafa sığdığını taban ve çıktı için AYRI AYRI ölçüyor; seçenekler 0.5'lik
+// kademeler (1.5 / 2 / 2.5 / 3 / 3.5 / 4). Çıktıda bu sayının düşmesi kafanın
+// büyümesi demektir.
+//
+// 0.5 = TEK KADEME. Sıkı seçildi çünkü kullanıcı bunu en önemli madde olarak
+// bildirdi ve bu kapı şu an FİİLEN YOK: 21 günlük üretim logunda (135 kare)
+// eski "HEAD_VS_SHOULDERS" sorusu 135 kez "HEAD_NORMAL" dedi, tek bir kare
+// bile elenmedi. Sayısal büyüme kapısı da ölü (bkz. faceQuality
+// OUTPUT_FACE_GROWTH_MAX notu: gözlenen maksimum 1.19, eşik 1.45).
+//
+// KALİBRASYON NOTU: bu eşik ilk kez veri OLMADAN konuluyor (ölçüm satırları
+// da yeni). İlk üretimden sonra "VISION ÖLÇÜM (kafa açıklığı)" logları
+// okunmalı: taban-çıktı farkının dağılımı görülünce eşik ya doğrulanır ya
+// gevşetilir — dosyadaki diğer kapılarla aynı usul.
+const VISION_HEAD_SPAN_DROP_MAX = 0.5;
+
 /**
  * Vision kalite kontrolü — İKİ AYRI ÇAĞRI (2026-08-22 yeniden yapılandırma).
  *
@@ -1906,59 +1929,70 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
       ? ("You are a quality checker for an AI image-editing pipeline.\n" +
          "IMAGE 1 is the pipeline OUTPUT. IMAGE 2 is the BASE canvas that was edited — it is the " +
          "source of truth for HEAD SIZE (head vs shoulders) and GAZE (where the eyes look). " +
-         "If further images are present, they are CHEST-UP reference photos of the target: use them " +
-         "only as a secondary cue for natural head-to-shoulder proportion (never for gaze; never copy " +
-         "their zoom as absolute size).\n\n" +
+         "If further images are present, they are CHEST-UP reference photos of the target. Their ONLY " +
+         "job is head-to-shoulder proportion. Never use them to judge gaze, skin tone, lighting, " +
+         "clothing or who the person is, and never copy their zoom as absolute size.\n\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
          "puffed/swollen/rounded/melted face, warped lips, mouth, eyes or nose, an unnaturally stretched " +
          "or rectangular face, an unexplained dark blotch or smudge, or a generally deformed face.\n" +
          "C) SKIN TONE CONSISTENCY — in IMAGE 1 only: is skin colour the SAME on face, neck, chest/" +
          "shoulders if visible, forearms and hands? Shading is fine; two different people's tones on " +
          "one body (face matching target, arms still the base person's tone) is HANDS_OR_ARMS_MISMATCH.\n" +
-         "E) HEAD SIZE VS BASE — compare IMAGE 1 to IMAGE 2. Measure head width vs shoulder width in " +
-         "BOTH images. Classify:\n" +
-         "  HEAD_NORMAL — IMAGE 1's head-to-shoulder ratio matches IMAGE 2 (base). Chest-up images, if " +
-         "any, agree that the head is not oversized for those shoulders.\n" +
-         "  HEAD_LARGE — IMAGE 1's head is clearly larger relative to its shoulders than IMAGE 2, OR " +
-         "reads bobble-headed / pushed-forward versus the base composition, OR clearly larger than the " +
-         "chest-up cue would allow. Prefer HEAD_LARGE when unsure between NORMAL and LARGE.\n" +
-         "  HEAD_SMALL — IMAGE 1's head is clearly smaller vs shoulders than IMAGE 2.\n" +
-         "  NO_SHOULDERS — neither IMAGE 1 nor IMAGE 2 shows usable shoulders.\n" +
+         "E) HEAD SPAN — do NOT judge whether the two images 'match'. MEASURE each image separately and " +
+         "report both numbers; the comparison is done elsewhere. For one image, lay the width of the " +
+         "head (ear to ear) against the width of the shoulders (shoulder point to shoulder point) and " +
+         "answer: how many head-widths fit across the shoulders? A normal adult is about 3. A " +
+         "bobble-headed render is 2 or less. Report 1.5, 2, 2.5, 3, 3.5 or 4, choosing the nearest. " +
+         "Use NO_SHOULDERS only if that image shows no shoulder at all — a partly visible, turned or " +
+         "clothed shoulder still counts and must be measured. Measure IMAGE 2 (base) first, then " +
+         "IMAGE 1 (output), and let the two answers differ if that is what you see.\n" +
          "F) NECK/HEAD ATTACHMENT — on IMAGE 1: stretched neck, pasted seam, floating head, or head " +
          "pushed back in depth vs shoulders → fail. Ordinary tilts are fine.\n" +
-         "G) GAZE VS BASE — compare iris/gaze direction in IMAGE 1 to IMAGE 2. They must MATCH: same " +
-         "look-at-camera vs look-away, same side, same up/down. Classify:\n" +
-         "  NATURAL — gaze in IMAGE 1 matches IMAGE 2.\n" +
-         "  WRONG_DIRECTION — gaze differs from IMAGE 2 (e.g. base looks away, output looks at camera; " +
-         "or eyes fight the base head pose). Anatomically broken gaze also fails.\n" +
+         "G) GAZE — again do NOT judge 'matching'. Report where the eyes look in EACH image separately, " +
+         "using the viewer's left/right (not the person's). Answer CAMERA when the irises meet the lens, " +
+         "LEFT or RIGHT when they look to that side of the frame, UP or DOWN when the vertical is what " +
+         "stands out, and AWAY only when the eyes are visible but their direction genuinely cannot be " +
+         "read. Report IMAGE 2 (base) first, then IMAGE 1 (output).\n" +
          "H) HAND QUALITY — visible hands in IMAGE 1: blurry, melted, wrong finger count → fail.\n" +
          "I) FACE EXPOSURE — IMAGE 1 face blown out / unnaturally luminous vs its scene → fail.\n" +
          "J) HEAD ORIENTATION FIT — IMAGE 1 head orientation must fit its body/scene AND match IMAGE 2's " +
-         "head attitude (turn/tilt). Wrong-for-scene or clearly different from base → fail.\n\n" +
-         "Reply on exactly eight lines:\n" +
-         "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
+         "head attitude (turn/tilt). Wrong-for-scene or clearly different from base → fail.\n" +
+         "K) BODY INTEGRITY — is the person in IMAGE 1 fully OPAQUE and solid? It fails if any part of " +
+         "the body — arm, shoulder, torso, hand — is semi-transparent so that the background (railing, " +
+         "furniture, sea, wall) shows THROUGH it, if the silhouette smears into the background as a " +
+         "double exposure, or if a limb dissolves or is cut off mid-air. Ordinary occlusion (an object " +
+         "in front of the person) and motion blur are fine.\n\n" +
+         "Reply on exactly eleven lines:\n" +
+         "BASE_HEAD_SPAN: <1.5 | 2 | 2.5 | 3 | 3.5 | 4 | NO_SHOULDERS>\n" +
+         "OUTPUT_HEAD_SPAN: <1.5 | 2 | 2.5 | 3 | 3.5 | 4 | NO_SHOULDERS>\n" +
+         "BASE_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY>\n" +
+         "OUTPUT_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY>\n" +
          "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
-         "GAZE_DIRECTION: <NATURAL | WRONG_DIRECTION>\n" +
          "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
          "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
          "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
+         "BODY_INTEGRITY: <SOLID | TRANSPARENT_OR_GHOSTED>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first seven lines before the verdict. Binding rules — the verdict MUST match " +
-         "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
+         "Decide the first ten lines before the verdict. The head-span and gaze lines are MEASUREMENTS, " +
+         "not judgements — report what each image actually shows even when the two disagree, and never " +
+         "copy one line into the other just to look consistent. Binding rules — the verdict MUST match " +
+         "whichever of these fired, however clean the rest looks: OUTPUT_HEAD_SPAN smaller than " +
+         "BASE_HEAD_SPAN (fewer head-widths across the shoulders means a bigger head) -> " +
+         "BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
-         "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
-         "WRONG_FOR_SCENE -> BAD_ORIENTATION. Check every question before " +
-         "answering GOOD. Verdict is one of:\n" +
+         "BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
+         "WRONG_FOR_SCENE -> BAD_ORIENTATION. TRANSPARENT_OR_GHOSTED -> BAD_GHOSTING. " +
+         "Check every question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
          "BAD_PROPORTION: <e.g. head too large vs base shoulders>\n" +
          "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
-         "BAD_GAZE: <e.g. eyes look at camera but base looked away>\n" +
          "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
          "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
-         "BAD_ORIENTATION: <e.g. head turn differs from base>")
+         "BAD_ORIENTATION: <e.g. head turn differs from base>\n" +
+         "BAD_GHOSTING: <e.g. right arm see-through, railing visible through torso>")
       : ("You are a quality checker for an AI image-editing pipeline.\n" +
          "IMAGE 1 was produced by an edit. Judge the rendered result itself:\n" +
          "B) RENDERING QUALITY — is the face in IMAGE 1 free of AI artifacts? It fails if you see a " +
@@ -2012,8 +2046,13 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "and situation point one way but the head is rotated somewhere unrelated, so the person " +
          "looks like they are facing the wrong way for the photo. Ordinary candid angles, looking " +
          "off-camera, and relaxed head tilts are fine — only classify a head whose orientation " +
-         "clearly does not belong to the body/scene it was placed in.\n\n" +
-         "Reply on exactly eight lines:\n" +
+         "clearly does not belong to the body/scene it was placed in.\n" +
+         "K) BODY INTEGRITY — is the person fully OPAQUE and solid? It fails if any part of the body — " +
+         "arm, shoulder, torso, hand — is semi-transparent so that the background (railing, furniture, " +
+         "sea, wall) shows THROUGH it, if the silhouette smears into the background as a double " +
+         "exposure, or if a limb dissolves or is cut off mid-air. Ordinary occlusion (an object in " +
+         "front of the person) and motion blur are fine.\n\n" +
+         "Reply on exactly nine lines:\n" +
          "HEAD_VS_SHOULDERS: <HEAD_NORMAL | HEAD_LARGE | HEAD_SMALL | NO_SHOULDERS>\n" +
          "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
@@ -2021,13 +2060,14 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
          "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
          "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
+         "BODY_INTEGRITY: <SOLID | TRANSPARENT_OR_GHOSTED>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first seven lines before the verdict. Binding rules — the verdict MUST match " +
+         "Decide the first eight lines before the verdict. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
          "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
-         "WRONG_FOR_SCENE -> BAD_ORIENTATION. Check every question before " +
-         "answering GOOD. Verdict is one of:\n" +
+         "WRONG_FOR_SCENE -> BAD_ORIENTATION. TRANSPARENT_OR_GHOSTED -> BAD_GHOSTING. " +
+         "Check every question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
          "BAD_SKIN: <where the tone mismatches, e.g. hands darker than face>\n" +
@@ -2036,7 +2076,8 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "BAD_GAZE: <e.g. eyes point a different way than the head is turned>\n" +
          "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
          "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
-         "BAD_ORIENTATION: <e.g. head turned away from what the body faces>");
+         "BAD_ORIENTATION: <e.g. head turned away from what the body faces>\n" +
+         "BAD_GHOSTING: <e.g. right arm see-through, railing visible through torso>");
 
     // detail "high": kimlik karşılaştırması için yüz ayrıntısı şart; "low"
     // (512px) yüz hatlarını ayırt etmeye yetmiyor. Maliyet farkı ihmal
@@ -2091,8 +2132,9 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
 
-    // DÖRT SATIRLI CEVAP: Vision önce üç zorunlu SINIFLANDIRMA yapıyor (kafa/
-    // omuz, boyun bağlantısı, ten rengi), karar en son satırda geliyor.
+    // DOKUZ SATIRLI CEVAP: Vision önce sekiz zorunlu SINIFLANDIRMA yapıyor
+    // (kafa/omuz, boyun bağlantısı, ten rengi, bakış, el, parlaklık, kafa
+    // yönelimi, gövde bütünlüğü), karar en son satırda geliyor.
     // Gerekçe: serbest metin isteyince model her kareye rutin olarak
     // "GOOD: ...correct proportions" yazıyordu — kafa gövdeye göre gözle
     // görülür büyük olan karelerde bile (5/5 geçmişti).
@@ -2134,6 +2176,28 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // "kafa gövdenin/sahnenin baktığı yere bakmıyor" başka bir sorudur.
     const isExposureLine = (l) => /^FACE_EXPOSURE/.test(l.toUpperCase());
     const isOrientationLine = (l) => /^HEAD_ORIENTATION/.test(l.toUpperCase());
+    // BODY_INTEGRITY (2026-09-06): AYNI yöntem, aynı gerekçe — kullanıcı, tüm
+    // kapıları geçip TESLİM EDİLEN bir karede (job 1181577f, elegance chunk=6,
+    // yat/marina) sağ kolun ve gövdenin YARI SAYDAM çıktığını, arkadaki
+    // korkuluğun kolun içinden göründüğünü bildirdi. Hiçbir katman saydamlık/
+    // hayalet birleşmeyi ölçmüyordu: ten kapısı rengi, netlik kapısı bulanıklığı,
+    // boyun kapısı yalnızca kafa-gövde bağlantısını görüyor.
+    const isIntegrityLine = (l) => /^BODY_INTEGRITY/.test(l.toUpperCase());
+    // KARŞILAŞTIRMAYI ARTIK KOD YAPIYOR (2026-09-06). Taban modunda Vision'a
+    // "kafa oranı/bakış tabanla eşleşiyor mu?" diye SORMUYORUZ; iki görselin
+    // ölçümünü AYRI AYRI isteyip farkı burada hesaplıyoruz.
+    //
+    // NEDEN: 21 günlük üretim logu (146 kare) bu iki sorunun ölü olduğunu
+    // gösterdi — HEAD_VS_SHOULDERS 135/135 "HEAD_NORMAL", GAZE_DIRECTION
+    // 135/135 "NATURAL". Yani model, kullanıcının gözle "kafa çok büyük" ve
+    // "yanlış yere bakıyor" dediği kareler dahil HİÇBİR kareye kusur demedi.
+    // Bu, dosyada 2026-08-04'te belgelenen örüntünün aynısı: "eşleşiyor mu?"
+    // gibi tek adımlı bir yargı sorusuna model rutin olarak "evet" diyor.
+    // Çözüm de aynı: yargıyı elinden al, ÖLÇÜM iste.
+    const isBaseSpanLine = (l) => /^BASE_HEAD_SPAN/.test(l.toUpperCase());
+    const isOutSpanLine = (l) => /^OUTPUT_HEAD_SPAN/.test(l.toUpperCase());
+    const isBaseGazeLine = (l) => /^BASE_GAZE/.test(l.toUpperCase());
+    const isOutGazeLine = (l) => /^OUTPUT_GAZE/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
     const neckLine = lines.find(isNeckLine);
     const skinLine = lines.find(isSkinLine);
@@ -2141,9 +2205,16 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     const handLine = lines.find(isHandLine);
     const exposureLine = lines.find(isExposureLine);
     const orientationLine = lines.find(isOrientationLine);
+    const integrityLine = lines.find(isIntegrityLine);
+    const baseSpanLine = lines.find(isBaseSpanLine);
+    const outSpanLine = lines.find(isOutSpanLine);
+    const baseGazeLine = lines.find(isBaseGazeLine);
+    const outGazeLine = lines.find(isOutGazeLine);
     const verdictLine = lines.find(
       (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) &&
-             !isHandLine(l) && !isExposureLine(l) && !isOrientationLine(l)
+             !isHandLine(l) && !isExposureLine(l) && !isOrientationLine(l) &&
+             !isIntegrityLine(l) && !isBaseSpanLine(l) && !isOutSpanLine(l) &&
+             !isBaseGazeLine(l) && !isOutGazeLine(l)
     ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
     if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
@@ -2152,13 +2223,57 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (handLine) console.log(`VISION ÖLÇÜM (el kalitesi): ${handLine}`);
     if (exposureLine) console.log(`VISION ÖLÇÜM (yüz parlaklığı): ${exposureLine}`);
     if (orientationLine) console.log(`VISION ÖLÇÜM (kafa yönelimi): ${orientationLine}`);
+    if (integrityLine) console.log(`VISION ÖLÇÜM (gövde bütünlüğü): ${integrityLine}`);
+    if (baseSpanLine || outSpanLine) console.log(`VISION ÖLÇÜM (kafa açıklığı): ${baseSpanLine || "—"} / ${outSpanLine || "—"}`);
+    if (baseGazeLine || outGazeLine) console.log(`VISION ÖLÇÜM (bakış): ${baseGazeLine || "—"} / ${outGazeLine || "—"}`);
 
     const verdictDetail = () =>
       verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
 
+    // ÖLÇÜM KARŞILAŞTIRMASI — KULLANICININ 1. VE 2. ÖNCELİĞİ.
+    // Omuz genişliğine sığan kafa sayısı ÇIKTIDA azaldıysa kafa büyümüş
+    // demektir (3 kafa sığan omuzda 2 sığıyorsa kafa belirgin büyük). Tek
+    // kademe (0.5) düşüş bile reddedilir: kullanıcı bunu en önemli madde
+    // olarak bildirdi ve reddedilen kare zaten yeniden üretiliyor.
+    // Ölçülemeyen taraf (NO_SHOULDERS / sayı yok) kapıyı sessizce devre dışı
+    // bırakır — kanıt yokken kare elenmez.
+    const spanOf = (line) => {
+      if (!line) return null;
+      const m = /:\s*([\d.]+)/.exec(line);
+      const v = m ? Number(m[1]) : NaN;
+      return Number.isFinite(v) ? v : null;
+    };
+    const baseSpan = spanOf(baseSpanLine);
+    const outSpan = spanOf(outSpanLine);
+    if (baseSpan != null && outSpan != null && baseSpan - outSpan >= VISION_HEAD_SPAN_DROP_MAX) {
+      return {
+        ok: false, reason: "proportion", inconclusive: false,
+        detail: verdictDetail() || `kafa açıklığı ${baseSpan} -> ${outSpan}`,
+      };
+    }
+    // BAKIŞ: ŞİMDİLİK YALNIZCA ÖLÇÜM, ELEME YOK (2026-09-06).
+    //
+    // Bu iki satır (BASE_GAZE / OUTPUT_GAZE) eski tek soruluk "GAZE_DIRECTION"
+    // kontrolünün yerine kondu ve ondan çok daha canlı: eski soru 21 günde
+    // 135 karenin 135'ine "NATURAL" derken, yeni ölçüm gerçek karelerde
+    // farklılık üretiyor. AMA gözle doğrulama, bu farklılıkların çoğunun
+    // TABANIN yanlış okunmasından geldiğini gösterdi: güvenilir eşleşen 11
+    // karede 4 uyuşmazlık çıktı, 3'ünde taban kişi aslında kameraya bakıyordu
+    // (Vision "DOWN"/"LEFT"/"RIGHT" demişti) — yani kare kusursuzdu.
+    // 4'te 3 yanlış pozitifle eleme yapmak, kullanıcının asıl şikâyeti olan
+    // "gereksiz ret" sorununu büyütürdü.
+    //
+    // Bu yüzden karar bir kez daha SAYISAL kapıya bırakıldı: kafanın tabandan
+    // kameraya çevrilmesi YAW ile ölçülüyor (bkz. YAW_TO_CAMERA_DROP_MAX,
+    // kullanıcının bildirdiği kareyi yakalıyor). Buradaki iki satır loglanıyor
+    // ki dağılım birikince eleme kuralına dönüştürülüp dönüştürülemeyeceğine
+    // veriyle karar verilebilsin — dosyadaki diğer kapılarla aynı usul.
+
     // HEAD_LARGE bağlayıcıdır: model sınıfı "büyük" deyip verdict'i GOOD
     // bırakırsa (talimata rağmen olabiliyor) kare yine de reddedilir —
     // sınıflandırma satırı kararın kendisinden daha güvenilir bir sinyal.
+    // (Bu satır artık yalnızca referanssız "self" modunda üretiliyor; taban
+    // modunda yerini yukarıdaki iki-ölçüm karşılaştırması aldı.)
     if (headsLine && /HEAD_LARGE/i.test(headsLine)) {
       return { ok: false, reason: "proportion", detail: verdictDetail() || "HEAD_LARGE", inconclusive: false };
     }
@@ -2170,12 +2285,6 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (neckLine && /STRETCHED_OR_DETACHED|PUSHED_BACK/i.test(neckLine)) {
       const which = /PUSHED_BACK/i.test(neckLine) ? "PUSHED_BACK" : "STRETCHED_OR_DETACHED";
       return { ok: false, reason: "attachment", detail: verdictDetail() || which, inconclusive: false };
-    }
-    // HANDS_OR_ARMS_MISMATCH bağlayıcıdır — aynı gerekçe: serbest metindeki
-    // BAD_SKIN kategorisi gerçek bir vakada (elegance_0_0.jpg, eller koyu
-    // kalmış) modelin kendi sorusuna rağmen "GEÇTİ" demesine engel olamadı.
-    if (skinLine && /HANDS_OR_ARMS_MISMATCH/i.test(skinLine)) {
-      return { ok: false, reason: "skin", detail: verdictDetail() || "HANDS_OR_ARMS_MISMATCH", inconclusive: false };
     }
     // WRONG_DIRECTION bağlayıcıdır — aynı yöntem: 2026-08-12'de kullanıcı,
     // sayısal YAW ölçümü eşiğin (0.30) altında kaldığı hâlde kafanın "olması
@@ -2203,8 +2312,34 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (orientationLine && /WRONG_FOR_SCENE/i.test(orientationLine)) {
       return { ok: false, reason: "orientation", detail: verdictDetail() || "WRONG_FOR_SCENE", inconclusive: false };
     }
+    // TRANSPARENT_OR_GHOSTED bağlayıcıdır — bkz. isIntegrityLine tanımının
+    // yanındaki gerçek vaka (yarı saydam kol, teslim edilmişti).
+    if (integrityLine && /TRANSPARENT_OR_GHOSTED/i.test(integrityLine)) {
+      return { ok: false, reason: "ghosting", detail: verdictDetail() || "TRANSPARENT_OR_GHOSTED", inconclusive: false };
+    }
 
     const answer = verdictLine.toUpperCase();
+
+    // HANDS_OR_ARMS_MISMATCH bağlayıcıdır ama EN SONA alındı (2026-09-06).
+    // Sebep: "skin" reddi artık sayısal ölçümle geçersiz kılınabiliyor (bkz.
+    // runOpenAiDirectChunk'taki VISION TEN REDDİ bloğu). Eskisi gibi ilk
+    // sıradayken erken dönseydi, ten reddi affedilen bir kare bakış/el/
+    // parlaklık/hayalet satırlarına HİÇ bakılmadan kabul edilirdi. Şimdi
+    // diğer tüm sınıflandırmalar önce çalışıyor; buraya gelen kare yalnızca
+    // ten sorunu bildirilmiş karedir.
+    //
+    // Serbest metin başka bir kusur bildiriyorsa ONU döndürürüz: Vision bazen
+    // yüzü bozuk bir kareyi ten satırında da işaretliyor (gerçek vaka: job
+    // 1181577f, elegance c3 deneme=1 — kullanıcı "yüz bozulmuş, doğru ret"
+    // dedi). O reddin sayısal ten ölçümüyle affedilmemesi gerekir.
+    if (skinLine && /HANDS_OR_ARMS_MISMATCH/i.test(skinLine)) {
+      if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail: verdictDetail(), inconclusive: false };
+      if (answer.startsWith("BAD_FEATURES") || answer.startsWith("BAD_IDENTITY")) {
+        return { ok: false, reason: "identity", detail: verdictDetail(), inconclusive: false };
+      }
+      if (answer.startsWith("BAD_HAIR")) return { ok: false, reason: "hair", detail: verdictDetail(), inconclusive: false };
+      return { ok: false, reason: "skin", detail: verdictDetail() || "HANDS_OR_ARMS_MISMATCH", inconclusive: false };
+    }
     // Gerekçe: verdict satırındaki iki nokta üst üstesinden sonrası (yoksa boş).
     const detail = verdictDetail();
     // BAD_FEATURES = yeni çerçevelemedeki ad; BAD_IDENTITY eski cevaplarla
@@ -2244,6 +2379,9 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // kılınamaz, bkz. visionRejectionOverridden).
     if (answer.startsWith("BAD_EXPOSURE")) return { ok: false, reason: "exposure", detail, inconclusive: false };
     if (answer.startsWith("BAD_ORIENTATION")) return { ok: false, reason: "orientation", detail, inconclusive: false };
+    // BAD_GHOSTING: BODY_INTEGRITY satırı yakalayamazsa diye verdict satırından
+    // ayrıca güvence — diğer "identity" dışı sebeplerle aynı desen.
+    if (answer.startsWith("BAD_GHOSTING")) return { ok: false, reason: "ghosting", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
@@ -2295,6 +2433,7 @@ const DEBUG_ROOT = "dating_rejected";
 const REJECTION_REASON_LABELS = {
   "math-identity": "Yüz, referans fotoğraflarınla yeterince eşleşmedi",
   "yaw-drift": "Baş açısı şablondan çok saptı",
+  "yaw-to-camera": "Taban fotoğraf profilken baş kameraya çevrilmiş",
   "math-no-face+vision-inconclusive": "Yüz net tespit edilemedi",
   "skin-tone": "Ten tonu tutarsızlığı tespit edildi",
   "eyes-closed": "Gözler kapalı/yarı kapalı çıktı",
@@ -2310,6 +2449,7 @@ const REJECTION_REASON_LABELS = {
   "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
   "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
   "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
+  "vision-ghosting": "Gövde/kol yarı saydam çıktı (arka plan içinden görünüyor)",
   // NOT: no-face-* etiketleri KALDIRILDI (2026-08-22) — artık eleme sebebi
   // değiller (bkz. KONUM KAPISI'ndaki geri alma gerekçesi). O kuralın kısa
   // süre yürürlükte olduğu dönemde kaydedilen kareler etkilenmez: gerekçe
@@ -2410,7 +2550,41 @@ const OPENAI_DIRECT_MAX_ATTEMPTS = 6;
 // 0.30: gözlenen 10 sapmanın 2'sini (0.38 ve 0.40) eler, normal varyasyona
 // (<=0.25) dokunmaz. Foto kaybı riski düşük tutuldu — eşik gerçek dağılım
 // büyüdükçe kalibre edilecek (dosyadaki diğer kapılarla aynı usul).
+//
+// 0.25 DENENDİ VE VAZGEÇİLDİ (2026-09-06). 21 günlük gerçek dağılım (146
+// ölçüm): p50=0.13, p90=0.33, p95=0.41, maks=0.59. Simetrik eşiği 0.30'dan
+// 0.25'e çekmek elenen kare oranını %14.4'ten %19.9'a çıkarıyordu — ve gözle
+// doğrulama bu bedelin karşılıksız olduğunu gösterdi: sapması +0.29 ve +0.22
+// olan iki kare (26df8451 c4/c8) gözle sorunsuzdu. Sapmanın BÜYÜKLÜĞÜ tek
+// başına kusur kanıtı değil; YÖNÜ belirleyici (bkz. aşağıdaki kural).
 const OUTPUT_YAW_DRIFT_MAX = 0.30;
+
+// KAFAYI KAMERAYA ÇEVİRME KAPISI (2026-09-06, kullanıcının 2. önceliği).
+// Kullanıcının bildirdiği somut kare (job 1181577f, elegance c6, Monaco/yat):
+// tabandaki kişi TAM PROFİLDE (yaw 1.00) sağa bakarken, çıktıda gövde profil
+// kalmış ama KAFA omzun üzerinden kameraya döndürülmüş (yaw 0.80). Sapma
+// -0.20, yani genel eşiğin (0.30) altında — hiçbir kapıya takılmadan teslim
+// edilmişti.
+//
+// Bu, prompt'ta zaten yasaklanan bilinen bir model davranışı: yüzü kolay
+// üretmek için kafayı ortaya/kameraya çekmek. Kural bu yüzden YÖNE DUYARLI:
+// yalnızca profil-dışına DOĞRU (yaw AZALARAK) kayan kareler elenir; kafanın
+// daha da yana dönmesi (yaw artışı) bu kuralı tetiklemez.
+//
+// ŞABLON PROFİL ŞARTI: taban zaten cepheden bakıyorsa (düşük yaw) küçük bir
+// azalma anlamsızdır; kural yalnızca tabanın belirgin profil olduğu karelerde
+// çalışır. Gerçek üretim verisiyle maliyet ölçüldü (146 ölçüm):
+//   sapma<=-0.18 ve şablonYaw>=0.70  ->  6 kare (%4.1)
+// Karşılaştırma: simetrik eşiği 0.25'e çekmek %19.9'a dokunuyordu. Yani bu
+// kural, doğrulanmış hatayı yakalarken maliyeti beşte birine indiriyor.
+//
+// 0.18 EŞİĞİ İKİ GÖZLE DOĞRULANMIŞ NOKTA ARASINDA SEÇİLDİ:
+//   -0.197 (1181577f c6, şablon 1.00) → kullanıcı "reddedilmeliydi" dedi
+//   -0.148 (26df8451 c7, şablon 0.95) → gözle sorunsuz, elenmemeli
+// 0.20 denenmişti ama kullanıcının karesi (-0.197) eşiğin KILPAYI altında
+// kalıp kaçıyordu.
+const YAW_TO_CAMERA_TEMPLATE_MIN = 0.70;
+const YAW_TO_CAMERA_DROP_MAX = 0.18;
 
 // KAFA YERLEŞİMİ (dx) KAPISI (2026-08-13, gerçek olay): measureHeadPlacement
 // eskiden yalnızca ÖLÇÜYORDU, hiçbir kareyi elemiyordu (bkz. faceQuality.js
@@ -2816,12 +2990,16 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         if (templateYaw != null && outYaw != null) {
           const drift = outYaw - templateYaw;
           const bad = Math.abs(drift) > OUTPUT_YAW_DRIFT_MAX;
+          // Kafa, profil tabandan kameraya doğru çevrilmiş mi? (bkz.
+          // YAW_TO_CAMERA_DROP_MAX — yöne duyarlı ikinci kural.)
+          const toCamera = templateYaw >= YAW_TO_CAMERA_TEMPLATE_MIN &&
+                           drift <= -YAW_TO_CAMERA_DROP_MAX;
           // GEÇEN kareler de loglanıyor — eşik ancak gerçek dağılım görülerek
           // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
-          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[yaw-drift]" : "GEÇTİ"} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX}`);
-          if (bad) {
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[yaw-drift]" : toCamera ? "RED[yaw-to-camera]" : "GEÇTİ"} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera}`);
+          if (bad || toCamera) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-              mode, gate: "yaw-drift", distance: mathDist,
+              mode, gate: bad ? "yaw-drift" : "yaw-to-camera", distance: mathDist,
               detail: `çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)}`,
             });
             if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
@@ -2839,6 +3017,10 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // aynı piksel buffer'ını kullanır.
       const tplBuf = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
 
+      // Sayısal ten ölçümü — Vision'ın "el/kol teni uyuşmuyor" reddi için de
+      // hakem olarak kullanılır (bkz. aşağıdaki VISION TEN REDDİ bloğu).
+      let skinVsFace = null;
+
       // UZUV KROMA + TEN KAPISI — Vision'dan ÖNCE (2026-09-06).
       // Eskiden Vision BAD_SKIN, kroma düzeltmesinden önce reddedip düzeltilabilir
       // kareleri retry'a atıyordu. Sıra: düzelt → ölç → Vision (kafa/bakış/…).
@@ -2854,17 +3036,46 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         console.error("OpenAI yolu: uzuv kroma düzeltmesi hata verdi (atlanıyor):", e);
       }
 
+      // TEN KAPISI — KARAR ÖLÇÜSÜ: "uzuvlar ÇIKTININ KENDİ YÜZÜYLE aynı tonda
+      // mı?" (2026-09-06 kullanıcı kararı: "ten yüz ile aynı şekilde boyanacak,
+      // aynıysa reddetme"). Uzuvlar zaten yukarıda yüz tonuna BOYANIYOR; boyama
+      // sonrası kare kendi içinde tutarlıysa RED YOK.
+      //
+      // Hedef ton neden SELFIE DEĞİL: selfie tonu nötr ışıkta ölçülüyor, sahne
+      // ışığı altındaki kareyi ona zorlamak farkı şişiriyor. Ölçüm yöntemi
+      // (üç-noktalı taban/hedef karşılaştırması) ve eşiği (0.60) aynen korunuyor
+      // — yalnızca hedef ton değişti. Selfie hedefli değer TEŞHİS için loglanır.
       try {
-        const { assessSkinToneConsistency } = require("./faceQuality");
-        const st = await assessSkinToneConsistency(buf, tplBuf, refSkinTone);
-        const rt = st.ratio != null ? st.ratio.toFixed(3) : "null";
-        const fd = st.faceDelta != null ? st.faceDelta.toFixed(1) : "null";
-        const refSrc = refSkinTone ? "selfie+chest" : "çıktı";
-        console.log(`TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${st.ok ? (st.reason ? `ÖLÇÜLEMEDİ[${st.reason}]` : "GEÇTİ") : "RED[skin]"} eskiTonOranı=${rt} yüzFarkı=${fd} örnek=${st.sampled ?? "null"} ref=${refSrc}`);
-        if (!st.ok) {
+        const { assessSkinToneConsistency, measureFaceToneVsRef } = require("./faceQuality");
+        // HEDEF TON = null → ÇIKTININ KENDİ YÜZÜ (bkz. assessSkinToneConsistency
+        // başlığındaki refSkinTone açıklaması). Soru artık "selfie tonundan ne
+        // kadar uzak" değil, "uzuvlar yüzle aynı mı".
+        skinVsFace = await assessSkinToneConsistency(buf, tplBuf, null);
+        const rt = skinVsFace.ratio != null ? skinVsFace.ratio.toFixed(3) : "null";
+        // Teşhis: selfie hedefli eski ölçüm yalnızca loglanır, karar vermez.
+        let selfieRatio = "null";
+        try {
+          const st = await assessSkinToneConsistency(buf, tplBuf, refSkinTone);
+          selfieRatio = st.ratio != null ? st.ratio.toFixed(3) : "null";
+        } catch { /* teşhis ölçümü kareyi etkilemez */ }
+        // Teşhis: "çıktının yüzü selfie tonunda mı?" — kullanıcının 3. maddesi.
+        // Eşiği veriyle koyabilmek için önce yalnızca ölçülüp loglanıyor
+        // (bkz. measureFaceToneVsRef başlığı).
+        let faceVsSelfie = "null";
+        try {
+          const fv = await measureFaceToneVsRef(buf, refSkinTone);
+          if (fv) faceVsSelfie = fv.chroma.toFixed(1);
+        } catch { /* teşhis ölçümü kareyi etkilemez */ }
+        console.log(
+          `TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+          `${skinVsFace.ok ? (skinVsFace.reason ? `ÖLÇÜLEMEDİ[${skinVsFace.reason}]` : "GEÇTİ") : "RED[skin]"} ` +
+          `yüzeGöreOran=${rt} örnek=${skinVsFace.sampled ?? "null"} ` +
+          `(teşhis selfieHedef=${selfieRatio} yüzSelfieFarkı=${faceVsSelfie})`
+        );
+        if (!skinVsFace.ok) {
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "skin-tone", distance: mathDist,
-            detail: `eskiTonOranı=${rt}`,
+            detail: `yüzeGöreOran=${rt}`,
           });
           if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
           break;
@@ -2903,6 +3114,23 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       }
       if (!visionOk && visionRejectionOverridden(visionReason, mathDist)) {
         console.warn(`VISION REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): mesafe=${mathDist.toFixed(3)} < ${VISION_OVERRIDE_MAX_DISTANCE} — Vision "${visionDetail || "identity"}" demişti, sayısal kanıt güçlü olduğu için kare KABUL edildi`);
+        visionOk = true;
+      }
+      // VISION TEN REDDİ ARTIK BAĞLAYICI DEĞİL (2026-09-06 kullanıcı kararı).
+      // Gerçek vaka (job 1181577f): elegance c1 ve c3, HANDS_OR_ARMS_MISMATCH
+      // ile elendi; kullanıcı iki karede de gözle ten sorunu olmadığını, ikisinin
+      // de kabul edilmesi gerektiğini söyledi. Vision'ın bu sorusu ışık/gölgeyi
+      // ton farkı sanabiliyor. Sayısal ölçüm (uzuv teni ↔ çıktının kendi yüzü)
+      // "tutarlı" diyorsa Vision'ın ten reddi geçersiz sayılır. Ölçüm
+      // YAPILAMADIYSA (yüz yok / yetersiz örnek) hakem yok — Vision'ın reddi
+      // aynen geçerli kalır; kanıtsız affetmiyoruz.
+      if (!visionOk && visionReason === "skin" &&
+          skinVsFace && skinVsFace.ok && skinVsFace.ratio != null) {
+        console.warn(
+          `VISION TEN REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+          `yüzeGöreOran=${skinVsFace.ratio.toFixed(3)} — sayısal ölçüm teni tutarlı buldu, ` +
+          `Vision "${visionDetail || "HANDS_OR_ARMS_MISMATCH"}" demişti, kare KABUL edildi`
+        );
         visionOk = true;
       }
       if (!visionOk) {
