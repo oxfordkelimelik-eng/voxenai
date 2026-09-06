@@ -3,9 +3,9 @@ workflows:
   ios-workflow:
     name: iOS Build Workflow
     max_build_duration: 60
-    # M4: 10-core / 16GB — archive süresini M2'ye göre kısaltır.
-    # Billing kapalı hesaplarda Codemagic reddederse mac_mini_m2'ye geri alın.
-    instance_type: mac_mini_m4
+    # M2 varsayılan kuyruk; M4 daha hızlı ama sık "queued"da bekliyor /
+    # billing erişimi gerektiriyor. Hız için sonra mac_mini_m4 denenebilir.
+    instance_type: mac_mini_m2
     # Cache notu: Codemagic cache genelde BAŞARILI build sonunda güncellenir.
     # Upload yüzünden fail olan build'lerde DerivedData dolmuyordu; bu yüzden
     # "Restoring cache <1s" görülebiliyordu. Başarılı TestFlight sonrası
