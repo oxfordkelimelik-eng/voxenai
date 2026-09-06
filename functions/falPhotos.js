@@ -2346,9 +2346,9 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (integrityLine && /TRANSPARENT_OR_GHOSTED/i.test(integrityLine)) {
       return { ok: false, reason: "ghosting", detail: verdictDetail() || "TRANSPARENT_OR_GHOSTED", inconclusive: false };
     }
-    // PULLED_TO_CAMERA bağlayıcıdır — şablon yaw'ına ihtiyaç duymaz (kahve
-    // yürüyüş karesi: taban ölçülemadi, Vision tabanı CAMERA yazdı, kafa
-    // gövdeden koparılıp merceğe çevrilmişti).
+    // PULLED_TO_CAMERA bağlayıcıdır ama ALIGNED lastik damgadır (f94c3cec:
+    // 10/10 ALIGNED, kahve yürüyüşü yine geçti). Asıl eleme sayısal kapıda
+    // (bkz. isPulledToCameraNumeric). Vision bir kez PULLED derse yine red.
     if (headBodyLine && /PULLED_TO_CAMERA/i.test(headBodyLine)) {
       return { ok: false, reason: "pulled-to-camera", detail: verdictDetail() || "PULLED_TO_CAMERA", inconclusive: false };
     }
@@ -2471,6 +2471,7 @@ const REJECTION_REASON_LABELS = {
   "yaw-drift": "Baş açısı şablondan çok saptı",
   "yaw-to-camera": "Taban fotoğraf profilken baş kameraya çevrilmiş",
   "yaw-over-rotate": "Baş, tabandakinden belirgin daha fazla yana dönmüş",
+  "yaw-pulled-to-camera": "Yüz, gövdenin/yürüyüşün baktığı yerden kameraya çevrilmiş",
   "math-no-face+vision-inconclusive": "Yüz net tespit edilemedi",
   "vision-pulled-to-camera": "Yüz, gövdenin/yürüyüşün baktığı yerden kameraya çevrilmiş",
   "skin-tone": "Ten tonu tutarsızlığı tespit edildi",
@@ -3047,9 +3048,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // şablon değişince yeniden ölçülür (bkz. yukarıdaki sıfırlama).
       try {
         const { headYawOf } = require("./faceQuality");
+        const { isPulledToCameraNumeric } = require("./headBodyGate");
         const tplBufForYaw = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
         if (templateYaw === undefined) templateYaw = await headYawOf(tplBufForYaw);
-        // Fail-safe: ikisinden biri ölçülemediyse kapı sessizce devre dışı.
+        const pulledNoTpl = isPulledToCameraNumeric(templateYaw ?? null, outYaw ?? null);
+        // Fail-safe: ikisinden biri ölçülemediyse eski yaw kapıları susar.
+        // Şablon yaw'ı yokken çıktı merceğe dönükse HEAD_VS_BODY sayısal
+        // reddi devreye girer (kahve + çanta yürüyüşü, f94c3cec c3).
         if (templateYaw != null && outYaw != null) {
           const drift = outYaw - templateYaw;
           const bad = Math.abs(drift) > OUTPUT_YAW_DRIFT_MAX;
@@ -3068,7 +3073,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
             : "GEÇTİ";
           // GEÇEN kareler de loglanıyor — eşik ancak gerçek dağılım görülerek
           // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
-          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate}`);
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate} çekildi=${pulledNoTpl}`);
           if (bad || toCamera || overRotate) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : "yaw-over-rotate",
@@ -3078,8 +3083,17 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
             if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
             break;
           }
+        } else if (pulledNoTpl) {
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[yaw-pulled-to-camera] çıktı=${outYaw.toFixed(2)} şablon=null çekildi=true`);
+          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+            mode, gate: "yaw-pulled-to-camera",
+            distance: mathDist,
+            detail: `çıktı=${outYaw.toFixed(2)} şablon=null`,
+          });
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
         } else {
-          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ÖLÇÜLEMEDİ çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"}`);
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ÖLÇÜLEMEDİ çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"} çekildi=false`);
         }
       } catch (e) {
         console.error("OpenAI yolu: yaw kapısı hata verdi (bu katman atlanıyor):", e);
