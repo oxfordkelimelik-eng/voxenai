@@ -37,12 +37,13 @@ class DatingConfig {
   //
   // TAM BOY FOTOĞRAF KALDIRILDI (2026-08-20, kullanıcı kararı): boy ve vücut
   // tipi zaten onboarding formundan alınıyor (bodyProfile) ve sunucu tarafında
-  // ZATEN tek yetkili kaynak sayılıyordu (bkz. falPhotos.js shortBodyNote) —
-  // tam boy fotoğraftan türetilen gözlem yalnızca ikincildi ve çelişki
-  // durumunda eleniyordu. Kullanıcıdan bir adım daha az istiyoruz.
-  // functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
+  // 3 canlı yüz + 2 zorunlu göğüs-üstü (omuz/üst göğüs) — beden/ten/kafa
+  // ölçeği sinyali. functions/falPhotos.js FACE_PHOTO_COUNT +
+  // CHEST_UP_PHOTO_COUNT ile senkron.
   static const int faceCaptureCount = 3;
-  static const int referencePhotoCount = faceCaptureCount; // 3
+  static const int chestUpPhotoCount = 2;
+  static const int referencePhotoCount =
+      faceCaptureCount + chestUpPhotoCount; // 5
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç

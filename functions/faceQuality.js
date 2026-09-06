@@ -195,20 +195,22 @@ async function detectSingleFace(buf, { minFaceRatio = MIN_FACE_RATIO } = {}) {
   }
 }
 
-// Tam boy referansta yüz kadrajın küçük bir kısmıdır — yüz selfie eşiği
-// (MIN_FACE_RATIO) ile reddedilmemeli.
-// GEVŞETİLDİ (2026-07-26 kullanıcı geri bildirimi: "boydan seçtiğimiz
-// fotoğrafı sürekli reddediyor"): uzaktan çekilmiş gerçek tam boy karelerde
-// yüz çok küçük kalıp 0.04 altında tespit edilemiyordu → 0.015'e düşürüldü.
-const MIN_FACE_RATIO_BODY = 0.015;
-// ...ama yüz kadrajın ÜST sınırından da BÜYÜKSE bu tam boy değil, yakın bir
-// selfie/portredir — gövde görünmüyordur, reddet. Kaba oran tahmini:
-// tam boy yüz ~0.13, bel üstü ~0.28, baş-omuz selfie ~0.5. Eşik 0.35 -> 0.45:
-// bel/kalça üstü kadrajları da (yüz biraz daha büyük görünse de) kabul eder,
-// yalnızca gerçekten baş-omuz yakın çekimini eler. Client tarafı
-// (GuidedCaptureScreen pose kontrolü) asıl "ayaklar kadrajda mı"yı tutuyor;
-// bu sunucu kapısı yalnızca "sadece yüz gönderilmiş" durumunu yakalar.
-const MAX_FACE_RATIO_BODY = 0.45;
+// Göğüs-üstü (chest-up) beden referansı: omuz + üst göğüs görünür, yüz net.
+// Uzak tam boyda yüz çok küçük; yakın yüz selfie'sinde yüz çok büyük —
+// ikisi de reddedilir. Kaba oran: uzak tam boy ~0.02–0.04, göğüs-üstü
+// ~0.08–0.32, yakın yüz ~0.45+.
+const MIN_FACE_RATIO_CHEST = 0.05;
+const MAX_FACE_RATIO_CHEST = 0.40;
+// Eski isimler — analyzeReferences beden karelerinde chest bandını kullanır.
+const MIN_FACE_RATIO_BODY = MIN_FACE_RATIO_CHEST;
+const MAX_FACE_RATIO_BODY = MAX_FACE_RATIO_CHEST;
+
+/** Göğüs-üstü yüz oranı bandı (birim test / prepare). */
+function isValidChestUpFaceRatio(ratio) {
+  return typeof ratio === "number" &&
+    ratio >= MIN_FACE_RATIO_CHEST &&
+    ratio <= MAX_FACE_RATIO_CHEST;
+}
 // Açı çeşitliliği kapısı: iki YÜZ karesinin kimlik vektörü birbirine bu
 // mesafeden yakınsa neredeyse aynı kare/açı sayılır (kullanıcı ör. 3 kez
 // cepheden çekmiş) — farklı açı kimlik sadakatini artırır. MUHAFAZAKÂR:
@@ -425,12 +427,15 @@ function profileDegreeFromLandmarks(landmarks) {
 
 /**
  * Referans fotoğrafları analiz eder.
- * Yeni akış: [ön, sağ, sol, tamBoy] — son kare beden referansı (küçük yüz OK).
+ * Akış: [ön, sağ, sol, chest1, chest2] — son K kare göğüs-üstü beden
+ * referansı (omuz/üst göğüs görünür; uzak tam boy veya salt yüz crop değil).
  * facePhotoCount (varsayılan 3): ilk N kare yüz; kimlik vektörü tercihen
  * bunlardan ortalanır. bestIndex/bestBox yüz karelerinden seçilir.
  */
 async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
   const unclearIndices = [];
+  // İsim tarihi: eskiden "tam boy değil"; şimdi göğüs-üstü bandı dışı
+  // (çok yakın yüz VEYA çok uzak tam boy). Mesaj prepareReferencePhotos'ta.
   const notFullBodyIndices = [];
   // Gözü APAÇIK kapalı (kırpma anı) yüz kareleri — kullanıcıdan değiştirmesi
   // istenir. Gözü kısık olanlar buraya GİRMEZ (bkz. CLOSED_EYE_MAX).
@@ -464,11 +469,10 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
       unclearIndices.push(idx);
       continue;
     }
-    // Tam boy referansı GERÇEKTEN tam boy mu: yüz kadrajın küçük bir kısmı
-    // olmalı. Yüz üst orandan büyükse bu yakın bir selfie'dir, gövde
-    // görünmüyordur — ayrı bir hata olarak işaretle (mesajı "net değil"den
-    // farklı: kullanıcıya "tam boy ver" demeliyiz).
-    if (isBodyRef && detection.ratio > MAX_FACE_RATIO_BODY) {
+    // Göğüs-üstü bandı: yüz çok büyükse salt selfie; çok küçükse uzak tam boy.
+    if (isBodyRef &&
+        (detection.ratio > MAX_FACE_RATIO_CHEST ||
+         detection.ratio < MIN_FACE_RATIO_CHEST)) {
       notFullBodyIndices.push(idx);
       continue;
     }
@@ -509,6 +513,9 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
     // (rawPixels + sampleFaceTone, assessSkinToneConsistency'nin taban/çıktı
     // için kullandığı AYNI yöntem — üç taraf aynı ölçekte kıyaslansın diye).
     // Fail-safe: çıkarılamazsa yalnızca ortalamaya katkısı olmaz.
+    // Göğüs-üstü karelerden boyun/üst göğüs teni de eklenir — kolların yüzle
+    // aynı tona çekilmesi için hedef ton yalnızca yakın selfie yanaklarına
+    // kilitlenmesin.
     if (!isBodyRef) {
       try {
         const px = await rawPixels(buffers[idx]);
@@ -516,6 +523,14 @@ async function analyzeReferences(buffers, { facePhotoCount = 3 } = {}) {
         if (tone) faceTones.push(tone);
       } catch {
         // yut — bu referansı elemez
+      }
+    } else {
+      try {
+        const px = await rawPixels(buffers[idx]);
+        const tone = px ? sampleChestSkinTone(px, detection.box) : null;
+        if (tone) faceTones.push(tone);
+      } catch {
+        // yut
       }
     }
 
@@ -1006,6 +1021,27 @@ function sampleFaceTone(px, box) {
   const x1 = Math.min(px.width, Math.ceil((box.x + box.width * 0.80) * s));
   const y0 = Math.max(0, Math.floor((box.y + box.height * 0.45) * s));
   const y1 = Math.min(px.height, Math.ceil((box.y + box.height * 0.80) * s));
+  const samples = [];
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const o = (y * px.width + x) * 3;
+      const r = px.data[o], g = px.data[o + 1], b = px.data[o + 2];
+      if (isSkinLike(r, g, b)) samples.push(rgbToLab(r, g, b));
+    }
+  }
+  return medianLab(samples);
+}
+
+/**
+ * Göğüs-üstü karede yüzün ALTINDAKI boyun/üst göğüs bandından ten örnekler.
+ * Kol/omuz teni için selfie yanak bandından daha iyi sinyal verir.
+ */
+function sampleChestSkinTone(px, faceBox) {
+  const s = px.scale;
+  const x0 = Math.max(0, Math.floor((faceBox.x + faceBox.width * 0.10) * s));
+  const x1 = Math.min(px.width, Math.ceil((faceBox.x + faceBox.width * 0.90) * s));
+  const y0 = Math.max(0, Math.floor((faceBox.y + faceBox.height * 0.85) * s));
+  const y1 = Math.min(px.height, Math.ceil((faceBox.y + faceBox.height * 2.4) * s));
   const samples = [];
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
@@ -1684,4 +1720,7 @@ module.exports = {
   assessOutputFace,
   detectMainFace,
   FACE_MATCH_THRESHOLD,
+  isValidChestUpFaceRatio,
+  MIN_FACE_RATIO_CHEST,
+  MAX_FACE_RATIO_CHEST,
 };

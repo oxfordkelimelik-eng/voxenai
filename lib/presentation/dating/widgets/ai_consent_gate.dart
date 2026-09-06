@@ -21,7 +21,7 @@ import 'dating_widgets.dart' show PrimaryButton;
 /// "Yapay Zekâ Veri Paylaşımı" ekranından dilediği an geri çekebilir
 /// (bkz. showAiDataSharingSettings).
 enum AiFlowKind {
-  /// AI dating fotoğrafı üretimi — canlı selfie'ler + tam boy fotoğraf.
+  /// AI dating fotoğrafı üretimi — canlı selfie'ler + göğüs-üstü referanslar.
   photoGeneration,
 
   /// Fotoğraf analizi & seçimi — kullanıcının seçtiği fotoğraflar.
@@ -89,17 +89,18 @@ class _AiConsentSheet extends StatelessWidget {
   String get _whatIsSent => switch (kind) {
         AiFlowKind.photoGeneration =>
           'Çektiğin ${DatingConfig.faceCaptureCount} yüz fotoğrafı '
-              '(ön / sağ / sol); yüz analizi, sahne kompozisyonu, ön '
-              'işleme ve kalite kontrolden geçirildikten sonra işlenmek '
-              'üzere OpenAI altyapısına iletilir.',
+              '(ön / sağ / sol) ve ${DatingConfig.chestUpPhotoCount} göğüs-üstü '
+              'fotoğraf; yüz analizi, sahne kompozisyonu, ön işleme ve kalite '
+              'kontrolden geçirildikten sonra işlenmek üzere OpenAI '
+              'altyapısına iletilir.',
         AiFlowKind.photoAnalysis =>
           'Analiz için seçtiğin fotoğraflar, çok kriterli skorlama '
               'modelimiz üzerinden işlenmek üzere OpenAI altyapısına '
               'iletilir.',
         null =>
-          'Foto üretiminde çektiğin yüz fotoğrafları ile foto analizinde '
-              'seçtiğin fotoğraflar; kompozisyon, kalite kontrolü ve '
-              'skorlama içeren işleme hatlarımızdan geçirilip OpenAI '
+          'Foto üretiminde çektiğin yüz ve göğüs-üstü fotoğrafları ile foto '
+              'analizinde seçtiğin fotoğraflar; kompozisyon, kalite kontrolü '
+              've skorlama içeren işleme hatlarımızdan geçirilip OpenAI '
               'altyapısına iletilir.',
       };
 

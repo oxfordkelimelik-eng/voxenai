@@ -168,9 +168,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   static const String _defaultStyleId = 'elegance';
   _AiStage _stage = _AiStage.package;
   final Set<String> _styles = {_defaultStyleId};
-  /// Canlı ön / sağ / sol (sıra sabit). TEK referans kaynağı — tam boy
-  /// fotoğraf 2026-08-20'de kaldırıldı (bkz. DatingConfig.referencePhotoCount).
+  /// Canlı ön / sağ / sol (sıra sabit) + zorunlu 2 göğüs-üstü galeri foto.
   final List<File> _facePhotos = [];
+  final List<File> _chestUpPhotos = [];
   String? _errorMessage;
   bool _validatingPhotos = false; // galeriden seçimde yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
@@ -181,18 +181,25 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   String _lastMode = 'full';
 
   bool get _refsReady =>
-      _facePhotos.length == DatingConfig.faceCaptureCount;
+      _facePhotos.length == DatingConfig.faceCaptureCount &&
+      _chestUpPhotos.length == DatingConfig.chestUpPhotoCount;
 
-  List<File> get _allReferencePhotos => List<File>.unmodifiable(_facePhotos);
+  List<File> get _allReferencePhotos => List<File>.unmodifiable([
+        ..._facePhotos,
+        ..._chestUpPhotos,
+      ]);
 
   // fal.ai üretim işi takibi
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _jobSub;
   Map<String, dynamic>? _jobData;
-  // startPhotoGeneration çağrısı network hatasıyla düşerse (bkz. _generate)
-  // sunucunun gerçekte işi başlatıp başlatmadığı belirsizdir; bu süre
-  // dolmadan Firestore'dan 'generating'/'done'/'failed' gelmezse asıl hata
-  // gösterilir (aksi halde kullanıcı sonsuza kadar loading'de kalır).
+  // startPhotoGeneration çağrısı network/timeout ile düşse bile sunucu
+  // üretiyor olabilir (bkz. _generate). Firestore'dan 'generating'/'done'
+  // gelmezse ancak bu süre sonunda hata gösterilir — üretim 5-15 dk
+  // sürebildiği için kısa tutmak (eski 90sn) arka planda biten işlerde
+  // yanlışlıkla hata ekranı açıyordu.
   Timer? _jobTimeoutTimer;
+  // Callable kopsa bile sonucu kaçırmamak için üretim süresine yakın tavan.
+  static const _jobListenFallback = Duration(minutes: 20);
   // Sonuç ekranındaki "Fotoğraflar" / "Elenen Kareler" geçişi — yalnızca
   // _rejectedFrames doluyken görünür (bkz. _resultStep).
   bool _showRejected = false;
@@ -356,6 +363,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _errorMessage = null;
     });
 
+    // Callable dönmeden ÖNCE dinlemeye başla: OpenAI yolu senkron ve uzun
+    // sürdüğü için istemci timeout/kopma alsa bile Firestore'daki
+    // generating/done kaçırılmaz (bkz. 2026-09 gerçek olay — arka planda
+    // 10 foto bitti, kullanıcı hata ekranı gördü).
+    _listenToJob(uid, jobId);
+
     try {
       await functions
           .httpsCallable(
@@ -376,58 +389,93 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         'model': ?modelId,
         'mode': ?mode,
       });
-
-      if (!mounted) return;
-      _listenToJob(uid, jobId);
+      // Başarı: listener zaten aktif; done gelince sonuç ekranına geçer.
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
-      // 'deadline-exceeded'/'unavailable' istemcinin bağlantıyı/isteği
-      // kaybettiği anlamına gelir — SUNUCUYA ulaşmış olabilir (bkz.
-      // startPhotoGeneration: bakiye düşümü + job='generating' yazımı TEK
-      // transaction, istemcinin ardından bağlantıyı kaybetmesinden bağımsız
-      // sürer, bkz. 2026-08-15 "network connection lost" olayı — job arka
-      // planda 10/10 tamamlandı ama istemci hiç görmedi). Doğrudan hata
-      // göstermek yerine aynı jobId ile gerçek durumu bekleyelim.
-      if (e.code == 'deadline-exceeded' || e.code == 'unavailable') {
-        _listenToJob(uid, jobId, fallbackErrorMessage: e.message?.trim());
+      // Kesin istemci/önkoşul hataları — üretim başlamamış olmalı.
+      if (e.code == 'unauthenticated' || e.code == 'failed-precondition') {
+        _jobSub?.cancel();
+        _jobTimeoutTimer?.cancel();
+        setState(() {
+          _stage = _AiStage.error;
+          final detail = e.message?.trim();
+          _errorMessage = (detail != null && detail.isNotEmpty)
+              ? detail
+              : (e.code == 'unauthenticated'
+                  ? 'Giriş yapman gerekiyor.'
+                  : 'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
+                      'Devam etmek için AI Foto paketi al.');
+        });
         return;
       }
-      setState(() {
-        _stage = _AiStage.error;
-        final detail = e.message?.trim();
-        _errorMessage = (detail != null && detail.isNotEmpty)
+      // deadline-exceeded / unavailable / internal / cancelled / … :
+      // sunucu üretiyor olabilir. Hata EKRANINA GEÇME — Firestore dinlemeye
+      // devam et; iş bitince sonuç gösterilir.
+      final detail = e.message?.trim();
+      _listenToJob(
+        uid,
+        jobId,
+        fallbackErrorMessage: (detail != null && detail.isNotEmpty)
             ? detail
-            : switch (e.code) {
-                'unauthenticated' => 'Giriş yapman gerekiyor.',
-                'failed-precondition' =>
-                  'Paket bakiyen yetersiz veya ücretsiz deneme hakkın bitti. '
-                      'Devam etmek için AI Foto paketi al.',
-                _ => 'Üretim başlatılamadı (${e.code}). Lütfen tekrar dene.',
-              };
-      });
+            : 'Üretim başlatılamadı (${e.code}). Lütfen tekrar dene.',
+      );
     } catch (e) {
       if (!mounted) return;
-      // FirebaseFunctionsException DIŞINDA (soket kopması, DNS hatası vb.)
-      // de aynı belirsizlik geçerli — yukarıdaki gerekçeyle aynı fallback.
-      _listenToJob(uid, jobId, fallbackErrorMessage: 'Üretim başlatılamadı. Lütfen tekrar dene.');
+      // Soket/DNS vb. — aynı belirsizlik; hata gösterme, job'u dinle.
+      _listenToJob(
+        uid,
+        jobId,
+        fallbackErrorMessage: 'Üretim başlatılamadı. Lütfen tekrar dene.',
+      );
     }
   }
 
   void _listenToJob(String uid, String jobId, {String? fallbackErrorMessage}) {
     _jobSub?.cancel();
     _jobTimeoutTimer?.cancel();
-    // İstek sunucuya hiç ulaşmadıysa (gerçek network kopması) Firestore'da
-    // hiçbir zaman bu jobId için doküman oluşmaz — sonsuza kadar loading'de
-    // kalınmasın diye bir süre sonra asıl hatayı göster.
+    // İstek sunucuya hiç ulaşmadıysa loading sonsuza kalmasın. Süre, gerçek
+    // üretim + retry (5-15 dk) ile uyumlu; dolmadan generating/done gelirse
+    // iptal edilir. Dolunca Firestore'a bir kez daha bakılır — arka planda
+    // bitmiş iş için hata gösterilmez.
     if (fallbackErrorMessage != null) {
-      _jobTimeoutTimer = Timer(const Duration(seconds: 90), () {
-        if (!mounted) return;
-        if (_stage == _AiStage.loading) {
-          setState(() {
-            _stage = _AiStage.error;
-            _errorMessage = fallbackErrorMessage;
-          });
+      _jobTimeoutTimer = Timer(_jobListenFallback, () async {
+        if (!mounted || _stage != _AiStage.loading) return;
+        try {
+          final snap = await FirebaseFirestore.instance
+              .doc('users/$uid/private/genData/genJobs/$jobId')
+              .get();
+          final data = snap.data();
+          if (!mounted || _stage != _AiStage.loading) return;
+          if (data != null) {
+            final status = data['status'] as String?;
+            if (status == 'done' || status == 'generating') {
+              setState(() {
+                _jobData = data;
+                if (status == 'done') {
+                  _stage = _AiStage.result;
+                }
+                // generating: loading'de kal — snapshot zaten dinleniyor.
+              });
+              return;
+            }
+            if (status == 'failed') {
+              setState(() {
+                _jobData = data;
+                _stage = _AiStage.error;
+                _errorMessage = data['errorMessage'] as String? ??
+                    fallbackErrorMessage;
+              });
+              return;
+            }
+          }
+        } catch (_) {
+          // Son kontrol başarısızsa aşağıdaki hata ekranına düş.
         }
+        if (!mounted || _stage != _AiStage.loading) return;
+        setState(() {
+          _stage = _AiStage.error;
+          _errorMessage = fallbackErrorMessage;
+        });
       });
     }
     _jobSub = FirebaseFirestore.instance
@@ -497,6 +545,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       // ve sabit tek birim (bkz. _defaultStyleId).
       _stage = _AiStage.package;
       _facePhotos.clear();
+      _chestUpPhotos.clear();
       _styles
         ..clear()
         ..add(_defaultStyleId);
@@ -725,6 +774,42 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
   }
 
+  /// Zorunlu 2 göğüs-üstü (omuz + üst göğüs) — kafa ölçeği / ten / omuz sinyali.
+  Future<void> _pickChestUpPhotos() async {
+    if (_preparing || _validatingPhotos) return;
+    final picked = await _pickImages(
+        multi: true, limit: DatingConfig.chestUpPhotoCount);
+    if (!mounted) return;
+    if (picked.length != DatingConfig.chestUpPhotoCount) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Tam olarak ${DatingConfig.chestUpPhotoCount} göğüs-üstü fotoğraf '
+            'seçmelisin (omuzlar ve üst göğüs görünür).'),
+      ));
+      return;
+    }
+    setState(() => _validatingPhotos = true);
+    for (final f in picked) {
+      final ok = await _isValidBodyReferencePhoto(f);
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _validatingPhotos = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Seçtiğin fotoğraflardan birinde yüz görünmüyor. Omuzların ve '
+              'üst göğsün göründüğü, yüzün net olduğu kareler seç.'),
+        ));
+        return;
+      }
+    }
+    setState(() {
+      _validatingPhotos = false;
+      _chestUpPhotos
+        ..clear()
+        ..addAll(picked);
+      _prepareError = null;
+    });
+  }
 
   void _openStyleSheet(PhotoStyle style) {
     final selected = _styles.contains(style.id);
@@ -1332,6 +1417,67 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                     : _facePhotos.isEmpty
                         ? 'Yüz çekimini başlat'
                         : 'Yüz çekimini tekrarla',
+                style: const TextStyle(color: AppColors.gold)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppColors.borderGold),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+              'Göğüs-üstü — galeri (zorunlu)',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          Text(
+              'Tam ${DatingConfig.chestUpPhotoCount} foto: omuzlar ve üst '
+              'göğüs görünsün, yüz net olsun. Uzak tam boy veya yalnızca '
+              'yakın yüz kabul edilmez — kafa boyutu, bakış ve ten için '
+              'kullanılır.',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 10),
+          if (_chestUpPhotos.isEmpty)
+            Container(
+              height: 90,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.borderSubtle),
+              ),
+              child: const Text('Henüz göğüs-üstü foto yok',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (int i = 0; i < _chestUpPhotos.length; i++)
+                  _RemovableThumb(
+                    file: _chestUpPhotos[i],
+                    onRemove: () => setState(() {
+                      _chestUpPhotos.clear();
+                      _prepareError = null;
+                    }),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed:
+                (_preparing || _validatingPhotos) ? null : _pickChestUpPhotos,
+            icon: const Icon(Icons.photo_library_outlined,
+                color: AppColors.gold),
+            label: Text(
+                _chestUpPhotos.isEmpty
+                    ? 'Göğüs-üstü ${DatingConfig.chestUpPhotoCount} foto seç'
+                    : 'Göğüs-üstü fotoğrafları değiştir',
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
