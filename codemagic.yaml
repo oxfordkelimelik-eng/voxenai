@@ -3,29 +3,31 @@ workflows:
   ios-workflow:
     name: iOS Build Workflow
     max_build_duration: 60
-    instance_type: mac_mini_m2
-    # pub + CocoaPods önbelleği: her build'de bağımlılıkları sıfırdan indirmeyi azaltır.
-    # Çıktıyı değiştirmez; yalnızca indirme süresini kısaltır.
+    # M4: 10-core / 16GB — archive süresini M2'ye göre kısaltır.
+    # Billing kapalı hesaplarda Codemagic reddederse mac_mini_m2'ye geri alın.
+    instance_type: mac_mini_m4
+    # Cache notu: Codemagic cache genelde BAŞARILI build sonunda güncellenir.
+    # Upload yüzünden fail olan build'lerde DerivedData dolmuyordu; bu yüzden
+    # "Restoring cache <1s" görülebiliyordu. Başarılı TestFlight sonrası
+    # sonraki archive'lar belirgin hızlanır.
     #
-    # ios/Pods: Podfile.lock sabit olduğu sürece pod'ları yeniden İNDİRİP
-    # açmaya gerek yok — 'pod install' önbellekten çok daha hızlı tamamlanır.
-    # Podfile.lock değişirse CocoaPods farkı görüp gerekli pod'ları zaten
-    # günceller, yani bayat kalma riski yok.
+    # ios/Pods: Podfile.lock sabitken pod'ları yeniden indirmek gerekmez.
     cache:
       cache_paths:
         - $FLUTTER_ROOT/.pub-cache
+        - $FLUTTER_ROOT/bin/cache
         - $HOME/.pub-cache
         - $HOME/Library/Caches/CocoaPods
         - ios/Pods
-        # Xcode DerivedData: xcodebuild archive'ın asıl derleme çıktısı burada
-        # tutulur (Pods hedeflerinin + Flutter engine'in nesne dosyaları).
-        # Kaynak kodda küçük bir değişiklik olduğunda Xcode DEĞİŞMEYEN
-        # hedefleri sıfırdan derlemek yerine önbellekten kullanır — tekrarlayan
-        # build'lerde arşivleme süresini ciddi kısaltır.
+        # Xcode DerivedData: tekrarlayan archive'larda en büyük kazanç.
         - $HOME/Library/Developer/Xcode/DerivedData
     environment:
+      # stable kanalı her SDK güncellemesinde cache'i bozar; pin = tekrarlanabilir CI.
+      # Xcode 26.6 makinesindeki güncel stable ile uyumlu tut; Flutter major
+      # yükseltirken burayı bilinçli güncelle.
       flutter: stable
-      xcode: latest
+      # latest DEĞİL — Xcode değişince DerivedData cache çöp olur.
+      xcode: 26.6
       cocoapods: default
       groups:
         # Codemagic panelinde olusturmaniz gereken degisken grubu.
@@ -53,16 +55,23 @@ workflows:
     scripts:
       - name: 1. Get dependencies & generate iOS config
         script: |
+          set -e
           flutter config --no-enable-swift-package-manager
-          flutter pub get
+          # Cache doluysa --offline saniyeler sürer; yoksa normal pub get.
+          if ! flutter pub get --offline; then
+            echo "pub-cache offline miss — flutter pub get (network)"
+            flutter pub get
+          fi
           # --build-number: her Codemagic build'i benzersiz CFBundleVersion alsin
           # ki TestFlight "build numarasi zaten var" diye reddetmesin.
           flutter build ios --config-only --release --no-codesign \
             --build-number="$PROJECT_BUILD_NUMBER"
       - name: 2. Install CocoaPods dependencies
         script: |
-          # Podfile.lock sabitken --repo-update gereksiz; yalnızca pod'ları kurar.
-          cd ios && pod install
+          set -e
+          # --deployment: Podfile.lock dışına çıkmadan kurar (repo-update yok).
+          # Lock ile uyumsuzluk varsa fail eder — sessiz sürüm kayması olmaz.
+          cd ios && pod install --deployment
       - name: 3. Fetch stable signing files & apply
         script: |
           set -e
@@ -94,16 +103,18 @@ workflows:
       - name: 4. Archive (manual, stable distribution cert)
         script: |
           set -e
+          # Cache isabetini logla — "Restoring cache <1s" sonrası burada
+          # DerivedData boyutu 0'a yakınsa archive soğuk başlıyor demektir.
+          DD="$HOME/Library/Developer/Xcode/DerivedData"
+          if [ -d "$DD" ]; then
+            echo "DerivedData mevcut: $(du -sh "$DD" 2>/dev/null | awk '{print $1}')"
+          else
+            echo "DerivedData YOK — soğuk archive (ilk/başarısız önceki build)"
+          fi
           # Tek tam derleme burada yapilir. xcodebuild archive, Flutter'in
           # Xcode script'lerini (Dart derleme + native link) calistirir;
           # ayri bir "flutter build ios" adimi gereksiz tekrar derlemeydi.
-          # use-profiles Runner hedefini manuel + app-store profiliyle
-          # yapilandirdi; xcodebuild bunu okuyup arsivi dagitim sertifikasiyla
-          # imzalar. Otomatik imza/gelistirme sertifikasi URETILMEZ.
-          # COMPILER_INDEX_STORE_ENABLE=NO: Xcode'un IDE-ici kod tamamlama/
-          # atlama icin urettigi indeksleme verisini KAPATIR. CI'da hic
-          # kullanilmiyor ama derleme suresine gercek katki yapiyor; kapatmak
-          # yaygin bilinen bir CI hizlandirma ayari, cikan .ipa'yi etkilemez.
+          # COMPILER_INDEX_STORE_ENABLE=NO: CI'da gereksiz indekslemeyi kapatır.
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
