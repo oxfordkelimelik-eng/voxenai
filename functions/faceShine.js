@@ -13,7 +13,14 @@
 const sharp = require("sharp");
 
 const SELFIE_SHINE_MIN = 0.04;
-const OUTPUT_SHINE_MIN = 0.05;
+// 0.05 -> 0.03 (2026-09-07 kullanıcı bildirimi: "ışık altında çekilmişse yüz
+// çok parlak çıkıyor"). Job aaf8b1ea'da çıktı parlaması 0.046 / 0.044 / 0.036
+// ölçüldü ve ÜÇÜ DE "no-shine" ile atlandı — eski eşiğin hemen altındalardı.
+// Selfie'de parlama SELFIE_SHINE_MIN'i (0.04) tutturamadığında selfieLit=false
+// kalıyor, o zaman da gevşek eşik (OUTPUT_SHINE_MIN_IF_SELFIE) devreye
+// girmiyordu: iki eşik birbirini kilitliyordu. SHINE_AREA_MAX (%18) tavanı
+// genel sahne güneşini hâlâ koruyor, yani bu düşüş tüm yüzü karartmaz.
+const OUTPUT_SHINE_MIN = 0.03;
 const OUTPUT_SHINE_MIN_IF_SELFIE = 0.015;
 const SHINE_AREA_MAX = 0.18;
 const SPECULAR_L_ABOVE = 10;

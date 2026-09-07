@@ -53,6 +53,18 @@ test("selfie ışıklıysa düşük çıktı parlaması da düzeltilir", () => {
   assert.equal(shouldReduceShine({ shineRatio: 0.25 }, true), false);
 });
 
+test("aaf8b1ea'da atlanan parlamalar artık düzeltilir", () => {
+  // Gerçek ölçümler (2026-09-07, job aaf8b1ea): selfie'de parlama
+  // bulunamadığı için selfieLit=false, eski 0.05 eşiğiyle üçü de atlanmıştı.
+  for (const ratio of [0.046, 0.044, 0.036]) {
+    assert.equal(shouldReduceShine({ shineRatio: ratio }, false), true);
+  }
+  // Düz ten hâlâ dokunulmadan geçmeli.
+  assert.equal(shouldReduceShine({ shineRatio: 0.008 }, false), false);
+  // Genel sahne güneşi (alan tavanı) hâlâ korunuyor.
+  assert.equal(shouldReduceShine({ shineRatio: 0.25 }, false), false);
+});
+
 test("speküler lekelerin L değeri düşer, renk kanalı kalır", () => {
   const px = makeSkinPx(80, 80, { hotspotX0: 30, hotspotX1: 50, hotspotY0: 12, hotspotY1: 20 });
   const before = px.data[13 * 80 * 3 + 40 * 3];
