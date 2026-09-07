@@ -1950,4 +1950,5 @@ module.exports = {
   assessOutputFace,
   detectMainFace,
   FACE_MATCH_THRESHOLD,
+  PROFILE_UNRELIABLE_MIN,
 };

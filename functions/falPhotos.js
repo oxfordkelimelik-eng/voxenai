@@ -3120,7 +3120,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // Şablon yaw'ı ŞABLON BAŞINA bir kez ölçülür (deneme başına değil);
       // şablon değişince yeniden ölçülür (bkz. yukarıdaki sıfırlama).
       try {
-        const { headYawOf } = require("./faceQuality");
+        const { headYawOf, PROFILE_UNRELIABLE_MIN } = require("./faceQuality");
         const { isPulledToCameraNumeric, isUnderRotated } = require("./headBodyGate");
         const tplBufForYaw = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
         if (templateYaw === undefined) templateYaw = await headYawOf(tplBufForYaw);
@@ -3141,7 +3141,19 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           const overRotate = templateYaw >= YAW_OVER_ROTATE_TEMPLATE_MIN &&
                              drift >= YAW_OVER_ROTATE_RISE_MIN;
           const underRotate = isUnderRotated(templateYaw, outYaw);
-          const yawVerdict = bad ? "RED[yaw-drift]"
+          // PROFİL İSTİSNASI (2026-09-08 gerçek olay, job aaf8b1ea c1_att1):
+          // profileDegreeFromLandmarks (headYawOf'un temeli) kimlik
+          // mesafesinde AYNI SEBEPTEN güvenilmez sayılıyor (bkz.
+          // PROFILE_UNRELIABLE_MIN, faceQuality.js) — kafa yüksek derecede
+          // yana dönükken burun/göz-köşesi geometrisi doğrusallığını
+          // kaybediyor. Şablon 0.52, çıktı 0.90 ölçüldü, sapma eşiği (0.30)
+          // büyük farkla aştı ve kare RED[yaw-drift] oldu — ama kullanıcı
+          // görsel karşılaştırmada kareyi kabul edilebilir buldu. Kimlik
+          // kapısıyla TUTARLI olacak şekilde: şablon YA DA çıktı zaten
+          // güvenilmez bölgedeyse (>0.45) sert red yerine Vision'a devret.
+          const yawUnreliable = templateYaw > PROFILE_UNRELIABLE_MIN || outYaw > PROFILE_UNRELIABLE_MIN;
+          const yawVerdict = yawUnreliable ? "ÖLÇÜLEMEDİ[profile]"
+            : bad ? "RED[yaw-drift]"
             : toCamera ? "RED[yaw-to-camera]"
             : overRotate ? "RED[yaw-over-rotate]"
             : underRotate ? "RED[yaw-under-rotate]"
@@ -3149,7 +3161,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           // GEÇEN kareler de loglanıyor — eşik ancak gerçek dağılım görülerek
           // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
           console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate} eksikDönme=${underRotate} çekildi=${pulledNoTpl}`);
-          if (bad || toCamera || overRotate || underRotate) {
+          if (!yawUnreliable && (bad || toCamera || overRotate || underRotate)) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : overRotate ? "yaw-over-rotate" : "yaw-under-rotate",
               distance: mathDist,
@@ -3460,7 +3472,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // sonra dx'i güvenle kullan) — dy için de aynı yolu izleyebilmek için
       // önce (pitchFarkı, dy) çiftlerinin gerçek dağılımını görmemiz lazım.
       try {
-        const { measureHeadPlacement } = require("./faceQuality");
+        const { measureHeadPlacement, PROFILE_UNRELIABLE_MIN } = require("./faceQuality");
         const p = await measureHeadPlacement(buf, tplBuf);
         // no-face-* RED KURALI GERİ ALINDI (2026-08-22, KULLANICI GÖRSEL
         // DOĞRULAMASI). 2026-08-21'de burayı "yüz yok -> RED" yapmıştım;
@@ -3489,9 +3501,19 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         if (!p.ok) {
           console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${p.reason}]`);
         } else {
-          const bad = Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;
+          // PROFİL İSTİSNASI (2026-09-08 gerçek olay, job aaf8b1ea c2_att4):
+          // dx, yüz kutusunun merkezinden hesaplanıyor — kafa yüksek derecede
+          // yana dönükken (yaw kimlik/yaw kapısındaki PROFILE_UNRELIABLE_MIN
+          // eşiğini aşınca) kutunun görünen kısmı asimetrikleşir ve merkez
+          // kayar. Bu karede pitchFarkı=-2.96 (normalde ±0.05 civarı) zaten
+          // aynı landmark bozulmasını gösteriyordu — kullanıcı görsel
+          // karşılaştırmada kareyi kabul edilebilir buldu. dx de aynı
+          // ölçüm ailesinden olduğu için profilde ona da güvenilmiyor.
+          const yawUnreliable = (p.yaw != null && p.yaw > PROFILE_UNRELIABLE_MIN) ||
+                                 (p.tplYaw != null && p.tplYaw > PROFILE_UNRELIABLE_MIN);
+          const bad = !yawUnreliable && Math.abs(p.dx) > OUTPUT_HEAD_DX_MAX;
           const pitchFarki = (p.pitch != null && p.tplPitch != null) ? (p.pitch - p.tplPitch) : null;
-          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${bad ? "RED[head-dx]" : "GEÇTİ"} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} pitchFarkı=${pitchFarki != null ? pitchFarki.toFixed(2) : "null"} eşik=${OUTPUT_HEAD_DX_MAX}`);
+          console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawUnreliable ? "ÖLÇÜLEMEDİ[profile]" : (bad ? "RED[head-dx]" : "GEÇTİ")} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} pitchFarkı=${pitchFarki != null ? pitchFarki.toFixed(2) : "null"} eşik=${OUTPUT_HEAD_DX_MAX}`);
           if (bad) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: "head-dx", distance: mathDist,
