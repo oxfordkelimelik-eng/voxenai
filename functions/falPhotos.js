@@ -666,6 +666,15 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
     "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
     "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
+    "FACE RENDERING QUALITY — spend your detail budget on the face. It must be the sharpest, cleanest " +
+    "region of the frame: crisp eyes with visible catchlights and iris detail, defined lashes and brow " +
+    "hairs, clean lip edges, and skin that reads as living tissue with fine pores and natural " +
+    "subsurface warmth. \"Unedited phone photo\" and \"no airbrush\" mean do not SMOOTH or beautify — " +
+    "they do NOT mean render the face rough, noisy or low-resolution. The face must never look " +
+    "pixelated, mushy, grainy, blocky, plasticky, dull, flat or lifeless, and must never be softer or " +
+    "lower-resolution than the clothing and background around it. Do not add fake studio light, glow " +
+    "or sheen to achieve this — the liveliness comes from resolved detail and accurate colour under " +
+    "the scene's own light, not from extra brightness.\n\n" +
     "AVOID: reinterpreting or restyling the target's face, making the face look like a different or only-" +
     "similar person, changing the shape or size of the eyes/lips/nose/jaw, thinning/plumping/widening or " +
     "reshaping the lips, enlarging or opening the eyes beyond the references, rounding/puffing/swelling/" +
@@ -1085,7 +1094,16 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
     "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
     "blotch, smudge or patchy shadow stuck on a joint or knuckle — skin there must read as evenly and " +
-    "naturally lit as the face, not mottled or dirty-looking."
+    "naturally lit as the face, not mottled or dirty-looking.\n\n" +
+    "FACE RENDERING QUALITY — spend your detail budget on the face. It must be the sharpest, cleanest " +
+    "region of the frame: crisp eyes with visible catchlights and iris detail, defined lashes and brow " +
+    "hairs, clean lip edges, and skin that reads as living tissue with fine pores and natural " +
+    "subsurface warmth. \"Unedited phone photo\" and \"no airbrush\" mean do not SMOOTH or beautify — " +
+    "they do NOT mean render the face rough, noisy or low-resolution. The face must never look " +
+    "pixelated, mushy, grainy, blocky, plasticky, dull, flat or lifeless, and must never be softer or " +
+    "lower-resolution than the clothing and background around it. Do not add fake studio light, glow " +
+    "or sheen to achieve this — the liveliness comes from resolved detail and accurate colour under " +
+    "the scene's own light, not from extra brightness."
   );
 }
 

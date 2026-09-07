@@ -10,16 +10,18 @@
 
 const sharp = require("sharp");
 
-// Gerçek telefon kamerası JPEG'lerine yakın kalite. AI çıktıları genelde
-// bunun üzerinde (~95+) geliyor — düşürmek "temiz" hissi kırar. 86 -> 90
-// (2026-08-xx, "netlik düşük" şikayeti) -> 94 (2026-08-16, kullanıcı geri
-// bildirimi: fotoğraflar kalitesiz gelmeye başladı, artık dating profillerinde
-// insanlar profesyonel kameralarla da çekim yapıyor — "amatör telefon fotosu"
-// varsayımı eskisi kadar güçlü değil). 94 hâlâ AI'nin ~95+ nativesinin altında
-// (tamamen "temiz" hissi kırılıyor) ama 90'a göre belirgin daha az sıkıştırma
-// kaybı var. Yüz bölgesinde grain de artık AYRICA maskelendiği için (bkz.
-// buildGrainLayer) bu ikisi birlikte netlik şikayetini hedefliyor.
-const JPEG_QUALITY = 94;
+// Gerçek telefon kamerası JPEG'lerine yakın kalite. 86 -> 90 (2026-08-xx,
+// "netlik düşük" şikayeti) -> 94 (2026-08-16, "fotoğraflar kalitesiz geliyor";
+// dating profillerinde profesyonel çekim de yaygın, "amatör telefon fotosu"
+// varsayımı zayıfladı) -> 96 (2026-09-08, "yüz piksel piksel / pürüzlü /
+// cansız" bildirimi). Sıkıştırma kaybı yüzde en çok göze batan yer; gerçekçilik
+// zaten grain + chroma tarafından değil, modelin kendi dokusundan geliyor.
+const JPEG_QUALITY = 96;
+// Renk alt-örneklemesi. "4:2:0" renk çözünürlüğünü yatay+dikey YARIYA indirir;
+// cilt tonu gibi yumuşak geçişlerde bu, yüzde bant/blok ve "pürüzlü" bir görüntü
+// bırakıyordu (2026-09-08 bildirimi). "4:4:4" renk kanalını tam çözünürlükte
+// tutar — dosya birkaç yüz KB büyür, karşılığında cilt geçişleri temiz kalır.
+const JPEG_CHROMA_SUBSAMPLING = "4:4:4";
 // Referans selfie'ler fal'a gitmeden önce yeniden kodlanırken kullanılan
 // kalite — yön düzeltmesi kimlik sinyalini bozmamalı (yüksek tut).
 const REF_JPEG_QUALITY = 92;
@@ -50,8 +52,14 @@ const GRAIN_AMPLITUDE = 9;
  */
 function faceGrainScale(x, y, box) {
   if (!box) return 1;
-  const padX = box.width * 0.25;
-  const padY = box.height * 0.30; // çene/saç çizgisini de kapsasın diye biraz fazla
+  // KORUMA ALANI GENİŞLETİLDİ (2026-09-08, "yüz piksel piksel / pürüzlü
+  // duruyor" bildirimi). Eski pad (0.25/0.30) + featherStart 0.7, grain'in
+  // yüz kutusunun HEMEN kenarında yeniden yükselmesine izin veriyordu —
+  // yanak/çene/alın sınırı, kullanıcının en çok baktığı bölge, ölçüsüz
+  // gürültü alıyordu. Artık koruma yüz kutusunun belirgin dışına taşıyor
+  // (saç, boyun, kulak hattı dahil) ve geçiş çok daha dışarıda başlıyor.
+  const padX = box.width * 0.55;
+  const padY = box.height * 0.65;
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   const rx = box.width / 2 + padX;
@@ -60,8 +68,8 @@ function faceGrainScale(x, y, box) {
   const nx = (x - cx) / rx;
   const ny = (y - cy) / ry;
   const d = Math.sqrt(nx * nx + ny * ny); // 0=merkez, 1=elips kenarı
-  const featherStart = 0.7; // buraya kadar grain neredeyse yok
-  const featherEnd = 1.15; // bu mesafeden sonra grain tam
+  const featherStart = 0.92; // bu mesafeye kadar grain TAMAMEN kapalı
+  const featherEnd = 1.35; // bu mesafeden sonra grain tam
   if (d <= featherStart) return 0;
   if (d >= featherEnd) return 1;
   return (d - featherStart) / (featherEnd - featherStart);
@@ -113,7 +121,7 @@ async function addPhoneCameraTexture(buf) {
     const grain = await buildGrainLayer(meta.width, meta.height, faceBox);
     return await image
       .composite([{ input: grain, blend: "overlay" }])
-      .jpeg({ quality: JPEG_QUALITY, chromaSubsampling: "4:2:0", mozjpeg: true })
+      .jpeg({ quality: JPEG_QUALITY, chromaSubsampling: JPEG_CHROMA_SUBSAMPLING, mozjpeg: true })
       .toBuffer();
   } catch (e) {
     console.error("Post-processing başarısız (orijinal görsel kullanılıyor):", e);
@@ -356,9 +364,14 @@ async function recompositeIntoOriginal(outputBuf, originalBuf, geo) {
       .toBuffer();
 
     // 3) Orijinal tuvalin üstüne, kırpmanın alındığı TAM konuma bindir.
+    // ÇİFT SIKIŞTIRMA (2026-09-08): buradaki çıktı doğrudan kullanıcıya
+    // gitmiyor — addPhoneCameraTexture onu tekrar JPEG'e kodluyor. Ara adımda
+    // 92 kalite + varsayılan 4:2:0 kullanmak, yüzde iki kez sıkıştırma kaybı
+    // demekti ("piksel piksel / pürüzlü yüz" bildirimi). Ara ürün artık
+    // kayıpsız PNG; tek gerçek sıkıştırma son adımda yapılıyor.
     const result = await sharp(originalBuf)
       .composite([{ input: patchWithAlpha, left, top }])
-      .jpeg({ quality: 92 })
+      .png()
       .toBuffer();
 
     // Boyut kontrolü — beklenmedik bir sapma olursa fail-safe null.
