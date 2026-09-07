@@ -1,0 +1,9 @@
+build/
+android/
+ios/
+functions/node_modules/
+functions/lib/
+.dart_tool/
+.claude/
+node_modules/
+*.jks

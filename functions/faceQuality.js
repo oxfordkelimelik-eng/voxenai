@@ -439,6 +439,7 @@ async function analyzeReferences(buffers) {
   // yüzüne değil, kullanıcının GERÇEK selfie tonuna güvenebilmesi için (bkz.
   // assessSkinToneConsistency'nin refSkinTone parametresi).
   const faceTones = [];
+  const faceShineFlags = [];
   let bestIndex = null;
   let bestArea = -1;
   let bestBox = null;
@@ -502,6 +503,11 @@ async function analyzeReferences(buffers) {
       const px = await rawPixels(buffers[idx]);
       const tone = px ? sampleFaceTone(px, detection.box) : null;
       if (tone) faceTones.push(tone);
+      if (px) {
+        const { specularStatsFromPixels, SELFIE_SHINE_MIN } = require("./faceShine");
+        const sh = specularStatsFromPixels(px, detection.box);
+        if (sh && sh.shineRatio >= SELFIE_SHINE_MIN) faceShineFlags.push(sh.shineRatio);
+      }
     } catch {
       // yut — bu referansı elemez
     }
@@ -570,6 +576,8 @@ async function analyzeReferences(buffers) {
   // fonksiyon assessSkinToneConsistency'nin yüz-bandı örneklemesinde de
   // kullanılıyor). Firestore'a düz [L,a,b] dizisi olarak gider.
   const refSkinTone = faceTones.length > 0 ? medianLab(faceTones) : null;
+  const refHasFaceShine = faceShineFlags.length > 0;
+  const refFaceShine = faceShineFlags.length ? Math.max(...faceShineFlags) : null;
 
   return {
     unclearIndices,
@@ -577,6 +585,8 @@ async function analyzeReferences(buffers) {
     closedEyeIndices,
     refEyeOpenness,
     refSkinTone,
+    refHasFaceShine,
+    refFaceShine,
     bestIndex,
     bestBox,
     refDescriptor,
@@ -673,8 +683,11 @@ const PROFILE_UNRELIABLE_MIN = 0.45;
 // model o kişiyi kullanıcıya çevirmeye çalışmıştı. Tavan olmasaydı bu kare
 // Vision'a devredilir ve muhtemelen teslim edilirdi.
 // Gözlenen profil mesafeleri: 0.373 / 0.606 (ikisi de sağlam, 0.606 zaten
-// kullanıcıya teslim edilmişti) ve 0.802 (bozuk). 0.70 ikisini ayırır.
-const PROFILE_DEFER_MAX_DISTANCE = 0.70;
+// kullanıcıya teslim edilmişti) ve 0.802 (bozuk). 0.70 ikisini ayırıyordu.
+// 2026-09-07 (b1d6972b c0 deneme 1): mesafe 0.724, lunapark / kafa kamera
+// dışı — kullanıcı kareyi gözle iyi gördü, math-identity kesti. 0.76 o kareyi
+// Vision'a devreder, 0.802'lik yanlış-kişi tavanını yerinde bırakır.
+const PROFILE_DEFER_MAX_DISTANCE = 0.76;
 
 // KURTARMA EŞİĞİ (2026-08-03): profil/yan bakış karelerinde SSD skoru normal
 // eşiğin altına düşüp yüz "yok" sayılıyordu. Gerçek ölçüm: 2026-08-03
@@ -1579,7 +1592,24 @@ async function measureHeadPlacement(outputBuf, templateBuf) {
 }
 
 // ---------------------------------------------------------------------------
-// UZUV NETLİK ÖLÇÜMÜ (measureLimbSharpness) — ÖLÇER, ELEMEZ (henüz)
+// UZUV NETLİK ÖLÇÜMÜ (measureLimbSharpness) — ARTIK KULLANILMIYOR (2026-09-06)
+//
+// ÇAĞRILMIYOR: falPhotos.js'teki tek çağrı yeri kaldırıldı. Yerine
+// measureLimbRegion + limbBox.js geldi. Silinmedi ki bir daha denenmesin;
+// ÖLÇÜLDÜ VE İKİ AYRI SEBEPTEN YANLIŞ SONUÇ VERDİĞİ GÖRÜLDÜ:
+//
+//   1) "Yüz dışındaki EN BÜYÜK ten-benzeri bileşen" uzuv değil. Kullanıcının
+//      silik el bildirdiği iki karede oranı 0.85 ve 0.68 ölçtü — 101 karelik
+//      gerçek dağılımın p75'inin ÜSTÜ, yani temiz taraf. Ölçtüğü şey silik el
+//      değil, keskin boyun/göğüstü idi. Krem duvarla kol aynı bileşene
+//      giriyor: chunk 0'da tek bileşen karenin %80.8'ini kaplıyordu.
+//   2) Kusurun kendisi bulanıklık DEĞİL. Hayalet el yarı saydam; içinden
+//      görünen zemin yüksek frekans ekliyor. chunk 1'in hayalet eli, aynı
+//      karedeki yüz cildinden 2.53 KAT daha keskin ölçüldü. Hiçbir Laplacian
+//      eşiği bu kusuru yakalayamaz — kapı Vision'ın uzuv kırpması yargısına
+//      taşındı (bkz. limbBox.js judgeLimbCrop).
+//
+// Aşağıdaki özgün gerekçe tarihsel kayıt olarak duruyor:
 //
 // SORUN (2026-08-13, gerçek olay): kullanıcı elin/parmakların silik/bulanık
 // çıktığı bir kare bildirdi. Mevcut netlik kapısı (BLUR_VARIANCE_MIN, bkz.
@@ -1705,13 +1735,214 @@ async function measureLimbSharpness(outputBuf) {
   }
 }
 
+// Kutu içindeki pikselin uzuv sayılması için yüz tonuna izin verilen en büyük
+// Lab uzaklığı. VERİYLE SEÇİLDİ: chunk 0'ın uzuv kutusunda ten sayılan piksel
+// adedi yarıçap 14'te 12.660, 18'de 30.749'a fırlıyor — krem duvar tam bu
+// aralıkta maskeye giriyor. 14, duvarı dışarıda tutarken uzvun sapan
+// piksellerini içeride bırakan en geniş değer.
+const LIMB_TONE_RADIUS = 14;
+
+// Maskeli Laplacian: verilen kutuyu orijinal çözünürlükte çıkarır, içindeki
+// UZUV piksellerini seçer ve varyansı yalnızca onlarda hesaplar.
+//
+// NEDEN MASKELİ: kutu kaba bir dikdörtgen. Ham kutu varyansı içindeki
+// duvar/kumaş kenarlarıyla dolar — ölçümde şikâyet EDİLMEYEN chunk 7 en kötü
+// oranı (0.100), şikâyet EDİLEN chunk 0 ise iyi tarafı (0.840) gösteriyordu.
+//
+// NEDEN İKİ AŞAMALI SEÇİM: YCbCr ten kuralı TEK BAŞINA yetmiyor, krem duvarı
+// ve bej pantolonu da ten sayıyor (chunk 0'da 54.991 piksel, çoğu duvar).
+// İkinci şart olarak yüz tonuna Lab yakınlığı aranıyor.
+//
+// Döner: { variance, count, tone }.
+async function maskedLaplacianVariance(buf, box, faceTone = null, radius = LIMB_TONE_RADIUS) {
+  const rect = {
+    left: Math.max(0, Math.round(box.x)),
+    top: Math.max(0, Math.round(box.y)),
+    width: Math.max(1, Math.round(box.width)),
+    height: Math.max(1, Math.round(box.height)),
+  };
+  const [rgb, lap] = await Promise.all([
+    sharp(buf).extract(rect).removeAlpha().raw().toBuffer(),
+    sharp(buf)
+      .extract(rect)
+      .grayscale()
+      .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], offset: 128 })
+      .raw()
+      .toBuffer(),
+  ]);
+  const n = lap.length;
+  const idx = [];
+  const labs = [];
+  for (let i = 0; i < n; i++) {
+    const o = i * 3;
+    const r = rgb[o], g = rgb[o + 1], b = rgb[o + 2];
+    if (!isSkinLike(r, g, b)) continue;
+    const lab = rgbToLab(r, g, b);
+    if (faceTone && labDistance(lab, faceTone) > radius) continue;
+    idx.push(i);
+    labs.push(lab);
+  }
+  if (!idx.length) return { variance: null, count: 0, tone: null };
+  let mean = 0;
+  for (const i of idx) mean += lap[i];
+  mean /= idx.length;
+  let variance = 0;
+  for (const i of idx) {
+    const d = lap[i] - mean;
+    variance += d * d;
+  }
+  return { variance: variance / idx.length, count: idx.length, tone: medianLab(labs) };
+}
+
+/**
+ * VERİLEN KUTULARDA uzuv ölçümü — netlik ve ten farkı, tek geçişte.
+ *
+ * Kutular limbBox.js'ten gelir (kırpma + numaralı ızgara); gerekçesi orada.
+ *
+ * REFERANS NEDEN YÜZ CİLDİ: netliği kare geneline bölmek elmayla armut
+ * karşılaştırmasıydı — cilt doğası gereği düz, kare geneli ise kenar dolu.
+ * Aynı karedeki YÜZ CİLDİ ise uzuvla aynı cinsten: aynı kişi, aynı ışık, aynı
+ * doku ve model yüzü her zaman düzgün çiziyor. "El yüz kadar net mi" sorusu
+ * doğrudan bu oranla ölçülür.
+ *
+ * AÇIKLIK (L) NEDEN AYRI RAPORLANIYOR: şikâyet edilen chunk 4'te el/başparmak
+ * bileşenlerinin yüzden KROMA farkı 1.5-3.5 çıktı, yani renk tonu neredeyse
+ * aynı; toplam Lab farkı ise 8.1 idi ve aradaki fark ~13 birim AÇIKLIKTA
+ * duruyordu. chromaDistance L'yi tamamen atar, labDistance 0.6 ile bastırır
+ * (gölge toleransı için) — kullanıcının gördüğü fark tam olarak bu iki
+ * fonksiyonun görmediği yerde. Bu yüzden ikisi de ayrı ayrı dönülüyor.
+ *
+ * ÖLÇER, ELEMEZ. Eşik gerçek dağılım toplanmadan konmayacak (dosyadaki
+ * KONUM KAPISI/dx ve HEAD_VS_BODY'nin izlediği aynı usul).
+ *
+ * boxes: [{x,y,w,h}] — 0-1 normalize, orijinal kare koordinatında.
+ * Döner: { ok, regions, faceVar, worstRatio, maxChroma, maxDeltaL }
+ *        | { ok:false, reason }.
+ */
+async function measureLimbRegion(outputBuf, boxes) {
+  try {
+    if (!outputBuf || !Array.isArray(boxes) || boxes.length === 0) {
+      return { ok: false, reason: "no-box" };
+    }
+    const face = await detectMainFace(outputBuf);
+    if (!face) return { ok: false, reason: "no-face" };
+    const px = await rawPixels(outputBuf);
+    if (!px) return { ok: false, reason: "insufficient-input" };
+    const faceTone = sampleFaceTone(px, face.box);
+    if (!faceTone) return { ok: false, reason: "insufficient-sample" };
+
+    const meta = await sharp(outputBuf).metadata();
+    if (!meta.width || !meta.height) return { ok: false, reason: "insufficient-input" };
+
+    // Yüz cildi referansı: sampleFaceTone ile AYNI yanak bandı (gözler, kaşlar,
+    // saç çizgisi ve ağız dışarıda — bunlar ten değil ve varyansı şişirirler).
+    const faceBand = {
+      x: face.box.x + face.box.width * 0.20,
+      y: face.box.y + face.box.height * 0.45,
+      width: face.box.width * 0.60,
+      height: face.box.height * 0.35,
+    };
+    const faceMeasure = await maskedLaplacianVariance(outputBuf, faceBand, faceTone);
+    if (!faceMeasure.variance || faceMeasure.count < 100) {
+      return { ok: false, reason: "face-reference-unmeasurable" };
+    }
+    const faceVar = faceMeasure.variance;
+    // Yüz tonu artık AYNI maskeyle yeniden ölçülüyor: uzuvla birebir aynı
+    // seçim kuralından geçmeyen bir referansa göre fark almak yanıltır.
+    const faceRef = faceMeasure.tone || faceTone;
+
+    const regions = [];
+    for (const b of boxes) {
+      const box = {
+        x: b.x * meta.width, y: b.y * meta.height,
+        width: b.w * meta.width, height: b.h * meta.height,
+      };
+      if (box.width < 8 || box.height < 8) continue;
+      const limb = await maskedLaplacianVariance(outputBuf, box, faceTone);
+      // Orijinal çözünürlükte 400'den az uzuv pikseli kalan bölgede hem varyans
+      // hem medyan gürültüdür; ölçümü null bırakıyoruz.
+      const measurable = limb.variance != null && limb.count >= 400;
+      regions.push({
+        skinPx: limb.count,
+        localVar: limb.variance,
+        ratio: measurable ? limb.variance / faceVar : null,
+        chroma: measurable ? chromaDistance(limb.tone, faceRef) : null,
+        deltaL: measurable ? Math.abs(limb.tone[0] - faceRef[0]) : null,
+        box: b,
+      });
+    }
+    if (!regions.length) return { ok: false, reason: "box-too-small" };
+
+    const ratios = regions.map((r) => r.ratio).filter((v) => v != null);
+    const chromas = regions.map((r) => r.chroma).filter((v) => v != null);
+    const deltaLs = regions.map((r) => r.deltaL).filter((v) => v != null);
+    return {
+      ok: true,
+      regions,
+      faceVar,
+      faceSkinPx: faceMeasure.count,
+      // EN KÖTÜ bölge belirleyici: iki elden biri silikse ortalama onu saklar.
+      worstRatio: ratios.length ? Math.min(...ratios) : null,
+      maxChroma: chromas.length ? Math.max(...chromas) : null,
+      maxDeltaL: deltaLs.length ? Math.max(...deltaLs) : null,
+    };
+  } catch (e) {
+    console.error("Uzuv bölge ölçümü hata verdi (atlanıyor):", e.message || e);
+    return { ok: false, reason: "error" };
+  }
+}
+
+/**
+ * Taban/çıktı iris konumu. Gözbebeğinin göz açıklığındaki 0..1 yeri.
+ * Ölçülemezse null (fail-safe: bakış kapısı susar).
+ */
+async function measureIrisGaze(buf) {
+  try {
+    const faceapi = await ensureModelsLoaded();
+    const { tensor } = await bufferToTensorScaled(buf);
+    try {
+      const result = await faceapi
+        .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
+          minConfidence: MIN_DETECTION_CONFIDENCE,
+        }))
+        .withFaceLandmarks();
+      if (!result) return null;
+      const [h, w] = tensor.shape;
+      const { data } = await sharp(buf)
+        .resize(w, h, { fit: "fill" })
+        .grayscale()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const { irisOffsetFromGray } = require("./gazeGate");
+      const p = result.landmarks.positions;
+      const left = irisOffsetFromGray(data, w, h, p.slice(36, 42));
+      const right = irisOffsetFromGray(data, w, h, p.slice(42, 48));
+      const parts = [left, right].filter(Boolean);
+      if (!parts.length) return null;
+      return {
+        irisX: parts.reduce((a, q) => a + q.x, 0) / parts.length,
+        irisY: parts.reduce((a, q) => a + q.y, 0) / parts.length,
+        eyeWidth: parts.reduce((a, q) => a + q.width, 0) / parts.length,
+        eyes: parts.length,
+      };
+    } finally {
+      tensor.dispose();
+    }
+  } catch (e) {
+    console.error("Iris bakış ölçümü hata verdi (atlanıyor):", e.message || e);
+    return null;
+  }
+}
+
 module.exports = {
   analyzeReferences,
   assessSkinToneConsistency,
+  measureLimbRegion,
   measureFaceToneVsRef,
   correctLimbChroma,
   measureHeadPlacement,
   measureLimbSharpness,
+  measureIrisGaze,
   headYawOf,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,

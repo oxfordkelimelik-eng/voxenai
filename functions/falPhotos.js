@@ -1018,11 +1018,13 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
     "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
     "viewer would not immediately recognise the selfie person, the edit failed.\n" +
-    "P2 GAZE AND HEAD ANGLE — the eyes must look EXACTLY where the BASE person's eyes look (camera, " +
-    "left, right, up, down) and the head must keep the BASE person's turn angle to the same degree. " +
-    "Do not rotate, straighten or re-centre the head, and do not pull the eyes toward the lens. If the " +
-    "base is in profile or three-quarter, the output stays at that exact angle. Ignore where the target " +
-    "looks in their own selfies — the base decides gaze and angle, always.\n" +
+    "P2 GAZE AND HEAD ANGLE — the eyes must look at the EXACT same point in the scene as the BASE " +
+    "person's eyes. Copy the iris position inside each eye opening from the first image. A coarse match " +
+    "(both looking 'left' or both 'at camera') is NOT enough if the irises sit in a different place. " +
+    "The head must keep the BASE person's turn angle to the same degree. Do not rotate, straighten or " +
+    "re-centre the head, and do not pull the eyes toward the lens. If the base is in profile or " +
+    "three-quarter, the output stays at that exact angle. Ignore where the target looks in their own " +
+    "selfies — the base decides gaze and angle, always.\n" +
     "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
     "that same count in the output. Never take head scale " +
     "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
@@ -1075,7 +1077,10 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
     "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
     "TATTOOS: the output has none — remove the base person's.\n\n" +
-    "QUALITY: the face sits under the scene's existing light; add none of your own. The result must " +
+    "QUALITY: the face sits under the scene's existing light; add none of your own. If a selfie was " +
+    "shot under flash or a bright key light, do NOT copy that sheen or hot-spot onto the output face — " +
+    "strip that extra light and place the skin under the FIRST image's scene light only, consistent " +
+    "with the visible arms. The result must " +
     "look like an ordinary unedited phone photo — real skin texture, no airbrush, beauty filter or " +
     "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
     "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
@@ -1959,7 +1964,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "using the viewer's left/right (not the person's). Answer CAMERA when the irises meet the lens, " +
          "LEFT or RIGHT when they look to that side of the frame, UP or DOWN when the vertical is what " +
          "stands out, and AWAY only when the eyes are visible but their direction genuinely cannot be " +
-         "read. Report IMAGE 2 (base) first, then IMAGE 1 (output).\n" +
+         "read. NEVER copy IMAGE 2's token onto IMAGE 1 to look consistent. If one image meets the " +
+         "lens and the other looks off-camera, the two lines MUST differ. After the two tokens, also " +
+         "judge whether they look at the SAME point: SAME only if the irises sit in the same place in " +
+         "the eye opening and aim at the same spot in the scene. Both labelled CAMERA (or both LEFT) " +
+         "can still be DIFFERENT if one looks slightly off. Report IMAGE 2 (base) first, then IMAGE 1 " +
+         "(output).\n" +
          "H) HAND QUALITY — visible hands in IMAGE 1: blurry, melted, wrong finger count → fail.\n" +
          "I) FACE EXPOSURE — IMAGE 1 face blown out / unnaturally luminous vs its scene → fail.\n" +
          "J) HEAD ORIENTATION FIT — IMAGE 1 head orientation must fit its body/scene AND match IMAGE 2's " +
@@ -1973,8 +1983,15 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "shoulders are going, or was the face rotated toward the camera to make it easier to draw? " +
          "ALIGNED: head and body share one direction (a 3/4 portrait whose chest also faces that way " +
          "is ALIGNED). PULLED_TO_CAMERA: the body is walking or turned aside but the face has been " +
-         "yanked toward the lens so the eyes meet the camera. Ignore IMAGE 2 for this line.\n\n" +
-         "Reply on exactly twelve lines:\n" +
+         "yanked toward the lens so the eyes meet the camera. Ignore IMAGE 2 for this line.\n" +
+         "M) FACE vs ARM LIGHT — look ONLY at IMAGE 1. Compare the LIGHT on the face with the LIGHT on " +
+         "visible bare arms or hands (ignore clothes). MATCHED: one lighting setup — if the face is " +
+         "lit, the arms show the same key light, similar highlight strength and the same direction. " +
+         "FACE_OVERLIT: the face is clearly lit (sheen, key-light, flash/studio look) while the arms/" +
+         "hands stay matte and much darker, as if they were shot under a different light. Ordinary " +
+         "portrait falloff that still reaches the arms is MATCHED. Skin-tone differences are question " +
+         "C, not this line.\n\n" +
+         "Reply on exactly fourteen lines:\n" +
          "BODY_INTEGRITY: <SOLID | TRANSPARENT_OR_GHOSTED>\n" +
          "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
          "HEAD_VS_BODY: <ALIGNED | PULLED_TO_CAMERA>\n" +
@@ -1982,21 +1999,23 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "OUTPUT_HEAD_SPAN: <1.5 | 2 | 2.5 | 3 | 3.5 | 4 | NO_SHOULDERS>\n" +
          "BASE_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY>\n" +
          "OUTPUT_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY>\n" +
+         "GAZE_POINT: <SAME | DIFFERENT>\n" +
          "NECK_ATTACHMENT: <NORMAL | STRETCHED_OR_DETACHED | PUSHED_BACK>\n" +
          "SKIN_TONE: <CONSISTENT | HANDS_OR_ARMS_MISMATCH>\n" +
          "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
          "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
+         "FACE_ARM_LIGHT: <MATCHED | FACE_OVERLIT>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first eleven lines before the verdict. The head-span and gaze lines are MEASUREMENTS, " +
+         "Decide the first thirteen lines before the verdict. The head-span and gaze lines are MEASUREMENTS, " +
          "not judgements — report what each image actually shows even when the two disagree, and never " +
          "copy one line into the other just to look consistent. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: OUTPUT_HEAD_SPAN smaller than " +
          "BASE_HEAD_SPAN (fewer head-widths across the shoulders means a bigger head) -> " +
          "BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
-         "BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
+         "BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. FACE_OVERLIT -> BAD_FACE_LIGHT. " +
          "WRONG_FOR_SCENE -> BAD_ORIENTATION. TRANSPARENT_OR_GHOSTED -> BAD_GHOSTING. " +
-         "PULLED_TO_CAMERA -> BAD_PULLED. " +
+         "PULLED_TO_CAMERA -> BAD_PULLED. GAZE_POINT DIFFERENT -> BAD_GAZE. " +
          "Check every question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
          "BAD_QUALITY: <what looks broken>\n" +
@@ -2005,6 +2024,8 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "BAD_ATTACHMENT: <e.g. neck stretched, head floating behind the body, head pushed back>\n" +
          "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
          "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
+         "BAD_FACE_LIGHT: <e.g. face flash-lit, arms still dark and matte>\n" +
+         "BAD_GAZE: <e.g. eyes look at a different point than the base>\n" +
          "BAD_ORIENTATION: <e.g. head turn differs from base>\n" +
          "BAD_GHOSTING: <e.g. right arm see-through, railing visible through torso>\n" +
          "BAD_PULLED: <e.g. walking aside but face yanked to the lens>")
@@ -2070,8 +2091,13 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "L) HEAD VS BODY — does the face point the same way the torso / walk / shoulders are going, " +
          "or was the face rotated toward the camera to make it easier to draw? ALIGNED if head and " +
          "body share one direction. PULLED_TO_CAMERA if the body walks or turns aside but the face " +
-         "was yanked toward the lens.\n\n" +
-         "Reply on exactly ten lines:\n" +
+         "was yanked toward the lens.\n" +
+         "M) FACE vs ARM LIGHT — compare the LIGHT on the face with the LIGHT on visible bare arms " +
+         "or hands (ignore clothes). MATCHED if they share one lighting. FACE_OVERLIT if the face is " +
+         "clearly lit (sheen, key-light, flash/studio look) while the arms/hands stay matte and much " +
+         "darker, as if shot under a different light. Ordinary portrait falloff that still reaches " +
+         "the arms is MATCHED. Skin-tone differences are question C, not this line.\n\n" +
+         "Reply on exactly eleven lines:\n" +
          "BODY_INTEGRITY: <SOLID | TRANSPARENT_OR_GHOSTED>\n" +
          "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
          "HEAD_VS_BODY: <ALIGNED | PULLED_TO_CAMERA>\n" +
@@ -2081,11 +2107,13 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "GAZE_DIRECTION: <NATURAL | WRONG_DIRECTION>\n" +
          "HAND_QUALITY: <NORMAL | BLURRY_OR_MALFORMED>\n" +
          "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
+         "FACE_ARM_LIGHT: <MATCHED | FACE_OVERLIT>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first nine lines before the verdict. Binding rules — the verdict MUST match " +
+         "Decide the first ten lines before the verdict. Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: HEAD_LARGE -> BAD_PROPORTION. " +
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
          "WRONG_DIRECTION -> BAD_GAZE. BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. " +
+         "FACE_OVERLIT -> BAD_FACE_LIGHT. " +
          "WRONG_FOR_SCENE -> BAD_ORIENTATION. TRANSPARENT_OR_GHOSTED -> BAD_GHOSTING. " +
          "PULLED_TO_CAMERA -> BAD_PULLED. " +
          "Check every question before answering GOOD. Verdict is one of:\n" +
@@ -2097,6 +2125,7 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "BAD_GAZE: <e.g. eyes point a different way than the head is turned>\n" +
          "BAD_HANDS: <e.g. fingers blurry/melted, wrong finger count>\n" +
          "BAD_EXPOSURE: <e.g. face blown out, detail lost to white>\n" +
+         "BAD_FACE_LIGHT: <e.g. face flash-lit, arms still dark and matte>\n" +
          "BAD_ORIENTATION: <e.g. head turned away from what the body faces>\n" +
          "BAD_GHOSTING: <e.g. right arm see-through, railing visible through torso>\n" +
          "BAD_PULLED: <e.g. walking aside but face yanked to the lens>");
@@ -2127,7 +2156,7 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
         // haklı mı yoksa gürültülü mü olduğunu ancak "neden reddettiğini"
         // görerek anlayabiliriz (bkz. 2026-07-30: 0.305 mesafeli en iyi kare
         // reddedilirken 0.448'lik kare kabul edildi — sayıyla örtüşmüyor).
-        max_tokens: 120,
+        max_tokens: 200,
         temperature: 0,
         messages: [
           { role: "system", content: VISION_SYSTEM_MSG },
@@ -2210,6 +2239,11 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // Bu satır YALNIZCA çıktıya bakar: gövde/yürüyüş bir yöne, yüz merceğe
     // çekilmişse PULLED_TO_CAMERA.
     const isHeadBodyLine = (l) => /^HEAD_VS_BODY/.test(l.toUpperCase());
+    // FACE_ARM_LIGHT (2026-09-07, b1d6972b): yüz ışıklı, kollar mat/koyu.
+    // Ham L* eşiği şikâyetli ve şikâyetsiz kareleri ayıramadı; bu satır
+    // ışık yönünü/şiddetini görür, ten tonunu (SKIN_TONE) karıştırmaz.
+    const isFaceLightLine = (l) => /^FACE_ARM_LIGHT/.test(l.toUpperCase());
+    const isGazePointLine = (l) => /^GAZE_POINT/.test(l.toUpperCase());
     // KARŞILAŞTIRMAYI ARTIK KOD YAPIYOR (2026-09-06). Taban modunda Vision'a
     // "kafa oranı/bakış tabanla eşleşiyor mu?" diye SORMUYORUZ; iki görselin
     // ölçümünü AYRI AYRI isteyip farkı burada hesaplıyoruz.
@@ -2234,6 +2268,8 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     const orientationLine = lines.find(isOrientationLine);
     const integrityLine = lines.find(isIntegrityLine);
     const headBodyLine = lines.find(isHeadBodyLine);
+    const faceLightLine = lines.find(isFaceLightLine);
+    const gazePointLine = lines.find(isGazePointLine);
     const baseSpanLine = lines.find(isBaseSpanLine);
     const outSpanLine = lines.find(isOutSpanLine);
     const baseGazeLine = lines.find(isBaseGazeLine);
@@ -2241,7 +2277,9 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     const verdictLine = lines.find(
       (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) &&
              !isHandLine(l) && !isExposureLine(l) && !isOrientationLine(l) &&
-             !isIntegrityLine(l) && !isHeadBodyLine(l) && !isBaseSpanLine(l) && !isOutSpanLine(l) &&
+             !isIntegrityLine(l) && !isHeadBodyLine(l) && !isFaceLightLine(l) &&
+             !isGazePointLine(l) &&
+             !isBaseSpanLine(l) && !isOutSpanLine(l) &&
              !isBaseGazeLine(l) && !isOutGazeLine(l)
     ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
@@ -2253,6 +2291,8 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (orientationLine) console.log(`VISION ÖLÇÜM (kafa yönelimi): ${orientationLine}`);
     if (integrityLine) console.log(`VISION ÖLÇÜM (gövde bütünlüğü): ${integrityLine}`);
     if (headBodyLine) console.log(`VISION ÖLÇÜM (kafa/gövde): ${headBodyLine}`);
+    if (faceLightLine) console.log(`VISION ÖLÇÜM (yüz/kol ışığı): ${faceLightLine}`);
+    if (gazePointLine) console.log(`VISION ÖLÇÜM (bakış noktası): ${gazePointLine}`);
     if (baseSpanLine || outSpanLine) console.log(`VISION ÖLÇÜM (kafa açıklığı): ${baseSpanLine || "—"} / ${outSpanLine || "—"}`);
     if (baseGazeLine || outGazeLine) console.log(`VISION ÖLÇÜM (bakış): ${baseGazeLine || "—"} / ${outGazeLine || "—"}`);
 
@@ -2280,23 +2320,22 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
         detail: verdictDetail() || `kafa açıklığı ${baseSpan} -> ${outSpan}`,
       };
     }
-    // BAKIŞ: ŞİMDİLİK YALNIZCA ÖLÇÜM, ELEME YOK (2026-09-06).
+    // BAKIŞ: İKİ SATIR DA OKUNABİLİYORSA VE FARKLIYSA ELEME (2026-09-07).
     //
-    // Bu iki satır (BASE_GAZE / OUTPUT_GAZE) eski tek soruluk "GAZE_DIRECTION"
-    // kontrolünün yerine kondu ve ondan çok daha canlı: eski soru 21 günde
-    // 135 karenin 135'ine "NATURAL" derken, yeni ölçüm gerçek karelerde
-    // farklılık üretiyor. AMA gözle doğrulama, bu farklılıkların çoğunun
-    // TABANIN yanlış okunmasından geldiğini gösterdi: güvenilir eşleşen 11
-    // karede 4 uyuşmazlık çıktı, 3'ünde taban kişi aslında kameraya bakıyordu
-    // (Vision "DOWN"/"LEFT"/"RIGHT" demişti) — yani kare kusursuzdu.
-    // 4'te 3 yanlış pozitifle eleme yapmak, kullanıcının asıl şikâyeti olan
-    // "gereksiz ret" sorununu büyütürdü.
-    //
-    // Bu yüzden karar bir kez daha SAYISAL kapıya bırakıldı: kafanın tabandan
-    // kameraya çevrilmesi YAW ile ölçülüyor (bkz. YAW_TO_CAMERA_DROP_MAX,
-    // kullanıcının bildirdiği kareyi yakalıyor). Buradaki iki satır loglanıyor
-    // ki dağılım birikince eleme kuralına dönüştürülüp dönüştürülemeyeceğine
-    // veriyle karar verilebilsin — dosyadaki diğer kapılarla aynı usul.
+    // 2026-09-06'da bu kapı kapalıydı: 4 uyuşmazlığın 3'ü tabanın yanlış
+    // okunmasıydı. b1d6972b teslim chunk 0 bunu boşa çıkardı — satırlar
+    // CAMERA / RIGHT idi, kullanıcı "tabanla aynı yere bakmıyor" dedi ve
+    // kare geçti. Artık karşılaştırma kodda: taban ve çıktı token'ı farklıysa
+    // (AWAY / satır yok hariç, fail-safe) reason=gaze.
+    {
+      const { isGazeMismatch } = require("./gazeGate");
+      if (isGazeMismatch(baseGazeLine, outGazeLine)) {
+        return {
+          ok: false, reason: "gaze", inconclusive: false,
+          detail: verdictDetail() || `${baseGazeLine} / ${outGazeLine}`,
+        };
+      }
+    }
 
     // HEAD_LARGE bağlayıcıdır: model sınıfı "büyük" deyip verdict'i GOOD
     // bırakırsa (talimata rağmen olabiliyor) kare yine de reddedilir —
@@ -2321,6 +2360,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // bu soru ise gözün/bakışın kendisini değerlendiriyor — farklı sinyaller.
     if (gazeLine && /WRONG_DIRECTION/i.test(gazeLine)) {
       return { ok: false, reason: "gaze", detail: verdictDetail() || "WRONG_DIRECTION", inconclusive: false };
+    }
+    // GAZE_POINT DIFFERENT — kaba token aynı kalsa bile bakış noktası ayrı
+    // (b1d6972b c1/c2/c3: her iki satır CAMERA veya RIGHT, kullanıcı yine
+    // "aynı yere bakmıyor" dedi).
+    if (gazePointLine && /DIFFERENT/i.test(gazePointLine)) {
+      return { ok: false, reason: "gaze", detail: verdictDetail() || "GAZE_POINT DIFFERENT", inconclusive: false };
     }
     // BLURRY_OR_MALFORMED bağlayıcıdır — aynı yöntem: 2026-08-13'te kullanıcı,
     // tüm-kare netlik kapısı ve RENK-odaklı ten kapısı geçtiği hâlde elin
@@ -2351,6 +2396,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // (bkz. isPulledToCameraNumeric). Vision bir kez PULLED derse yine red.
     if (headBodyLine && /PULLED_TO_CAMERA/i.test(headBodyLine)) {
       return { ok: false, reason: "pulled-to-camera", detail: verdictDetail() || "PULLED_TO_CAMERA", inconclusive: false };
+    }
+    // FACE_OVERLIT bağlayıcıdır — yüz ışıklı, kollar mat/koyu (b1d6972b
+    // teslim chunk 0/1/2). Ham L* eşiği bağlanmadı: şikâyetsiz karelerde
+    // de yüz-kol L* farkı yüksekti.
+    if (faceLightLine && /FACE_OVERLIT/i.test(faceLightLine)) {
+      return { ok: false, reason: "face-light", detail: verdictDetail() || "FACE_OVERLIT", inconclusive: false };
     }
 
     const answer = verdictLine.toUpperCase();
@@ -2418,6 +2469,7 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // ayrıca güvence — diğer "identity" dışı sebeplerle aynı desen.
     if (answer.startsWith("BAD_GHOSTING")) return { ok: false, reason: "ghosting", detail, inconclusive: false };
     if (answer.startsWith("BAD_PULLED")) return { ok: false, reason: "pulled-to-camera", detail, inconclusive: false };
+    if (answer.startsWith("BAD_FACE_LIGHT")) return { ok: false, reason: "face-light", detail, inconclusive: false };
     if (answer.startsWith("BAD_QUALITY")) return { ok: false, reason: "quality", detail, inconclusive: false };
     if (answer.startsWith("BAD")) return { ok: false, reason: "quality", detail, inconclusive: false }; // referanssız mod
     if (answer.startsWith("GOOD")) return { ok: true, reason: null, detail, inconclusive: false };
@@ -2481,6 +2533,7 @@ const REJECTION_REASON_LABELS = {
   "vision-attachment": "Boyun/baş bağlantısı doğal görünmüyor",
   "vision-skin": "El/kol teni yüz teniyle uyuşmuyor",
   "vision-gaze": "Bakış yönü taban fotoğrafla uyuşmuyor",
+  "iris-gaze": "Bakış yönü taban fotoğrafla uyuşmuyor",
   "vision-hands": "Eller bulanık/bozuk çıktı",
   "vision-identity": "Yüz hatları referansla yeterince eşleşmedi",
   "vision-hair": "Saç uyumsuzluğu tespit edildi",
@@ -2489,6 +2542,9 @@ const REJECTION_REASON_LABELS = {
   "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
   "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
   "vision-ghosting": "Gövde/kol yarı saydam çıktı (arka plan içinden görünüyor)",
+  "limb-ghost": "El/kol yarı saydam, bozuk ya da sıvanmış çıktı",
+  "yaw-under-rotate": "Baş, tabandaki profil dönüşünü bitirmemiş",
+  "vision-face-light": "Yüz ışığı kol/el ışığıyla uyuşmuyor",
   // NOT: no-face-* etiketleri KALDIRILDI (2026-08-22) — artık eleme sebebi
   // değiller (bkz. KONUM KAPISI'ndaki geri alma gerekçesi). O kuralın kısa
   // süre yürürlükte olduğu dönemde kaydedilen kareler etkilenmez: gerekçe
@@ -2902,7 +2958,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -2934,9 +2990,27 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
   // Şablon değişirse aşağıda undefined'a döndürülür ki yeniden ölçülsün.
   let templateYaw;
+  let templateIris;
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
+    // HEARTBEAT (2026-09-07 gerçek olay): cleanupStuckGenJobs her 5 dakikada
+    // bir 'generating' işlerde updatedAt'i kontrol ediyor; updatedAt SADECE
+    // bir chunk tamamen bitince (finalizeChunk) güncelleniyordu. Bir chunk
+    // kalite kapısından defalarca dönüp (iris-gaze/yaw/skin-tone vb.) 6
+    // denemeyi 5 dakikadan uzun sürede tüketirse, hiçbir chunk henüz
+    // bitmediği için updatedAt bayatlıyor; cleanupStuckGenJobs işi HÂLÂ
+    // AKTİFKEN "takılı" sanıp refundAndFail çağırıyor — bu da
+    // deleteTrainingPhotos ile referans selfie'leri Storage'dan siliyor,
+    // ama bu fonksiyon çalışmaya devam ettiği için sonraki denemeler
+    // artık silinmiş referansı indirmeye çalışıp 403 alıyor (görüntü:
+    // "referans indirilemedi: 403" -> generateForMode null -> chunk kaybı,
+    // kullanıcıda kesintili üretim / bağlantı hatası). Her deneme başında
+    // updatedAt'i tazeleyerek gerçekten çalışan işlerin erken öldürülmesini
+    // engelliyoruz. Fire-and-forget: bu heartbeat'in başarısız olması
+    // üretimi bloklamamalı.
+    jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+
     // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI
     // tuvali kullanıyordu. Sorun şablondan geliyorsa tekrar denemek boşuna —
     // gerçek örnek: 0.802 ve 0.800, iki denemede neredeyse aynı sonuç, çünkü
@@ -2947,6 +3021,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       if (next) {
         ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
+        templateIris = undefined;
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
@@ -3048,7 +3123,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // şablon değişince yeniden ölçülür (bkz. yukarıdaki sıfırlama).
       try {
         const { headYawOf } = require("./faceQuality");
-        const { isPulledToCameraNumeric } = require("./headBodyGate");
+        const { isPulledToCameraNumeric, isUnderRotated } = require("./headBodyGate");
         const tplBufForYaw = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
         if (templateYaw === undefined) templateYaw = await headYawOf(tplBufForYaw);
         const pulledNoTpl = isPulledToCameraNumeric(templateYaw ?? null, outYaw ?? null);
@@ -3067,16 +3142,18 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           // Aynı yöne bakarken dönüş abartılmış mı? (bkz. YAW_OVER_ROTATE_*)
           const overRotate = templateYaw >= YAW_OVER_ROTATE_TEMPLATE_MIN &&
                              drift >= YAW_OVER_ROTATE_RISE_MIN;
+          const underRotate = isUnderRotated(templateYaw, outYaw);
           const yawVerdict = bad ? "RED[yaw-drift]"
             : toCamera ? "RED[yaw-to-camera]"
             : overRotate ? "RED[yaw-over-rotate]"
+            : underRotate ? "RED[yaw-under-rotate]"
             : "GEÇTİ";
           // GEÇEN kareler de loglanıyor — eşik ancak gerçek dağılım görülerek
           // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
-          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate} çekildi=${pulledNoTpl}`);
-          if (bad || toCamera || overRotate) {
+          console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate} eksikDönme=${underRotate} çekildi=${pulledNoTpl}`);
+          if (bad || toCamera || overRotate || underRotate) {
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-              mode, gate: bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : "yaw-over-rotate",
+              mode, gate: bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : overRotate ? "yaw-over-rotate" : "yaw-under-rotate",
               distance: mathDist,
               detail: `çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)}`,
             });
@@ -3097,6 +3174,33 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         }
       } catch (e) {
         console.error("OpenAI yolu: yaw kapısı hata verdi (bu katman atlanıyor):", e);
+      }
+
+      // İRİS BAKIŞI — kaba Vision sınıfı (CAMERA/LEFT) aynı kalsa bile
+      // gözbebeği kaymışsa tabanla aynı yere bakılmıyor demektir.
+      try {
+        const { measureIrisGaze } = require("./faceQuality");
+        const { isIrisGazeMismatch } = require("./gazeGate");
+        const tplBufForIris = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+        if (templateIris === undefined) templateIris = await measureIrisGaze(tplBufForIris);
+        const outIris = await measureIrisGaze(buf);
+        const irisBad = isIrisGazeMismatch(templateIris, outIris);
+        const bx = templateIris && templateIris.irisX != null ? templateIris.irisX.toFixed(2) : "null";
+        const ox = outIris && outIris.irisX != null ? outIris.irisX.toFixed(2) : "null";
+        console.log(
+          `İRİS ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+          `${irisBad ? "RED[iris-gaze]" : "GEÇTİ"} taban=${bx} çıktı=${ox}`
+        );
+        if (irisBad) {
+          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+            mode, gate: "iris-gaze", distance: mathDist,
+            detail: `taban=${bx} çıktı=${ox}`,
+          });
+          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          break;
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: iris bakış kapısı hata verdi (atlanıyor):", e);
       }
 
       // templateInput kırpma yapıldıysa Buffer, yapılmadıysa URL string'idir.
@@ -3121,6 +3225,22 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         if (cc.applied && cc.buf) buf = cc.buf;
       } catch (e) {
         console.error("OpenAI yolu: uzuv kroma düzeltmesi hata verdi (atlanıyor):", e);
+      }
+
+      // YÜZ PARLAMASI — selfie flaş/anahtar ışığı çıktı yüzüne kopyalanmışsa
+      // speküler lekeleri alır. Genel sahne güneşini karartmaz (alan tavanı).
+      try {
+        const { reduceFaceSpecular } = require("./faceShine");
+        const sh = await reduceFaceSpecular(buf, { selfieLit: !!refHasFaceShine });
+        const sr = sh.shineRatio != null ? sh.shineRatio.toFixed(3) : "null";
+        console.log(
+          `YÜZ PARLAMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+          `${sh.applied ? "ALINDI" : `ATLANDI[${sh.reason}]`} oran=${sr}` +
+          `${sh.changed != null ? ` piksel=${sh.changed}` : ""} selfieIşık=${!!refHasFaceShine}`
+        );
+        if (sh.applied && sh.buf) buf = sh.buf;
+      } catch (e) {
+        console.error("OpenAI yolu: yüz parlama düzeltmesi hata verdi (atlanıyor):", e);
       }
 
       // TEN KAPISI — KARAR ÖLÇÜSÜ: "uzuvlar ÇIKTININ KENDİ YÜZÜYLE aynı tonda
@@ -3230,14 +3350,20 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // ile elendi; kullanıcı iki karede de gözle ten sorunu olmadığını, ikisinin
       // de kabul edilmesi gerektiğini söyledi. Vision'ın bu sorusu ışık/gölgeyi
       // ton farkı sanabiliyor. Sayısal ölçüm (uzuv teni ↔ çıktının kendi yüzü)
-      // "tutarlı" diyorsa Vision'ın ten reddi geçersiz sayılır. Ölçüm
-      // YAPILAMADIYSA (yüz yok / yetersiz örnek) hakem yok — Vision'ın reddi
-      // aynen geçerli kalır; kanıtsız affetmiyoruz.
+      // "tutarlı" diyorsa Vision'ın ten reddi geçersiz sayılır. Hedef ve
+      // taban yüz tonu ayırt edilemiyorsa (indistinguishable) hakem yine
+      // geçer: sayısal kapı da fark görememiştir, Vision'ın ışık/gölgeyi
+      // ton sanması bu durumda bağlanmaz (b1d6972b c4a3). Ölçüm YOKSA
+      // (yüz yok / yetersiz örnek) hakem yok — Vision'ın reddi kalır.
       if (!visionOk && visionReason === "skin" &&
-          skinVsFace && skinVsFace.ok && skinVsFace.ratio != null) {
+          skinVsFace && skinVsFace.ok &&
+          (skinVsFace.ratio != null || skinVsFace.reason === "indistinguishable")) {
+        const skinRef = skinVsFace.ratio != null
+          ? `yüzeGöreOran=${skinVsFace.ratio.toFixed(3)}`
+          : "neden=indistinguishable";
         console.warn(
           `VISION TEN REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-          `yüzeGöreOran=${skinVsFace.ratio.toFixed(3)} — sayısal ölçüm teni tutarlı buldu, ` +
+          `${skinRef} — sayısal ölçüm teni tutarlı/ayırt-edilemez buldu, ` +
           `Vision "${visionDetail || "HANDS_OR_ARMS_MISMATCH"}" demişti, kare KABUL edildi`
         );
         visionOk = true;
@@ -3277,21 +3403,66 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         console.error("OpenAI yolu: göz açıklığı kontrolü hata verdi (bu katman atlanıyor):", e);
       }
 
-      // EL/UZUV NETLİK ÖLÇÜMÜ (measureLimbSharpness) — ÖLÇER, ELEMEZ (henüz).
-      // bkz. faceQuality.js başlığı: kullanıcı elin silik/bulanık çıktığı bir
-      // kare bildirdi, tüm-kare netlik kapısı bunu görmüyordu. Gerçek dağılım
-      // toplanana kadar bağlayıcı kapı YAPILMIYOR (KONUM KAPISI/dx'in eşiğe
-      // bağlanmadan önce izlediği aynı yol).
+      // UZUV KAPISI — hayalet/saydam el ELER, ten farkı yalnızca ÖLÇER.
+      //
+      // ESKİ KATMAN (measureLimbSharpness) KALDIRILDI: "en büyük ten
+      // bileşenini" uzuv sayıyordu ve şikâyet edilen iki karede oranı 0.85 ve
+      // 0.68 ölçtü — 101 karelik gerçek dağılımın p75'inin ÜSTÜ. Ölçtüğü şey
+      // silik el değil, keskin boyun/göğüstü idi. Yerine konum bilgisi
+      // dışarıdan alınıyor (bkz. limbBox.js başlığı: Person kutusuna kırpma +
+      // numaralı ızgara; altı karenin altısında uzvu doğru buldu).
+      //
+      // ELEME YALNIZCA KIRPMA YARGISINDAN: hayalet el saydamlık kusuru olduğu
+      // için Laplacian onu göremiyor (chunk 1'in hayalet eli yüz cildinden
+      // 2.53 kat "keskin" ölçüldü). Yakınlaştırılmış kırpmada sorulan soru ise
+      // altı karenin altısında doğru cevap verdi.
+      //
+      // TEN FARKI ELEMİYOR: sinyal kromada değil AÇIKLIKTA (şikâyet edilen üç
+      // karede 7.3 / 9.2 / 9.8, temiz karelerde 0.4 / 4.0), ama kask karesi
+      // aradaki bantta ve altı kare eşiğe yetmez. Gerçek dağılım toplanana
+      // kadar bağlayıcı DEĞİL — KONUM KAPISI/dx'in izlediği aynı yol.
       try {
-        const { measureLimbSharpness } = require("./faceQuality");
-        const ls = await measureLimbSharpness(buf);
-        if (!ls.ok) {
-          console.log(`EL NETLİK ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${ls.reason}]`);
+        const { locateLimbRegions, judgeLimbCrop, googleObjectAnnotator } = require("./limbBox");
+        const { measureLimbRegion } = require("./faceQuality");
+        const loc = await locateLimbRegions(buf, OPENAI_KEY.value(), googleObjectAnnotator());
+        if (!loc.ok) {
+          console.log(`UZUV KONUM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${loc.reason}]`);
+        } else if (!loc.boxes.length) {
+          console.log(`UZUV KONUM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): görünür çıplak uzuv YOK`);
         } else {
-          console.log(`EL NETLİK ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): yerel=${ls.localVar.toFixed(1)} kareGeneli=${ls.frameVar.toFixed(1)} oran=${ls.ratio != null ? ls.ratio.toFixed(2) : "null"}`);
+          const m = await measureLimbRegion(buf, loc.boxes);
+          if (!m.ok) {
+            console.log(`UZUV TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${m.reason}]`);
+          } else {
+            console.log(
+              `UZUV TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `açıklıkFarkı=${m.maxDeltaL != null ? m.maxDeltaL.toFixed(1) : "null"} ` +
+              `kroma=${m.maxChroma != null ? m.maxChroma.toFixed(1) : "null"} ` +
+              `yüzeGöreNetlik=${m.worstRatio != null ? m.worstRatio.toFixed(2) : "null"} ` +
+              `bölge=${m.regions.length} uzuvPx=${m.regions.map((r) => r.skinPx).join("/")}`
+            );
+          }
+          const jd = await judgeLimbCrop(buf, loc.boxes, OPENAI_KEY.value());
+          if (!jd.ok) {
+            console.log(`UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${jd.reason}]`);
+          } else if (jd.bad) {
+            console.log(
+              `UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `RED[limb-ghost] işaretler=${jd.flags.join(",") || "verdict"} gerekçe="${jd.detail}"`
+            );
+            await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+              mode, gate: "limb-ghost",
+              distance: mathDist,
+              detail: `${jd.flags.join(",") || "BAD_LIMB"} — ${jd.detail}`,
+            });
+            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            break;
+          } else {
+            console.log(`UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): GEÇTİ`);
+          }
         }
       } catch (e) {
-        console.error("OpenAI yolu: el netlik ölçümü hata verdi (bu katman atlanıyor):", e);
+        console.error("OpenAI yolu: uzuv kapısı hata verdi (bu katman atlanıyor):", e);
       }
 
       // BEŞİNCİ KAPI — KAFA YERLEŞİMİ (dx, deterministik). tplBuf ile AYNI
@@ -3512,6 +3683,7 @@ exports.prepareReferencePhotos = onCall(
     let refDescriptor = null;
     let refEyeOpenness = null;
     let refSkinTone = null;
+    let refHasFaceShine = false;
     try {
       const { analyzeReferences } = require("./faceQuality");
       const analysis = await analyzeReferences(refBuffers);
@@ -3581,6 +3753,7 @@ exports.prepareReferencePhotos = onCall(
       if (Array.isArray(analysis.refSkinTone)) {
         refSkinTone = analysis.refSkinTone;
       }
+      if (analysis.refHasFaceShine) refHasFaceShine = true;
       console.log(
         `HAZIRLIK REFERANS: yüz=${FACE_PHOTO_COUNT} referansSayisi=${orderedRefUrls.length}`
       );
@@ -3631,6 +3804,7 @@ exports.prepareReferencePhotos = onCall(
       ...(refDescriptor ? { refDescriptor } : {}),
       ...(refEyeOpenness != null ? { refEyeOpenness } : {}),
       ...(refSkinTone ? { refSkinTone } : {}),
+      ...(refHasFaceShine ? { refHasFaceShine: true } : {}),
       ...(safeBodyProfile ? { bodyProfile: safeBodyProfile } : {}),
       facePhotoCount: FACE_PHOTO_COUNT,
       referencePhotoCount: orderedRefUrls.length,
@@ -3745,6 +3919,7 @@ exports.startPhotoGeneration = onCall(
     // Kullanıcının GERÇEK ten tonu [L,a,b] — ten kapısı bunu hedef ton olarak
     // kullanır (bkz. faceQuality.assessSkinToneConsistency başlığı).
     const refSkinTone = Array.isArray(prepData.refSkinTone) ? prepData.refSkinTone : null;
+    const refHasFaceShine = !!prepData.refHasFaceShine;
 
     // TABAN GÖRSELLERİ bakiye DÜŞÜLMEDEN önce seç (havuz boşsa kredi
     // harcanmadan net hata). Kategoriler kaldırıldı (2026-08-02): tek düz
@@ -3939,7 +4114,7 @@ exports.startPhotoGeneration = onCall(
             const urls = await Promise.all(uniqueCandidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
               uid, jobId, styleId, i, urls, refUrls, identityCaption,
-              bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone
+              bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine
             );
           }));
         }));
