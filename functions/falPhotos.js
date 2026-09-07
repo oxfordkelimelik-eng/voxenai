@@ -2990,7 +2990,6 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
   // Şablon değişirse aşağıda undefined'a döndürülür ki yeniden ölçülsün.
   let templateYaw;
-  let templateIris;
 
   let finalBuf = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
@@ -3021,7 +3020,6 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       if (next) {
         ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
-        templateIris = undefined;
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
@@ -3176,32 +3174,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         console.error("OpenAI yolu: yaw kapısı hata verdi (bu katman atlanıyor):", e);
       }
 
-      // İRİS BAKIŞI — kaba Vision sınıfı (CAMERA/LEFT) aynı kalsa bile
-      // gözbebeği kaymışsa tabanla aynı yere bakılmıyor demektir.
-      try {
-        const { measureIrisGaze } = require("./faceQuality");
-        const { isIrisGazeMismatch } = require("./gazeGate");
-        const tplBufForIris = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
-        if (templateIris === undefined) templateIris = await measureIrisGaze(tplBufForIris);
-        const outIris = await measureIrisGaze(buf);
-        const irisBad = isIrisGazeMismatch(templateIris, outIris);
-        const bx = templateIris && templateIris.irisX != null ? templateIris.irisX.toFixed(2) : "null";
-        const ox = outIris && outIris.irisX != null ? outIris.irisX.toFixed(2) : "null";
-        console.log(
-          `İRİS ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-          `${irisBad ? "RED[iris-gaze]" : "GEÇTİ"} taban=${bx} çıktı=${ox}`
-        );
-        if (irisBad) {
-          await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-            mode, gate: "iris-gaze", distance: mathDist,
-            detail: `taban=${bx} çıktı=${ox}`,
-          });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
-          break;
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: iris bakış kapısı hata verdi (atlanıyor):", e);
-      }
+      // İRİS BAKIŞI KAPISI KALDIRILDI (2026-09-07): job aaf8b1ea'da 36 redden
+      // 21'i bu kapıdan geldi, chunk başına 4-6 denemeyi tüketip kullanıcının
+      // OpenAI kredisini gereksiz yere yaktı (eşik/ölçüm gürültüye karşı çok
+      // hassastı). Kaba Vision BASE_GAZE/OUTPUT_GAZE karşılaştırması
+      // (isGazeMismatch, aşağıdaki VISION ÖLÇÜM bloğunda) bakış yönü
+      // uyuşmazlığını hâlâ yakalıyor — o daha az agresif ve yanlış pozitif
+      // oranı düşük.
 
       // templateInput kırpma yapıldıysa Buffer, yapılmadıysa URL string'idir.
       // Ten düzeltmesi + ten kapısı + Vision (şablon karşılaştırması) hepsi
