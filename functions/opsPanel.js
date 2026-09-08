@@ -8,20 +8,40 @@
 // bilinçli olarak nötr ("ops", "admin" değil) — güvenliğin kendisi email
 // kontrolüne dayanıyor, bu sadece ek bir gizlilik katmanı.
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { db, bucket, assertSafeId, signedDownloadUrl } = require("./_shared");
+const {
+  db, bucket, assertSafeId, signedDownloadUrl,
+  enforceRateLimit, checkAppAttestation,
+} = require("./_shared");
 
+// Küçük harfe normalize edilmiş — Firebase/IdP tarafı email case'ini garanti
+// aynı tutmuyor (Gmail case-insensitive'dir), tam eşitlik yanlışlıkla
+// erişimi reddedebilirdi.
 const OPS_EMAIL = "kutayalptekin3@gmail.com";
+
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
 
-function assertOps(request) {
+// Hız sınırı: bu paneli tek kullanıcı çağırıyor, aşırı sık çağrı için gerçek
+// bir ihtiyaç yok — düşük ama makul bir tavan, hem yanlış-email deneme
+// gürültüsünü hem de kazara sonsuz döngü/otomatik yenileme riskini keser.
+const RL_OPS = { max: 60, windowMs: 10 * 60 * 1000,
+  message: "Çok fazla istek gönderildi. Bir süre sonra tekrar dene." };
+
+async function assertOps(request, fnName) {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Giriş gerekli.");
   }
-  const email = request.auth.token.email;
+  const email = (request.auth.token.email || "").toLowerCase().trim();
   if (!email || email !== OPS_EMAIL || request.auth.token.email_verified === false) {
-    // Generic mesaj — "ops"/"admin" kelimesi geçmez, panelin varlığını ifşa etmez.
+    // Generic mesaj — "ops"/"admin" kelimesi geçmez, panelin varlığını ifşa
+    // etmez. Yanlış email de dahil HER durumda aynı hata/mesaj döner —
+    // "email var ama yanlış" ile "email yok" arasında ayrım yapılmaz.
     throw new HttpsError("permission-denied", "Yetkisiz.");
   }
+  // App Check + hız sınırı, YALNIZCA email eşleştikten sonra kontrol edilir
+  // — yanlış email zaten en erken noktada (yukarıda) reddedilir, bu iki
+  // kontrol geçerli kullanıcı için ek savunma katmanıdır.
+  checkAppAttestation(request, fnName);
+  await enforceRateLimit(request.auth.uid, fnName, RL_OPS);
 }
 
 /** doc path: users/{uid}/private/.../{collectionId}/{docId} -> uid çıkar. */
@@ -39,7 +59,7 @@ function uidFromDocPath(docRef) {
 exports.opsGetOverview = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
   async (request) => {
-    assertOps(request);
+    await assertOps(request, "opsGetOverview");
     const { sinceMillis, untilMillis } = request.data || {};
     const until = untilMillis ? new Date(untilMillis) : new Date();
     const since = sinceMillis ? new Date(sinceMillis) : new Date(until.getTime() - DEFAULT_WINDOW_MS);
@@ -125,7 +145,7 @@ exports.opsGetOverview = onCall(
 exports.opsGetJobDetail = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
   async (request) => {
-    assertOps(request);
+    await assertOps(request, "opsGetJobDetail");
     const { uid, jobId } = request.data || {};
     if (!uid || !jobId) {
       throw new HttpsError("invalid-argument", "uid ve jobId zorunlu.");

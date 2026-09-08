@@ -35,7 +35,7 @@ class _OpsGateState extends ConsumerState<OpsGate> {
 
   @override
   Widget build(BuildContext context) {
-    final email = ref.watch(authServiceProvider).currentUser?.email;
+    final email = ref.watch(authServiceProvider).currentUser?.email?.toLowerCase().trim();
 
     if (email == null) {
       return Scaffold(
