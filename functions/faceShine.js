@@ -23,9 +23,21 @@ const SELFIE_SHINE_MIN = 0.04;
 const OUTPUT_SHINE_MIN = 0.03;
 const OUTPUT_SHINE_MIN_IF_SELFIE = 0.015;
 const SHINE_AREA_MAX = 0.18;
-const SPECULAR_L_ABOVE = 10;
+// 10 -> 7 (2026-09-09 kullanıcı bildirimi, job d13df6ce): elegance_6'da
+// parlama oranı 0.002 ölçülüp "no-shine" ile ATLANDI, ama kare gözle parlaktı.
+// Sebep: bu eşik yalnızca SERT/nokta parlamaları (medyan ten L*'sinin 10 birim
+// üstü) sayıyordu; yumuşak-yaygın flaş aydınlanması (yüzün geneli birkaç birim
+// parlak) hiç yakalanmıyordu. 7'ye indirmek o bandı da kapsıyor.
+// SHINE_AREA_MAX (%18) tavanı hâlâ genel sahne güneşini koruyor: parlak alan
+// yüzün beşte birini aşarsa bu "ışık" değil "sahne" sayılıp dokunulmuyor.
+const SPECULAR_L_ABOVE = 7;
 const SPECULAR_CHROMA_MAX = 22;
-const REDUCE_STRENGTH = 0.72;
+// 0.72 -> 0.88 (aynı bildirim): job d13df6ce'de elegance_4/7/9'da düzeltme
+// UYGULANDI (oran 0.042 / 0.064 / 0.126) ama kullanıcı kareleri hâlâ "çok
+// parlak" buldu — yani kapı doğru tetikleniyordu, düzeltmenin gücü yetersizdi.
+// 0.88 speküler pikseli medyan ten tonuna neredeyse tam çeker; tamamen 1.0
+// yapmıyoruz ki cilt dokusu düzleşip "plastik" görünüm oluşmasın.
+const REDUCE_STRENGTH = 0.88;
 const MIN_SKIN_PX = 80;
 
 function srgbToLinear(c) {

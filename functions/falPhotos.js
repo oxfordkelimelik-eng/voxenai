@@ -1027,13 +1027,15 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
     "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
     "viewer would not immediately recognise the selfie person, the edit failed.\n" +
-    "P2 GAZE AND HEAD ANGLE — the eyes must look at the EXACT same point in the scene as the BASE " +
-    "person's eyes. Copy the iris position inside each eye opening from the first image. A coarse match " +
-    "(both looking 'left' or both 'at camera') is NOT enough if the irises sit in a different place. " +
-    "The head must keep the BASE person's turn angle to the same degree. Do not rotate, straighten or " +
-    "re-centre the head, and do not pull the eyes toward the lens. If the base is in profile or " +
-    "three-quarter, the output stays at that exact angle. Ignore where the target looks in their own " +
-    "selfies — the base decides gaze and angle, always.\n" +
+    "P2 GAZE AND HEAD ANGLE — THE MOST COMMON FAILURE: renders drift the eyes toward the camera when " +
+    "the base person is looking away. Do not do this. If the BASE person looks to the side, down, up " +
+    "or off-frame, your output MUST look exactly there too — same direction, same angle, irises in the " +
+    "same corner of each eye opening. Eyes meeting the viewer when the base's do not is an automatic " +
+    "failure, no matter how good the rest looks. A coarse match (both roughly 'left') is NOT enough if " +
+    "the irises sit in a different place. The head must keep the BASE person's turn angle to the same " +
+    "degree: do not rotate, straighten or re-centre it, and do not shift it on the shoulders. If the " +
+    "base is in profile or three-quarter, the output stays at that exact angle. Ignore where the target " +
+    "looks in their own selfies — the base decides gaze and angle, always.\n" +
     "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
     "that same count in the output. Never take head scale " +
     "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
@@ -1971,7 +1973,19 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "the eye opening and aim at the same spot in the scene. Both labelled CAMERA (or both LEFT) " +
          "can still be DIFFERENT if one looks slightly off. Report IMAGE 2 (base) first, then IMAGE 1 " +
          "(output).\n" +
-         "H) HAND QUALITY — visible hands in IMAGE 1: blurry, melted, wrong finger count → fail.\n" +
+         // 2026-09-09 kullanıcı bildirimi (job 52781069, teslim edilen
+         // elegance_6): el silik/yumuşak çıkmıştı ama bu satır tek cümleydi
+         // ve model NORMAL dedi. Sayısal netlik oranı (UZUV TEN ÖLÇÜM'deki
+         // yüzeGöreNetlik) eşik yapılamıyor — 131 ölçümlük dağılımda 0.06'ya
+         // kadar inen ONLARCA kare sorunsuz teslim edilmiş, oran tek başına
+         // iyi/kötü ayırmıyor. Bu yüzden çözüm sayısal eşik değil, sorunun
+         // kendisini "self" modundaki (2069) ayrıntı seviyesine çıkarmak:
+         // modele neyin kusur SAYILMADIĞI da söylenince yargı keskinleşiyor.
+         "H) HAND QUALITY — look specifically at any visible hand or fingers in IMAGE 1. It fails if " +
+         "they look blurry, smeared, soft or melted COMPARED TO the rest of the photo's sharpness, or " +
+         "anatomically wrong (extra or missing fingers, fused fingers, an impossible joint). A hand " +
+         "that is resting, clasped, holding an object, in motion or partly hidden is completely " +
+         "normal — only fail a hand that is actually rendered badly.\n" +
          "I) FACE EXPOSURE — IMAGE 1 face blown out / unnaturally luminous vs its scene → fail.\n" +
          "J) HEAD ORIENTATION FIT — IMAGE 1 head orientation must fit its body/scene AND match IMAGE 2's " +
          "head attitude (turn/tilt). Wrong-for-scene or clearly different from base → fail.\n" +
@@ -2812,7 +2826,74 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
   return { buf: prev, dist: prevDist };
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor) {
+/**
+ * ÖNCEKİ DENEMENİN HATASINI MODELE SÖYLEYEN DÜZELTİCİ ÖN-EK (2026-09-09).
+ *
+ * GERÇEK OLAY: job 52781069 chunk 7 (5/5 red) ve db963457 chunk 5 (5/6 red)
+ * — her denemede FARKLI şablon kullanıldığı hâlde model hep AYNI hataya
+ * düştü: taban RIGHT/LEFT'e bakarken çıktının gözünü CAMERA'ya çekti.
+ * Yani şablonu değiştirmek yetmiyor; modele "geçen sefer şunu yanlış
+ * yaptın" denmediği sürece aynı önyargı tekrarlanıyor (eğitim verisinde
+ * kameraya bakan yüz baskın).
+ *
+ * Bu ön-ek prompt'un EN BAŞINA konur — sistem/talimat metninde en çok
+ * ağırlık verilen konum. Yalnızca retry'da (attempt > 1) ve yalnızca
+ * önceki reddin sebebi biliniyorsa eklenir.
+ */
+function retryCorrectionPrefix(lastGate) {
+  if (!lastGate) return "";
+  const g = String(lastGate);
+  if (g === "vision-gaze" || g === "iris-gaze") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render drifted the eyes toward the camera. The base person " +
+      "is NOT looking at the lens, and neither may your output. Before you " +
+      "finish, look at the FIRST image again and copy the exact iris position " +
+      "inside each eye: if the base looks to the side, down or away, your " +
+      "output must look to that same side, at the same angle, with the irises " +
+      "in the same corner of the eye opening. Eyes meeting the viewer when the " +
+      "base's do not is an automatic failure. Do not 'improve' the pose.\n\n"
+    );
+  }
+  if (g === "yaw-drift" || g === "yaw-to-camera" || g === "yaw-over-rotate" ||
+      g === "yaw-under-rotate" || g === "yaw-pulled-to-camera" || g === "head-dx") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render changed the head angle. Keep the BASE person's head " +
+      "turn exactly: same degree of profile, same tilt, same position on the " +
+      "shoulders. Do not rotate the head toward the camera, do not straighten " +
+      "it, do not re-centre it.\n\n"
+    );
+  }
+  if (g === "limb-ghost") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render produced malformed hands. Render every visible hand " +
+      "with the correct number of separate, clearly defined fingers, in sharp " +
+      "focus, matching the base image's hand position exactly. Fused, " +
+      "duplicated, blurred or missing fingers are an automatic failure.\n\n"
+    );
+  }
+  if (g === "skin-tone" || g === "vision-skin") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render left the arms and hands a different tone from the " +
+      "face. Apply the target's skin tone to EVERY visible piece of skin — " +
+      "face, neck, chest, arms, hands — as one continuous tone.\n\n"
+    );
+  }
+  if (g === "math-identity" || g === "vision-identity") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render did not look like the person in the selfies. Copy " +
+      "their facial structure feature by feature: nose shape and width, eye " +
+      "shape and spacing, eyebrow form, lip shape, jaw and cheekbone lines.\n\n"
+    );
+  }
+  return "";
+}
+
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor, retryHint = "") {
   const faceUrls = faceRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Taban + yüz açıları. Kafa ölçeği artık yalnızca tabandan okunuyor.
@@ -2829,7 +2910,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // kimliği tolerans üstünde bozduysa çıktısı ATILIR (bkz.
     // acceptStageIfIdentityHolds). Ölçüm yereldir, API maliyeti yoktur.
     const s1 = await generateWithOpenAI(
-      buildStage1Prompt(identityCaption, bodyProfile),
+      retryHint + buildStage1Prompt(identityCaption, bodyProfile),
       fullSet
     );
     if (!s1) {
@@ -2875,7 +2956,9 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_P1400]: buildEditPromptP1400,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
-  const prompt = build(identityCaption, bodyProfile);
+  // retryHint EN BAŞA: önceki denemenin somut hatası, genel talimatlardan
+  // önce okunsun (bkz. retryCorrectionPrefix gerekçesi).
+  const prompt = retryHint + build(identityCaption, bodyProfile);
   return await generateWithOpenAI(prompt, fullSet);
 }
 
@@ -3009,6 +3092,11 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   let templateYaw;
 
   let finalBuf = null;
+  // SON REDDİN SEBEBİ — bir sonraki denemenin prompt'una düzeltici uyarı
+  // olarak geçer (bkz. retryCorrectionPrefix). Şablon değiştirmek tek
+  // başına yetmiyor: model aynı önyargıyı (gözü kameraya çekme) farklı
+  // şablonda da tekrarlıyordu.
+  let lastRejectGate = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
     // HEARTBEAT (2026-09-07 gerçek olay): cleanupStuckGenJobs her 5 dakikada
     // bir 'generating' işlerde updatedAt'i kontrol ediyor; updatedAt SADECE
@@ -3041,9 +3129,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       }
     }
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
+    const retryHint = attempt > 1 ? retryCorrectionPrefix(lastRejectGate) : "";
+    if (retryHint) {
+      console.log(`DÜZELTİCİ UYARI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki red "${lastRejectGate}" — prompt'a hedefli uyarı eklendi`);
+    }
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor
+      refDescriptor, retryHint
     );
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
@@ -3051,6 +3143,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // kayboluyordu — loglarda o chunk'ın var olduğu bile görünmüyordu,
       // sebep ancak diğer tüm chunk'lar tek tek elenerek bulunabiliyordu.
       console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak)`);
+      // lastRejectGate BİLEREK sıfırlanmıyor: burada üretim hiç olmadı, bu bir
+      // kalite reddi değil. Varsa önceki kalite reddinin uyarısı hâlâ en
+      // güncel bilgidir ve sonraki denemeye taşınmalı.
       if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
       break;
     }
@@ -3117,8 +3212,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
       // devir sebebidir.
       const noFace = !mathOk && (mathReason === "no-face" || mathReason === "profile");
       if (!mathOk && !noFace) {
+        lastRejectGate = `math-${mathReason || "?"}`;
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-          mode, gate: `math-${mathReason || "?"}`, distance: mathDist,
+          mode, gate: lastRejectGate, distance: mathDist,
         });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
@@ -3179,8 +3275,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           // kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
           console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawVerdict} çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)} sapma=${drift >= 0 ? "+" : ""}${drift.toFixed(2)} eşik=${OUTPUT_YAW_DRIFT_MAX} kameraya=${toCamera} fazlaDönme=${overRotate} eksikDönme=${underRotate} çekildi=${pulledNoTpl}`);
           if (!yawUnreliable && (bad || toCamera || overRotate || underRotate)) {
+            lastRejectGate = bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : overRotate ? "yaw-over-rotate" : "yaw-under-rotate";
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-              mode, gate: bad ? "yaw-drift" : toCamera ? "yaw-to-camera" : overRotate ? "yaw-over-rotate" : "yaw-under-rotate",
+              mode, gate: lastRejectGate,
               distance: mathDist,
               detail: `çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)}`,
             });
@@ -3189,6 +3286,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           }
         } else if (pulledNoTpl) {
           console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): RED[yaw-pulled-to-camera] çıktı=${outYaw.toFixed(2)} şablon=null çekildi=true`);
+          lastRejectGate = "yaw-pulled-to-camera";
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "yaw-pulled-to-camera",
             distance: mathDist,
@@ -3288,6 +3386,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           `(teşhis selfieHedef=${selfieRatio} yüzSelfieFarkı=${faceVsSelfie})`
         );
         if (!skinVsFace.ok) {
+          lastRejectGate = "skin-tone";
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "skin-tone", distance: mathDist,
             detail: `yüzeGöreOran=${rt}`,
@@ -3342,6 +3441,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         const hasFaceBox = mathFaceRatio != null && mathFaceRatio >= FACE_EVIDENCE_RATIO_MIN;
         if (!hasFaceBox) {
           console.warn(`KALITE: yüz tespit edilemedi VE Vision karar veremedi — kanıt yok, kare reddedildi (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
+          // retryCorrectionPrefix bu kapıyı tanımaz (boş hint döner) — bilinçli:
+          // "ölçemedim" modele söylenecek somut bir hata değil.
+          lastRejectGate = "math-no-face+vision-inconclusive";
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "math-no-face+vision-inconclusive", distance: null,
           });
@@ -3396,8 +3498,9 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         visionOk = true;
       }
       if (!visionOk) {
+        lastRejectGate = `vision-${visionReason || "?"}`;
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-          mode, gate: `vision-${visionReason || "?"}`, distance: mathDist, detail: visionDetail,
+          mode, gate: lastRejectGate, distance: mathDist, detail: visionDetail,
         });
         if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
         break;
@@ -3419,6 +3522,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         // görülerek kalibre edilebilir (dosyadaki diğer kapılarla aynı usul).
         console.log(`GÖZ ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${closed ? "RED[eyes]" : (outEyeOpenness == null || refEyeOpenness == null ? "ÖLÇÜLEMEDİ" : "GEÇTİ")} çıktı=${oe} referans=${re}`);
         if (closed) {
+          lastRejectGate = "eyes-closed";
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "eyes-closed", distance: mathDist,
             detail: `çıktı=${oe} referans=${re}`,
@@ -3477,6 +3581,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
               `UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
               `RED[limb-ghost] işaretler=${jd.flags.join(",") || "verdict"} gerekçe="${jd.detail}"`
             );
+            lastRejectGate = "limb-ghost";
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: "limb-ghost",
               distance: mathDist,
@@ -3551,6 +3656,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
           const pitchFarki = (p.pitch != null && p.tplPitch != null) ? (p.pitch - p.tplPitch) : null;
           console.log(`KONUM KAPISI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${yawUnreliable ? "ÖLÇÜLEMEDİ[profile]" : (bad ? "RED[head-dx]" : "GEÇTİ")} dx=${p.dx.toFixed(2)} dy=${p.dy.toFixed(2)} pitchFarkı=${pitchFarki != null ? pitchFarki.toFixed(2) : "null"} eşik=${OUTPUT_HEAD_DX_MAX}`);
           if (bad) {
+            lastRejectGate = "head-dx";
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: "head-dx", distance: mathDist,
               detail: `dx=${p.dx.toFixed(2)}`,

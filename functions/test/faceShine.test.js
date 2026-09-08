@@ -33,6 +33,17 @@ test("speküler: yüksek L ve düşük kroma", () => {
   assert.equal(isSpecularLab([80, 30, 25], 60), false);
 });
 
+test("yumuşak/yaygın flaş aydınlanması da speküler sayılır", () => {
+  // d13df6ce elegance_6: oran 0.002 ölçülüp atlanmıştı — eski eşik (medyan+10)
+  // yalnızca sert nokta parlamalarını görüyordu. Medyanın 7-9 birim üstündeki
+  // yumuşak aydınlanma artık yakalanır, 5 birim ve altı hâlâ normal ten.
+  assert.equal(isSpecularLab([68, 4, 3], 60), true);
+  assert.equal(isSpecularLab([67, 4, 3], 60), true);
+  assert.equal(isSpecularLab([65, 4, 3], 60), false);
+  // Renkli (yüksek kroma) piksel parlama değildir — makyaj/kıyafet korunur.
+  assert.equal(isSpecularLab([68, 30, 25], 60), false);
+});
+
 test("düz ten parlama oranı düşük kalır", () => {
   const px = makeSkinPx(80, 80);
   const st = specularStatsFromPixels(px, box);
