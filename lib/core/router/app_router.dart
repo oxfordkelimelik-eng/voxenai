@@ -9,6 +9,8 @@ import '../../presentation/dating/paywall/paywall_screen.dart';
 import '../../presentation/dating/paywall/login_screen.dart';
 import '../../presentation/dating/settings/dating_settings_screen.dart';
 import '../../presentation/dating/settings/dating_faq_screen.dart';
+import '../../presentation/ops/ops_screen.dart';
+import '../../presentation/ops/ops_job_detail_screen.dart';
 import 'dating_routes.dart';
 
 // ============================================================
@@ -99,6 +101,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: DatingRoutes.faq,
         builder: (c, s) => const DatingFaqScreen(),
+      ),
+      // Gizli işletim paneli — hiçbir yerden linklenmez, sadece doğrudan
+      // adres/deep link ile erişilir. Erişim OpsGate içinde email
+      // kontrolüyle sınırlanır (bkz. ops_gate.dart).
+      GoRoute(
+        path: DatingRoutes.ops,
+        builder: (c, s) => const OpsScreen(),
+      ),
+      GoRoute(
+        path: '${DatingRoutes.opsJob}/:uid/:jobId',
+        builder: (c, s) => OpsJobDetailScreen(
+          uid: s.pathParameters['uid']!,
+          jobId: s.pathParameters['jobId']!,
+        ),
       ),
     ],
   );

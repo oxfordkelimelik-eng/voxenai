@@ -3,7 +3,7 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const {
   admin, db, bucket,
-  assertSafeId, enforceRateLimit, checkAppAttestation,
+  assertSafeId, enforceRateLimit, checkAppAttestation, signedDownloadUrl,
 } = require("./_shared");
 
 // HIZ SINIRLARI — her ikisi de GERÇEK PARA harcayan uç noktalar.
@@ -1280,24 +1280,7 @@ async function uploadToFalStorage(buf, fileName) {
   throw new HttpsError("internal", `fal.ai upload başarısız: ${lastErr}`);
 }
 
-/**
- * Firebase Storage'dan fal.ai'ın çekebileceği herkese-açık okuma URL'i.
- *
- * NOT: getSignedUrl() 'iam.serviceAccounts.signBlob' izni ister; Cloud
- * Functions'ın varsayılan compute service account'ında bu izin genelde yok
- * (SigningError). Bunun yerine dosyaya bir download token verip Firebase'in
- * token'lı public URL'ini üretiyoruz — bu signBlob GEREKTİRMEZ ve fal.ai
- * tarafından erişilebilir. URL yalnızca token'ı bilene açıktır.
- */
-async function signedDownloadUrl(file) {
-  const token = require("crypto").randomUUID();
-  await file.setMetadata({
-    metadata: { firebaseStorageDownloadTokens: token },
-  });
-  const encodedPath = encodeURIComponent(file.name);
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket().name}` +
-    `/o/${encodedPath}?alt=media&token=${token}`;
-}
+// signedDownloadUrl -> _shared.js'e taşındı (opsPanel.js de kullanıyor).
 
 // ============================================================
 // FACE SWAP TABAN GÖRSEL HAVUZU

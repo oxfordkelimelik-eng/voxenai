@@ -10,4 +10,6 @@ class DatingRoutes {
   static const String settings = '/settings'; // gizlilik + hesap
   static const String faq = '/faq'; // sık sorulan sorular
   static const String module = '/module'; // /module/:id
+  static const String ops = '/ops'; // gizli — satın alma/üretim istatistikleri
+  static const String opsJob = '/ops/job'; // + /:uid/:jobId
 }

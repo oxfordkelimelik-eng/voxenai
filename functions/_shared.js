@@ -122,7 +122,28 @@ function checkAppAttestation(request, fnName) {
   console.warn(`APP CHECK YOK: ${fnName} çağrısında doğrulanmış istemci belirteci gelmedi (izleme modu).`);
 }
 
+/**
+ * Firebase Storage'dan herkese-açık okuma URL'i (fal.ai, OpenAI, ops paneli
+ * gibi Firebase Auth'suz istemcilerin çekebileceği).
+ *
+ * NOT: getSignedUrl() 'iam.serviceAccounts.signBlob' izni ister; Cloud
+ * Functions'ın varsayılan compute service account'ında bu izin genelde yok
+ * (SigningError). Bunun yerine dosyaya bir download token verip Firebase'in
+ * token'lı public URL'ini üretiyoruz — bu signBlob GEREKTİRMEZ. URL yalnızca
+ * token'ı bilene açıktır.
+ */
+async function signedDownloadUrl(file) {
+  const token = require("crypto").randomUUID();
+  await file.setMetadata({
+    metadata: { firebaseStorageDownloadTokens: token },
+  });
+  const encodedPath = encodeURIComponent(file.name);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket().name}` +
+    `/o/${encodedPath}?alt=media&token=${token}`;
+}
+
 module.exports = {
   admin, db, bucket,
   assertSafeId, enforceRateLimit, checkAppAttestation, APP_CHECK_ENFORCED,
+  signedDownloadUrl,
 };
