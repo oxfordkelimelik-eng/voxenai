@@ -2382,8 +2382,24 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // GAZE_POINT DIFFERENT — kaba token aynı kalsa bile bakış noktası ayrı
     // (b1d6972b c1/c2/c3: her iki satır CAMERA veya RIGHT, kullanıcı yine
     // "aynı yere bakmıyor" dedi).
+    //
+    // gazeSource:"point" İLE İŞARETLENİR (2026-09-08 gerçek olay, job
+    // db963457): bu soru irisin göz boşluğu İÇİNDEKİ tam konumunu
+    // karşılaştırıyor — yaw/head-dx'teki landmark ölçümüyle AYNI zayıflığı
+    // taşıyor: kafa yüksek profildeyken (bkz. PROFILE_UNRELIABLE_MIN) bir
+    // göz kısmen/hiç görünmez, "aynı noktaya mı bakıyor" sorusu doğası
+    // gereği güvenilmez hale gelir. Bu işte 19 denemenin 15'i zaten
+    // YAW ÖLÇÜM: ÖLÇÜLEMEDİ[profile] idi ve chunk 5 art arda 6 farklı
+    // şablonda da hep bu yüzden GAZE_POINT DIFFERENT ile elendi — kısır
+    // döngü. Çağıran taraf (runOpenAiDirectChunk) bu işareti görüp
+    // templateYaw/outYaw profilde ise bu reddi görmezden gelecek; kaba
+    // isGazeMismatch (yukarıda) ve WRONG_DIRECTION profilde de nispeten
+    // güvenilir kaldığı için onlara dokunulmadı.
     if (gazePointLine && /DIFFERENT/i.test(gazePointLine)) {
-      return { ok: false, reason: "gaze", detail: verdictDetail() || "GAZE_POINT DIFFERENT", inconclusive: false };
+      return {
+        ok: false, reason: "gaze", gazeSource: "point",
+        detail: verdictDetail() || "GAZE_POINT DIFFERENT", inconclusive: false,
+      };
     }
     // BLURRY_OR_MALFORMED bağlayıcıdır — aynı yöntem: 2026-08-13'te kullanıcı,
     // tüm-kare netlik kapısı ve RENK-odaklı ten kapısı geçtiği hâlde elin
@@ -3313,7 +3329,26 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
         visionDetail = v.detail;
         visionReason = v.reason;
         visionInconclusive = !!v.inconclusive;
-        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${v.ok ? (v.inconclusive ? "KARARSIZ(kabul)" : "GEÇTİ") : "RED[" + v.reason + "]"}${v.detail ? ` — "${v.detail}"` : ""}`);
+        // GAZE_POINT REDDİ PROFİLDE GEÇERSİZ SAYILIR (2026-09-08 gerçek olay,
+        // job db963457): bu soru irisin göz boşluğu İÇİNDEKİ tam konumunu
+        // karşılaştırıyor — yaw/head-dx'teki landmark ölçümüyle AYNI zayıflığı
+        // taşıyor (bkz. PROFILE_UNRELIABLE_MIN kullanımı yukarıdaki YAW
+        // KAPISI'nda). Bu işte chunk 5, 6 farklı şablonda da hep yüksek
+        // profildeydi (çıktı yaw'ı 0.49-0.89) ve 5/6 denemede aynı gerekçeyle
+        // ("eyes look at a different point") elendi — kısır döngü, kullanıcı
+        // kredisini boşa yaktı. gazeSource:"point" SADECE bu ince-taneli
+        // soruyu işaretler; kaba isGazeMismatch/WRONG_DIRECTION profilde de
+        // nispeten güvenilir kaldığı için etkilenmez.
+        if (!visionOk && visionReason === "gaze" && v.gazeSource === "point") {
+          const { PROFILE_UNRELIABLE_MIN } = require("./faceQuality");
+          const yawProfile = (templateYaw != null && templateYaw > PROFILE_UNRELIABLE_MIN) ||
+                              (outYaw != null && outYaw > PROFILE_UNRELIABLE_MIN);
+          if (yawProfile) {
+            console.warn(`VISION BAKIŞ-NOKTASI REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): çıktı/şablon yaw profilde (çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"} > ${PROFILE_UNRELIABLE_MIN}) — göz boşluğu ölçümü güvenilmez, kare KABUL edildi`);
+            visionOk = true;
+          }
+        }
+        console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${visionOk ? (visionInconclusive ? "KARARSIZ(kabul)" : "GEÇTİ") : "RED[" + visionReason + "]"}${visionDetail ? ` — "${visionDetail}"` : ""}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
       }
