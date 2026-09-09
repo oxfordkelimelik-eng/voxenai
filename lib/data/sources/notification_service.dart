@@ -1,3 +1,5 @@
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -92,12 +94,36 @@ class NotificationService {
     }
   }
 
+  // Son alınan FCM token — auth henüz hazır değilken de saklanır, kullanıcı
+  // geldiğinde (authStateChanges) kaydedilir. app.dart'ta appBootstrapProvider
+  // (anonim giriş) ve NotificationService.init() PARALEL çağrılıyor — bu
+  // yüzden token'ı doğrudan burada sunucuya göndermek yarış durumu yaratır
+  // (request.auth henüz yok olabilir); authStateChanges dinleyicisi bu
+  // sıralama sorununu ortadan kaldırır.
+  String? _lastFcmToken;
+
   Future<void> _initFcm() async {
     try {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
       final token = await messaging.getToken();
       _logger.i('FCM token: $token');
+      _lastFcmToken = token;
+
+      // Kullanıcı (anonim dahi olsa) hazır olduğunda token'ı sunucuya
+      // kaydet — auth henüz gelmemişse bu dinleyici tetiklendiğinde gelir.
+      FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (user != null && _lastFcmToken != null) {
+          _registerToken(_lastFcmToken!);
+        }
+      });
+
+      // Token zaman zaman yenilenir (yeniden yükleme, cihaz değişikliği) —
+      // yenisi geldiğinde de sunucuya kaydedilmeli.
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+        _lastFcmToken = newToken;
+        _registerToken(newToken);
+      });
 
       // Uygulama ön plandayken gelen push'u yerel bildirime çevir
       FirebaseMessaging.onMessage.listen((RemoteMessage m) {
@@ -108,6 +134,18 @@ class NotificationService {
       });
     } catch (e) {
       _logger.w('FCM init atlandı: $e');
+    }
+  }
+
+  /// Token'ı sunucuya (notificationCampaigns/{uid}) kaydeder — hata olursa
+  /// sessizce yutulur (fail-safe, mevcut dosyadaki desenle tutarlı).
+  Future<void> _registerToken(String token) async {
+    try {
+      await FirebaseFunctions.instanceFor(region: 'europe-west1')
+          .httpsCallable('registerFcmToken')
+          .call({'token': token});
+    } catch (e) {
+      _logger.w('FCM token kaydı atlandı: $e');
     }
   }
 

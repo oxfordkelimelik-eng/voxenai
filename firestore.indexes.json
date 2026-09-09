@@ -15,6 +15,14 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "notificationCampaigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "reminderDay", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
