@@ -101,6 +101,26 @@ class _OverviewContent extends StatelessWidget {
         const SizedBox(height: 12),
         ..._mapRows(data.statusCounts, label: 'Durum'),
         const SizedBox(height: 24),
+        _sectionTitle('İŞ TÜRÜ'),
+        Row(
+          children: [
+            Expanded(
+                child: _statCard('Ücretsiz', '${data.freeTierJobs}',
+                    color: AppColors.info)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: _statCard('Paralı', '${data.paidJobs}',
+                    color: AppColors.success)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: _statCard('Başarısız', '${data.failedJobs}',
+                    color: AppColors.error)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        _sectionTitle('RET KAPISI DAĞILIMI'),
+        ..._mapRows(data.gateCounts, label: 'Kapı'),
+        const SizedBox(height: 24),
         _sectionTitle('İŞ LİSTESİ'),
         ...data.jobs.map((j) => _JobTile(job: j)),
       ],

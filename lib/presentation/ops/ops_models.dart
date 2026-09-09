@@ -97,6 +97,10 @@ class OpsOverview {
   final Map<String, int> statusCounts;
   final int totalDelivered;
   final int totalRejected;
+  final Map<String, int> gateCounts;
+  final int freeTierJobs;
+  final int paidJobs;
+  final int failedJobs;
   final List<OpsPurchase> purchases;
   final List<OpsJobSummary> jobs;
 
@@ -109,6 +113,10 @@ class OpsOverview {
     required this.statusCounts,
     required this.totalDelivered,
     required this.totalRejected,
+    required this.gateCounts,
+    required this.freeTierJobs,
+    required this.paidJobs,
+    required this.failedJobs,
     required this.purchases,
     required this.jobs,
   });
@@ -134,6 +142,15 @@ class OpsOverview {
       ),
       totalDelivered: (summary['totalDelivered'] as num?)?.toInt() ?? 0,
       totalRejected: (summary['totalRejected'] as num?)?.toInt() ?? 0,
+      gateCounts: Map<String, int>.from(
+        (summary['gateCounts'] as Map?)?.map(
+              (k, v) => MapEntry(k.toString(), (v as num).toInt()),
+            ) ??
+            {},
+      ),
+      freeTierJobs: (summary['freeTierJobs'] as num?)?.toInt() ?? 0,
+      paidJobs: (summary['paidJobs'] as num?)?.toInt() ?? 0,
+      failedJobs: (summary['failedJobs'] as num?)?.toInt() ?? 0,
       purchases: ((j['purchases'] as List?) ?? [])
           .map((e) => OpsPurchase.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),

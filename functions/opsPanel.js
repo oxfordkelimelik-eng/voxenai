@@ -26,12 +26,22 @@ const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
 const RL_OPS = { max: 60, windowMs: 10 * 60 * 1000,
   message: "Çok fazla istek gönderildi. Bir süre sonra tekrar dene." };
 
+/**
+ * assertOps'un email karşılaştırma mantığı — SAF fonksiyon (I/O yok), test
+ * edilebilirlik için ayrıldı (bkz. functions/test/opsPanel.test.js).
+ * email_verified undefined İSE true kabul edilir (mevcut `!== false`
+ * davranışı bilerek korunuyor — bazı token'larda bu alan hiç gelmeyebilir).
+ */
+function isAuthorizedOpsEmail(tokenEmail, tokenEmailVerified) {
+  const email = (tokenEmail || "").toLowerCase().trim();
+  return !!email && email === OPS_EMAIL && tokenEmailVerified !== false;
+}
+
 async function assertOps(request, fnName) {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Giriş gerekli.");
   }
-  const email = (request.auth.token.email || "").toLowerCase().trim();
-  if (!email || email !== OPS_EMAIL || request.auth.token.email_verified === false) {
+  if (!isAuthorizedOpsEmail(request.auth.token.email, request.auth.token.email_verified)) {
     // Generic mesaj — "ops"/"admin" kelimesi geçmez, panelin varlığını ifşa
     // etmez. Yanlış email de dahil HER durumda aynı hata/mesaj döner —
     // "email var ama yanlış" ile "email yok" arasında ayrım yapılmaz.
@@ -44,7 +54,9 @@ async function assertOps(request, fnName) {
   await enforceRateLimit(request.auth.uid, fnName, RL_OPS);
 }
 
-/** doc path: users/{uid}/private/.../{collectionId}/{docId} -> uid çıkar. */
+/** doc path: users/{uid}/private/.../{collectionId}/{docId} -> uid çıkar.
+ * SAF fonksiyon — gerçek Firestore DocumentReference gerektirmez, sadece
+ * .parent/.id property'lerine bakar (bkz. test dosyasındaki düz obje mock). */
 function uidFromDocPath(docRef) {
   // parent = collection, parent.parent = doc(uid), ... users/{uid} her zaman
   // path'in ilk iki segmenti (bkz. tüm genData/payments path'leri).
@@ -54,6 +66,66 @@ function uidFromDocPath(docRef) {
     if (!cur) return null;
   }
   return cur ? cur.id : null;
+}
+
+/** gs://bucket/path -> path. https:// URL ise null (çağıran orijinali kullanır). */
+function gsPathFromUrl(gsUrl) {
+  if (!gsUrl || typeof gsUrl !== "string") return null;
+  const m = /^gs:\/\/[^/]+\/(.+)$/.exec(gsUrl);
+  return m ? m[1] : null;
+}
+
+/** rejectedFrames dizisinden gate -> sayaç. */
+function extractGateCounts(rejectedFrames) {
+  const counts = {};
+  for (const f of rejectedFrames || []) {
+    const gate = (f && f.gate) || "?";
+    counts[gate] = (counts[gate] || 0) + 1;
+  }
+  return counts;
+}
+
+/** Birden fazla işin gateCounts'unu tek toplam haritada birleştirir. */
+function aggregateGateCounts(jobs) {
+  const total = {};
+  for (const j of jobs || []) {
+    for (const [gate, n] of Object.entries(j.gateCounts || {})) {
+      total[gate] = (total[gate] || 0) + n;
+    }
+  }
+  return total;
+}
+
+/** processedPurchases doküman listesinden özet. */
+function buildPurchaseSummary(purchases) {
+  return {
+    totalPurchases: purchases.length,
+    uniqueBuyers: new Set(purchases.map((p) => p.uid)).size,
+    productCounts: purchases.reduce((acc, p) => {
+      acc[p.productId] = (acc[p.productId] || 0) + 1;
+      return acc;
+    }, {}),
+  };
+}
+
+/** genJobs doküman listesinden özet — kapı dağılımı ve iş türü sayaçları dahil. */
+function buildJobSummary(jobs) {
+  return {
+    totalJobs: jobs.length,
+    uniqueProducers: new Set(jobs.map((j) => j.uid)).size,
+    statusCounts: jobs.reduce((acc, j) => {
+      acc[j.status] = (acc[j.status] || 0) + 1;
+      return acc;
+    }, {}),
+    totalDelivered: jobs.reduce((n, j) => n + j.deliveredCount, 0),
+    totalRejected: jobs.reduce((n, j) => n + j.rejectedCount, 0),
+    gateCounts: aggregateGateCounts(jobs),
+    // İş türü kırılımı: ücretsiz deneme / paket ücretiyle / başarısız.
+    // Panelde bu ayrımı elle çıkarmak gerekiyordu — burada bir kez hesaplanır.
+    freeTierJobs: jobs.filter((j) => j.usedFreeTier).length,
+    paidJobs: jobs.filter((j) => !j.usedFreeTier && j.packUnitsCharged > 0).length,
+    failedJobs: jobs.filter((j) => j.status === "failed").length,
+  };
 }
 
 exports.opsGetOverview = onCall(
@@ -98,11 +170,6 @@ exports.opsGetOverview = onCall(
         (n, r) => n + ((r && r.photoUrls && r.photoUrls.length) || 0), 0
       );
       const rejectedFrames = Array.isArray(d.rejectedFrames) ? d.rejectedFrames : [];
-      const gateCounts = {};
-      for (const f of rejectedFrames) {
-        const gate = f.gate || "?";
-        gateCounts[gate] = (gateCounts[gate] || 0) + 1;
-      }
       return {
         uid: uidFromDocPath(doc.ref),
         jobId: doc.id,
@@ -115,27 +182,15 @@ exports.opsGetOverview = onCall(
         errorMessage: d.errorMessage || null,
         deliveredCount,
         rejectedCount: rejectedFrames.length,
-        gateCounts,
+        gateCounts: extractGateCounts(rejectedFrames),
         createdAt: d.createdAt ? d.createdAt.toMillis() : null,
         updatedAt: d.updatedAt ? d.updatedAt.toMillis() : null,
       };
     });
 
     const summary = {
-      totalPurchases: purchases.length,
-      uniqueBuyers: new Set(purchases.map((p) => p.uid)).size,
-      productCounts: purchases.reduce((acc, p) => {
-        acc[p.productId] = (acc[p.productId] || 0) + 1;
-        return acc;
-      }, {}),
-      totalJobs: jobs.length,
-      uniqueProducers: new Set(jobs.map((j) => j.uid)).size,
-      statusCounts: jobs.reduce((acc, j) => {
-        acc[j.status] = (acc[j.status] || 0) + 1;
-        return acc;
-      }, {}),
-      totalDelivered: jobs.reduce((n, j) => n + j.deliveredCount, 0),
-      totalRejected: jobs.reduce((n, j) => n + j.rejectedCount, 0),
+      ...buildPurchaseSummary(purchases),
+      ...buildJobSummary(jobs),
     };
 
     return { summary, purchases, jobs };
@@ -160,11 +215,10 @@ exports.opsGetJobDetail = onCall(
     const job = snap.data();
 
     async function resolveGsUrl(gsUrl) {
-      if (!gsUrl || typeof gsUrl !== "string") return null;
-      const m = /^gs:\/\/[^/]+\/(.+)$/.exec(gsUrl);
-      if (!m) return gsUrl; // zaten https ise olduğu gibi dön
+      const path = gsPathFromUrl(gsUrl);
+      if (path == null) return gsUrl || null; // gs:// değilse (https zaten) olduğu gibi dön
       try {
-        return await signedDownloadUrl(bucket().file(m[1]));
+        return await signedDownloadUrl(bucket().file(path));
       } catch (e) {
         console.error("ops: gs:// çözümleme hatası (atlanıyor):", e.message || e);
         return null;
@@ -207,3 +261,16 @@ exports.opsGetJobDetail = onCall(
     };
   }
 );
+
+// Test-only exports — barrel dosyası (index.js) bu ismi SEÇMEDİĞİ için
+// gerçek bir Cloud Function olarak deploy edilmez, sadece
+// functions/test/opsPanel.test.js bunları require eder.
+exports._testables = {
+  isAuthorizedOpsEmail,
+  uidFromDocPath,
+  gsPathFromUrl,
+  extractGateCounts,
+  aggregateGateCounts,
+  buildPurchaseSummary,
+  buildJobSummary,
+};
