@@ -38,9 +38,13 @@ class DatingSettingsScreen extends ConsumerWidget {
         children: [
           _section('SATIN ALMALAR'),
           _tile(Icons.workspace_premium_outlined, 'Paket Bakiyem',
+              // AI foto üretimindeki ücretsiz deneme yorum satırına alındı
+              // (2026-09-09) — bu genel mesaj hem foto hem analiz bakiyesini
+              // kapsadığı için nötr bırakıldı (analiz tarafında ücretsiz
+              // deneme hâlâ geçerli).
               subtitle: (pack.photo > 0 || pack.analysis > 0)
                   ? '${pack.photo} stil · ${pack.analysis} analiz kaldı'
-                  : 'Paket yok — ilk çıktı her zaman ücretsiz gösterilir',
+                  : 'Paket yok — devam etmek için paket al',
               onTap: () => _info(context, 'Paket Bakiyem',
                   'AI foto üretimi: ${pack.photo} stil hakkı\nFotoğraf analizi: ${pack.analysis} analiz hakkı\n\nAbonelik yoktur; ihtiyacın kadar tek seferlik paket alırsın.')),
           _tile(Icons.shopping_bag_outlined, 'Paket Al',

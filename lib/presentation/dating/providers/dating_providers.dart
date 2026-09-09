@@ -380,12 +380,14 @@ class PackBalance {
         freeAnalysisUsed: freeAnalysisUsed ?? this.freeAnalysisUsed,
       );
 
-  /// Verilen sayıda stil üretimini karşılayabilir mi? (paket hakkı VEYA
-  /// tek stil için ücretsiz deneme). Sunucudaki startPhotoGeneration
-  /// mantığıyla aynı — kredi harcamadan ÖNCE istemcide kontrol için.
+  /// Verilen sayıda stil üretimini karşılayabilir mi? Sunucudaki
+  /// startPhotoGeneration mantığıyla aynı — kredi harcamadan ÖNCE
+  /// istemcide kontrol için.
   bool canAffordStyles(int styleCount) {
     if (photo >= styleCount) return true;
-    if (styleCount == 1 && !freePhotoUsed) return true; // ücretsiz ilk stil
+    // AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09) — bkz.
+    // functions/falPhotos.js startPhotoGeneration aynı tarihli not.
+    // if (styleCount == 1 && !freePhotoUsed) return true;
     return false;
   }
 }

@@ -1054,15 +1054,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           ),
         ),
         // Bakiye/seçim bilgisi: kullanıcı kaç stil üretebileceğini üretimden
-        // ÖNCE net görsün (her stil 1 paket hakkı = photosPerSet foto). Bakiye 0 ise
-        // ilk stil ücretsiz denenebilir.
+        // ÖNCE net görsün (her stil 1 paket hakkı = photosPerSet foto).
+        // AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09) —
+        // bakiye 0 iken artık "ilk stil ücretsiz" DENİLMİYOR, paket almaya
+        // yönlendiriliyor (bkz. functions/falPhotos.js aynı tarihli not).
         Builder(builder: (_) {
           final bal = ref.watch(packBalanceProvider).photo;
           final selected = _styles.length;
           final tooMany = bal > 0 && selected > bal;
           final text = bal > 0
               ? 'Paketinde $bal stil hakkın var · $selected stil seçtin'
-              : 'İlk stilin ücretsiz · $selected stil seçtin';
+              : 'Devam etmek için paket almalısın';
           return Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Container(
@@ -1497,6 +1499,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
   /// Ücretsiz denemede sunucunun HİÇ ÜRETMEDİĞİ (bkz. falPhotos.js
   /// FREE_TIER_CHUNK_COUNT) kalan foto sayısı — stiller toplamı.
+  /// AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09): sunucuda
+  /// usedFreeTier artık hiç true olmadığı için bu değer pratikte hep 0
+  /// döner — kod silinmedi, geri açılırsa aynen çalışır.
   int get _lockedCount {
     final results = _jobData?['results'] as Map<String, dynamic>?;
     if (results == null) return 0;

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/discounted_price.dart';
 import 'purchase_auth_gate.dart';
 
 /// Hangi paket grubunun gösterileceği.
@@ -170,6 +171,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         sub:
                             '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
                         price: _price(DatingConfig.photoStandardProductId),
+                        oldPriceLabel:
+                            DatingConfig.photoStandardOldPriceLabel,
+                        discountPercentLabel:
+                            '%${DatingConfig.discountPercent(DatingConfig.photoStandardOldPriceTl, DatingConfig.photoStandardNewPriceTargetTl)}',
                         busy: _busyProductId ==
                             DatingConfig.photoStandardProductId,
                         onTap: _busy
@@ -183,6 +188,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                         sub:
                             '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
                         price: _price(DatingConfig.photoPremiumProductId),
+                        oldPriceLabel: DatingConfig.photoPremiumOldPriceLabel,
+                        discountPercentLabel:
+                            '%${DatingConfig.discountPercent(DatingConfig.photoPremiumOldPriceTl, DatingConfig.photoPremiumNewPriceTargetTl)}',
                         badge: 'EN İYİ DEĞER',
                         busy: _busyProductId ==
                             DatingConfig.photoPremiumProductId,
@@ -253,6 +261,10 @@ class _PackCard extends StatelessWidget {
   final String? badge;
   final bool busy;
   final VoidCallback? onTap;
+  // null ise indirim gösterilmez (geriye uyumlu — analiz kartları için
+  // null bırakılır, sadece bu foto üretimi kartları için doldurulur).
+  final String? oldPriceLabel;
+  final String? discountPercentLabel;
   const _PackCard({
     required this.icon,
     required this.title,
@@ -261,6 +273,8 @@ class _PackCard extends StatelessWidget {
     required this.onTap,
     this.badge,
     this.busy = false,
+    this.oldPriceLabel,
+    this.discountPercentLabel,
   });
 
   @override
@@ -337,12 +351,19 @@ class _PackCard extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(price,
-                            style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.gold,
-                                height: 1.1)),
+                        if (oldPriceLabel != null)
+                          DiscountedPrice(
+                            oldPriceLabel: oldPriceLabel!,
+                            price: price,
+                            discountPercentLabel: discountPercentLabel ?? '',
+                          )
+                        else
+                          Text(price,
+                              style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.gold,
+                                  height: 1.1)),
                         const SizedBox(height: 2),
                         const Icon(Icons.chevron_right_rounded,
                             color: AppColors.textMuted, size: 22),

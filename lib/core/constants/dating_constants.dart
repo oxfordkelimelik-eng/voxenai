@@ -11,15 +11,22 @@ class DatingConfig {
   // ============================================================
   // FİYATLANDIRMA — ABONELİK YOK, TEK SEFERLİK PAKET MODELİ
   // ------------------------------------------------------------
-  // Model: her üretim/analiz akışında yalnızca İLK ÇIKTI (1 foto) ücretsiz
-  // gösterilir; devamını görmek/indirmek için paket satın alınır. Yenilenen
-  // abonelik yoktur; paket biter, kullanıcı yeniden alır.
+  // Model: foto ANALİZİ akışında yalnızca İLK ÇIKTI (1 analiz) ücretsiz
+  // gösterilir; devamını görmek/indirmek için paket satın alınır. AI FOTO
+  // ÜRETİMİNDEKİ ücretsiz ilk deneme 2026-09-09'da yorum satırına alındı
+  // (bkz. functions/falPhotos.js startPhotoGeneration, dating_providers.dart
+  // canAffordStyles) — foto üretiminde artık baştan paket gerekiyor.
+  // Yenilenen abonelik yoktur; paket biter, kullanıcı yeniden alır.
   //
   // PAKETLER:
   //   Foto Analizi : Tekli   1 analiz  → ₺99
   //                  Standart 5 analiz  → ₺249
-  //   AI Foto Üretimi : Standart 10 foto (1 stil)  → ₺249
-  //                     Premium  50 foto (5 stil)  → ₺999
+  //   AI Foto Üretimi : Standart 10 foto (1 stil)  → ₺349 (eski ₺700'den)
+  //                     Premium  50 foto (5 stil)  → ₺999 (eski ₺2000'den)
+  //   Not: yukarıdaki foto üretimi fiyatları mağaza (App Store Connect /
+  //   Play Console) tarafında ayarlanır, bu dosyadaki *PriceLabel sabitleri
+  //   artık UI'da kullanılmıyor (bkz. aşağıdaki uyarı) — gerçek tahsilat
+  //   her zaman datingStorePrice() ile mağazadan gelir.
   // ============================================================
 
   // --- Üretim birimi ---
@@ -82,6 +89,27 @@ class DatingConfig {
   static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 50
   static const String photoPremiumPriceLabel = '₺999';
   static const String photoPremiumProductId = 'dating_pack_photo50';
+
+  // --- "Eski fiyattan indirim" gösterimi için SADECE görsel referans ---
+  // UYARI: Bunlar GERÇEK tahsilat değildir, hiçbir satın alma akışında
+  // kullanılmaz. Yalnızca paywall/vitrin kartlarında üstü çizili "eski
+  // fiyat" olarak gösterilir; gerçek fiyat HER ZAMAN datingStorePrice() ile
+  // mağazadan gelir (bkz. dating_providers.dart:24-38 uyarısı). Mağazadaki
+  // gerçek fiyat kademesi (₺349 / ₺999) kullanıcı tarafından App Store
+  // Connect + Play Console'da ayarlanır — kod bunu doğrulayamaz.
+  static const String photoStandardOldPriceLabel = '₺700';
+  static const int photoStandardOldPriceTl = 700;
+  static const int photoStandardNewPriceTargetTl = 349;
+
+  static const String photoPremiumOldPriceLabel = '₺2000';
+  static const int photoPremiumOldPriceTl = 2000;
+  static const int photoPremiumNewPriceTargetTl = 999;
+
+  /// Eski/hedef TL'den yüzde indirim hesaplar — mağaza fiyat string'i
+  /// PARSE EDİLMEZ (format riski, "$4.99"/"₺249,00" gibi yerel biçimler
+  /// kırılgan olurdu). Sadece bu iki dokümante edilmiş TL sabitinden türer.
+  static int discountPercent(int oldTl, int newTl) =>
+      (((oldTl - newTl) / oldTl) * 100).round();
 
   // --- Dahili kredi altyapısı (yalnızca pasif modüller için — arka planda) ---
   static const int creditsAiPhoto = 10; // AI foto üretimi

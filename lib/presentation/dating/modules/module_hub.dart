@@ -19,9 +19,10 @@ class ModuleHubScreen extends ConsumerStatefulWidget {
 class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   int _tab = 0;
 
-  /// Modüle her zaman girilebilir: ilk çıktı ekranda ücretsiz gösterilir,
-  /// devamı için paket gerekiyorsa akış (module_flows) içinde paywall'a
-  /// yönlendirilir.
+  /// Modüle her zaman girilebilir: analiz modülünde ilk çıktı ücretsiz
+  /// gösterilir (AI foto üretiminde bu 2026-09-09'da yorum satırına
+  /// alındı — bkz. functions/falPhotos.js), devamı için paket gerekiyorsa
+  /// akış (module_flows) içinde paywall'a yönlendirilir.
   void _openModule(DatingModule m) {
     context.push('${DatingRoutes.module}/${m.id}');
   }

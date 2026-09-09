@@ -10,6 +10,7 @@ import '../paywall/purchase_auth_gate.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/voxen_visuals.dart';
 import '../widgets/shared_widgets.dart';
+import '../widgets/discounted_price.dart';
 
 /// Form sonrası tek ekranlı vitrin + paket seçimi.
 /// Scroll yok: kompakt slider (otomatik kayar) + fiyat satırları + CTA.
@@ -401,6 +402,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                                   _price(DatingConfig.photoStandardProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo10),
+                              oldPriceLabel:
+                                  DatingConfig.photoStandardOldPriceLabel,
+                              discountPercentLabel:
+                                  '%${DatingConfig.discountPercent(DatingConfig.photoStandardOldPriceTl, DatingConfig.photoStandardNewPriceTargetTl)}',
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -414,6 +419,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                                   _price(DatingConfig.photoPremiumProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photo50),
+                              oldPriceLabel:
+                                  DatingConfig.photoPremiumOldPriceLabel,
+                              discountPercentLabel:
+                                  '%${DatingConfig.discountPercent(DatingConfig.photoPremiumOldPriceTl, DatingConfig.photoPremiumNewPriceTargetTl)}',
                             ),
                           ),
                         ],
@@ -516,6 +525,8 @@ class _PriceRow extends StatelessWidget {
   final String price;
   final bool busy;
   final VoidCallback onTap;
+  final String? oldPriceLabel;
+  final String? discountPercentLabel;
   const _PriceRow({
     required this.icon,
     required this.title,
@@ -523,6 +534,8 @@ class _PriceRow extends StatelessWidget {
     required this.price,
     required this.busy,
     required this.onTap,
+    this.oldPriceLabel,
+    this.discountPercentLabel,
   });
 
   @override
@@ -563,11 +576,18 @@ class _PriceRow extends StatelessWidget {
                 ],
               ),
             ),
-            Text(price,
-                style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.gold)),
+            (oldPriceLabel != null && discountPercentLabel != null)
+                ? DiscountedPrice(
+                    oldPriceLabel: oldPriceLabel!,
+                    price: price,
+                    discountPercentLabel: discountPercentLabel!,
+                    priceFontSize: 16,
+                  )
+                : Text(price,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.gold)),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right_rounded,
                 size: 18, color: AppColors.textMuted),

@@ -4126,15 +4126,23 @@ exports.startPhotoGeneration = onCall(
 
       const balance = wallet.photoBalance || 0;
       if (balance < unitsNeeded) {
-        if (!wallet.freePhotoUsed && styles.length === 1) {
-          unitsToCharge = 0;
-          usedFreeTier = true;
-        } else if (!wallet.freePhotoUsed && styles.length > 1) {
-          throw new HttpsError(
-            "failed-precondition",
-            "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
-          );
-        } else if (balance > 0) {
+        // AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09,
+        // kullanıcı kararı) — foto analizindeki ücretsiz deneme
+        // (freeAnalysisUsed, aiProxy.js) BUNDAN AYRI, dokunulmadı. Geri
+        // açmak için aşağıdaki iki dalı ve usedFreeTier/freePhotoUsed
+        // yazımını (bu fonksiyonun altında) eski hâline getir — hiçbir
+        // fonksiyon silinmedi, sadece bu blok devre dışı.
+        //
+        // if (!wallet.freePhotoUsed && styles.length === 1) {
+        //   unitsToCharge = 0;
+        //   usedFreeTier = true;
+        // } else if (!wallet.freePhotoUsed && styles.length > 1) {
+        //   throw new HttpsError(
+        //     "failed-precondition",
+        //     "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
+        //   );
+        // } else
+        if (balance > 0) {
           // Bakiyesi var ama seçtiği stil sayısından az — net yönlendirme yap.
           throw new HttpsError(
             "failed-precondition",
