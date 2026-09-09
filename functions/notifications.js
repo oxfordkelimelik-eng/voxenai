@@ -44,13 +44,16 @@ function reminderCopyFor(day, what) {
   return copies[day] || copies[copies.length - 1];
 }
 
-/** wallet durumuna göre "what" kelimesi — syncEngagementReminders'daki
- * mantıkla aynı (notification_service.dart). */
+/** wallet durumuna göre "what" kelimesi.
+ *
+ * NOT (2026-09-09): AI foto ücretsiz denemesi falPhotos.js'te yorum
+ * satırına alındığı için freePhotoUsed artık hiçbir zaman false->true
+ * geçmiyor — bu kampanya fiilen sadece ücretsiz analiz kullanıp satın
+ * almamış kullanıcılar için tetikleniyor. Metin buna göre sabitlendi;
+ * foto denemesi geri açılırsa (bkz. falPhotos.js aynı tarihli not) bu
+ * fonksiyon da eski dallı haline geri alınmalı. */
 function whatFor(freePhotoUsed, freeAnalysisUsed) {
-  if (!freePhotoUsed && !freeAnalysisUsed) return "Ücretsiz fotoğrafın ve analizin";
-  if (!freePhotoUsed) return "Ücretsiz fotoğrafın";
-  if (!freeAnalysisUsed) return "Ücretsiz analizin";
-  return "Ücretsiz hakkın";
+  return "Ücretsiz analizin";
 }
 
 function chunk(arr, size) {
@@ -124,6 +127,12 @@ exports.onWalletWrite = onDocumentWritten(
     }
 
     // Ücretsiz hak YENİ kullanıldıysa VE hâlâ hiç bakiyesi yoksa — başlat.
+    //
+    // NOT (2026-09-09): AI foto ücretsiz denemesi falPhotos.js'te yorum
+    // satırına alındı, bu yüzden freePhotoUsed artık hiçbir zaman
+    // false->true geçmiyor — freePhotoJustUsed pratikte hep false olacak.
+    // Kod silinmedi: foto denemesi geri açılırsa burası otomatik yeniden
+    // devreye girer, ekstra değişiklik gerekmez.
     const freePhotoJustUsed = !(before && before.freePhotoUsed) && after.freePhotoUsed === true;
     const freeAnalysisJustUsed = !(before && before.freeAnalysisUsed) && after.freeAnalysisUsed === true;
     if ((freePhotoJustUsed || freeAnalysisJustUsed) && afterPhoto === 0 && afterAnalysis === 0) {
