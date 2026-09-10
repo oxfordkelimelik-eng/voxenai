@@ -384,19 +384,17 @@ class PackBalance {
   /// startPhotoGeneration mantığıyla aynı — kredi harcamadan ÖNCE
   /// istemcide kontrol için.
   ///
-  /// GEÇİCİ OLARAK GERİ AÇILDI (2026-09-10): 2026-09-09'da bu satır yorum
-  /// satırına alınmıştı ama sunucu tarafı bundan ÖNCE deploy edildiği için
-  /// (App Store review süresi farkı) eski istemci sürümleri (hâlâ "ücretsiz
-  /// hakkın var" sanan) sunucudan ret alıp kullanıcıya yanlış "zaman aşımı"
-  /// hatası gösterdi. Sunucu bu yüzden aynı gün ücretsiz denemeyi geçici
-  /// olarak geri açtı (bkz. functions/falPhotos.js startPhotoGeneration aynı
-  /// tarihli not) — istemci burada SUNUCUYLA UYUMLU tutuluyor. Ücretsiz
-  /// deneme kapalı sürüm App Store'da yayına girip kullanıcıların çoğu ona
-  /// geçtikten SONRA, önce bu satır, sonra sunucudaki karşılığı kapatılmalı
-  /// — asla önce sunucu, sonra istemci (tam da bu hataya yol açtı).
+  /// TEKLİ ÜCRETSİZ DENEME KALDIRILDI (2026-09-10, TestFlight test sürümü —
+  /// App Store'a henüz atılmadı, kullanıcı bilerek TestFlight'ta deneyip
+  /// sonra karar verecek). SUNUCU TARAFI HÂLÂ AÇIK bırakıldı (bkz.
+  /// functions/falPhotos.js startPhotoGeneration 2026-09-10 notu) —
+  /// canlıdaki eski App Store sürümü (1.0.2+4) hâlâ ücretsiz deneme bekliyor,
+  /// sunucu onu reddederse aynı "zaman aşımı" olayı (bkz. 2026-09-10 gerçek
+  /// olay) tekrarlanır. Sunucu ancak bu istemci App Store'da yayına girip
+  /// kullanıcıların çoğu güncelledikten SONRA kapatılmalı.
   bool canAffordStyles(int styleCount) {
     if (photo >= styleCount) return true;
-    if (styleCount == 1 && !freePhotoUsed) return true;
+    // if (styleCount == 1 && !freePhotoUsed) return true;
     return false;
   }
 }

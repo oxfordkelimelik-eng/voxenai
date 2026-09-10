@@ -1055,20 +1055,16 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         ),
         // Bakiye/seçim bilgisi: kullanıcı kaç stil üretebileceğini üretimden
         // ÖNCE net görsün (her stil 1 paket hakkı = photosPerSet foto).
-        // GEÇİCİ OLARAK GERİ AÇILDI (2026-09-10) — bkz. dating_providers.dart
-        // canAffordStyles aynı tarihli not: sunucu/istemci deploy sırası
-        // uyumsuzluğu yüzünden ücretsiz deneme geçici olarak tekrar aktif.
+        // TEKLİ ÜCRETSİZ DENEME KALDIRILDI (2026-09-10, TestFlight test
+        // sürümü) — bkz. dating_providers.dart canAffordStyles aynı
+        // tarihli not.
         Builder(builder: (_) {
           final bal = ref.watch(packBalanceProvider).photo;
           final selected = _styles.length;
           final tooMany = bal > 0 && selected > bal;
-          final freePhotoUsed =
-              ref.watch(packBalanceProvider).freePhotoUsed;
           final text = bal > 0
               ? 'Paketinde $bal stil hakkın var · $selected stil seçtin'
-              : (!freePhotoUsed
-                  ? 'İlk stilin ücretsiz · $selected stil seçtin'
-                  : 'Devam etmek için paket almalısın');
+              : 'Devam etmek için paket almalısın';
           return Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: Container(
