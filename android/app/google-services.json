@@ -14,6 +14,22 @@
       },
       "oauth_client": [
         {
+          "client_id": "473057059250-9a5gl8v526d8cuhs4paqqiajd6n4f6at.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.voxenai.app",
+            "certificate_hash": "194a8b4e7bc7ace3ad8333013c50b4fb35f25262"
+          }
+        },
+        {
+          "client_id": "473057059250-dt4iikahuru8basps8qk3vbvakpflfeb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.voxenai.app",
+            "certificate_hash": "663f0e22564c320c4c711c5bb4d35601aef8cd7a"
+          }
+        },
+        {
           "client_id": "473057059250-a3q3k83f3atd8cvtght9o0det02i7gtv.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -29,6 +45,13 @@
             {
               "client_id": "473057059250-a3q3k83f3atd8cvtght9o0det02i7gtv.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "473057059250-mia3vm05de9ht4ebb7ks6cpjcutfvcqn.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.voxenai.app"
+              }
             }
           ]
         }
