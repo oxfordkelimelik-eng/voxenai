@@ -50,6 +50,18 @@ final opsQuickRangeProvider = StateProvider<OpsQuickRange>(
   (ref) => OpsQuickRange.month,
 );
 
+/// Seçilen hızlı aralığın SOMUT tarih değeri — YALNIZCA opsQuickRangeProvider
+/// değiştiğinde yeniden hesaplanır. quickRange.toRange() çağrısını doğrudan
+/// widget build()'inde yapmak YANLIŞ: DateTime.now() her build'te farklı bir
+/// 'until' üretir, bu da FutureProvider.family'nin key'ini (OpsDateRange
+/// eşitliği since/until'a bakar) her build'te değiştirip yeni bir
+/// opsGetOverview çağrısı tetikler — hızlıca hız sınırına (60/10dk) çarpıp
+/// ekranda sonsuz "loading" görünmesine yol açar (gerçek olay, 2026-09-11).
+final opsResolvedRangeProvider = Provider<OpsDateRange>((ref) {
+  final quickRange = ref.watch(opsQuickRangeProvider);
+  return quickRange.toRange();
+});
+
 const _opsRegion = 'europe-west1';
 
 final opsOverviewProvider =

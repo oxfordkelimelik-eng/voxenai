@@ -22,7 +22,7 @@ class _OpsOverviewBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final quickRange = ref.watch(opsQuickRangeProvider);
-    final range = quickRange.toRange();
+    final range = ref.watch(opsResolvedRangeProvider);
     final overview = ref.watch(opsOverviewProvider(range));
 
     return Scaffold(
