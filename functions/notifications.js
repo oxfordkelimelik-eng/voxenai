@@ -1,12 +1,15 @@
 // Sunucu tabanlı satın alma hatırlatma kampanyası.
 //
-// AMAÇ: ücretsiz denemeyi (foto veya analiz) kullanmış ama hiç satın alma
-// yapmamış kullanıcılara, satın alım yapana ya da 4 gün dolana kadar günde
-// bir kez (TR saati 20:00) push bildirimi göndermek. Mevcut yerel bildirim
-// sistemi (notification_service.dart, syncEngagementReminders) SADECE
-// uygulama en az bir kez açıldığında zamanlanıyor ve sunucu satın alma
-// durumundan habersiz — bu, ondan tamamen AYRI, uygulama kapalı olsa da
-// çalışan bir mekanizma.
+// AMAÇ (2026-09-10'da basitleştirildi — kullanıcı kararı): uygulamayı
+// indirip giriş yapmış (token almış) ama HİÇ satın alma yapmamış her
+// kullanıcıya, satın alım yapana ya da 4 gün dolana kadar günde bir kez
+// (TR saati 20:00) push bildirimi göndermek. ESKİDEN kampanya yalnızca
+// "ücretsiz deneme kullanıldıysa" başlıyordu (tekli-foto/tekli-analiz
+// hakkı harcanınca) — artık bu şart YOK, tek koşul "satın alma sıfır".
+// Mevcut yerel bildirim sistemi (notification_service.dart,
+// syncEngagementReminders) SADECE uygulama en az bir kez açıldığında
+// zamanlanıyor ve sunucu satın alma durumundan habersiz — bu, ondan
+// tamamen AYRI, uygulama kapalı olsa da çalışan bir mekanizma.
 //
 // VERİ MODELİ: yeni root koleksiyon notificationCampaigns/{uid}. Firestore
 // rules'a dokunulmadı — dosya sonundaki "match /{document=**} { allow
@@ -28,32 +31,21 @@ const MAX_REMINDER_DAY = 4; // gün 0-3 gönderilir, gün 4'te durur (4 bildirim
 // yazım bu sınıra göre parçalanır.
 const FCM_BATCH_SIZE = 500;
 
-/** Gün 0-3 için bildirim metinleri. "what" mevcut notification_service.dart
- * mantığıyla aynı: hangi ücretsiz hak kullanılmadıysa o. */
-function reminderCopyFor(day, what) {
+/** Gün 0-3 için bildirim metinleri (2026-09-10'da basitleştirildi — artık
+ * "ücretsiz hakkını kullan" değil, genel bir davet: kullanıcı daha hiç
+ * paket almamış, amaç ilk satın almayı tetiklemek). */
+function reminderCopyFor(day) {
   const copies = [
-    { title: `✨ ${what} seni bekliyor`,
-      body: "Birkaç selfie yükle, profilin için hazır kareyi gör." },
-    { title: "📸 Profil fotoğrafın eşleşmelerini belirliyor",
-      body: `${what} hâlâ kullanılmadı — denemek birkaç dakika sürüyor.` },
-    { title: "💬 Doğru fotoğraf fark yaratır",
-      body: "Ücretsiz hakkını kullanmadan bunu görmeyeceksin. Şimdi dene." },
-    { title: "⏳ Ücretsiz hakkın hâlâ dokunulmadı",
-      body: "Bugün son hatırlatma — birkaç saniyeni ayır." },
+    { title: "✨ Profilini hazırlamaya hazır mısın?",
+      body: "Birkaç selfie yükle, AI fotoğrafların ve analizin seni bekliyor." },
+    { title: "📸 Doğru fotoğraf eşleşmeleri belirliyor",
+      body: "Voxen AI ile profilini birkaç dakikada güçlendir." },
+    { title: "💬 Fark yaratan bir profil bir tık uzağında",
+      body: "AI foto veya analiz paketiyle hemen başla." },
+    { title: "⏳ Son hatırlatma",
+      body: "Profilini güçlendirmek için bugün birkaç saniyeni ayır." },
   ];
   return copies[day] || copies[copies.length - 1];
-}
-
-/** wallet durumuna göre "what" kelimesi.
- *
- * NOT (2026-09-09): AI foto ücretsiz denemesi falPhotos.js'te yorum
- * satırına alındığı için freePhotoUsed artık hiçbir zaman false->true
- * geçmiyor — bu kampanya fiilen sadece ücretsiz analiz kullanıp satın
- * almamış kullanıcılar için tetikleniyor. Metin buna göre sabitlendi;
- * foto denemesi geri açılırsa (bkz. falPhotos.js aynı tarihli not) bu
- * fonksiyon da eski dallı haline geri alınmalı. */
-function whatFor(freePhotoUsed, freeAnalysisUsed) {
-  return "Ücretsiz analizin";
 }
 
 function chunk(arr, size) {
@@ -65,10 +57,15 @@ function chunk(arr, size) {
 /**
  * FCM token kaydı — client, giriş yapmış her kullanıcı için (anonim dahil,
  * ensureSignedIn() zaten her açılışta en az anonim oturum sağlıyor) token
- * alır almaz burayı çağırır. notificationCampaigns/{uid} dokümanına merge
- * yazar; doküman yoksa oluşturur (kampanya henüz başlamamış olabilir,
- * bu durumda sadece token saklanır, onWalletWrite tetiklendiğinde aktive
- * olur).
+ * alır almaz burayı çağırır.
+ *
+ * KAMPANYA BAŞLATMA BURADA (2026-09-10, basitleştirildi): eskiden kampanya
+ * yalnızca ücretsiz deneme kullanılınca (onWalletWrite'ta) başlıyordu.
+ * Artık tek koşul "kullanıcı uygulamaya girdi VE hiç satın alma yapmamış" —
+ * bunu en güvenilir yakalayabileceğimiz an token kaydı anı (uygulama her
+ * açıldığında/ilk kez açıldığında tetiklenir). wallet'a bakılır: bakiye
+ * sıfırsa VE zaten aktif bir kampanya yoksa (satın alıp durdurulmuş bir
+ * kampanyayı yanlışlıkla yeniden başlatmamak için) kampanya başlatılır.
  */
 exports.registerFcmToken = onCall(
   { region: "europe-west1", memory: "128MiB", timeoutSeconds: 15 },
@@ -86,25 +83,51 @@ exports.registerFcmToken = onCall(
     await enforceRateLimit(request.auth.uid, "registerFcmToken",
       { max: 10, windowMs: 10 * 60 * 1000, message: "Çok fazla istek." });
 
-    await db.doc(`${CAMPAIGNS_COL}/${request.auth.uid}`).set({
-      uid: request.auth.uid,
-      fcmToken: token,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    const uid = request.auth.uid;
+    const campaignRef = db.doc(`${CAMPAIGNS_COL}/${uid}`);
+    const walletRef = db.doc(`users/${uid}/private/wallet`);
+
+    await db.runTransaction(async (tx) => {
+      const [campaignSnap, walletSnap] = await Promise.all([
+        tx.get(campaignRef), tx.get(walletRef),
+      ]);
+      const campaign = campaignSnap.exists ? campaignSnap.data() : null;
+      const wallet = walletSnap.exists ? walletSnap.data() : null;
+      const hasAnyBalance = !!wallet &&
+        ((wallet.photoBalance || 0) > 0 || (wallet.analysisBalance || 0) > 0);
+
+      const update = {
+        uid,
+        fcmToken: token,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      // Hiç satın alma yapmamışsa (bakiyesi yoksa) VE kampanya daha önce
+      // hiç başlatılmamışsa (campaign == null) başlat. Kampanya zaten var
+      // ama active:false ise (daha önce satın alıp durdurulmuş olabilir,
+      // ya da MAX_REMINDER_DAY'e ulaşıp otomatik kapanmış olabilir) DOKUNMA
+      // — "satın almış birine sırf token yenilendi diye kampanyayı yeniden
+      // başlatma" ve "4 günü dolmuş kampanyayı sıfırlama" riskini önler.
+      if (!hasAnyBalance && campaign === null) {
+        update.active = true;
+        update.reminderDay = 0;
+        update.lastSentAt = null;
+      }
+      tx.set(campaignRef, update, { merge: true });
+    });
 
     return { ok: true };
   }
 );
 
 /**
- * wallet yazıldığında tetiklenir. İki iş yapar:
- *  1) freePhotoUsed/freeAnalysisUsed false->true geçtiyse VE kullanıcı hiç
- *     satın alma yapmamışsa (photoBalance/analysisBalance hâlâ 0/başlangıç
- *     seviyesindeyse) kampanyayı BAŞLATIR (active:true, reminderDay:0).
- *  2) Bakiye satın alma ile arttıysa (paket kredisi eklendi) kampanyayı
- *     DURDURUR — bu, tek trigger'ın hem başlatma hem durdurma sinyalini
- *     yakalamasını sağlar (satın alma sonrası wallet.photoBalance/
- *     analysisBalance yükselir, bkz. payments.js verifyPurchase).
+ * wallet yazıldığında tetiklenir — SADECE durdurma sinyali (2026-09-10'da
+ * basitleştirildi). Bakiye satın alma ile arttıysa (paket kredisi eklendi)
+ * kampanyayı DURDURUR. Başlatma artık burada değil: registerFcmToken
+ * (token kaydı anı = kullanıcının uygulamaya girdiği an) tek koşulla
+ * ("hiç satın alma yapmamış") kampanyayı başlatıyor — bkz. o fonksiyonun
+ * başındaki not. Bu trigger'ı da (onPurchaseWrite gibi) sadece durdurma
+ * için tutmak, "satın alma = kampanya biter" sinyalini iki ayrı yoldan
+ * (buradan ve onPurchaseWrite'tan) yakalayıp kaçırma riskini azaltıyor.
  */
 exports.onWalletWrite = onDocumentWritten(
   { document: "users/{uid}/private/wallet", region: "europe-west1" },
@@ -114,37 +137,15 @@ exports.onWalletWrite = onDocumentWritten(
     const after = event.data.after.exists ? event.data.after.data() : null;
     if (!after) return; // silindi, ilgilenmiyoruz
 
-    const campaignRef = db.doc(`${CAMPAIGNS_COL}/${uid}`);
-
-    // Bakiye YÜKSELDİYSE (satın alma) — kampanyayı durdur.
     const beforePhoto = (before && before.photoBalance) || 0;
     const beforeAnalysis = (before && before.analysisBalance) || 0;
     const afterPhoto = after.photoBalance || 0;
     const afterAnalysis = after.analysisBalance || 0;
     if (afterPhoto > beforePhoto || afterAnalysis > beforeAnalysis) {
-      await campaignRef.set({ active: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      return;
-    }
-
-    // Ücretsiz hak YENİ kullanıldıysa VE hâlâ hiç bakiyesi yoksa — başlat.
-    //
-    // NOT (2026-09-09): AI foto ücretsiz denemesi falPhotos.js'te yorum
-    // satırına alındı, bu yüzden freePhotoUsed artık hiçbir zaman
-    // false->true geçmiyor — freePhotoJustUsed pratikte hep false olacak.
-    // Kod silinmedi: foto denemesi geri açılırsa burası otomatik yeniden
-    // devreye girer, ekstra değişiklik gerekmez.
-    const freePhotoJustUsed = !(before && before.freePhotoUsed) && after.freePhotoUsed === true;
-    const freeAnalysisJustUsed = !(before && before.freeAnalysisUsed) && after.freeAnalysisUsed === true;
-    if ((freePhotoJustUsed || freeAnalysisJustUsed) && afterPhoto === 0 && afterAnalysis === 0) {
-      await campaignRef.set({
-        uid,
-        active: true,
-        reminderDay: 0,
-        lastSentAt: null,
-        freePhotoUsed: !!after.freePhotoUsed,
-        freeAnalysisUsed: !!after.freeAnalysisUsed,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      await db.doc(`${CAMPAIGNS_COL}/${uid}`).set(
+        { active: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
     }
   }
 );
@@ -195,8 +196,7 @@ exports.sendEngagementReminders = onSchedule(
     for (const group of chunk(candidates, FCM_BATCH_SIZE)) {
       const messages = group.map((c) => {
         const day = c.data.reminderDay || 0;
-        const what = whatFor(c.data.freePhotoUsed, c.data.freeAnalysisUsed);
-        const copy = reminderCopyFor(day, what);
+        const copy = reminderCopyFor(day);
         return {
           token: c.data.fcmToken,
           notification: { title: copy.title, body: copy.body },
