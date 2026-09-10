@@ -55,3 +55,8 @@ app.*.map.json
 ios_private_key.pem
 CertificateSigningRequest.certSigningRequest
 *.certSigningRequest
+
+# Firebase service account key — ASLA commit edilmemeli (Admin SDK private key)
+functions/service-account-key.json
+**/serviceAccountKey.json
+**/service-account*.json

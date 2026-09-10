@@ -3059,6 +3059,28 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
 }
 
 async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false) {
+  // KUYRUK HEARTBEAT (2026-09-10 gerçek olay): aynı kullanıcı üst üste iki
+  // job başlattığında, her ikisinin chunk'ları AYNI process-içi
+  // OPENAI_IMAGE_MAX_CONCURRENCY (=2) kuyruğunu paylaşıyor. Kuyrukta bekleyen
+  // (acquireOpenAiImageSlot içinde bekleyen) bir chunk hiçbir log yazmaz ve
+  // aşağıdaki attempt-döngüsü heartbeat'ine (satır ~3170) hiç girmez — çünkü
+  // döngü henüz başlamamıştır. Sonuç: updatedAt 5+ dakika bayatlar,
+  // cleanupStuckGenJobs işi "takılı" sanıp öldürür, kullanıcı iki kez üst üste
+  // "Zaman aşımı" alır (gerçek örnek: iki job aynı anda 20 chunk'ı 2 slotta
+  // paylaştı, ikisi de öldü). Bu interval, kuyrukta geçirilen süre dahil
+  // fonksiyonun TÜM ömrü boyunca çalışır — attempt döngüsünün varlığından
+  // bağımsızdır. Fire-and-forget: hata sessizce yutulur, üretimi bloklamaz.
+  const heartbeatTimer = setInterval(() => {
+    jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+  }, 90 * 1000);
+  try {
+    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine);
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
+}
+
+async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -3098,21 +3120,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // şablonda da tekrarlıyordu.
   let lastRejectGate = null;
   for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
-    // HEARTBEAT (2026-09-07 gerçek olay): cleanupStuckGenJobs her 5 dakikada
-    // bir 'generating' işlerde updatedAt'i kontrol ediyor; updatedAt SADECE
-    // bir chunk tamamen bitince (finalizeChunk) güncelleniyordu. Bir chunk
-    // kalite kapısından defalarca dönüp (iris-gaze/yaw/skin-tone vb.) 6
-    // denemeyi 5 dakikadan uzun sürede tüketirse, hiçbir chunk henüz
-    // bitmediği için updatedAt bayatlıyor; cleanupStuckGenJobs işi HÂLÂ
-    // AKTİFKEN "takılı" sanıp refundAndFail çağırıyor — bu da
-    // deleteTrainingPhotos ile referans selfie'leri Storage'dan siliyor,
-    // ama bu fonksiyon çalışmaya devam ettiği için sonraki denemeler
-    // artık silinmiş referansı indirmeye çalışıp 403 alıyor (görüntü:
-    // "referans indirilemedi: 403" -> generateForMode null -> chunk kaybı,
-    // kullanıcıda kesintili üretim / bağlantı hatası). Her deneme başında
-    // updatedAt'i tazeleyerek gerçekten çalışan işlerin erken öldürülmesini
-    // engelliyoruz. Fire-and-forget: bu heartbeat'in başarısız olması
-    // üretimi bloklamamalı.
+    // HEARTBEAT (2026-09-07 gerçek olay, 2026-09-10'da runOpenAiDirectChunk
+    // sarmalayıcısındaki setInterval ile GENİŞLETİLDİ — bkz. fonksiyon başı):
+    // cleanupStuckGenJobs her 5 dakikada bir 'generating' işlerde updatedAt'i
+    // kontrol ediyor. Bu satır her deneme başında EK bir tazeleme —
+    // setInterval'in 90sn'lik periyodu zaten bunu kapsıyor ama deneme anında
+    // taze bir zaman damgası garantilemek için fazladan bir yazım maliyetsiz.
+    // Fire-and-forget: bu heartbeat'in başarısız olması üretimi bloklamamalı.
     jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
 
     // YENİDEN DENEME = YENİ ŞABLON (2026-08-04): eskiden her deneme AYNI

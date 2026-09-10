@@ -197,6 +197,32 @@ exports.opsGetOverview = onCall(
   }
 );
 
+/**
+ * jobId'den uid bulur — panelde işlerin listesi genelde uid ile birlikte
+ * gelir, ama sadece jobId biliniyorsa (örn. dosya adından/loglardan) uid'i
+ * bulmak için collectionGroup taraması gerekir. opsGetJobDetail bu uid'i
+ * gerektirdiği için, önce bu çağrılır.
+ */
+exports.opsFindJobByJobId = onCall(
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
+  async (request) => {
+    await assertOps(request, "opsFindJobByJobId");
+    const { jobId } = request.data || {};
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "jobId zorunlu.");
+    }
+    assertSafeId(jobId, "jobId");
+
+    const snap = await db.collectionGroup("genJobs").get();
+    let found = null;
+    snap.forEach((d) => { if (d.id === jobId) found = d; });
+    if (!found) {
+      throw new HttpsError("not-found", "İş bulunamadı.");
+    }
+    return { uid: uidFromDocPath(found.ref), jobId };
+  }
+);
+
 exports.opsGetJobDetail = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
   async (request) => {

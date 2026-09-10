@@ -27,7 +27,7 @@ for (const name of [
   exports[name] = falPhotos[name];
 }
 
-for (const name of ["opsGetOverview", "opsGetJobDetail"]) {
+for (const name of ["opsGetOverview", "opsGetJobDetail", "opsFindJobByJobId"]) {
   exports[name] = opsPanel[name];
 }
 
