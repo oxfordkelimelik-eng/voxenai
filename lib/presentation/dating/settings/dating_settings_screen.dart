@@ -11,11 +11,41 @@ import '../widgets/ai_consent_gate.dart';
 
 /// Ayarlar & Gizlilik (Bölüm 9). Politika, şartlar, paketler, restore,
 /// hesap/veri silme, destek. KVKK/GDPR + App Store gerekleri.
-class DatingSettingsScreen extends ConsumerWidget {
+class DatingSettingsScreen extends ConsumerStatefulWidget {
   const DatingSettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DatingSettingsScreen> createState() =>
+      _DatingSettingsScreenState();
+}
+
+class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
+  // GİZLİ /OPS ERİŞİMİ (2026-09-10): /ops route'u hiçbir yerden linklenmez
+  // ve deep link/URL scheme yapılandırılmamış — uygulama içinden ulaşacak
+  // hiçbir yol yoktu. Versiyon etiketine art arda 7 kez basmak (Android
+  // "Geliştirici Seçenekleri" deseniyle aynı, kullanıcının bilmediği bir
+  // sıradan kullanıcının tesadüfen bulamayacağı ama sahibinin bilerek
+  // erişebileceği yol) admin paneline götürür.
+  int _versionTapCount = 0;
+  DateTime? _firstTapAt;
+
+  void _onVersionTap() {
+    final now = DateTime.now();
+    if (_firstTapAt == null || now.difference(_firstTapAt!) > const Duration(seconds: 3)) {
+      _firstTapAt = now;
+      _versionTapCount = 1;
+      return;
+    }
+    _versionTapCount++;
+    if (_versionTapCount >= 7) {
+      _versionTapCount = 0;
+      _firstTapAt = null;
+      context.push(DatingRoutes.ops);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final pack = ref.watch(packBalanceProvider);
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -94,9 +124,17 @@ class DatingSettingsScreen extends ConsumerWidget {
               onTap: () => _confirmDelete(context, ref)),
 
           const SizedBox(height: 24),
-          const Center(
-            child: Text('VOXEN AI · v1.0.0',
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          Center(
+            child: GestureDetector(
+              onTap: _onVersionTap,
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                child: Text('VOXEN AI · v1.0.0',
+                    style:
+                        TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              ),
+            ),
           ),
           const SizedBox(height: 8),
           const Center(
