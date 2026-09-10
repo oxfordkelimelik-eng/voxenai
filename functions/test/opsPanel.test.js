@@ -8,6 +8,8 @@ const {
   aggregateGateCounts,
   buildPurchaseSummary,
   buildJobSummary,
+  safeString,
+  buildDailyBreakdown,
 } = require("../opsPanel")._testables;
 
 test("isAuthorizedOpsEmail: doğru email + doğrulanmış -> true", () => {
@@ -118,7 +120,7 @@ test("aggregateGateCounts: boş iş listesi için boş obje", () => {
 });
 
 // --- buildPurchaseSummary ---
-test("buildPurchaseSummary: toplam, tekil alıcı, ürün dağılımı", () => {
+test("buildPurchaseSummary: toplam, tekil alıcı, ürün dağılımı, ciro (TL)", () => {
   const purchases = [
     { uid: "A", productId: "dating_pack_photo10" },
     { uid: "B", productId: "dating_pack_photo10" },
@@ -128,6 +130,59 @@ test("buildPurchaseSummary: toplam, tekil alıcı, ürün dağılımı", () => {
   assert.equal(s.totalPurchases, 3);
   assert.equal(s.uniqueBuyers, 2);
   assert.deepEqual(s.productCounts, { dating_pack_photo10: 2, dating_pack_analysis5: 1 });
+  assert.equal(s.totalRevenueTry, 349 + 349 + 249);
+});
+
+test("buildPurchaseSummary: bilinmeyen productId ciroya 0 katkı yapar", () => {
+  const s = buildPurchaseSummary([{ uid: "A", productId: "unknown_product" }]);
+  assert.equal(s.totalRevenueTry, 0);
+});
+
+// --- safeString ---
+test("safeString: string olduğu gibi döner", () => {
+  assert.equal(safeString("BAD_QUALITY"), "BAD_QUALITY");
+});
+
+test("safeString: null/undefined -> null", () => {
+  assert.equal(safeString(null), null);
+  assert.equal(safeString(undefined), null);
+});
+
+test("safeString: obje -> JSON string (Flutter cast hatasını önler)", () => {
+  assert.equal(safeString({ code: "X", msg: "y" }), '{"code":"X","msg":"y"}');
+});
+
+test("safeString: sayı -> string", () => {
+  assert.equal(safeString(42), "42");
+});
+
+// --- buildDailyBreakdown ---
+test("buildDailyBreakdown: TR gününe göre gruplar, ciro ve adet toplar", () => {
+  // 2026-09-10 12:00 Europe/Istanbul (UTC+3) = 2026-09-10T09:00:00Z
+  const day1a = new Date("2026-09-10T09:00:00Z").getTime();
+  const day1b = new Date("2026-09-10T20:00:00Z").getTime();
+  const day2 = new Date("2026-09-09T09:00:00Z").getTime();
+  const purchases = [
+    { productId: "dating_pack_photo10", createdAt: day1a },
+    { productId: "dating_pack_analysis1", createdAt: day1b },
+    { productId: "dating_pack_photo50", createdAt: day2 },
+  ];
+  const breakdown = buildDailyBreakdown(purchases);
+  assert.equal(breakdown.length, 2);
+  // En yeni gün önce.
+  assert.equal(breakdown[0].day, "2026-09-10");
+  assert.equal(breakdown[0].count, 2);
+  assert.equal(breakdown[0].revenueTry, 349 + 99);
+  assert.deepEqual(breakdown[0].productCounts, {
+    dating_pack_photo10: 1, dating_pack_analysis1: 1,
+  });
+  assert.equal(breakdown[1].day, "2026-09-09");
+  assert.equal(breakdown[1].count, 1);
+  assert.equal(breakdown[1].revenueTry, 999);
+});
+
+test("buildDailyBreakdown: boş liste için boş dizi", () => {
+  assert.deepEqual(buildDailyBreakdown([]), []);
 });
 
 // --- buildJobSummary ---

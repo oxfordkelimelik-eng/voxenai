@@ -110,6 +110,7 @@ class _DetailContent extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (data.email != null) _row('Kullanıcı', data.email!),
             _row('Durum', data.status ?? '?'),
             _row('Model', data.model ?? '?'),
             _row('Mod', data.photoMode ?? '?'),
@@ -188,38 +189,82 @@ class _DetailContent extends StatelessWidget {
         itemCount: frames.length,
         itemBuilder: (context, i) {
           final f = frames[i];
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: f.url != null
-                      ? CachedNetworkImage(
-                          imageUrl: f.url!,
-                          fit: BoxFit.cover,
-                          placeholder: (c, u) => const ColoredBox(
-                              color: AppColors.surfaceElevated),
-                          errorWidget: (c, u, e) => const ColoredBox(
-                            color: AppColors.surfaceElevated,
-                            child: Icon(Icons.broken_image_outlined,
-                                color: AppColors.textMuted),
-                          ),
-                        )
-                      : const ColoredBox(color: AppColors.surfaceElevated),
+          return GestureDetector(
+            onTap: () => _showRejectedFrameDetail(context, f),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: f.url != null
+                        ? CachedNetworkImage(
+                            imageUrl: f.url!,
+                            fit: BoxFit.cover,
+                            placeholder: (c, u) => const ColoredBox(
+                                color: AppColors.surfaceElevated),
+                            errorWidget: (c, u, e) => const ColoredBox(
+                              color: AppColors.surfaceElevated,
+                              child: Icon(Icons.broken_image_outlined,
+                                  color: AppColors.textMuted),
+                            ),
+                          )
+                        : const ColoredBox(color: AppColors.surfaceElevated),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                f.gate ?? '?',
-                style: const TextStyle(
-                    color: AppColors.error,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  f.gate ?? '?',
+                  style: const TextStyle(
+                      color: AppColors.error,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           );
         },
       );
+
+  void _showRejectedFrameDetail(BuildContext context, OpsRejectedFrame f) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (f.url != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: CachedNetworkImage(
+                  imageUrl: f.url!,
+                  height: 220,
+                  fit: BoxFit.contain,
+                  errorWidget: (c, u, e) => const SizedBox(
+                    height: 120,
+                    child: Center(
+                      child: Icon(Icons.broken_image_outlined,
+                          color: AppColors.textMuted),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 14),
+            _row('Kapı (gate)', f.gate ?? '?', valueColor: AppColors.error),
+            if (f.reason != null) _row('Gerekçe', f.reason!),
+            if (f.detail != null) _row('Detay', f.detail!),
+            if (f.chunkIdx != null) _row('Chunk', '${f.chunkIdx}'),
+            if (f.attempt != null) _row('Deneme', '${f.attempt}'),
+          ],
+        ),
+      ),
+    );
+  }
 }

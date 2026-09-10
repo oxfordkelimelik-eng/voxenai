@@ -2,38 +2,81 @@
 // Cloud Function yanıtlarını temsil eder. Elle yazılmış (code-gen yok,
 // admin-only, küçük şema).
 
+/// json içindeki her hangi bir değeri güvenle String'e çevirir — sunucudan
+/// yanlışlıkla obje (Map) gelen bir alan `as String?` cast'iyle uygulamayı
+/// çökertmesin diye. Sunucu tarafında `safeString` zaten JSON'a çeviriyor,
+/// bu sadece ek bir savunma katmanı (eski/cache'lenmiş yanıtlar için).
+String? _asString(dynamic v) {
+  if (v == null) return null;
+  if (v is String) return v;
+  return v.toString();
+}
+
 class OpsPurchase {
   final String? uid;
+  final String? email;
   final String orderId;
   final String? productId;
   final String? platform;
   final String? creditedField;
   final int creditedAmount;
+  final int priceTry;
   final int? createdAtMillis;
 
   OpsPurchase({
     required this.uid,
+    required this.email,
     required this.orderId,
     required this.productId,
     required this.platform,
     required this.creditedField,
     required this.creditedAmount,
+    required this.priceTry,
     required this.createdAtMillis,
   });
 
   factory OpsPurchase.fromJson(Map<String, dynamic> j) => OpsPurchase(
-        uid: j['uid'] as String?,
-        orderId: j['orderId'] as String? ?? '',
-        productId: j['productId'] as String?,
-        platform: j['platform'] as String?,
-        creditedField: j['creditedField'] as String?,
+        uid: _asString(j['uid']),
+        email: _asString(j['email']),
+        orderId: _asString(j['orderId']) ?? '',
+        productId: _asString(j['productId']),
+        platform: _asString(j['platform']),
+        creditedField: _asString(j['creditedField']),
         creditedAmount: (j['creditedAmount'] as num?)?.toInt() ?? 0,
+        priceTry: (j['priceTry'] as num?)?.toInt() ?? 0,
         createdAtMillis: (j['createdAt'] as num?)?.toInt(),
+      );
+}
+
+class OpsDailyStat {
+  final String day;
+  final int count;
+  final int revenueTry;
+  final Map<String, int> productCounts;
+
+  OpsDailyStat({
+    required this.day,
+    required this.count,
+    required this.revenueTry,
+    required this.productCounts,
+  });
+
+  factory OpsDailyStat.fromJson(Map<String, dynamic> j) => OpsDailyStat(
+        day: _asString(j['day']) ?? '?',
+        count: (j['count'] as num?)?.toInt() ?? 0,
+        revenueTry: (j['revenueTry'] as num?)?.toInt() ?? 0,
+        productCounts: Map<String, int>.from(
+          (j['productCounts'] as Map?)?.map(
+                (k, v) => MapEntry(k.toString(), (v as num).toInt()),
+              ) ??
+              {},
+        ),
       );
 }
 
 class OpsJobSummary {
   final String? uid;
+  final String? email;
   final String jobId;
   final String? status;
   final List<String>? styles;
@@ -50,6 +93,7 @@ class OpsJobSummary {
 
   OpsJobSummary({
     required this.uid,
+    required this.email,
     required this.jobId,
     required this.status,
     required this.styles,
@@ -66,15 +110,16 @@ class OpsJobSummary {
   });
 
   factory OpsJobSummary.fromJson(Map<String, dynamic> j) => OpsJobSummary(
-        uid: j['uid'] as String?,
-        jobId: j['jobId'] as String? ?? '',
-        status: j['status'] as String?,
+        uid: _asString(j['uid']),
+        email: _asString(j['email']),
+        jobId: _asString(j['jobId']) ?? '',
+        status: _asString(j['status']),
         styles: (j['styles'] as List?)?.map((e) => e.toString()).toList(),
-        photoMode: j['photoMode'] as String?,
-        model: j['model'] as String?,
+        photoMode: _asString(j['photoMode']),
+        model: _asString(j['model']),
         usedFreeTier: j['usedFreeTier'] as bool? ?? false,
         packUnitsCharged: (j['packUnitsCharged'] as num?)?.toInt() ?? 0,
-        errorMessage: j['errorMessage'] as String?,
+        errorMessage: _asString(j['errorMessage']),
         deliveredCount: (j['deliveredCount'] as num?)?.toInt() ?? 0,
         rejectedCount: (j['rejectedCount'] as num?)?.toInt() ?? 0,
         gateCounts: Map<String, int>.from(
@@ -92,6 +137,7 @@ class OpsOverview {
   final int totalPurchases;
   final int uniqueBuyers;
   final Map<String, int> productCounts;
+  final int totalRevenueTry;
   final int totalJobs;
   final int uniqueProducers;
   final Map<String, int> statusCounts;
@@ -103,11 +149,13 @@ class OpsOverview {
   final int failedJobs;
   final List<OpsPurchase> purchases;
   final List<OpsJobSummary> jobs;
+  final List<OpsDailyStat> dailyBreakdown;
 
   OpsOverview({
     required this.totalPurchases,
     required this.uniqueBuyers,
     required this.productCounts,
+    required this.totalRevenueTry,
     required this.totalJobs,
     required this.uniqueProducers,
     required this.statusCounts,
@@ -119,6 +167,7 @@ class OpsOverview {
     required this.failedJobs,
     required this.purchases,
     required this.jobs,
+    required this.dailyBreakdown,
   });
 
   factory OpsOverview.fromJson(Map<String, dynamic> j) {
@@ -132,6 +181,7 @@ class OpsOverview {
             ) ??
             {},
       ),
+      totalRevenueTry: (summary['totalRevenueTry'] as num?)?.toInt() ?? 0,
       totalJobs: (summary['totalJobs'] as num?)?.toInt() ?? 0,
       uniqueProducers: (summary['uniqueProducers'] as num?)?.toInt() ?? 0,
       statusCounts: Map<String, int>.from(
@@ -157,6 +207,9 @@ class OpsOverview {
       jobs: ((j['jobs'] as List?) ?? [])
           .map((e) => OpsJobSummary.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
+      dailyBreakdown: ((j['dailyBreakdown'] as List?) ?? [])
+          .map((e) => OpsDailyStat.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 }
@@ -181,13 +234,13 @@ class OpsRejectedFrame {
   });
 
   factory OpsRejectedFrame.fromJson(Map<String, dynamic> j) => OpsRejectedFrame(
-        gate: j['gate'] as String?,
+        gate: _asString(j['gate']),
         chunkIdx: (j['chunkIdx'] as num?)?.toInt(),
         attempt: (j['attempt'] as num?)?.toInt(),
-        reason: j['reason'] as String?,
-        detail: j['detail'] as String?,
-        rejectedAt: j['rejectedAt'] as String?,
-        url: j['url'] as String?,
+        reason: _asString(j['reason']),
+        detail: _asString(j['detail']),
+        rejectedAt: _asString(j['rejectedAt']),
+        url: _asString(j['url']),
       );
 }
 
@@ -198,7 +251,7 @@ class OpsStyleResult {
   OpsStyleResult({required this.status, required this.photoUrls});
 
   factory OpsStyleResult.fromJson(Map<String, dynamic> j) => OpsStyleResult(
-        status: j['status'] as String?,
+        status: _asString(j['status']),
         photoUrls: ((j['photoUrls'] as List?) ?? [])
             .where((e) => e != null)
             .map((e) => e.toString())
@@ -208,6 +261,7 @@ class OpsStyleResult {
 
 class OpsJobDetail {
   final String uid;
+  final String? email;
   final String jobId;
   final String? status;
   final List<String>? styles;
@@ -223,6 +277,7 @@ class OpsJobDetail {
 
   OpsJobDetail({
     required this.uid,
+    required this.email,
     required this.jobId,
     required this.status,
     required this.styles,
@@ -238,15 +293,16 @@ class OpsJobDetail {
   });
 
   factory OpsJobDetail.fromJson(Map<String, dynamic> j) => OpsJobDetail(
-        uid: j['uid'] as String? ?? '',
-        jobId: j['jobId'] as String? ?? '',
-        status: j['status'] as String?,
+        uid: _asString(j['uid']) ?? '',
+        email: _asString(j['email']),
+        jobId: _asString(j['jobId']) ?? '',
+        status: _asString(j['status']),
         styles: (j['styles'] as List?)?.map((e) => e.toString()).toList(),
-        photoMode: j['photoMode'] as String?,
-        model: j['model'] as String?,
+        photoMode: _asString(j['photoMode']),
+        model: _asString(j['model']),
         usedFreeTier: j['usedFreeTier'] as bool? ?? false,
         packUnitsCharged: (j['packUnitsCharged'] as num?)?.toInt() ?? 0,
-        errorMessage: j['errorMessage'] as String?,
+        errorMessage: _asString(j['errorMessage']),
         createdAtMillis: (j['createdAt'] as num?)?.toInt(),
         updatedAtMillis: (j['updatedAt'] as num?)?.toInt(),
         results: Map<String, OpsStyleResult>.from(

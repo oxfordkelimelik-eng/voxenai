@@ -16,6 +16,40 @@ class OpsDateRange {
   int get hashCode => Object.hash(since, until);
 }
 
+/// Panelin üstündeki hızlı aralık seçici — "Bugün / Bu Hafta / Bu Ay / 90 Gün".
+enum OpsQuickRange { today, week, month, quarter }
+
+extension OpsQuickRangeX on OpsQuickRange {
+  String get label => switch (this) {
+        OpsQuickRange.today => 'Bugün',
+        OpsQuickRange.week => 'Bu Hafta',
+        OpsQuickRange.month => 'Bu Ay',
+        OpsQuickRange.quarter => 'Son 90 Gün',
+      };
+
+  OpsDateRange toRange() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    switch (this) {
+      case OpsQuickRange.today:
+        return OpsDateRange(since: today, until: now);
+      case OpsQuickRange.week:
+        return OpsDateRange(
+            since: today.subtract(const Duration(days: 7)), until: now);
+      case OpsQuickRange.month:
+        return OpsDateRange(
+            since: today.subtract(const Duration(days: 30)), until: now);
+      case OpsQuickRange.quarter:
+        return OpsDateRange(
+            since: today.subtract(const Duration(days: 90)), until: now);
+    }
+  }
+}
+
+final opsQuickRangeProvider = StateProvider<OpsQuickRange>(
+  (ref) => OpsQuickRange.month,
+);
+
 const _opsRegion = 'europe-west1';
 
 final opsOverviewProvider =

@@ -9,9 +9,23 @@
 // kontrolüne dayanıyor, bu sadece ek bir gizlilik katmanı.
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const {
-  db, bucket, assertSafeId, signedDownloadUrl,
+  admin, db, bucket, assertSafeId, signedDownloadUrl,
   enforceRateLimit, checkAppAttestation,
 } = require("./_shared");
+
+// productId -> TL fiyat. payments.js'teki PRODUCT_CREDITS ile EL İLE senkron
+// tutulmalı (kredi tarafı orada, fiyat tarafı burada — panel sadece ciro
+// göstermek için fiyatı biliyor, doğrulama akışı fiyata bakmaz).
+const PRODUCT_PRICES_TRY = {
+  dating_pack_photo10: 349,
+  dating_pack_photo50: 999,
+  dating_pack_analysis1: 99,
+  dating_pack_analysis5: 249,
+};
+
+function priceForProduct(productId) {
+  return PRODUCT_PRICES_TRY[productId] || 0;
+}
 
 // Küçük harfe normalize edilmiş — Firebase/IdP tarafı email case'ini garanti
 // aynı tutmuyor (Gmail case-insensitive'dir), tam eşitlik yanlışlıkla
@@ -75,11 +89,31 @@ function gsPathFromUrl(gsUrl) {
   return m ? m[1] : null;
 }
 
+/**
+ * Firestore'daki bazı eski dokümanlarda "string" alanlar (detail, reason vb.)
+ * yanlışlıkla obje olarak yazılmış olabiliyor — bu, Flutter tarafında
+ * `as String?` cast'inde "type 'Map<...>' is not a subtype of type 'String?'"
+ * hatasına yol açıyordu. Panel hiçbir zaman ham obje döndürmemeli; obje ise
+ * JSON'a çevrilip gösterilir, aksi hâlde string'e zorlanır.
+ */
+function safeString(value) {
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
 /** rejectedFrames dizisinden gate -> sayaç. */
 function extractGateCounts(rejectedFrames) {
   const counts = {};
   for (const f of rejectedFrames || []) {
-    const gate = (f && f.gate) || "?";
+    const gate = safeString(f && f.gate) || "?";
     counts[gate] = (counts[gate] || 0) + 1;
   }
   return counts;
@@ -96,7 +130,7 @@ function aggregateGateCounts(jobs) {
   return total;
 }
 
-/** processedPurchases doküman listesinden özet. */
+/** processedPurchases doküman listesinden özet — ciro (TL) dahil. */
 function buildPurchaseSummary(purchases) {
   return {
     totalPurchases: purchases.length,
@@ -105,7 +139,39 @@ function buildPurchaseSummary(purchases) {
       acc[p.productId] = (acc[p.productId] || 0) + 1;
       return acc;
     }, {}),
+    totalRevenueTry: purchases.reduce((n, p) => n + priceForProduct(p.productId), 0),
   };
+}
+
+// Türkiye saatine göre "YYYY-MM-DD" gün anahtarı — Cloud Functions runtime'ı
+// UTC çalıştığı için Intl ile İstanbul ofseti uygulanır (sabit +03 yerine
+// bunu kullanmak DST gibi durumlarda da doğru kalır).
+const TR_DAY_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
+});
+function trDayKey(millis) {
+  if (!millis) return "?";
+  return TR_DAY_FORMATTER.format(new Date(millis)); // en-CA -> "YYYY-MM-DD"
+}
+
+/**
+ * Satın almaları TR gününe göre gruplar: her gün için satış adedi, ciro,
+ * ve ürün kırılımı. Panelin "günlük detaylı çıktı" ihtiyacı için — tarihe
+ * göre azalan sırada (en yeni gün önce) döner.
+ */
+function buildDailyBreakdown(purchases) {
+  const byDay = new Map();
+  for (const p of purchases) {
+    const day = trDayKey(p.createdAt);
+    if (!byDay.has(day)) {
+      byDay.set(day, { day, count: 0, revenueTry: 0, productCounts: {} });
+    }
+    const bucket = byDay.get(day);
+    bucket.count += 1;
+    bucket.revenueTry += priceForProduct(p.productId);
+    bucket.productCounts[p.productId] = (bucket.productCounts[p.productId] || 0) + 1;
+  }
+  return Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? 1 : -1));
 }
 
 /** genJobs doküman listesinden özet — kapı dağılımı ve iş türü sayaçları dahil. */
@@ -159,6 +225,7 @@ exports.opsGetOverview = onCall(
         platform: d.platform || null,
         creditedField: d.creditedField || null,
         creditedAmount: d.creditedAmount || 0,
+        priceTry: priceForProduct(d.productId),
         createdAt: d.createdAt ? d.createdAt.toMillis() : null,
       };
     });
@@ -179,7 +246,7 @@ exports.opsGetOverview = onCall(
         model: d.model || null,
         usedFreeTier: !!d.usedFreeTier,
         packUnitsCharged: d.packUnitsCharged || 0,
-        errorMessage: d.errorMessage || null,
+        errorMessage: safeString(d.errorMessage),
         deliveredCount,
         rejectedCount: rejectedFrames.length,
         gateCounts: extractGateCounts(rejectedFrames),
@@ -188,12 +255,31 @@ exports.opsGetOverview = onCall(
       };
     });
 
+    // Panelde "hangi kullanıcı" sorusu email ile cevaplanıyor — uid tek
+    // başına anlamsız. Firebase Auth toplu sorgu 100'lük sayfalar hâlinde
+    // yapılır (getUsers tek çağrıda en fazla 100 identifier kabul eder).
+    const uids = Array.from(new Set(
+      [...purchases, ...jobs].map((x) => x.uid).filter(Boolean)
+    ));
+    const emailByUid = new Map();
+    for (let i = 0; i < uids.length; i += 100) {
+      const batch = uids.slice(i, i + 100).map((uid) => ({ uid }));
+      try {
+        const result = await admin.auth().getUsers(batch);
+        for (const u of result.users) emailByUid.set(u.uid, u.email || null);
+      } catch (e) {
+        console.error("ops: kullanıcı email çözümleme hatası (atlanıyor):", e.message || e);
+      }
+    }
+    for (const p of purchases) p.email = emailByUid.get(p.uid) || null;
+    for (const j of jobs) j.email = emailByUid.get(j.uid) || null;
+
     const summary = {
       ...buildPurchaseSummary(purchases),
       ...buildJobSummary(jobs),
     };
 
-    return { summary, purchases, jobs };
+    return { summary, purchases, jobs, dailyBreakdown: buildDailyBreakdown(purchases) };
   }
 );
 
@@ -261,25 +347,33 @@ exports.opsGetJobDetail = onCall(
 
     const rejectedFrames = await Promise.all(
       (job.rejectedFrames || []).map(async (f) => ({
-        gate: f.gate || null,
+        gate: safeString(f.gate),
         chunkIdx: f.chunkIdx ?? null,
         attempt: f.attempt ?? null,
-        reason: f.reason || null,
-        detail: f.detail || null,
-        rejectedAt: f.rejectedAt || null,
+        reason: safeString(f.reason),
+        detail: safeString(f.detail),
+        rejectedAt: safeString(f.rejectedAt),
         url: await resolveGsUrl(f.gsUrl),
       }))
     );
 
+    let email = null;
+    try {
+      const userRecord = await admin.auth().getUser(uid);
+      email = userRecord.email || null;
+    } catch (e) {
+      console.error("ops: kullanıcı email çözümleme hatası (atlanıyor):", e.message || e);
+    }
+
     return {
-      uid, jobId,
+      uid, jobId, email,
       status: job.status || null,
       styles: job.styles || null,
       photoMode: job.photoMode || null,
       model: job.model || null,
       usedFreeTier: !!job.usedFreeTier,
       packUnitsCharged: job.packUnitsCharged || 0,
-      errorMessage: job.errorMessage || null,
+      errorMessage: safeString(job.errorMessage),
       createdAt: job.createdAt ? job.createdAt.toMillis() : null,
       updatedAt: job.updatedAt ? job.updatedAt.toMillis() : null,
       results,
@@ -299,4 +393,6 @@ exports._testables = {
   aggregateGateCounts,
   buildPurchaseSummary,
   buildJobSummary,
+  safeString,
+  buildDailyBreakdown,
 };
