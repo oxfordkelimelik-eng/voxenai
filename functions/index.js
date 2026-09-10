@@ -37,6 +37,7 @@ for (const name of [
   "onWalletWrite",
   "onPurchaseWrite",
   "sendEngagementReminders",
+  "opsSendCompensationNotice",
 ]) {
   exports[name] = notifications[name];
 }

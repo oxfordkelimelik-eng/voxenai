@@ -168,6 +168,131 @@ exports.onPurchaseWrite = onDocumentWritten(
 );
 
 /**
+ * TEK SEFERLİK TELAFİ BİLDİRİMİ (2026-09-10 olayı).
+ *
+ * NEDEN: cleanupStuckGenJobs 'ready' işleri de tarayıp "Zaman aşımı" yazıyordu
+ * (bkz. falPhotos.js'teki cleanupStuckGenJobs açıklaması). Kullanıcı stil
+ * seçim ekranındayken ekranı hata ekranına dönüyordu; parası düşülmemişti ama
+ * "paketim yandı" sanıp tekrar satın alanlar oldu. Hata düzeltildi; bu fonksiyon
+ * mağdurlara "kredileriniz duruyor, kullanabilirsiniz" bilgisini iletir.
+ *
+ * ELLE TETİKLENİR — otomatik çalışmaz. FCM token kaydı yeni sürümle geldiği
+ * için, canlı kullanıcılar güncelleyip token gönderene kadar hedeflerin
+ * çoğunda token olmayacak; bu yüzden fonksiyon tekrar tekrar çağrılabilir ve
+ * her seferinde SADECE henüz bildirim almamış (notifiedAt yok) ve token'ı
+ * OLAN hedeflere gönderir. dryRun ile önce kimlere gideceği görülebilir.
+ */
+exports.opsSendCompensationNotice = onCall(
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 300 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Giriş gerekli.");
+    }
+    const email = (request.auth.token.email || "").toLowerCase().trim();
+    if (email !== "destek@voxenai.com.tr" || request.auth.token.email_verified === false) {
+      throw new HttpsError("permission-denied", "Yetkisiz.");
+    }
+    const dryRun = (request.data || {}).dryRun !== false; // varsayılan: dryRun
+
+    // Hedefler: 'ready' iken haksız "Zaman aşımı" almış VE hâlâ kullanılmamış
+    // kredisi olan kullanıcılar. Bu iki koşulun kesişimi kasıtlı: kredisi
+    // kalmamış birine "kredilerin duruyor" demek yanlış olurdu.
+    const since = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const jobSnap = await db.collectionGroup("genJobs")
+      .where("createdAt", ">=", since)
+      .get();
+
+    const affectedUids = new Set();
+    for (const doc of jobSnap.docs) {
+      const d = doc.data();
+      if (d.status !== "failed") continue;
+      if (d.errorMessage !== "Zaman aşımı — işlem tamamlanamadı.") continue;
+      if (d.styles) continue; // stil seçilmiş = gerçek üretim denemesi, bu ayrı bir hata
+      let cur = doc.ref;
+      while (cur.parent && cur.parent.id !== "users") cur = cur.parent.parent;
+      if (cur) affectedUids.add(cur.id);
+    }
+
+    const targets = [];
+    const skipped = { noCredit: 0, alreadyNotified: 0, noToken: 0 };
+    for (const uid of affectedUids) {
+      const walletSnap = await db.doc(`users/${uid}/private/wallet`).get();
+      const w = walletSnap.data() || {};
+      const photo = w.photoBalance || 0;
+      const analysis = w.analysisBalance || 0;
+      if (photo === 0 && analysis === 0) { skipped.noCredit++; continue; }
+
+      const campRef = db.doc(`${CAMPAIGNS_COL}/${uid}`);
+      const camp = (await campRef.get()).data() || {};
+      if (camp.compensationNotifiedAt) { skipped.alreadyNotified++; continue; }
+      if (!camp.fcmToken) { skipped.noToken++; continue; }
+
+      targets.push({ uid, ref: campRef, token: camp.fcmToken, photo, analysis });
+    }
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        affectedTotal: affectedUids.size,
+        wouldSend: targets.length,
+        skipped,
+        preview: targets.map((t) => ({ uid: t.uid, photo: t.photo, analysis: t.analysis })),
+      };
+    }
+
+    let sent = 0, failed = 0;
+    for (const group of chunk(targets, FCM_BATCH_SIZE)) {
+      const messages = group.map((t) => {
+        // Metin kişiye göre: elinde ne varsa onu söyle.
+        const parts = [];
+        if (t.photo > 0) parts.push(`${t.photo} AI foto`);
+        if (t.analysis > 0) parts.push(`${t.analysis} analiz`);
+        return {
+          token: t.token,
+          notification: {
+            title: "🎁 Kredilerin hesabında duruyor",
+            body: `Yaşanan teknik aksaklık giderildi. ${parts.join(" ve ")} hakkın ` +
+              "kullanılmadan bekliyor — hemen üretime başlayabilirsin.",
+          },
+          data: { type: "compensation_notice" },
+        };
+      });
+
+      let response;
+      try {
+        response = await admin.messaging().sendEachForMulticast(messages);
+      } catch (e) {
+        console.error("TELAFİ BİLDİRİMİ: toplu gönderim hata verdi:", e.message || e);
+        continue;
+      }
+
+      const batch = db.batch();
+      response.responses.forEach((r, i) => {
+        if (r.success) {
+          sent++;
+          batch.set(group[i].ref, {
+            compensationNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        } else {
+          failed++;
+          const code = r.error && r.error.code;
+          console.warn(`TELAFİ BİLDİRİMİ: başarısız uid=${group[i].uid} kod=${code}`);
+          if (code === "messaging/registration-token-not-registered" ||
+              code === "messaging/invalid-registration-token") {
+            batch.set(group[i].ref, { fcmToken: null }, { merge: true });
+          }
+        }
+      });
+      await batch.commit();
+    }
+
+    console.log(`TELAFİ BİLDİRİMİ sonucu: gönderildi=${sent} başarısız=${failed}`);
+    return { dryRun: false, affectedTotal: affectedUids.size, sent, failed, skipped };
+  }
+);
+
+/**
  * Günlük kampanya gönderimi — TR saati 20:00. Aktif kampanyaları tarar,
  * FCM push gönderir, sayaç/durumu günceller, geçersiz token'ları temizler.
  */
