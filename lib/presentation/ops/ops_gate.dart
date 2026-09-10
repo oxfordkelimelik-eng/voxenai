@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../core/constants/app_colors.dart';
-import '../../core/router/dating_routes.dart';
 import '../providers/app_providers.dart' show authServiceProvider;
 
 /// Bu email dışındaki kimse içeriği görmez — tek güvenlik sınırı sunucu
@@ -22,13 +20,17 @@ class OpsGate extends ConsumerStatefulWidget {
 
 class _OpsGateState extends ConsumerState<OpsGate> {
   bool _busy = false;
+  String? _lastError; // TANI (2026-09-10, GEÇİCİ)
 
   Future<void> _signIn() async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _lastError = null;
+    });
     try {
       await ref.read(authServiceProvider).linkWithGoogle();
-    } catch (_) {
-      // Sessizce yut — buton yeniden görünür, "admin" ima eden bir mesaj yok.
+    } catch (e) {
+      _lastError = e.toString();
     }
     if (mounted) setState(() => _busy = false);
   }
@@ -74,6 +76,12 @@ class _OpsGateState extends ConsumerState<OpsGate> {
                         )
                       : const Text('Google ile Giriş'),
                 ),
+                if (_lastError != null) ...[
+                  const SizedBox(height: 16),
+                  Text('Hata: $_lastError',
+                      style: const TextStyle(
+                          color: AppColors.textMuted, fontSize: 12)),
+                ],
               ],
             ),
           ),
@@ -82,13 +90,41 @@ class _OpsGateState extends ConsumerState<OpsGate> {
     }
 
     if (email != kOpsEmail) {
-      // Sessiz yönlendirme — hiçbir mesaj gösterme.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) context.go(DatingRoutes.splash);
-      });
-      return const Scaffold(
+      // TANI (2026-09-10, GEÇİCİ): giriş sonrası yanlış yönlendirme
+      // şikayeti üzerine — hangi email geldiğini ekranda gösterir + tekrar
+      // giriş denemek için buton. Kök sebep netleşince bu blok eski
+      // (sessiz yönlendirme) haline döndürülecek.
+      return Scaffold(
         backgroundColor: AppColors.background,
-        body: SizedBox.shrink(),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('TANI (geçici ekran)',
+                    style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
+                Text('Algılanan email: "$email"',
+                    style: const TextStyle(color: AppColors.textPrimary)),
+                const SizedBox(height: 6),
+                Text('Beklenen: "$kOpsEmail"',
+                    style: const TextStyle(color: AppColors.textMuted)),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _busy ? null : _signIn,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: AppColors.textOnGold,
+                  ),
+                  child: const Text('Farklı Google Hesabıyla Tekrar Dene'),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
