@@ -4050,9 +4050,33 @@ exports.startPhotoGeneration = onCall(
     const walletRef = db.doc(`users/${uid}/private/wallet`);
     const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
 
+    // İŞİ 'failed' YAP VE HATAYI YENİDEN FIRLAT (2026-09-10 gerçek olay):
+    // 'ready' durumundaki bir iş, üretim başlamadan HttpsError ile
+    // reddedildiğinde (bakiye yok, referans eksik, havuz boş...) doküman
+    // 'ready' olarak KALIYORDU. cleanupStuckGenJobs 'ready' işleri de tarıyor
+    // ve 5 dakika sonra "Zaman aşımı — işlem tamamlanamadı" yazıyordu — yani
+    // kullanıcı "paketin yok" yerine 5 dakika sonra alakasız bir zaman aşımı
+    // görüyordu (10 Eylül: 41 işten 40'ı böyle "başarısız" göründü; 25
+    // kullanıcı hiç bakiyesi olmadan denemişti). Bu yol artık ANINDA ve
+    // DOĞRU mesajla sonuçlanır.
+    const failJobAndRethrow = async (e) => {
+      try {
+        await jobRef.set({
+          status: "failed",
+          errorMessage: e instanceof HttpsError ? e.message : "Üretim başlatılamadı.",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      } catch (writeErr) {
+        // İşi işaretleyemesek bile ASIL hatayı kaybetme.
+        console.error("İş 'failed' olarak işaretlenemedi:", writeErr);
+      }
+      throw e;
+    };
+
     // Doğrulama adımı atlanamaz: iş 'ready' değilse üretim başlamaz.
     const prepSnap = await jobRef.get();
     if (!prepSnap.exists || prepSnap.data().status !== "ready") {
+      // Burada iş zaten 'ready' DEĞİL — işaretlenecek bir şey yok.
       throw new HttpsError(
         "failed-precondition",
         "Fotoğraflar henüz doğrulanmadı. Lütfen baştan tekrar dene."
@@ -4060,10 +4084,10 @@ exports.startPhotoGeneration = onCall(
     }
     const refUrls = prepSnap.data().falRefUrls;
     if (!Array.isArray(refUrls) || refUrls.length === 0) {
-      throw new HttpsError(
+      await failJobAndRethrow(new HttpsError(
         "failed-precondition",
         "Referans fotoğrafları hazır değil. Lütfen baştan tekrar dene."
-      );
+      ));
     }
     const prepData = prepSnap.data();
     // Kişi-değişimi edit'i için kullanıcı referansları + kimlik/beden metni.
@@ -4086,12 +4110,12 @@ exports.startPhotoGeneration = onCall(
     // varsa yalnızca oradan seçilir — bkz. listTemplateFiles / HEIGHT_RANGE_TO_BAND.
     const { files, band: templateBand } = await listTemplateFiles(bodyProfile.heightRange);
     if (files.length === 0) {
-      throw new HttpsError(
+      await failJobAndRethrow(new HttpsError(
         "failed-precondition",
         `Taban görsel havuzu boş. Firebase Storage'da ${TEMPLATE_ROOT}/ ` +
         `klasörüne (veya boy bantlarına: ${TEMPLATE_HEIGHT_BANDS.join(" / ")}) ` +
         `AI ile üretilmiş taslak görseller yükle.`
-      );
+      ));
     }
     console.log(
       `ŞABLON HAVUZU: ${files.length} görsel` +
@@ -4140,23 +4164,31 @@ exports.startPhotoGeneration = onCall(
 
       const balance = wallet.photoBalance || 0;
       if (balance < unitsNeeded) {
-        // AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09,
-        // kullanıcı kararı) — foto analizindeki ücretsiz deneme
-        // (freeAnalysisUsed, aiProxy.js) BUNDAN AYRI, dokunulmadı. Geri
-        // açmak için aşağıdaki iki dalı ve usedFreeTier/freePhotoUsed
-        // yazımını (bu fonksiyonun altında) eski hâline getir — hiçbir
-        // fonksiyon silinmedi, sadece bu blok devre dışı.
+        // AI FOTO ÜCRETSİZ DENEMESİ GEÇİCİ OLARAK GERİ AÇILDI (2026-09-10).
         //
-        // if (!wallet.freePhotoUsed && styles.length === 1) {
-        //   unitsToCharge = 0;
-        //   usedFreeTier = true;
-        // } else if (!wallet.freePhotoUsed && styles.length > 1) {
-        //   throw new HttpsError(
-        //     "failed-precondition",
-        //     "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
-        //   );
-        // } else
-        if (balance > 0) {
+        // NEDEN: 2026-09-09'da bu blok yorum satırına alınıp SUNUCUYA deploy
+        // edildi, ama aynı değişikliğin istemci tarafı (dating_providers.dart
+        // canAffordStyles) App Store'a HENÜZ YÜKLENMEDİ. Kullanıcıların
+        // telefonundaki sürüm (1.0.2+4) hâlâ "1 stil ücretsiz" sanıp sunucuya
+        // istek atıyor, sunucu ise reddediyordu. Sonuç: 10 Eylül'de 41 işten
+        // 40'ı başarısız oldu, 25 kullanıcı hiç foto alamadı.
+        //
+        // KAPATMA SIRASI (kullanıcı kararı): (1) ücretsiz denemesi KAPALI
+        // istemci sürümü App Store'da yayına girsin, (2) kullanıcıların
+        // çoğu o sürüme geçsin, (3) ANCAK O ZAMAN burası tekrar yorum
+        // satırına alınsın. Önce sunucuyu kapatmak, eski istemcileri kırar.
+        //
+        // Foto analizindeki ücretsiz deneme (freeAnalysisUsed, aiProxy.js)
+        // BUNDAN AYRI, hiç dokunulmadı.
+        if (!wallet.freePhotoUsed && styles.length === 1) {
+          unitsToCharge = 0;
+          usedFreeTier = true;
+        } else if (!wallet.freePhotoUsed && styles.length > 1) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
+          );
+        } else if (balance > 0) {
           // Bakiyesi var ama seçtiği stil sayısından az — net yönlendirme yap.
           throw new HttpsError(
             "failed-precondition",
@@ -4196,7 +4228,7 @@ exports.startPhotoGeneration = onCall(
         model: modelId, // hangi model kullanıldı — izleme/karşılaştırma için
         photoMode, // hangi prompt stratejisi — A/B karşılaştırması için
       }, { merge: true });
-    });
+    }).catch(failJobAndRethrow);
 
     // TEKRAR AÇILDI (2026-07-27): tek "Fotoğraflarımı Oluştur" butonu artık
     // fal.ai SARMALAMASI değil, doğrudan OpenAI'nin kendi API'sine gidiyor

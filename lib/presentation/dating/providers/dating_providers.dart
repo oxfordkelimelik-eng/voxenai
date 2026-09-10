@@ -383,11 +383,20 @@ class PackBalance {
   /// Verilen sayıda stil üretimini karşılayabilir mi? Sunucudaki
   /// startPhotoGeneration mantığıyla aynı — kredi harcamadan ÖNCE
   /// istemcide kontrol için.
+  ///
+  /// GEÇİCİ OLARAK GERİ AÇILDI (2026-09-10): 2026-09-09'da bu satır yorum
+  /// satırına alınmıştı ama sunucu tarafı bundan ÖNCE deploy edildiği için
+  /// (App Store review süresi farkı) eski istemci sürümleri (hâlâ "ücretsiz
+  /// hakkın var" sanan) sunucudan ret alıp kullanıcıya yanlış "zaman aşımı"
+  /// hatası gösterdi. Sunucu bu yüzden aynı gün ücretsiz denemeyi geçici
+  /// olarak geri açtı (bkz. functions/falPhotos.js startPhotoGeneration aynı
+  /// tarihli not) — istemci burada SUNUCUYLA UYUMLU tutuluyor. Ücretsiz
+  /// deneme kapalı sürüm App Store'da yayına girip kullanıcıların çoğu ona
+  /// geçtikten SONRA, önce bu satır, sonra sunucudaki karşılığı kapatılmalı
+  /// — asla önce sunucu, sonra istemci (tam da bu hataya yol açtı).
   bool canAffordStyles(int styleCount) {
     if (photo >= styleCount) return true;
-    // AI FOTO ÜCRETSİZ DENEMESİ YORUM SATIRINA ALINDI (2026-09-09) — bkz.
-    // functions/falPhotos.js startPhotoGeneration aynı tarihli not.
-    // if (styleCount == 1 && !freePhotoUsed) return true;
+    if (styleCount == 1 && !freePhotoUsed) return true;
     return false;
   }
 }
