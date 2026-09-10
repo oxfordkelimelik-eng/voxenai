@@ -16,7 +16,7 @@ const {
 // Küçük harfe normalize edilmiş — Firebase/IdP tarafı email case'ini garanti
 // aynı tutmuyor (Gmail case-insensitive'dir), tam eşitlik yanlışlıkla
 // erişimi reddedebilirdi.
-const OPS_EMAIL = "kutayalptekin3@gmail.com";
+const OPS_EMAIL = "destek@voxenai.com.tr";
 
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
 

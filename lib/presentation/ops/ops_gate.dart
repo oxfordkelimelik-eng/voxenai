@@ -6,7 +6,7 @@ import '../providers/app_providers.dart' show authServiceProvider;
 /// Bu email dışındaki kimse içeriği görmez — tek güvenlik sınırı sunucu
 /// tarafındadır (opsPanel.js), burası sadece UX (yanlış kullanıcıya ekran
 /// göstermemek).
-const String kOpsEmail = 'kutayalptekin3@gmail.com';
+const String kOpsEmail = 'destek@voxenai.com.tr';
 
 /// `/ops` altındaki her ekranı sarar: email eşleşmiyorsa sessizce ana ekrana
 /// döner (hata mesajı yok, panelin varlığını ifşa etmez).

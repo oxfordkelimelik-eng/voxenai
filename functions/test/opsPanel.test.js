@@ -11,11 +11,11 @@ const {
 } = require("../opsPanel")._testables;
 
 test("isAuthorizedOpsEmail: doğru email + doğrulanmış -> true", () => {
-  assert.equal(isAuthorizedOpsEmail("kutayalptekin3@gmail.com", true), true);
+  assert.equal(isAuthorizedOpsEmail("destek@voxenai.com.tr", true), true);
 });
 
 test("isAuthorizedOpsEmail: case/boşluk normalize edilir", () => {
-  assert.equal(isAuthorizedOpsEmail("  KutayAlptekin3@Gmail.Com  ", true), true);
+  assert.equal(isAuthorizedOpsEmail("  Destek@VoxenAI.Com.Tr  ", true), true);
 });
 
 test("isAuthorizedOpsEmail: yanlış email -> false", () => {
@@ -28,11 +28,11 @@ test("isAuthorizedOpsEmail: boş/eksik email -> false", () => {
 });
 
 test("isAuthorizedOpsEmail: email_verified açıkça false -> false", () => {
-  assert.equal(isAuthorizedOpsEmail("kutayalptekin3@gmail.com", false), false);
+  assert.equal(isAuthorizedOpsEmail("destek@voxenai.com.tr", false), false);
 });
 
 test("isAuthorizedOpsEmail: email_verified undefined -> true kalır (mevcut davranış)", () => {
-  assert.equal(isAuthorizedOpsEmail("kutayalptekin3@gmail.com", undefined), true);
+  assert.equal(isAuthorizedOpsEmail("destek@voxenai.com.tr", undefined), true);
 });
 
 // --- uidFromDocPath ---
