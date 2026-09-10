@@ -4891,10 +4891,19 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
 
 /**
  * Webhook teslimatı güvenilmez olabilir — uzun süredir 'generating' takılı
- * kalan işleri başarısız sayıp iade eder. 'ready' (doğrulaması geçmiş ama
- * kullanıcı üretime hiç geçmemiş) işler de buraya düşer: bakiye zaten
- * düşülmediği için iade 0'dır, ama kimlik vektörü geride kalmasın diye iş
- * kapatılır. 'uploading' yalnızca eski/kalıntı işler için (artık üretilmiyor).
+ * kalan işleri başarısız sayıp iade eder.
+ *
+ * 'ready' İŞLER BURAYA DÜŞMEZ (2026-09-10 gerçek olay). Akış iki adımlı:
+ * prepareReferencePhotos işi 'ready' yapar (bakiye DÜŞÜLMEZ), sonra kullanıcı
+ * stil seçip startPhotoGeneration'ı çağırır. Yani 'ready', kullanıcının stil
+ * seçim ekranında beklediği NORMAL bir durum — hata değil. Eskiden 5 dakika
+ * sonra "Zaman aşımı — işlem tamamlanamadı" yazılıyordu; client job dokümanını
+ * canlı dinlediği için kullanıcı stil seçerken ekranı bir anda hata ekranına
+ * dönüyordu. Gerçek etki (10 Eylül): üç kullanıcı toplam 12 kez böyle "hata"
+ * aldı, bakiyeleri duruyordu ama hata gördükleri için üst üste paket satın
+ * aldılar (biri 4 paket alıp 3'ünü hiç kullanmadan bıraktı).
+ *
+ * 'uploading' yalnızca eski/kalıntı işler için (artık üretilmiyor).
  */
 exports.cleanupStuckGenJobs = onSchedule(
   { schedule: "every 5 minutes", region: "europe-west1", timeoutSeconds: 120 },
@@ -4902,7 +4911,7 @@ exports.cleanupStuckGenJobs = onSchedule(
     const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 5 * 60 * 1000);
     const stuck = await db
       .collectionGroup("genJobs")
-      .where("status", "in", ["uploading", "ready", "generating"])
+      .where("status", "in", ["uploading", "generating"])
       .where("updatedAt", "<", cutoff)
       .get();
 
@@ -4911,6 +4920,36 @@ exports.cleanupStuckGenJobs = onSchedule(
       const job = doc.data();
       console.warn(`Takılı iş temizleniyor: ${doc.ref.path}`);
       await refundAndFail(uid, doc.id, job.packUnitsCharged || 0, "Zaman aşımı — işlem tamamlanamadı.");
+    }
+  }
+);
+
+/**
+ * 'ready' işlerin KVKK temizliği — cleanupStuckGenJobs'tan ayrı tutuldu
+ * (bkz. oradaki gerekçe). Kullanıcı stil seçim ekranında saatlerce
+ * bekleyebilir; bu yüzden burada eşik 24 saat ve iş 'failed' YAPILMAZ —
+ * yalnızca selfie'ler silinir ve iş 'expired' işaretlenir. Client 'expired'i
+ * hata olarak göstermez (yalnızca 'failed' hata ekranı açar), dolayısıyla
+ * ekranda bekleyen kimse yanlışlıkla hata görmez.
+ */
+exports.cleanupExpiredReadyJobs = onSchedule(
+  { schedule: "every 60 minutes", region: "europe-west1", timeoutSeconds: 300 },
+  async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
+    const expired = await db
+      .collectionGroup("genJobs")
+      .where("status", "==", "ready")
+      .where("updatedAt", "<", cutoff)
+      .get();
+
+    for (const doc of expired.docs) {
+      const uid = doc.ref.parent.parent.parent.parent.id;
+      console.warn(`Süresi dolmuş 'ready' iş temizleniyor: ${doc.ref.path}`);
+      await doc.ref.set({
+        status: "expired",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      await deleteTrainingPhotos(uid, doc.id);
     }
   }
 );

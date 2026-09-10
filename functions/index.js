@@ -23,6 +23,7 @@ for (const name of [
   "startPhotoGeneration",
   "falInferenceWebhook",
   "cleanupStuckGenJobs",
+  "cleanupExpiredReadyJobs",
 ]) {
   exports[name] = falPhotos[name];
 }
