@@ -27,6 +27,21 @@ const {
 const CAMPAIGNS_COL = "notificationCampaigns";
 const MAX_REMINDER_DAY = 4; // gün 0-3 gönderilir, gün 4'te durur (4 bildirim)
 
+// opsPanel.js'teki OPS_EMAIL ile EL İLE senkron (döngüsel require'dan
+// kaçınmak için ayrı tanımlandı — iki dosya birbirini import etmiyor).
+const OPS_EMAIL = "destek@voxenai.com.tr";
+
+const PRODUCT_PRICES_TRY = {
+  dating_pack_photo10: 349, dating_pack_photo50: 999,
+  dating_pack_analysis1: 99, dating_pack_analysis5: 249,
+};
+const PRODUCT_LABELS = {
+  dating_pack_photo10: "AI Foto Standart (10 foto)",
+  dating_pack_photo50: "AI Foto Premium (50 foto)",
+  dating_pack_analysis1: "Analiz Tekli",
+  dating_pack_analysis5: "Analiz Standart (5)",
+};
+
 // FCM tek çağrıda en fazla 500 token kabul eder — hem gönderim hem batch
 // yazım bu sınıra göre parçalanır.
 const FCM_BATCH_SIZE = 500;
@@ -101,13 +116,18 @@ exports.registerFcmToken = onCall(
         fcmToken: token,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
+      // Admin hesabı (destek@voxenai.com.tr) hiçbir zaman "satın almadın"
+      // kampanyasına girmez — panelin kendisini kullanan hesabın bakiyesi
+      // hep 0 olur, bu bir satın alma-yapmama sinyali değildir.
+      const isOpsAccount = (request.auth.token.email || "").toLowerCase().trim() === OPS_EMAIL;
+
       // Hiç satın alma yapmamışsa (bakiyesi yoksa) VE kampanya daha önce
       // hiç başlatılmamışsa (campaign == null) başlat. Kampanya zaten var
       // ama active:false ise (daha önce satın alıp durdurulmuş olabilir,
       // ya da MAX_REMINDER_DAY'e ulaşıp otomatik kapanmış olabilir) DOKUNMA
       // — "satın almış birine sırf token yenilendi diye kampanyayı yeniden
       // başlatma" ve "4 günü dolmuş kampanyayı sıfırlama" riskini önler.
-      if (!hasAnyBalance && campaign === null) {
+      if (!isOpsAccount && !hasAnyBalance && campaign === null) {
         update.active = true;
         update.reminderDay = 0;
         update.lastSentAt = null;
@@ -151,9 +171,59 @@ exports.onWalletWrite = onDocumentWritten(
 );
 
 /**
+ * Admin'e (destek@voxenai.com.tr) yeni satış olduğunda push bildirimi
+ * gönderir — panel açık ya da kapalı, sonuç aynı (bu yüzden "canlı gösterge"
+ * değil FCM push seçildi). Admin'in kendi notificationCampaigns/{uid}
+ * dokümanındaki fcmToken kullanılır (registerFcmToken zaten her giriş
+ * yapmış kullanıcı için, admin dahil, token kaydediyor).
+ */
+async function notifyOpsOfNewSale(uid, purchase) {
+  let adminUid;
+  try {
+    adminUid = (await admin.auth().getUserByEmail(OPS_EMAIL)).uid;
+  } catch (e) {
+    console.error("SATIŞ BİLDİRİMİ: admin kullanıcı bulunamadı:", e.message || e);
+    return;
+  }
+  if (uid === adminUid) return; // admin kendi hesabıyla test satın alması yaptıysa bildirim gönderme
+
+  const adminCampSnap = await db.doc(`${CAMPAIGNS_COL}/${adminUid}`).get();
+  const token = adminCampSnap.exists ? adminCampSnap.data().fcmToken : null;
+  if (!token) {
+    console.warn("SATIŞ BİLDİRİMİ: admin FCM token yok, gönderilemedi.");
+    return;
+  }
+
+  let buyerEmail = uid;
+  try { buyerEmail = (await admin.auth().getUser(uid)).email || uid; } catch { /* uid ile devam */ }
+
+  const label = PRODUCT_LABELS[purchase.productId] || purchase.productId;
+  const price = PRODUCT_PRICES_TRY[purchase.productId] || 0;
+
+  try {
+    await admin.messaging().send({
+      token,
+      notification: {
+        title: "💰 Yeni satış",
+        body: `${label} — ${price} TL — ${buyerEmail}`,
+      },
+      data: { type: "new_sale", productId: purchase.productId || "" },
+    });
+  } catch (e) {
+    const code = e && e.code;
+    console.warn("SATIŞ BİLDİRİMİ: gönderim başarısız kod=", code);
+    if (code === "messaging/registration-token-not-registered" ||
+        code === "messaging/invalid-registration-token") {
+      await db.doc(`${CAMPAIGNS_COL}/${adminUid}`).set({ fcmToken: null }, { merge: true });
+    }
+  }
+}
+
+/**
  * Yeni bir satın alma kaydı oluştuğunda kampanyayı hemen durdurur — bu,
  * onWalletWrite'tan daha doğrudan bir durdurma sinyali (satın alma anında
- * durur, sonraki bir wallet yazımını beklemez).
+ * durur, sonraki bir wallet yazımını beklemez). Aynı olayda admin'e satış
+ * bildirimi de gönderir (bkz. notifyOpsOfNewSale).
  */
 exports.onPurchaseWrite = onDocumentWritten(
   { document: "users/{uid}/private/payments/processedPurchases/{orderId}", region: "europe-west1" },
@@ -164,6 +234,7 @@ exports.onPurchaseWrite = onDocumentWritten(
       active: false,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+    await notifyOpsOfNewSale(uid, event.data.after.data());
   }
 );
 
