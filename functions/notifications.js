@@ -83,7 +83,13 @@ function chunk(arr, size) {
  * kampanyayı yanlışlıkla yeniden başlatmamak için) kampanya başlatılır.
  */
 exports.registerFcmToken = onCall(
-  { region: "europe-west1", memory: "128MiB", timeoutSeconds: 15 },
+  // 128MiB YETMİYOR (2026-09-11 gerçek olay): Node.js 20 runtime'ının kendisi
+  // zaten 130-154 MiB kullanıyor, konteyner PORT=8080'de dinlemeye
+  // başlamadan bellek limitini aşıp health check'te düşüyordu — deploy
+  // "Container Healthcheck failed" hatasıyla başarısız oluyordu (aralıklı:
+  // bazı deploy'larda konteyner limitin altında kalacak kadar şanslı
+  // başlıyordu, bu yüzden hata her seferinde görünmüyordu).
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 15 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
