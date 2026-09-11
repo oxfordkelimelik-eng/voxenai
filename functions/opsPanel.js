@@ -213,6 +213,14 @@ exports.opsGetOverview = onCall(
     const until = untilMillis ? new Date(untilMillis) : new Date();
     const since = sinceMillis ? new Date(sinceMillis) : new Date(until.getTime() - DEFAULT_WINDOW_MS);
 
+    // Admin (OPS_EMAIL) hesabının kendi test satın almalarını ciro/satış
+    // istatistiklerinden dışlamak için uid'i gerekiyor. Bulunamazsa (örn.
+    // hesap yoksa) sessizce hiçbir şey filtrelenmez.
+    let opsUid = null;
+    try {
+      opsUid = (await admin.auth().getUserByEmail(OPS_EMAIL)).uid;
+    } catch { /* admin hesabı yoksa filtrelenecek bir şey yok */ }
+
     const [purchaseSnap, jobSnap] = await Promise.all([
       db.collectionGroup("processedPurchases")
         .where("createdAt", ">=", since)
@@ -227,19 +235,21 @@ exports.opsGetOverview = onCall(
         .get(),
     ]);
 
-    const purchases = purchaseSnap.docs.map((doc) => {
-      const d = doc.data();
-      return {
-        uid: uidFromDocPath(doc.ref),
-        orderId: doc.id,
-        productId: d.productId || null,
-        platform: d.platform || null,
-        creditedField: d.creditedField || null,
-        creditedAmount: d.creditedAmount || 0,
-        priceTry: priceForProduct(d.productId),
-        createdAt: d.createdAt ? d.createdAt.toMillis() : null,
-      };
-    });
+    const purchases = purchaseSnap.docs
+      .filter((doc) => uidFromDocPath(doc.ref) !== opsUid)
+      .map((doc) => {
+        const d = doc.data();
+        return {
+          uid: uidFromDocPath(doc.ref),
+          orderId: doc.id,
+          productId: d.productId || null,
+          platform: d.platform || null,
+          creditedField: d.creditedField || null,
+          creditedAmount: d.creditedAmount || 0,
+          priceTry: priceForProduct(d.productId),
+          createdAt: d.createdAt ? d.createdAt.toMillis() : null,
+        };
+      });
 
     const jobs = jobSnap.docs.map((doc) => {
       const d = doc.data();
