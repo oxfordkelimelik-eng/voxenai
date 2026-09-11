@@ -2,6 +2,30 @@
 // Cloud Function yanıtlarını temsil eder. Elle yazılmış (code-gen yok,
 // admin-only, küçük şema).
 
+/// Ürün id'sini panelde gösterilecek Türkçe isme çevirir. Tek yerden
+/// yönetiliyor — hem satış listesi hem günlük kartlar hem iş listesi
+/// aynı ismi kullanır.
+String opsProductLabel(String? productId) => switch (productId) {
+      'dating_pack_photo10' => 'AI Dating Foto Üretimi (10\'luk)',
+      'dating_pack_photo50' => 'AI Dating Foto Üretimi (50\'lik)',
+      'dating_pack_analysis1' => 'Foto Analizi (Tekli)',
+      'dating_pack_analysis5' => 'Foto Analizi (5\'li)',
+      null => 'Bilinmiyor',
+      _ => productId,
+    };
+
+/// İş/üretim durumunu panelde gösterilecek Türkçe karşılığa çevirir.
+String opsStatusLabel(String? status) => switch (status) {
+      'done' => 'Tamamlandı',
+      'failed' => 'Başarısız',
+      'generating' => 'Üretiliyor',
+      'ready' => 'Hazır (bekliyor)',
+      'uploading' => 'Yükleniyor',
+      'expired' => 'Süresi Doldu',
+      null => 'Bilinmiyor',
+      _ => status,
+    };
+
 /// json içindeki her hangi bir değeri güvenle String'e çevirir — sunucudan
 /// yanlışlıkla obje (Map) gelen bir alan `as String?` cast'iyle uygulamayı
 /// çökertmesin diye. Sunucu tarafında `safeString` zaten JSON'a çeviriyor,
@@ -48,17 +72,40 @@ class OpsPurchase {
       );
 }
 
+class OpsDailySaleItem {
+  final String? email;
+  final String? productId;
+  final int priceTry;
+  final int? createdAtMillis;
+
+  OpsDailySaleItem({
+    required this.email,
+    required this.productId,
+    required this.priceTry,
+    required this.createdAtMillis,
+  });
+
+  factory OpsDailySaleItem.fromJson(Map<String, dynamic> j) => OpsDailySaleItem(
+        email: _asString(j['email']),
+        productId: _asString(j['productId']),
+        priceTry: (j['priceTry'] as num?)?.toInt() ?? 0,
+        createdAtMillis: (j['createdAt'] as num?)?.toInt(),
+      );
+}
+
 class OpsDailyStat {
   final String day;
   final int count;
   final int revenueTry;
   final Map<String, int> productCounts;
+  final List<OpsDailySaleItem> items;
 
   OpsDailyStat({
     required this.day,
     required this.count,
     required this.revenueTry,
     required this.productCounts,
+    required this.items,
   });
 
   factory OpsDailyStat.fromJson(Map<String, dynamic> j) => OpsDailyStat(
@@ -71,6 +118,9 @@ class OpsDailyStat {
               ) ??
               {},
         ),
+        items: ((j['items'] as List?) ?? [])
+            .map((e) => OpsDailySaleItem.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList(),
       );
 }
 

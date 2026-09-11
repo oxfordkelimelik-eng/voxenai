@@ -111,7 +111,7 @@ class _DetailContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (data.email != null) _row('Kullanıcı', data.email!),
-            _row('Durum', data.status ?? '?'),
+            _row('Durum', opsStatusLabel(data.status)),
             _row('Model', data.model ?? '?'),
             _row('Mod', data.photoMode ?? '?'),
             _row('Ücretsiz Deneme', data.usedFreeTier ? 'Evet' : 'Hayır'),
@@ -161,21 +161,33 @@ class _DetailContent extends StatelessWidget {
           mainAxisSpacing: 6,
         ),
         itemCount: urls.length,
-        itemBuilder: (context, i) => ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: CachedNetworkImage(
-            imageUrl: urls[i],
-            fit: BoxFit.cover,
-            placeholder: (c, u) =>
-                const ColoredBox(color: AppColors.surfaceElevated),
-            errorWidget: (c, u, e) => const ColoredBox(
-              color: AppColors.surfaceElevated,
-              child: Icon(Icons.broken_image_outlined,
-                  color: AppColors.textMuted),
+        itemBuilder: (context, i) => GestureDetector(
+          onTap: () => _openFullscreenViewer(context, urls, i),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: CachedNetworkImage(
+              imageUrl: urls[i],
+              fit: BoxFit.cover,
+              placeholder: (c, u) =>
+                  const ColoredBox(color: AppColors.surfaceElevated),
+              errorWidget: (c, u, e) => const ColoredBox(
+                color: AppColors.surfaceElevated,
+                child: Icon(Icons.broken_image_outlined,
+                    color: AppColors.textMuted),
+              ),
             ),
           ),
         ),
       );
+
+  /// Tam ekran, pinch-to-zoom destekli fotoğraf görüntüleyici — birden fazla
+  /// fotoğraf arasında kaydırarak geçilebilir (PageView).
+  void _openFullscreenViewer(BuildContext context, List<String> urls, int initialIndex) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (context) => _FullscreenPhotoViewer(urls: urls, initialIndex: initialIndex),
+      fullscreenDialog: true,
+    ));
+  }
 
   Widget _rejectedGrid(List<OpsRejectedFrame> frames) => GridView.builder(
         shrinkWrap: true,
@@ -241,17 +253,20 @@ class _DetailContent extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (f.url != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: CachedNetworkImage(
-                  imageUrl: f.url!,
-                  height: 220,
-                  fit: BoxFit.contain,
-                  errorWidget: (c, u, e) => const SizedBox(
-                    height: 120,
-                    child: Center(
-                      child: Icon(Icons.broken_image_outlined,
-                          color: AppColors.textMuted),
+              GestureDetector(
+                onTap: () => _openFullscreenViewer(context, [f.url!], 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: CachedNetworkImage(
+                    imageUrl: f.url!,
+                    height: 220,
+                    fit: BoxFit.contain,
+                    errorWidget: (c, u, e) => const SizedBox(
+                      height: 120,
+                      child: Center(
+                        child: Icon(Icons.broken_image_outlined,
+                            color: AppColors.textMuted),
+                      ),
                     ),
                   ),
                 ),
@@ -263,6 +278,68 @@ class _DetailContent extends StatelessWidget {
             if (f.chunkIdx != null) _row('Chunk', '${f.chunkIdx}'),
             if (f.attempt != null) _row('Deneme', '${f.attempt}'),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tam ekran fotoğraf görüntüleyici — InteractiveViewer ile pinch-to-zoom,
+/// PageView ile fotoğraflar arası kaydırma. Ekstra paket gerektirmez.
+class _FullscreenPhotoViewer extends StatefulWidget {
+  final List<String> urls;
+  final int initialIndex;
+  const _FullscreenPhotoViewer({required this.urls, required this.initialIndex});
+
+  @override
+  State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
+}
+
+class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
+  late final PageController _controller =
+      PageController(initialPage: widget.initialIndex);
+  late int _currentIndex = widget.initialIndex;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: widget.urls.length > 1
+            ? Text('${_currentIndex + 1} / ${widget.urls.length}',
+                style: const TextStyle(color: Colors.white, fontSize: 14))
+            : null,
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: widget.urls.length,
+        onPageChanged: (i) => setState(() => _currentIndex = i),
+        itemBuilder: (context, i) => InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: CachedNetworkImage(
+              imageUrl: widget.urls[i],
+              fit: BoxFit.contain,
+              placeholder: (c, u) => const Center(
+                child: CircularProgressIndicator(color: AppColors.gold),
+              ),
+              errorWidget: (c, u, e) => const Icon(Icons.broken_image_outlined,
+                  color: AppColors.textMuted, size: 48),
+            ),
+          ),
         ),
       ),
     );

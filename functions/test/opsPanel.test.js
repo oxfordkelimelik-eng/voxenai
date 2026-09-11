@@ -163,9 +163,9 @@ test("buildDailyBreakdown: TR gününe göre gruplar, ciro ve adet toplar", () =
   const day1b = new Date("2026-09-10T20:00:00Z").getTime();
   const day2 = new Date("2026-09-09T09:00:00Z").getTime();
   const purchases = [
-    { productId: "dating_pack_photo10", createdAt: day1a },
-    { productId: "dating_pack_analysis1", createdAt: day1b },
-    { productId: "dating_pack_photo50", createdAt: day2 },
+    { productId: "dating_pack_photo10", createdAt: day1a, email: "a@x.com" },
+    { productId: "dating_pack_analysis1", createdAt: day1b, email: "b@x.com" },
+    { productId: "dating_pack_photo50", createdAt: day2, email: "c@x.com" },
   ];
   const breakdown = buildDailyBreakdown(purchases);
   assert.equal(breakdown.length, 2);
@@ -176,9 +176,14 @@ test("buildDailyBreakdown: TR gününe göre gruplar, ciro ve adet toplar", () =
   assert.deepEqual(breakdown[0].productCounts, {
     dating_pack_photo10: 1, dating_pack_analysis1: 1,
   });
+  // items en yeniden en eskiye sıralı, email taşınmış.
+  assert.equal(breakdown[0].items.length, 2);
+  assert.equal(breakdown[0].items[0].email, "b@x.com");
+  assert.equal(breakdown[0].items[1].email, "a@x.com");
   assert.equal(breakdown[1].day, "2026-09-09");
   assert.equal(breakdown[1].count, 1);
   assert.equal(breakdown[1].revenueTry, 999);
+  assert.equal(breakdown[1].items[0].email, "c@x.com");
 });
 
 test("buildDailyBreakdown: boş liste için boş dizi", () => {

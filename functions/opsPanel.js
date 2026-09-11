@@ -164,12 +164,23 @@ function buildDailyBreakdown(purchases) {
   for (const p of purchases) {
     const day = trDayKey(p.createdAt);
     if (!byDay.has(day)) {
-      byDay.set(day, { day, count: 0, revenueTry: 0, productCounts: {} });
+      byDay.set(day, { day, count: 0, revenueTry: 0, productCounts: {}, items: [] });
     }
     const bucket = byDay.get(day);
     bucket.count += 1;
     bucket.revenueTry += priceForProduct(p.productId);
     bucket.productCounts[p.productId] = (bucket.productCounts[p.productId] || 0) + 1;
+    // Panelin günlük kartında "kim, ne aldı, ne zaman" gösterebilmesi için
+    // satır bazlı liste — sadece toplamlar yetersizdi.
+    bucket.items.push({
+      email: p.email || null,
+      productId: p.productId,
+      priceTry: priceForProduct(p.productId),
+      createdAt: p.createdAt,
+    });
+  }
+  for (const bucket of byDay.values()) {
+    bucket.items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }
   return Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? 1 : -1));
 }

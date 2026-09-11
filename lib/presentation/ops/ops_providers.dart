@@ -16,15 +16,15 @@ class OpsDateRange {
   int get hashCode => Object.hash(since, until);
 }
 
-/// Panelin üstündeki hızlı aralık seçici — "Bugün / Bu Hafta / Bu Ay / 90 Gün".
-enum OpsQuickRange { today, week, month, quarter }
+/// Panelin üstündeki hızlı aralık seçici — "Bugün / Dün / Bu Hafta / Bu Ay".
+enum OpsQuickRange { today, yesterday, week, month }
 
 extension OpsQuickRangeX on OpsQuickRange {
   String get label => switch (this) {
         OpsQuickRange.today => 'Bugün',
+        OpsQuickRange.yesterday => 'Dün',
         OpsQuickRange.week => 'Bu Hafta',
         OpsQuickRange.month => 'Bu Ay',
-        OpsQuickRange.quarter => 'Son 90 Gün',
       };
 
   OpsDateRange toRange() {
@@ -33,15 +33,18 @@ extension OpsQuickRangeX on OpsQuickRange {
     switch (this) {
       case OpsQuickRange.today:
         return OpsDateRange(since: today, until: now);
+      case OpsQuickRange.yesterday:
+        final yesterday = today.subtract(const Duration(days: 1));
+        // 'until' dünün son anı — bugüne sarkarsa bugünün satışları da dahil olur.
+        return OpsDateRange(
+            since: yesterday,
+            until: today.subtract(const Duration(milliseconds: 1)));
       case OpsQuickRange.week:
         return OpsDateRange(
             since: today.subtract(const Duration(days: 7)), until: now);
       case OpsQuickRange.month:
         return OpsDateRange(
             since: today.subtract(const Duration(days: 30)), until: now);
-      case OpsQuickRange.quarter:
-        return OpsDateRange(
-            since: today.subtract(const Duration(days: 90)), until: now);
     }
   }
 }
