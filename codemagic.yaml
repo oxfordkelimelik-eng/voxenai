@@ -1,4 +1,5 @@
 # CERTIFICATE_PRIVATE_KEY eklendikten sonra test build'i tetiklemek icin.
+# (test push - build tetikleniyor mu kontrol)
 workflows:
   ios-workflow:
     name: iOS Build Workflow
