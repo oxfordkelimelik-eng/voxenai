@@ -6,5 +6,10 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<!-- Push Notifications capability — bunsuz FCM getToken() APNs token
+	     alamıyor ve registerFcmToken'a hiç çağrı gitmiyordu (2026-09-12
+	     gerçek olay: admin dahil hiçbir cihaz sunucuya token göndermedi). -->
+	<key>aps-environment</key>
+	<string>production</string>
 </dict>
 </plist>

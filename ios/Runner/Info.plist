@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Push Notifications için Background Modes — remote-notification.
+	     Runner.entitlements'taki aps-environment ile birlikte gerekli;
+	     ikisi de eksikken FCM getToken() APNs token alamıyordu (2026-09-12). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<!-- Uygulama yalnizca standart HTTPS/TLS kullaniyor (Firebase, dio) -->
