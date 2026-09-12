@@ -235,6 +235,10 @@ class DatingKeys {
   // Tek seferlik paketle satın alınan bakiye
   static const String packPhotoBalance = 'dating_pack_photo';
   static const String packAnalysisBalance = 'dating_pack_analysis';
+  // Kullanıcı App Store/Play Store puanlama pop-up'ını daha önce tetikledik mi?
+  // (bkz. review_prompt_service.dart) — Apple'ın kendisi zaten pop-up'ın kaç
+  // kez GÖRÜNECEĞİNİ sınırlıyor, bu ayrıca "bir daha hiç çağırma" bayrağı.
+  static const String reviewPromptShown = 'dating_review_prompt_shown';
 }
 
 /// Mock / gerçek modül görselleri için dosya yolları.

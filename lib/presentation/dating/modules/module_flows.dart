@@ -19,6 +19,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../../../data/sources/claude_api_service.dart' show PhotoScore;
+import '../../../data/sources/review_prompt_service.dart';
 import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
 import '../../screens/analysis/guided_capture_screen.dart';
@@ -451,6 +452,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 }
                 // generating: loading'de kal — snapshot zaten dinleniyor.
               });
+              if (status == 'done') {
+                ReviewPromptService().maybePromptAfterSuccess();
+              }
               return;
             }
             if (status == 'failed') {
@@ -492,7 +496,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           // Üretim yalnızca ödenen (veya ücretsiz hakla açılan) stiller için
           // çalıştı; dolayısıyla dönen TÜM fotolar zaten ödenmiştir — hepsi
           // açık gösterilir, ekstra kilit/blur yok.
+          final wasAlreadyResult = _stage == _AiStage.result;
           _stage = _AiStage.result;
+          if (!wasAlreadyResult) {
+            ReviewPromptService().maybePromptAfterSuccess();
+          }
         } else if (status == 'generating') {
           // Sunucuya gerçekten ulaşmıştı — job canlı, fallback'e gerek yok.
           _jobTimeoutTimer?.cancel();
@@ -2248,6 +2256,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         _unlocked = unlocked;
         _stage = 2;
       });
+      ReviewPromptService().maybePromptAfterSuccess();
     } catch (e) {
       if (!mounted) return;
       setState(() {

@@ -44,6 +44,10 @@ dependencies:
   percent_indicator: ^4.2.4
   fl_chart: ^0.71.0
 
+  # Uygulama içi App Store/Play Store puanlama pop-up'ı (Apple SKStoreReviewController
+  # / Android In-App Review) — bkz. lib/data/sources/review_prompt_service.dart
+  in_app_review: ^2.0.9
+
   # Utils
   intl: ^0.20.2
   uuid: ^4.5.1
