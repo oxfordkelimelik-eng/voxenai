@@ -1,0 +1,86 @@
+name: Android Build (.aab)
+
+# Codemagic'in android-workflow'u ucretli plan istedigi icin (linux instance
+# kotasi) Play Store paketini burada uretiyoruz. GitHub Actions private
+# repo'da ayda 2000 dakika ucretsiz; bir Android build ~5-10 dakika.
+#
+# .aab, build sonunda "Artifacts" bolumunden indirilir (workflow_dispatch ile
+# elle de tetiklenebilir).
+
+on:
+  push:
+    branches: [main]
+  # Panelden elle tetikleme (Actions sekmesi -> Run workflow)
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # build.gradle.kts JavaVersion.VERSION_17 kullaniyor.
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore release keystore & key.properties
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          # Secret bos/tanimsizsa build.gradle.kts SESSIZCE debug anahtarina
+          # duser (bkz. android/app/build.gradle.kts satir 63-67) — bu kontrol
+          # olmadan yanlis imzali bir .aab fark edilmeden Play Console'a kadar
+          # gidebilirdi.
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "HATA: ANDROID_KEYSTORE_BASE64 secret'i tanimli degil."
+            echo "Repo Settings -> Secrets and variables -> Actions altina ekleyin."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/upload-keystore.jks
+          if [ ! -s android/upload-keystore.jks ]; then
+            echo "HATA: keystore decode edilemedi (bos dosya)."
+            exit 1
+          fi
+          {
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=$GITHUB_WORKSPACE/android/upload-keystore.jks"
+          } > android/key.properties
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build release .aab
+        run: flutter build appbundle --release
+
+      - name: Verify .aab is release-signed
+        run: |
+          set -e
+          # Debug anahtariyla imzalanmis bir paketi erkenden yakala: release
+          # keystore'un CN'i "Rise Up", debug anahtarininki "Android Debug".
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          unzip -p "$AAB" META-INF/*.RSA 2>/dev/null \
+            | keytool -printcert 2>/dev/null | grep -i "Owner:" || true
+          if unzip -p "$AAB" META-INF/*.RSA 2>/dev/null \
+            | keytool -printcert 2>/dev/null | grep -qi "Android Debug"; then
+            echo "HATA: .aab DEBUG anahtariyla imzalanmis — Play Store kabul etmez."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: build/app/outputs/bundle/release/*.aab
+          retention-days: 30

@@ -60,3 +60,6 @@ CertificateSigningRequest.certSigningRequest
 functions/service-account-key.json
 **/serviceAccountKey.json
 **/service-account*.json
+
+# Keystore base64 ciktisi (CI secret olarak eklenir, repoya girmemeli)
+android_keystore_base64.txt
