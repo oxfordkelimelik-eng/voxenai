@@ -27,12 +27,32 @@ extension OpsQuickRangeX on OpsQuickRange {
         OpsQuickRange.month => 'Bu Ay',
       };
 
+  /// SAAT/DAKİKA İÇERMEZ — yalnızca GÜN sınırları döner.
+  ///
+  /// 'until' ARTIK ŞİMDİ (DateTime.now()) DEĞİL (2026-09-13). Eski hâlinde
+  /// "bugün/bu hafta/bu ay" için until=now yazılıyordu ve bu, sonucu
+  /// değiştirmediği hâlde HER HESAPLAMADA FARKLI bir değer üretiyordu.
+  /// OpsDateRange eşitliği since/until'a baktığı için her yeni değer
+  /// FutureProvider.family'de YENİ BİR ÖNBELLEK GİRDİSİ açıyordu: sekmeye
+  /// her dönüşte ve her yenilemede taze bir ağ çağrısı: 60/10dk sınırı
+  /// böyle doldu (gerçek olay 2026-09-13, sayaç 5 dakikada 60/60).
+  ///
+  /// 2026-09-11'deki opsResolvedRangeProvider düzeltmesi build DÖNGÜSÜNÜ
+  /// kesmişti ama anahtarın kendisi hâlâ oynaktı; asıl kök sebep buydu.
+  ///
+  /// Gelecek bir zamanı 'until' yapmak güvenli: sunucu aralığı kapalı
+  /// kabul ediyor ve bugünün sonuna kadar olan her satış zaten dahil.
   OpsDateRange toRange() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
+    // Günün SONU — gün boyunca sabit kalır, bu yüzden önbellek anahtarı da
+    // sabit kalır (aynı gün içinde tekrar tekrar aynı girdi kullanılır).
+    final endOfToday = today
+        .add(const Duration(days: 1))
+        .subtract(const Duration(milliseconds: 1));
     switch (this) {
       case OpsQuickRange.today:
-        return OpsDateRange(since: today, until: now);
+        return OpsDateRange(since: today, until: endOfToday);
       case OpsQuickRange.yesterday:
         final yesterday = today.subtract(const Duration(days: 1));
         // 'until' dünün son anı — bugüne sarkarsa bugünün satışları da dahil olur.
@@ -41,10 +61,10 @@ extension OpsQuickRangeX on OpsQuickRange {
             until: today.subtract(const Duration(milliseconds: 1)));
       case OpsQuickRange.week:
         return OpsDateRange(
-            since: today.subtract(const Duration(days: 7)), until: now);
+            since: today.subtract(const Duration(days: 7)), until: endOfToday);
       case OpsQuickRange.month:
         return OpsDateRange(
-            since: today.subtract(const Duration(days: 30)), until: now);
+            since: today.subtract(const Duration(days: 30)), until: endOfToday);
     }
   }
 }

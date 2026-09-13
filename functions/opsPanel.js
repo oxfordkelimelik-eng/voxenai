@@ -37,7 +37,15 @@ const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
 // Hız sınırı: bu paneli tek kullanıcı çağırıyor, aşırı sık çağrı için gerçek
 // bir ihtiyaç yok — düşük ama makul bir tavan, hem yanlış-email deneme
 // gürültüsünü hem de kazara sonsuz döngü/otomatik yenileme riskini keser.
-const RL_OPS = { max: 60, windowMs: 10 * 60 * 1000,
+// TAVAN 60 -> 200 (2026-09-13). 60, panelin gerçek kullanımına dar geldi:
+// 4 sekme + yenile düğmesi + iş detayına girip geri dönmek tek oturumda
+// onlarca çağrı demek ve sayaç dolduğunda panel 10 dakika boyunca TAMAMEN
+// kullanılamaz hale geliyordu (gerçek olay: 5 dakikada 60/60). Asıl kök
+// sebep önbellek anahtarının oynaklığıydı (bkz. ops_providers.dart
+// toRange) ve o düzeltildi; bu tavan artışı ikinci savunma katmanı —
+// sınır hâlâ var (kazara sonsuz döngüyü yine keser) ama normal kullanımı
+// engellemiyor. Paneli tek kişi çağırıyor, maliyet riski yok.
+const RL_OPS = { max: 200, windowMs: 10 * 60 * 1000,
   message: "Çok fazla istek gönderildi. Bir süre sonra tekrar dene." };
 
 /**
