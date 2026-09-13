@@ -9,9 +9,38 @@
  *
  * Satır yoksa / AWAY belirsizse fail-safe: eleme YOK. AWAY, yönün
  * okunamadığı kaçış kapısıdır; belirsiz ölçümle kare elenmez.
+ *
+ * AWAY PARÇALANDI (2026-09-13, gerçek vaka job f0bc4d5c elegance c1).
+ *
+ * SORUN: kullanıcı teslim edilen bir kareyi işaret etti — "taban fotomuz ile
+ * tamamen farklı yere bakıyor, kesin ret sebebi olmalıydı". Aynı işte kapı
+ * ÜÇ kareyi bakış yüzünden elemişti, yani kapı çalışıyordu; bu kareyi
+ * kaçırmasının sebebi ÖLÇEĞİN KABALIĞIydı.
+ *
+ * AWAY tek bir kova olarak hem "sağa uzağa" hem "sola uzağa" bakışı içine
+ * alıyordu. Taban AWAY, çıktı AWAY -> eşit sayılıp geçiyordu; oysa biri
+ * sağa, diğeri sola bakıyorsa insan gözü bunu anında görüyor. Üstelik
+ * ikisi de AWAY olduğunda yukarıdaki "belirsiz" kuralı da devreye girip
+ * elemeyi ayrıca engelliyordu — çift koruma, yanlış yönde.
+ *
+ * ÇÖZÜM: AWAY dört yöne ayrıldı (AWAY_LEFT/RIGHT/UP/DOWN). Artık iki taraf
+ * da okunabildiğinde yön karşılaştırılabiliyor. Çıplak AWAY hâlâ geçerli
+ * bir cevap ve hâlâ ELEMİYOR: model yönü gerçekten seçemediğinde kullanacağı
+ * kaçış kapısı olarak bilerek korundu (bkz. isGazeMismatch'teki kontrol).
+ *
+ * ZITLIK KURALI: yalnızca AÇIKÇA ZIT yönler elenir (sol↔sağ, yukarı↔aşağı).
+ * AWAY_LEFT ile LEFT aynı tarafı gösterir, uyuşmazlık sayılmaz — "uzağa"
+ * ile "yana" arasındaki sınır modelin yorumuna bağlı ve o ayrımla kare
+ * elemek yeni yanlış pozitifler doğurur. Bu, dosyanın genel usulü: kaba
+ * ölçümle yalnızca kaba hatayı ele.
  */
 
-const GAZE_TOKENS = ["CAMERA", "LEFT", "RIGHT", "UP", "DOWN", "AWAY"];
+// Sıralama ÖNEMLİ: parseGazeToken ilk eşleşeni döndürür, bu yüzden bileşik
+// isimler (AWAY_LEFT) çıplak olanlardan (AWAY, LEFT) ÖNCE gelmeli.
+const GAZE_TOKENS = [
+  "AWAY_LEFT", "AWAY_RIGHT", "AWAY_UP", "AWAY_DOWN",
+  "CAMERA", "LEFT", "RIGHT", "UP", "DOWN", "AWAY",
+];
 
 function parseGazeToken(line) {
   if (typeof line !== "string" || !line.trim()) return null;
@@ -22,13 +51,35 @@ function parseGazeToken(line) {
   return null;
 }
 
+/** Token'ın gösterdiği yön ekseni ve yönü. Bilinmiyorsa null. */
+function gazeDirection(token) {
+  switch (token) {
+    case "LEFT": case "AWAY_LEFT": return { axis: "x", sign: -1 };
+    case "RIGHT": case "AWAY_RIGHT": return { axis: "x", sign: 1 };
+    case "UP": case "AWAY_UP": return { axis: "y", sign: -1 };
+    case "DOWN": case "AWAY_DOWN": return { axis: "y", sign: 1 };
+    default: return null; // CAMERA ve çıplak AWAY'in yönü yok
+  }
+}
+
 function isGazeMismatch(baseLine, outputLine) {
   const base = parseGazeToken(baseLine);
   const out = parseGazeToken(outputLine);
   if (!base || !out) return false;
-  // AWAY = yön okunamadı. Belirsiz ölçümle eleme yok.
+  // Çıplak AWAY = yön okunamadı. Belirsiz ölçümle eleme yok.
   if (base === "AWAY" || out === "AWAY") return false;
-  return base !== out;
+  if (base === out) return false;
+
+  const b = gazeDirection(base);
+  const o = gazeDirection(out);
+  // CAMERA <-> herhangi bir yön: eski davranış korunuyor. Kameraya bakmakla
+  // yana bakmak arasındaki fark kabadır ve güvenilir şekilde okunur.
+  if (!b || !o) return true;
+  // Aynı eksende ZIT yön -> uyuşmazlık (sola karşı sağa).
+  if (b.axis === o.axis) return b.sign !== o.sign;
+  // FARKLI EKSEN (ör. taban DOWN, çıktı RIGHT) da uyuşmazlık: biri aşağı
+  // biri yana bakıyorsa bakış noktası aynı olamaz.
+  return true;
 }
 
 // İris kayması — kaba CAMERA/LEFT sınıfı aynı kalsa bile gözbebeği
@@ -84,6 +135,7 @@ function isIrisGazeMismatch(base, out) {
 
 module.exports = {
   parseGazeToken,
+  gazeDirection,
   isGazeMismatch,
   irisOffsetFromGray,
   isIrisGazeMismatch,

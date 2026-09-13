@@ -276,34 +276,110 @@ async function locateLimbRegions(buf, apiKey, annotate) {
 const LIMB_CROP_LONG_EDGE = 768;
 const LIMB_CROP_PAD = 0.02;
 
+// HAKEM SICAKLIĞI (2026-09-13) — bkz. judgeLimbCrop içindeki hakem başlığı.
+// Sıfır OLMAMALI: sıfırda ikinci soru birincinin kopyası olur ve hiçbir bilgi
+// eklemez. Düşük tutuluyor ki ikinci cevap hâlâ aynı kriterleri uygulasın,
+// yalnızca modelin kendi kararındaki kararlılığı örneklensin.
+const LIMB_ARBITER_TEMPERATURE = 0.4;
+
+// KIRPMA DOĞRULAMASI + "GÖREMEDİM" AYRIMI (2026-09-13).
+//
+// GERÇEK VAKA: kullanıcı üç reddi inceleyip üçünün de yanlış olduğunu
+// bildirdi (job 0c609c0e c3/c8, job f483d510 c7). Modelin cevapları:
+//   "MALFORMED — Fingers appear fused or malformed."
+//   "MALFORMED — Fingers appear fused or duplicated."
+//   "MALFORMED — Hand structure is unclear or malformed."
+// Kullanıcının tespiti: "bu fotoğrafta kullanıcının eli bile gözükmüyor,
+// elleri cepte". Fotoğraflar doğrulandı — eller ya net ve kusursuz ya da
+// cepte/gizli.
+//
+// İKİ AYRI KUSUR, İKİ AYRI ÇÖZÜM:
+//
+// 1) BELİRSİZLİK RED'E ÇEVRİLİYORDU. Üçüncü cevap "is UNCLEAR or malformed"
+//    diyor — model "göremedim" diyor, "bozuk" demiyor. Eski parser yalnızca
+//    MALFORMED kelimesini arıyor, gerekçeyi hiç okumuyordu. Artık ayrı bir
+//    NOT_VISIBLE sınıfı var ve ELEMİYOR: görülemeyen el hakkında kusur
+//    iddia edilemez.
+//
+// 2) KIRPMA YANLIŞ YERE DÜŞÜYORDU. Zincir şöyle: Google Person kutusu ->
+//    ızgara -> model "hangi hücrede el var" -> o hücreler kırpılıp buraya
+//    gelir. İlk halka yanlış hücre seçerse buraya ELİN OLMADIĞI bir bölge
+//    gelir ve model doğal olarak "yapı belirsiz" der — ki o bölgede el yok,
+//    doğru cevap budur. Zincirin ilk halkasının hatası ikinci halkada red'e
+//    dönüşüyordu. VISIBILITY satırı bu zinciri kırar: kırpmada gerçekten
+//    çıplak el/önkol yoksa kapı sessizce ATLANIR.
+//
+// VISIBILITY AYRI VE İLK SATIR: modele önce "ne görüyorsun" sorulur, sonra
+// "kalitesi nasıl". Tek adımlı yargı sorularında modelin rutin olarak
+// kusur uydurduğu bu dosyada 2026-08-04 ve 2026-09-06'da iki kez belgelendi;
+// çare her seferinde aynı oldu — yargıyı elinden al, önce gözlem iste.
 const LIMB_CROP_PROMPT =
   "You are an automated quality checker inside an image-generation pipeline. " +
-  "This is a ZOOMED CROP of one region of a generated photograph, showing a " +
-  "person's arm and hand.\n\n" +
-  "Judge the rendering of the arm, hand and fingers in this crop:\n" +
+  "This is a ZOOMED CROP of one region of a generated photograph. It is " +
+  "supposed to contain a person's arm and hand, but the crop may have been " +
+  "taken from the wrong place.\n\n" +
+  "FIRST decide what is actually in the crop:\n" +
+  "V) VISIBILITY — can you actually SEE bare skin of a hand, fingers, wrist " +
+  "or forearm in this crop? Answer NONE if the crop shows only clothing, a " +
+  "sleeve, the face, the neck, the torso, an object or background; if the " +
+  "hand is inside a pocket, behind an object, or cut off outside the crop. " +
+  "Answer PARTIAL if some bare limb skin is visible but the hand itself is " +
+  "mostly hidden or cut off. Answer FULL only if a hand or forearm is clearly " +
+  "and substantially visible.\n\n" +
+  "ONLY IF VISIBILITY is FULL, judge the rendering:\n" +
   "P) OPACITY — is the limb fully solid? It FAILS if the background (ground, " +
   "wall, furniture, railing) is visible THROUGH the arm or hand, if the limb " +
   "looks semi-transparent or washed into the background, or if it appears as a " +
   "faint double image.\n" +
   "Q) STRUCTURE — is the hand anatomically coherent? It FAILS if fingers are " +
   "melted, fused, missing, duplicated, the wrong count, or dissolve into a " +
-  "smudge.\n" +
+  "smudge. Answer MALFORMED ONLY for a defect you can actually SEE. If the " +
+  "hand is too small, too dark, too blurred or too hidden for you to tell, " +
+  "answer NOT_VISIBLE — never guess, and never answer MALFORMED merely " +
+  "because the structure is unclear to you.\n" +
   "R) DEFINITION — does the limb have the same rendering detail as a normal " +
   "photograph? It FAILS if the limb is markedly softer, smeared or less " +
   "defined than the rest of the crop. Ordinary depth-of-field is fine.\n\n" +
-  "Reply on exactly four lines:\n" +
-  "OPACITY: <SOLID | SEE_THROUGH>\n" +
-  "STRUCTURE: <NORMAL | MALFORMED>\n" +
-  "DEFINITION: <NORMAL | SMEARED>\n" +
+  "Reply on exactly five lines:\n" +
+  "VISIBILITY: <FULL | PARTIAL | NONE>\n" +
+  "OPACITY: <SOLID | SEE_THROUGH | NOT_VISIBLE>\n" +
+  "STRUCTURE: <NORMAL | MALFORMED | NOT_VISIBLE>\n" +
+  "DEFINITION: <NORMAL | SMEARED | NOT_VISIBLE>\n" +
   "<verdict>: <SHORT reason, max 10 words>\n\n" +
+  "If VISIBILITY is NONE or PARTIAL, the other three lines must all be " +
+  "NOT_VISIBLE and the verdict must be NO_LIMB.\n" +
   "Any SEE_THROUGH, MALFORMED or SMEARED forces BAD_LIMB. Verdict is one of:\n" +
+  "NO_LIMB: <what the crop actually shows>\n" +
   "GOOD: <why it passes>\n" +
   "BAD_LIMB: <what is wrong>";
 
-/** Kırpma cevabını ayrıştırır. SAF fonksiyon — testten çağrılır. */
+/**
+ * Kırpma cevabını ayrıştırır. SAF fonksiyon — testten çağrılır.
+ *
+ * Döner:
+ *   { ok:false, reason }                  — cevap okunamadı, kapı atlanır
+ *   { ok:true, visible:false, ... }       — kırpmada el yok, kapı ELEMEZ
+ *   { ok:true, visible:true, bad, flags } — gerçek yargı
+ */
 function parseLimbCropReply(raw) {
   if (typeof raw !== "string" || !raw.trim()) return { ok: false, reason: "empty" };
   const up = raw.toUpperCase();
+  const detail = (raw.split("\n").map((l) => l.trim())
+    .find((l) => /^(GOOD|BAD_LIMB|NO_LIMB)\s*:/i.test(l)) || "")
+    .replace(/^(GOOD|BAD_LIMB|NO_LIMB)\s*:\s*/i, "")
+    .slice(0, 120);
+
+  // GÖRÜNÜRLÜK ÖNCE: NONE/PARTIAL ise kalite satırlarına HİÇ bakılmaz.
+  // PARTIAL da elemiyor — yarısı kesilmiş bir el hakkında "parmak sayısı
+  // yanlış" demek ölçülebilir bir yargı değil.
+  const visLine = /VISIBILITY\s*:\s*(FULL|PARTIAL|NONE)/.exec(up);
+  const visibility = visLine ? visLine[1] : null;
+  if (visibility === "NONE" || visibility === "PARTIAL" || /NO_LIMB/.test(up)) {
+    return { ok: true, visible: false, bad: false, flags: [], visibility: visibility || "NONE", detail };
+  }
+
+  // NOT_VISIBLE bir kusur DEĞİL: model o satırı yargılayamadığını söylüyor.
+  // pick() yalnızca gerçek kusur etiketini yakalar.
   const pick = (key, bad) => (new RegExp(`${key}\\s*:\\s*${bad}`).test(up) ? bad : null);
   const opacity = pick("OPACITY", "SEE_THROUGH");
   const structure = pick("STRUCTURE", "MALFORMED");
@@ -315,10 +391,7 @@ function parseLimbCropReply(raw) {
   const bad = Boolean(opacity || structure || definition || hasBad);
   if (!bad && !hasGood) return { ok: false, reason: "unparsable" };
   const flags = [opacity, structure, definition].filter(Boolean);
-  const detail = (raw.split("\n").map((l) => l.trim()).find((l) => /^(GOOD|BAD_LIMB)\s*:/i.test(l)) || "")
-    .replace(/^(GOOD|BAD_LIMB)\s*:\s*/i, "")
-    .slice(0, 120);
-  return { ok: true, bad, flags, detail };
+  return { ok: true, visible: true, bad, flags, visibility: visibility || "FULL", detail };
 }
 
 /**
@@ -347,40 +420,88 @@ async function judgeLimbCrop(buf, boxes, apiKey) {
       .jpeg({ quality: 92 })
       .toBuffer();
 
-    const resp = await fetch(OPENAI_CHAT_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: LIMB_CELL_MODEL,
-        temperature: 0,
-        max_tokens: 80,
-        messages: [
-          { role: "system", content: LIMB_CELL_SYSTEM_MSG },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: LIMB_CROP_PROMPT },
-              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${cropBuf.toString("base64")}`, detail: "high" } },
-            ],
-          },
-        ],
-      }),
-    });
-    if (!resp.ok) return { ok: false, reason: `http-${resp.status}` };
-    const json = await resp.json();
-    if (json.usage) {
-      const u = json.usage;
-      console.log(
-        `MALIYET UZUV KIRPMA: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
-        `toplam=${u.total_tokens ?? "?"} model=${LIMB_CELL_MODEL}`
-      );
+    const first = await askLimbCrop(cropBuf, apiKey);
+    // Kırpma bir kez üretildi, iki kez sorulabilir — pahalı olan sharp işi
+    // değil, çağrının kendisi; ikinci çağrı YALNIZCA red durumunda yapılır.
+    if (!first.ok || !first.bad) return first;
+
+    // HAKEM — İKİNCİ GÖRÜŞ (2026-09-13).
+    //
+    // NEDEN: bu kapı tek bir Vision cevabıyla eliyordu ve kullanıcı üç reddi
+    // de yanlış buldu. Dosyadaki diğer Vision kapılarının hepsinde zaten bir
+    // hakem var (VISION TEN REDDİ / VISION KAFA REDDİ GEÇERSİZ SAYILDI —
+    // bkz. falPhotos.js runOpenAiDirectChunk); bu kapı o korumadan yoksundu.
+    //
+    // Burada hakem SAYISAL olamaz: hayalet el saydamlık kusurudur, Laplacian
+    // onu göremiyor (bu dosyanın başlığındaki ölçüm: hayalet el yüz cildinden
+    // 2.53 kat "keskin" ölçüldü). Bu yüzden hakem aynı soruyu tekrar sormak.
+    //
+    // GERÇEKTEN BAĞIMSIZ OLSUN DİYE temperature 0 DEĞİL: sıfırda model aynı
+    // girdiye aynı cevabı verir ve ikinci soru hiçbir bilgi eklemez, yalnızca
+    // maliyeti ikiye katlar. Düşük ama sıfır olmayan sıcaklık, modelin kendi
+    // kararındaki KARARLILIĞINI ölçmemizi sağlar: gerçek bir kusur her iki
+    // örneklemede de görülür, uydurulmuş bir kusur görülmez.
+    //
+    // KURAL: iki cevap da "bad" derse elenir. İkincisi temiz derse kare
+    // KABUL edilir — tek bir şüpheli cevap kullanıcıya kare kaybettirmez.
+    const second = await askLimbCrop(cropBuf, apiKey, LIMB_ARBITER_TEMPERATURE);
+    if (!second.ok) {
+      // Hakem cevap veremedi: ilk reddi TEK BAŞINA bağlayıcı saymıyoruz.
+      // Fail-safe yön seçimi bu dosyanın genel usulüyle aynı — ölçüm
+      // yapılamadığında kapı eler değil, atlar.
+      console.log(`UZUV HAKEM: cevap alınamadı (${second.reason}) — ilk red bağlayıcı sayılmadı`);
+      return { ...first, bad: false, arbiter: "unavailable" };
     }
-    const raw = (json?.choices?.[0]?.message?.content || "").trim();
-    return { ...parseLimbCropReply(raw), raw };
+    if (!second.bad) {
+      console.log(
+        `UZUV HAKEM: ilk cevap RED ("${first.flags.join(",") || "verdict"}"), ikinci cevap ` +
+        `TEMİZ ("${second.visible ? "GOOD" : "NO_LIMB"}") — kusur kararlı değil, kare KABUL edildi`
+      );
+      return { ...first, bad: false, arbiter: "overruled" };
+    }
+    console.log(
+      `UZUV HAKEM: iki cevap da RED (${first.flags.join(",") || "verdict"} / ` +
+      `${second.flags.join(",") || "verdict"}) — red ONAYLANDI`
+    );
+    return { ...first, arbiter: "confirmed" };
   } catch (e) {
     console.error("Uzuv kırpma yargısı hata verdi (atlanıyor):", e.message || e);
     return { ok: false, reason: "error" };
   }
+}
+
+/** Hazır kırpmayı Vision'a tek kez sorar. judgeLimbCrop'un iç yardımcısı. */
+async function askLimbCrop(cropBuf, apiKey, temperature = 0) {
+  const resp = await fetch(OPENAI_CHAT_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: LIMB_CELL_MODEL,
+      temperature,
+      max_tokens: 110,
+      messages: [
+        { role: "system", content: LIMB_CELL_SYSTEM_MSG },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: LIMB_CROP_PROMPT },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${cropBuf.toString("base64")}`, detail: "high" } },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!resp.ok) return { ok: false, reason: `http-${resp.status}` };
+  const json = await resp.json();
+  if (json.usage) {
+    const u = json.usage;
+    console.log(
+      `MALIYET UZUV KIRPMA: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
+      `toplam=${u.total_tokens ?? "?"} model=${LIMB_CELL_MODEL}`
+    );
+  }
+  const raw = (json?.choices?.[0]?.message?.content || "").trim();
+  return { ...parseLimbCropReply(raw), raw };
 }
 
 /**

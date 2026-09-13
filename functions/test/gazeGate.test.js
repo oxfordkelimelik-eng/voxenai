@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
   parseGazeToken,
+  gazeDirection,
   isGazeMismatch,
   irisOffsetFromGray,
   isIrisGazeMismatch,
@@ -34,6 +35,67 @@ test("token ayrıştırması satır önekini yutar", () => {
   assert.equal(parseGazeToken("BASE_GAZE: LEFT"), "LEFT");
   assert.equal(parseGazeToken("OUTPUT_GAZE: AWAY"), "AWAY");
   assert.equal(parseGazeToken("nonsense"), null);
+});
+
+// --- AWAY PARÇALANMASI (2026-09-13, job f0bc4d5c elegance c1) -------------
+// Kullanıcı teslim edilmiş bir kareyi işaret etti: "taban fotomuz ile tamamen
+// farklı yere bakıyor, kesin ret sebebi olmalıydı". Eski ölçekte taban AWAY /
+// çıktı AWAY eşit sayılıp geçiyordu.
+
+test("AWAY_LEFT vs AWAY_RIGHT — zıt yönler artık uyuşmazlık (f0bc4d5c c1)", () => {
+  assert.equal(
+    isGazeMismatch("BASE_GAZE: AWAY_LEFT", "OUTPUT_GAZE: AWAY_RIGHT"),
+    true
+  );
+  assert.equal(
+    isGazeMismatch("BASE_GAZE: AWAY_UP", "OUTPUT_GAZE: AWAY_DOWN"),
+    true
+  );
+});
+
+test("aynı yöne uzağa bakış geçer", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_LEFT", "OUTPUT_GAZE: AWAY_LEFT"), false);
+});
+
+test("AWAY_LEFT ile LEFT aynı tarafı gösterir — uyuşmazlık DEĞİL", () => {
+  // "uzağa" ile "yana" arasındaki sınır modelin yorumuna bağlı; o ayrımla
+  // kare elemek yeni yanlış pozitifler doğurur.
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_LEFT", "OUTPUT_GAZE: LEFT"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: RIGHT", "OUTPUT_GAZE: AWAY_RIGHT"), false);
+});
+
+test("çıplak AWAY hâlâ kaçış kapısı — hiçbir tarafta eleme yok", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY_RIGHT"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_LEFT", "OUTPUT_GAZE: AWAY"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY"), false);
+});
+
+test("farklı eksen (DOWN vs RIGHT) uyuşmazlıktır", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: DOWN", "OUTPUT_GAZE: RIGHT"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_DOWN", "OUTPUT_GAZE: AWAY_LEFT"), true);
+});
+
+test("CAMERA ile herhangi bir yön — eski davranış korunur", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", "OUTPUT_GAZE: AWAY_LEFT"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_RIGHT", "OUTPUT_GAZE: CAMERA"), true);
+});
+
+test("bileşik token çıplak olandan ÖNCE eşleşir (sıralama regresyonu)", () => {
+  // GAZE_TOKENS sırası bozulursa "AWAY_LEFT" satırı "AWAY" diye okunur ve
+  // kapı sessizce ölür — bu test o sırayı kilitler.
+  assert.equal(parseGazeToken("BASE_GAZE: AWAY_LEFT"), "AWAY_LEFT");
+  assert.equal(parseGazeToken("OUTPUT_GAZE: AWAY_RIGHT"), "AWAY_RIGHT");
+  assert.equal(parseGazeToken("OUTPUT_GAZE: AWAY_UP"), "AWAY_UP");
+  assert.equal(parseGazeToken("OUTPUT_GAZE: AWAY_DOWN"), "AWAY_DOWN");
+  assert.equal(parseGazeToken("OUTPUT_GAZE: AWAY"), "AWAY");
+});
+
+test("gazeDirection: eksen ve yön eşlemesi", () => {
+  assert.deepEqual(gazeDirection("LEFT"), { axis: "x", sign: -1 });
+  assert.deepEqual(gazeDirection("AWAY_LEFT"), { axis: "x", sign: -1 });
+  assert.deepEqual(gazeDirection("AWAY_DOWN"), { axis: "y", sign: 1 });
+  assert.equal(gazeDirection("CAMERA"), null);
+  assert.equal(gazeDirection("AWAY"), null);
 });
 
 test("koyu leke gözün sağındaysa iris x > 0.5", () => {

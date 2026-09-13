@@ -115,3 +115,69 @@ test("ayrıştırılamayan cevapta fail-safe: kare elenmez", () => {
   const r = parseLimbCropReply("I'm sorry, I can't help with that.");
   assert.equal(r.ok, false);
 });
+
+// --- KIRPMA DOĞRULAMASI + "GÖREMEDİM" AYRIMI (2026-09-13) ----------------
+// Kullanıcı üç reddi de yanlış buldu (0c609c0e c3/c8, f483d510 c7). İki
+// ayrı kusur vardı: (1) belirsizlik red'e çevriliyordu, (2) kırpma elin
+// olmadığı yere düşüyordu. Aşağıdaki testler ikisini de kilitler.
+
+test("kırpmada el yok (eller cepte) — kapı ELEMEZ, f483d510 c7", () => {
+  const r = parseLimbCropReply(
+    "VISIBILITY: NONE\nOPACITY: NOT_VISIBLE\nSTRUCTURE: NOT_VISIBLE\n" +
+    "DEFINITION: NOT_VISIBLE\nNO_LIMB: Crop shows only trouser fabric and a pocket."
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.visible, false);
+  assert.equal(r.bad, false);
+  assert.equal(r.visibility, "NONE");
+});
+
+test("el yarı gizli/kesik (PARTIAL) — yargı yapılmaz, ELEMEZ", () => {
+  const r = parseLimbCropReply(
+    "VISIBILITY: PARTIAL\nOPACITY: NOT_VISIBLE\nSTRUCTURE: NOT_VISIBLE\n" +
+    "DEFINITION: NOT_VISIBLE\nNO_LIMB: Only a wrist edge is visible."
+  );
+  assert.equal(r.visible, false);
+  assert.equal(r.bad, false);
+});
+
+test("STRUCTURE: NOT_VISIBLE bir kusur DEĞİL — 'unclear' red'e çevrilmez", () => {
+  // Gerçek cevap: "MALFORMED — Hand structure is unclear or malformed."
+  // Model "göremedim" diyordu, eski parser bunu "bozuk" sayıyordu.
+  const r = parseLimbCropReply(
+    "VISIBILITY: FULL\nOPACITY: SOLID\nSTRUCTURE: NOT_VISIBLE\n" +
+    "DEFINITION: NORMAL\nGOOD: Hand too small to judge, nothing visibly wrong."
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.visible, true);
+  assert.equal(r.bad, false);
+  assert.deepEqual(r.flags, []);
+});
+
+test("VISIBILITY: FULL iken gerçek kusur hâlâ eler", () => {
+  const r = parseLimbCropReply(
+    "VISIBILITY: FULL\nOPACITY: SOLID\nSTRUCTURE: MALFORMED\n" +
+    "DEFINITION: NORMAL\nBAD_LIMB: Six fingers on the left hand."
+  );
+  assert.equal(r.visible, true);
+  assert.equal(r.bad, true);
+  assert.deepEqual(r.flags, ["MALFORMED"]);
+});
+
+test("NO_LIMB verdict'i tek başına da görünürlüğü kapatır", () => {
+  // Model biçimi tam tutturamazsa bile niyeti okunabilmeli.
+  const r = parseLimbCropReply("NO_LIMB: hands are in pockets");
+  assert.equal(r.ok, true);
+  assert.equal(r.visible, false);
+  assert.equal(r.bad, false);
+});
+
+test("VISIBILITY satırı yoksa eski 4 satırlık biçim çalışmaya devam eder", () => {
+  // Geriye uyum: model eski biçimde cevap verirse kapı ölmemeli.
+  const r = parseLimbCropReply(
+    "OPACITY: SEE_THROUGH\nSTRUCTURE: NORMAL\nDEFINITION: NORMAL\nBAD_LIMB: see-through"
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.visible, true);
+  assert.equal(r.bad, true);
+});
