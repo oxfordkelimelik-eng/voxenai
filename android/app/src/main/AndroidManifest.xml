@@ -63,6 +63,16 @@
             android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled"
             android:value="true"/>
 
+        <!-- FCM: uygulama KAPALI/arka plandayken gelen push'ları Android
+             sistemi işler ve kanalı buradan okur. Tanımlı olmazsa bildirimler
+             isimsiz "Miscellaneous" kanalına düşüyor; notification_service.
+             dart'ta oluşturulan 'voxen_reminders' kanalının Importance.high
+             ayarı ve "Hatırlatmalar" adı yalnızca uygulama ön plandayken
+             geçerli oluyordu. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="voxen_reminders"/>
+
         <!-- flutter_local_notifications: zamanlı bildirimlerin cihaz yeniden
              başladıktan sonra da çalışması için gerekli receiver'lar -->
         <receiver android:exported="false"
