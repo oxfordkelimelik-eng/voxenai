@@ -82,7 +82,7 @@ class DatingConfig {
   // zaman photoStandardPhotos / photoPremiumPhotos üzerinden gelir.
   static const int photoStandardSets = 1; // Standart: 1 stil (10 foto)
   static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 10
-  static const String photoStandardPriceLabel = '₺249';
+  static const String photoStandardPriceLabel = '₺349';
   static const String photoStandardProductId = 'dating_pack_photo10';
 
   static const int photoPremiumSets = 5; // Premium: 5 stil (50 foto)
