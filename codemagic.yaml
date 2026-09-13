@@ -1,6 +1,76 @@
 # CERTIFICATE_PRIVATE_KEY eklendikten sonra test build'i tetiklemek icin.
 # (test push - build tetikleniyor mu kontrol)
 workflows:
+  android-workflow:
+    name: Android Build Workflow
+    max_build_duration: 45
+    instance_type: linux_x2
+    cache:
+      cache_paths:
+        - $FLUTTER_ROOT/.pub-cache
+        - $HOME/.pub-cache
+        - $HOME/.gradle/caches
+    environment:
+      flutter: stable
+      groups:
+        # Codemagic panelinde olusturmaniz gereken degisken grubu (appstore
+        # grubundan AYRI — Android imzalama bilgileri burada).
+        # Icinde su GIZLI degiskenler olmali:
+        #   ANDROID_KEYSTORE_BASE64 = android/upload-keystore.jks dosyasinin
+        #     base64 hali. Uretmek icin (PowerShell):
+        #     [Convert]::ToBase64String([IO.File]::ReadAllBytes("android/upload-keystore.jks")) | Out-File keystore_base64.txt
+        #     (Git Bash/Linux/Mac): base64 -w0 android/upload-keystore.jks > keystore_base64.txt
+        #   ANDROID_KEYSTORE_PASSWORD = key.properties'teki storePassword
+        #   ANDROID_KEY_ALIAS = key.properties'teki keyAlias (su an: upload)
+        #   ANDROID_KEY_PASSWORD = key.properties'teki keyPassword
+        - google_play
+      vars:
+        PACKAGE_NAME: "com.voxenai.app"
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+      cancel_previous_builds: true
+    scripts:
+      - name: 1. Get dependencies
+        script: |
+          set -e
+          if ! flutter pub get --offline; then
+            flutter pub get
+          fi
+      - name: 2. Restore release keystore & key.properties
+        script: |
+          set -e
+          # ANDROID_KEYSTORE_BASE64 bos/gecersizse build.gradle.kts SESSIZCE
+          # debug anahtarina duser (bkz. android/app/build.gradle.kts satir
+          # 63-67) — bu kontrol olmadan yanlis imzali bir .aab fark edilmeden
+          # Play Console'a kadar gidebilirdi.
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "HATA: ANDROID_KEYSTORE_BASE64 bos veya tanimli degil."
+            echo "Codemagic'te 'google_play' grubuna keystore'un base64 halini ekleyin."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$CM_BUILD_DIR/android/upload-keystore.jks"
+          if [ ! -s "$CM_BUILD_DIR/android/upload-keystore.jks" ]; then
+            echo "HATA: keystore decode edilemedi (bos dosya)."
+            exit 1
+          fi
+          {
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "storeFile=$CM_BUILD_DIR/android/upload-keystore.jks"
+          } > "$CM_BUILD_DIR/android/key.properties"
+      - name: 3. Build release .aab
+        script: |
+          set -e
+          flutter build appbundle --release \
+            --build-number="$PROJECT_BUILD_NUMBER"
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
+      - build/app/outputs/**/mapping.txt
+
   ios-workflow:
     name: iOS Build Workflow
     max_build_duration: 60
