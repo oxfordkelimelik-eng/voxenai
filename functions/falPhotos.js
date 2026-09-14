@@ -2654,6 +2654,7 @@ const REJECTION_REASON_LABELS = {
   "vision-no-evidence": "Görsel netlik/kimlik kanıtı yetersiz",
   "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
   "vision-artifact": "Yüzde yama/leke tespit edildi",
+  "face-artifact": "Yüzde yama/leke tespit edildi",
   "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
   "vision-ghosting": "Gövde/kol yarı saydam çıktı (arka plan içinden görünüyor)",
   "limb-ghost": "El/kol yarı saydam, bozuk ya da sıvanmış çıktı",
@@ -2756,9 +2757,17 @@ const GATE_REPEAT_DISABLE_AFTER = 2;
 //
 // eyes-closed BİLEREK DIŞARIDA: göreceli sayısal ölçüm (kişinin kendi
 // referans açıklığıyla kıyas), yorum değil.
+//
+// limb-ghost ÇIKARILDI (2026-09-14): kapının kendisi kaldırıldı — dört
+// doğrulanmış vakanın dördünde de yanlış eledi (bkz. runOpenAiDirectChunk
+// içindeki "UZUV KIRPMA YARGISI KALDIRILDI" başlığı).
+//
+// face-artifact EKLENDİ (2026-09-14): yeni ve yorum tabanlı bir kapı.
+// Yanlış pozitif verirse aynı chunk'ı tüketmesin — limb-ghost'un yaptığı
+// hatanın tekrarlanmaması için baştan koruma altında.
 const GATE_REPEAT_ELIGIBLE = new Set([
   "vision-hair",
-  "limb-ghost",
+  "face-artifact",
 ]);
 
 // YAW (KAFANIN YANA DÖNÜKLÜĞÜ) SAPMA SINIRI (2026-08-11).
@@ -2988,7 +2997,7 @@ function retryCorrectionPrefix(lastGate) {
       "face, neck, chest, arms, hands — as one continuous tone.\n\n"
     );
   }
-  if (g === "vision-artifact") {
+  if (g === "vision-artifact" || g === "face-artifact") {
     return (
       "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
       "Your last render left a patch on the face that did not belong to the " +
@@ -3723,12 +3732,27 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // (23eb1a78_2, f0bc4d5c_5, f0bc4d5c_3). Bu bir yanlış-KABUL: kusurlu
       // kare kullanıcıya gidiyor ve hiçbir mevcut kapı bunu görmüyor.
       //
-      // NEDEN HENÜZ BAĞLAYICI DEĞİL: 20 gerçek kare üzerinde ölçüldüğünde
-      // şikâyetli (%0.062-0.172) ve temiz (%0.000-0.356) sınıflar AYRILMADI —
-      // en kötü temiz kare en kötü şikâyetliden yüksek çıktı. Bu eşikle
-      // eleseydik düzeltmeye çalıştığımız yanlış-red sorununun aynısını
-      // üretirdik. Dağılım birikince eşik veriden kalibre edilecek; usul
-      // KONUM KAPISI/dx ve UZUV TEN ÖLÇÜMÜ ile aynı (bkz. faceArtifact.js).
+      // SAYISAL ÖLÇÜM BAĞLAYICI DEĞİL — KALİBRE EDİLEMEDİ (2026-09-14).
+      // 41 gerçek kare üzerinde, gözle DOĞRULANMIŞ sınıflarla ölçüldü ve iki
+      // sınıf AYRILMADI: lekeli kareler %1.531/%0.644/%0.372/%0.193, temiz
+      // kareler %0.365/%0.333/%0.145/%0.121 — iç içe geçmiş. Doluluk da
+      // ayırmadı (lekeli 0.27-0.61, temiz 0.40-0.79). Hiçbir eşik hem lekeyi
+      // yakalayıp hem temizi geçirmiyor; eleseydik düzeltmeye çalıştığımız
+      // yanlış-red sorununun aynısını üretirdik.
+      //
+      // Kök sebep çözünürlük: lekeli karelerde yüz kutusu 90-95px, yani leke
+      // 5x5 piksel; temiz karelerde yüz 120-157px ve doğal ten dokusu daha
+      // çok piksel kaplıyor. Ölçüm "kaç piksel anormal" diyor ama
+      // anormalliğin TÜRÜNÜ ayırt edemiyor.
+      //
+      // ELEME İŞİNİ ALTTAKİ KIRPMA KAPISI YAPIYOR. Bu ölçüm loglamaya devam
+      // ediyor: daha iyi bir ölçüm (kenar keskinliği, doku analizi) denemek
+      // için veri biriktiriyor — usul KONUM KAPISI/dx ve UZUV TEN ÖLÇÜMÜ
+      // ile aynı (bkz. faceArtifact.js).
+      //
+      // fd (yüz kutusu) ALTTAKİ KAPIYA DA GEREKLİ — bir kez tespit edilip
+      // ikisinde de kullanılıyor, ikinci bir detectMainFace çağrısı yok.
+      let faceBoxForArtifact = null;
       try {
         const { measureFacePatch } = require("./faceArtifact");
         const { detectMainFace } = require("./faceQuality");
@@ -3736,6 +3760,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         if (!fd || !fd.box) {
           console.log(`YÜZ ARTEFAKT ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[yüz-yok]`);
         } else {
+          faceBoxForArtifact = fd.box;
           const fp = await measureFacePatch(buf, fd.box);
           if (!fp.ok) {
             console.log(`YÜZ ARTEFAKT ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${fp.reason}]`);
@@ -3751,6 +3776,52 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         }
       } catch (e) {
         console.error("OpenAI yolu: yüz artefakt ölçümü hata verdi (bu katman atlanıyor):", e);
+      }
+
+      // YÜZ ARTEFAKT KAPISI — YAKINLAŞTIRILMIŞ KIRPMA (2026-09-14). ELER.
+      //
+      // Tam karede sorulan FACE_ARTIFACT satırı (assessOutputWithVision,
+      // 2026-09-13) bir kareyi yakaladı ama aynı gün 944d30fe_8'i KAÇIRDI —
+      // kaşında gözle bariz beyaz yama vardı ve kare teslim edildi. Sebep
+      // ölçek: 1170x1462'lik karede leke 5x5 piksel. Yüz kutusunu kırpıp
+      // 768px'e büyütmek onu ~25x25 yapıyor.
+      //
+      // Yöntem limbBox.js'te kanıtlandı (bkz. o dosyanın başlığı): tam
+      // karede model her kareye "SOLID" diyordu, kırpmada altı karenin
+      // altısında doğru cevap verdi.
+      //
+      // FAIL-SAFE: yüz bulunamadı / kutu çok küçük / cevap okunamadı ->
+      // kapı ELEMEZ. Dosyadaki tüm Vision kapılarıyla aynı yön.
+      if (faceBoxForArtifact) {
+        try {
+          const { judgeFaceArtifact } = require("./faceArtifactCrop");
+          const fa = await judgeFaceArtifact(buf, faceBoxForArtifact, OPENAI_KEY.value());
+          if (!fa.ok) {
+            console.log(`YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${fa.reason}]`);
+          } else if (fa.bad && disabledGates.has("face-artifact")) {
+            console.warn(
+              `YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `RED ATLANDI — kapı bu chunk için devre dışı, kare KABUL edildi`
+            );
+          } else if (fa.bad) {
+            recordGateRejection("face-artifact");
+            console.log(
+              `YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `RED[face-artifact] bölge="${fa.where}" gerekçe="${fa.detail}"`
+            );
+            lastRejectGate = "face-artifact";
+            await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+              mode, gate: "face-artifact", distance: mathDist,
+              detail: `${fa.where || "?"} — ${fa.detail}`,
+            });
+            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            break;
+          } else {
+            console.log(`YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): GEÇTİ`);
+          }
+        } catch (e) {
+          console.error("OpenAI yolu: yüz artefakt kırpma kapısı hata verdi (bu katman atlanıyor):", e);
+        }
       }
 
       // UZUV KAPISI — hayalet/saydam el ELER, ten farkı yalnızca ÖLÇER.
@@ -3772,7 +3843,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // aradaki bantta ve altı kare eşiğe yetmez. Gerçek dağılım toplanana
       // kadar bağlayıcı DEĞİL — KONUM KAPISI/dx'in izlediği aynı yol.
       try {
-        const { locateLimbRegions, judgeLimbCrop, googleObjectAnnotator } = require("./limbBox");
+        const { locateLimbRegions, googleObjectAnnotator } = require("./limbBox");
         const { measureLimbRegion } = require("./faceQuality");
         const loc = await locateLimbRegions(buf, OPENAI_KEY.value(), googleObjectAnnotator());
         if (!loc.ok) {
@@ -3792,44 +3863,38 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               `bölge=${m.regions.length} uzuvPx=${m.regions.map((r) => r.skinPx).join("/")}`
             );
           }
-          // KAPI DEVRE DIŞI MI (2026-09-13, bkz. gateRejectCounts): bu chunk'ta
-          // limb-ghost zaten sınıra ulaştıysa pahalı Vision çağrısını hiç
-          // yapmıyoruz — kapının sonucu nasılsa bağlayıcı olmayacak.
-          if (disabledGates.has("limb-ghost")) {
-            console.log(`UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[kapı-devre-dışı]`);
-          } else {
-            const jd = await judgeLimbCrop(buf, loc.boxes, OPENAI_KEY.value());
-            if (!jd.ok) {
-              console.log(`UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${jd.reason}]`);
-            } else if (jd.visible === false) {
-              // KIRPMA DOĞRULAMASI (2026-09-13): kırpmada gerçekten çıplak
-              // el/önkol yok. Bu bir kusur DEĞİL, konum zincirinin hatası —
-              // görülemeyen el hakkında kusur iddia edilemez. Kapı ELEMEZ.
-              console.log(
-                `UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                `ATLANDI[kırpmada-uzuv-yok] görünürlük=${jd.visibility} gerekçe="${jd.detail}"`
-              );
-            } else if (jd.bad) {
-              console.log(
-                `UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                `RED[limb-ghost] işaretler=${jd.flags.join(",") || "verdict"} hakem=${jd.arbiter || "?"} gerekçe="${jd.detail}"`
-              );
-              recordGateRejection("limb-ghost");
-              lastRejectGate = "limb-ghost";
-              await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
-                mode, gate: "limb-ghost",
-                distance: mathDist,
-                detail: `${jd.flags.join(",") || "BAD_LIMB"} — ${jd.detail}`,
-              });
-              if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
-              break;
-            } else {
-              console.log(
-                `UZUV KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                `GEÇTİ${jd.arbiter === "overruled" ? " (hakem ilk reddi geçersiz saydı)" : ""}`
-              );
-            }
-          }
+          // ================================================================
+          // UZUV KIRPMA YARGISI (limb-ghost) KALDIRILDI — 2026-09-14
+          // ================================================================
+          //
+          // KULLANICI KARARI, GERÇEK VERİYE DAYANIYOR. Kapı, doğruladığımız
+          // DÖRT vakanın dördünde de YANLIŞ eledi:
+          //   • 0c609c0e c3/c8 — "Fingers appear fused or duplicated"
+          //     (kullanıcı: eller net ve kusursuz)
+          //   • f483d510 c7   — "Hand structure is unclear or malformed"
+          //     (kullanıcı: "eli bile gözükmüyor, elleri cepte")
+          //   • 78e53593 c0   — "Fingers appear fused or duplicated"
+          //     (kullanıcı: bardak tutan el, parmaklar ayrı ve doğru)
+          //
+          // 2026-09-13'te iki onarım denendi (NOT_VISIBLE sınıfı + görünürlük
+          // doğrulaması, ve ikinci-görüş hakemi) ama kapının temel sorunu
+          // onarılabilir değil: model, SAYDAM NESNE TUTAN eli (bardak, şişe,
+          // cam) sistematik olarak "kaynaşmış/çoğalmış parmak" sanıyor —
+          // camın içinden görünen parmaklar gerçek fotoğrafın doğal
+          // görüntüsü. Yanlış-red maliyeti (kullanıcı kare kaybediyor +
+          // OpenAI kredisi yanıyor) ispatlanmış; buna karşılık kapının
+          // yakaladığı GERÇEK hayalet el vakası hiç doğrulanamadı.
+          //
+          // BOŞLUK OLUŞMUYOR — aynı kusuru gören İKİ Vision satırı duruyor
+          // ve ikisi de bağlayıcı (aynı çağrı, ek maliyet yok):
+          //   • HAND_QUALITY: BLURRY_OR_MALFORMED -> "hands" reddi
+          //     (2026-08-13, tam da "el silik/bulanık çıktı" şikâyeti için)
+          //   • BODY_INTEGRITY: TRANSPARENT_OR_GHOSTED -> "ghosting" reddi
+          //     (2026-09-06, "kol yarı saydam, korkuluk içinden görünüyor")
+          //
+          // UZUV TEN ÖLÇÜMÜ (yukarıda) KALIYOR: zaten elemiyordu, yalnızca
+          // ölçüp logluyor ve gelecekte kalibre edilebilecek veri biriktiriyor.
+          // locateLimbRegions de kalıyor — ten ölçümü onun kutularını kullanıyor.
         }
       } catch (e) {
         console.error("OpenAI yolu: uzuv kapısı hata verdi (bu katman atlanıyor):", e);
