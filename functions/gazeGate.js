@@ -66,9 +66,27 @@ function isGazeMismatch(baseLine, outputLine) {
   const base = parseGazeToken(baseLine);
   const out = parseGazeToken(outputLine);
   if (!base || !out) return false;
-  // Çıplak AWAY = yön okunamadı. Belirsiz ölçümle eleme yok.
-  if (base === "AWAY" || out === "AWAY") return false;
   if (base === out) return false;
+
+  // ÇIPLAK AWAY ARTIK HER ŞEYİ AFFETMİYOR (2026-09-14).
+  //
+  // Eskiden tek tarafta AWAY görmek elemeyi TAMAMEN kapatıyordu ve bu,
+  // kullanıcının şikâyet ettiği teslim edilmiş karelerin kaçış yoluydu
+  // (420fd8c6 elegance_6, 7160f104 elegance_5: "taban ile tamamen farklı
+  // yere bakıyor, ret olması lazımdı"). Model bir tarafı net okuyup
+  // diğerine belirsizlik hissettiğinde AWAY yazıyor ve kötü kare geçiyordu.
+  //
+  // YENİ KURAL: AWAY yalnızca DİĞER TARAF DA yönsüzse (AWAY/CAMERA)
+  // belirsizlik sayılır. Karşı taraf net bir YÖN bildiriyorsa (LEFT,
+  // AWAY_RIGHT, DOWN ...) bu artık ölçülebilir bir uyuşmazlıktır: biri
+  // "uzağa, yönü seçemedim" derken diğeri "sola" diyorsa iki bakış aynı
+  // noktada değildir. CAMERA ile AWAY hâlâ affediliyor — ikisi de tek
+  // başına yön taşımaz ve aralarındaki fark güvenilir okunamaz.
+  if (base === "AWAY" || out === "AWAY") {
+    const otherTok = base === "AWAY" ? out : base;
+    // Karşı taraf da yönsüzse (AWAY/CAMERA) -> belirsiz, eleme yok.
+    return gazeDirection(otherTok) !== null;
+  }
 
   const b = gazeDirection(base);
   const o = gazeDirection(out);

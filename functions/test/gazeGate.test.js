@@ -26,9 +26,22 @@ test("satır yoksa fail-safe geçsin", () => {
   assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", ""), false);
 });
 
-test("AWAY belirsizdir — tek tarafta olsa bile eleme yok", () => {
+// AWAY KURALI DARALTILDI (2026-09-14). Eskiden tek tarafta AWAY görmek
+// elemeyi tamamen kapatıyordu; kullanıcının şikâyet ettiği iki teslim
+// edilmiş kare (420fd8c6 elegance_6, 7160f104 elegance_5) tam da bu
+// boşluktan geçmişti. Artık AWAY yalnızca KARŞI TARAF DA yönsüzse
+// (AWAY/CAMERA) belirsizlik sayılır.
+test("AWAY ile CAMERA — ikisi de yönsüz, eleme yok", () => {
   assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", "OUTPUT_GAZE: AWAY"), false);
-  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: RIGHT"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: CAMERA"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY"), false);
+});
+
+test("AWAY karşısında NET YÖN varsa uyuşmazlık sayılır (kaçış kapısı kapandı)", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: RIGHT"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: LEFT", "OUTPUT_GAZE: AWAY"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY_LEFT"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_DOWN", "OUTPUT_GAZE: AWAY"), true);
 });
 
 test("token ayrıştırması satır önekini yutar", () => {
@@ -64,11 +77,10 @@ test("AWAY_LEFT ile LEFT aynı tarafı gösterir — uyuşmazlık DEĞİL", () =
   assert.equal(isGazeMismatch("BASE_GAZE: RIGHT", "OUTPUT_GAZE: AWAY_RIGHT"), false);
 });
 
-test("çıplak AWAY hâlâ kaçış kapısı — hiçbir tarafta eleme yok", () => {
-  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY_RIGHT"), false);
-  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_LEFT", "OUTPUT_GAZE: AWAY"), false);
-  assert.equal(isGazeMismatch("BASE_GAZE: AWAY", "OUTPUT_GAZE: AWAY"), false);
-});
+// NOT: "çıplak AWAY her şeyi affeder" testi 2026-09-14'te KALDIRILDI —
+// yerini yukarıdaki iki test aldı (AWAY yalnızca karşı taraf da yönsüzse
+// belirsizlik sayılır). Eski kural teslim edilen kötü karelerin kaçış
+// yoluydu; bkz. gazeGate.js'teki "ÇIPLAK AWAY ARTIK HER ŞEYİ AFFETMİYOR".
 
 test("farklı eksen (DOWN vs RIGHT) uyuşmazlıktır", () => {
   assert.equal(isGazeMismatch("BASE_GAZE: DOWN", "OUTPUT_GAZE: RIGHT"), true);

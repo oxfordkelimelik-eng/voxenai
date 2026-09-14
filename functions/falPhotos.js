@@ -662,7 +662,19 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "to see. Otherwise the face must sit under the exact same light direction, intensity and colour as " +
     "the rest of the base scene, with no separate or extra light on it. There must be NO unexplained " +
     "dark blotch, black smudge, dirty patch or hard shadow stuck on the face — facial skin stays clean " +
-    "and evenly toned in the person's real colour.\n\n" +
+    "and evenly toned in the person's real colour.\n" +
+    // AÇIK RENKLİ BLOK ARTEFAKTI (2026-09-14). Prompt şimdiye kadar yalnızca
+    // KOYU lekeyi yasaklıyordu; kullanıcının şikâyet ettiği kusur ise tersi:
+    // alın, kaş ve burun üstünde düz GRİ/BEYAZ, keskin ve düz kenarlı
+    // bloklar. İki iş üst üste bu yüzden çok ret aldı (7160f104 ve 420fd8c6:
+    // 33 reddin 19'u artefakt kaynaklı, 7160f104 chunk 1 altı deneme boyunca
+    // aynı yerde tekrarladı). Kapı bunu eliyor ama asıl çözüm üretimde
+    // oluşmasını engellemek — ret döngüsü süre ve OpenAI kredisi yakıyor.
+    "Equally, there must be NO flat grey, white or washed-out patch sitting on the facial skin: no " +
+    "rectangular or straight-edged block, no thin streak or line across the forehead, brows, nose, " +
+    "cheeks or chin, and no region that looks pasted on, painted over or pixelated differently from " +
+    "the skin around it. Real skin has continuous tone and texture — every part of the face must blend " +
+    "smoothly into the next with no hard or geometric borders anywhere.\n\n" +
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
     "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
     "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
@@ -1096,7 +1108,13 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
     "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
     "blotch, smudge or patchy shadow stuck on a joint or knuckle — skin there must read as evenly and " +
-    "naturally lit as the face, not mottled or dirty-looking.\n\n" +
+    "naturally lit as the face, not mottled or dirty-looking.\n" +
+    // Bkz. buildEditPrompt'taki aynı başlık (2026-09-14): asıl üretim modu
+    // bu olduğu için açık renkli blok artefaktı yasağı burada da olmalı.
+    "NO FLAT LIGHT PATCHES EITHER: never leave a grey, white or washed-out block, a straight-edged " +
+    "rectangle, or a thin streak sitting on the forehead, brows, nose, cheeks or chin. Facial skin " +
+    "must have continuous tone and texture throughout, blending smoothly with no hard or geometric " +
+    "borders and no area that looks pasted on or painted over.\n\n" +
     "FACE RENDERING QUALITY — spend your detail budget on the face. It must be the sharpest, cleanest " +
     "region of the frame: crisp eyes with visible catchlights and iris detail, defined lashes and brow " +
     "hairs, clean lip edges, and skin that reads as living tissue with fine pores and natural " +
@@ -2409,11 +2427,17 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // kare geçti. Artık karşılaştırma kodda: taban ve çıktı token'ı farklıysa
     // (AWAY / satır yok hariç, fail-safe) reason=gaze.
     {
-      const { isGazeMismatch } = require("./gazeGate");
+      const { isGazeMismatch, parseGazeToken } = require("./gazeGate");
       if (isGazeMismatch(baseGazeLine, outGazeLine)) {
+        // ÖLÇÜLEN TOKENLAR DIŞARI TAŞINIYOR (2026-09-14): çağıran taraf
+        // bunları bir sonraki denemenin düzeltici uyarısına yazıyor —
+        // "gözü kameraya çektin" gibi sabit ve çoğu zaman YANLIŞ bir
+        // teşhis yerine gerçek sapma bildiriliyor (bkz. retryCorrectionPrefix).
         return {
           ok: false, reason: "gaze", inconclusive: false,
           detail: verdictDetail() || `${baseGazeLine} / ${outGazeLine}`,
+          gazeBase: parseGazeToken(baseGazeLine),
+          gazeOut: parseGazeToken(outGazeLine),
         };
       }
     }
@@ -2955,19 +2979,43 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
  * ağırlık verilen konum. Yalnızca retry'da (attempt > 1) ve yalnızca
  * önceki reddin sebebi biliniyorsa eklenir.
  */
-function retryCorrectionPrefix(lastGate) {
+function retryCorrectionPrefix(lastGate, gazeFacts = null) {
   if (!lastGate) return "";
   const g = String(lastGate);
   if (g === "vision-gaze" || g === "iris-gaze") {
+    // ÖLÇÜLEN YÖNÜ SÖYLE (2026-09-14). Eski metin her red için "gözü
+    // kameraya çektin" DİYORDU — oysa gerçek retlerin çoğunda kusur bu
+    // değil: taban sağa bakarken çıktı sola bakıyor, ikisi de kameraya
+    // bakmıyor. Yanlış teşhis modele yanlış düzeltmeyi yaptırıyor ve aynı
+    // hata tekrarlanıyor: son 40 işte 108 reddin 46'sı (%42.6) gaze ve
+    // aynı chunk'ta 2 kez üst üste gaze reddi ALTI ayrı işte görüldü
+    // (420fd8c6 c0/c5/c9, 7160f104 c7, 944d30fe c7, 0c609c0e c2 ...).
+    //
+    // Artık Vision'ın ÖLÇTÜĞÜ iki token prompt'a yazılıyor, böylece model
+    // neyi yanlış yaptığını okuyor. Ölçüm yoksa eski genel metne düşülür.
+    if (gazeFacts && gazeFacts.base && gazeFacts.out) {
+      return (
+        "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+        `In the base photo (FIRST image) the eyes look ${gazeFacts.base}. ` +
+        `Your last render had them looking ${gazeFacts.out} instead — that is ` +
+        "the defect, and repeating it fails again.\n" +
+        `Your output MUST have the eyes looking ${gazeFacts.base}, matching the ` +
+        "base exactly: the same side, the same angle, and the irises sitting " +
+        "in the same corner of the eye opening. Look at the FIRST image again " +
+        "and copy the iris position before you finish. Do not 'improve' the " +
+        "pose, do not centre the eyes, and do not turn them toward the lens " +
+        "unless the base itself looks at the lens.\n\n"
+      );
+    }
     return (
       "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
-      "Your last render drifted the eyes toward the camera. The base person " +
-      "is NOT looking at the lens, and neither may your output. Before you " +
-      "finish, look at the FIRST image again and copy the exact iris position " +
-      "inside each eye: if the base looks to the side, down or away, your " +
-      "output must look to that same side, at the same angle, with the irises " +
-      "in the same corner of the eye opening. Eyes meeting the viewer when the " +
-      "base's do not is an automatic failure. Do not 'improve' the pose.\n\n"
+      "Your last render pointed the eyes somewhere other than where the base " +
+      "person is looking. Before you finish, look at the FIRST image again " +
+      "and copy the exact iris position inside each eye: whichever way the " +
+      "base looks — to a side, down, away or at the lens — your output must " +
+      "look the same way, at the same angle, with the irises in the same " +
+      "corner of the eye opening. Do not 'improve' the pose and do not centre " +
+      "the eyes.\n\n"
     );
   }
   if (g === "yaw-drift" || g === "yaw-to-camera" || g === "yaw-over-rotate" ||
@@ -3266,6 +3314,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // gerçek bir sapmanın kanıtıdır, model önyargısının değil.
   const gateRejectCounts = new Map();
   const disabledGates = new Set();
+  // Son bakış reddinde Vision'ın ÖLÇTÜĞÜ yönler ({base, out}) — bir sonraki
+  // denemenin düzeltici uyarısında kullanılır (bkz. retryCorrectionPrefix).
+  let lastGazeFacts = null;
   /**
    * Bir reddi tekrar sayacına işler ve sınıra ulaşıldıysa kapıyı bu chunk
    * için devre dışı bırakır. Kapı zaten devre dışıysa bu fonksiyona hiç
@@ -3308,7 +3359,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
-    const retryHint = attempt > 1 ? retryCorrectionPrefix(lastRejectGate) : "";
+    const retryHint = attempt > 1 ? retryCorrectionPrefix(lastRejectGate, lastGazeFacts) : "";
     if (retryHint) {
       console.log(`DÜZELTİCİ UYARI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki red "${lastRejectGate}" — prompt'a hedefli uyarı eklendi`);
     }
@@ -3590,6 +3641,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         visionDetail = v.detail;
         visionReason = v.reason;
         visionInconclusive = !!v.inconclusive;
+        // Bakış reddinde ÖLÇÜLEN yönler bir sonraki denemenin düzeltici
+        // uyarısına taşınır (bkz. retryCorrectionPrefix, 2026-09-14).
+        if (v.gazeBase && v.gazeOut) lastGazeFacts = { base: v.gazeBase, out: v.gazeOut };
         // GAZE_POINT REDDİ PROFİLDE GEÇERSİZ SAYILIR (2026-09-08 gerçek olay,
         // job db963457): bu soru irisin göz boşluğu İÇİNDEKİ tam konumunu
         // karşılaştırıyor — yaw/head-dx'teki landmark ölçümüyle AYNI zayıflığı
@@ -5242,3 +5296,11 @@ exports.cleanupExpiredReadyJobs = onSchedule(
     }
   }
 );
+
+// Saf yardımcıların testten erişilebilmesi için. index.js barrel'ı yalnızca
+// seçili Cloud Function isimlerini dışa açtığı için (bkz. o dosyadaki liste)
+// _testables ASLA bir fonksiyon olarak deploy edilmez — opsPanel.js'teki
+// aynı desen.
+exports._testables = {
+  retryCorrectionPrefix,
+};
