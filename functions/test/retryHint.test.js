@@ -48,6 +48,29 @@ test("artefakt uyarısı düz blok kusurunu adlandırır", () => {
   assert.match(hint, /forehead/i);
 });
 
+// ARTEFAKT BÖLGESİ (2026-09-14). İş 3db3ba68'de chunk 2 ve 8 ikişer kez
+// üst üste AYNI bölgeden elendi; uyarı bölgeyi söylemediği için model
+// düzeltmeyi nereye uygulayacağını bilmiyordu.
+test("ölçülen bölge verildiğinde uyarı ONU adreslar", () => {
+  const hint = retryCorrectionPrefix("face-artifact", null, "forehead and nose");
+  assert.match(hint, /on the forehead and nose/i);
+  assert.match(hint, /look there first/i);
+});
+
+test("bölge yoksa veya NONE ise bölge cümlesi EKLENMEZ", () => {
+  const noWhere = retryCorrectionPrefix("face-artifact", null, null);
+  assert.doesNotMatch(noWhere, /look there first/i);
+  const none = retryCorrectionPrefix("face-artifact", null, "NONE");
+  assert.doesNotMatch(none, /look there first/i);
+  // Genel metin yine de duruyor.
+  assert.match(none, /flat grey/i);
+});
+
+test("vision-artifact da bölge cümlesini alır", () => {
+  const hint = retryCorrectionPrefix("vision-artifact", null, "Grey patch on forehead");
+  assert.match(hint, /Grey patch on forehead/);
+});
+
 test("bilinmeyen/boş kapı boş string döner", () => {
   assert.equal(retryCorrectionPrefix(null), "");
   assert.equal(retryCorrectionPrefix("bilinmeyen-kapi"), "");

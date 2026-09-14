@@ -2979,7 +2979,7 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
  * ağırlık verilen konum. Yalnızca retry'da (attempt > 1) ve yalnızca
  * önceki reddin sebebi biliniyorsa eklenir.
  */
-function retryCorrectionPrefix(lastGate, gazeFacts = null) {
+function retryCorrectionPrefix(lastGate, gazeFacts = null, artifactWhere = null) {
   if (!lastGate) return "";
   const g = String(lastGate);
   if (g === "vision-gaze" || g === "iris-gaze") {
@@ -3046,11 +3046,25 @@ function retryCorrectionPrefix(lastGate, gazeFacts = null) {
     );
   }
   if (g === "vision-artifact" || g === "face-artifact") {
+    // ÖLÇÜLEN BÖLGEYİ SÖYLE (2026-09-14, gaze'deki aynı düzeltme).
+    //
+    // Kapı zaten "forehead and nose" gibi bir bölge üretiyor ama uyarı bunu
+    // taşımıyordu; model genel bir "yüzde leke bırakma" cümlesi okuyup aynı
+    // yere yine leke koyuyordu. İş 3db3ba68'de chunk 2 ve 8 ikişer kez üst
+    // üste AYNI bölgeden (alın/burun) elendi. Bölge adı verilince model
+    // düzeltmeyi nereye uygulayacağını biliyor.
+    const where = artifactWhere && String(artifactWhere).trim();
+    const whereSentence = where && !/^none$/i.test(where)
+      ? `The defect was on the ${where} — look there first and render that ` +
+        "area as clean, continuous skin.\n"
+      : "";
     return (
       "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
       "Your last render left a patch on the face that did not belong to the " +
       "photograph — a flat grey/white block or smear sitting on the skin with " +
-      "a hard edge. Render the facial skin as one continuous, evenly lit " +
+      "a hard edge.\n" +
+      whereSentence +
+      "Render the facial skin as one continuous, evenly lit " +
       "surface with natural pores and tone across the whole face. No flat " +
       "blocks, no straight-edged areas, no washed-out regions on the " +
       "forehead, brows, cheeks, nose or chin.\n\n"
@@ -3317,6 +3331,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // Son bakış reddinde Vision'ın ÖLÇTÜĞÜ yönler ({base, out}) — bir sonraki
   // denemenin düzeltici uyarısında kullanılır (bkz. retryCorrectionPrefix).
   let lastGazeFacts = null;
+  // Son artefakt reddinde kapının bildirdiği BÖLGE ("forehead and nose" gibi)
+  // — aynı şekilde bir sonraki denemenin uyarısına yazılır.
+  let lastArtifactWhere = null;
   /**
    * Bir reddi tekrar sayacına işler ve sınıra ulaşıldıysa kapıyı bu chunk
    * için devre dışı bırakır. Kapı zaten devre dışıysa bu fonksiyona hiç
@@ -3359,7 +3376,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
-    const retryHint = attempt > 1 ? retryCorrectionPrefix(lastRejectGate, lastGazeFacts) : "";
+    const retryHint = attempt > 1
+      ? retryCorrectionPrefix(lastRejectGate, lastGazeFacts, lastArtifactWhere)
+      : "";
     if (retryHint) {
       console.log(`DÜZELTİCİ UYARI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki red "${lastRejectGate}" — prompt'a hedefli uyarı eklendi`);
     }
@@ -3744,6 +3763,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         } else {
           recordGateRejection(visionGate);
           lastRejectGate = visionGate;
+          // Tam-kare artefakt reddinde ayrı bir "bölge" satırı yok; gerekçe
+          // metni ("Grey patch on forehead and nose") bölgeyi zaten içeriyor
+          // ve bir sonraki denemenin uyarısına o taşınır.
+          if (visionReason === "artifact") lastArtifactWhere = visionDetail || null;
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: lastRejectGate, distance: mathDist, detail: visionDetail,
           });
@@ -3864,6 +3887,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               `RED[face-artifact] bölge="${fa.where}" gerekçe="${fa.detail}"`
             );
             lastRejectGate = "face-artifact";
+            lastArtifactWhere = fa.where || null;
             await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
               mode, gate: "face-artifact", distance: mathDist,
               detail: `${fa.where || "?"} — ${fa.detail}`,
