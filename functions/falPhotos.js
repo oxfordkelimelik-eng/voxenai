@@ -1035,19 +1035,48 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "REFERENCES: every other image is a close-up SELFIE of the target — they are the ONLY source of " +
     "truth for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
     "accessories, pose, head angle, head size or where the eyes look — the FIRST image decides all of " +
-    "those.\n\n" +
+    "those.\n" +
+    // KAMERAYA BAKMA KUSURUNUN KÖK NEDENİ (2026-09-15, ölçülmüş).
+    //
+    // 29 gerçek ölçümün 10'unda (%34) kusur TEK VE AYNI: taban yana bakarken
+    // OUTPUT_GAZE CAMERA çıkıyor. Diğer hiçbir yön hatası yok — RIGHT/RIGHT,
+    // LEFT/LEFT, DOWN/DOWN eşleşmeleri temiz geçiyor. Yani model yönü
+    // "şaşırmıyor", sistematik olarak merceğe çeviriyor.
+    //
+    // SEBEP metinsel bir eksiklik DEĞİL: P2 bunu zaten açıkça yasaklıyor.
+    // Sebep GÖRSEL — referansların hepsi kameraya bakan yakın çekim
+    // selfie'ler. Model kimliği o karelerden kopyalarken gözbebeği konumunu
+    // da beraberinde kopyalıyor. Yasağı tekrar etmek çare olmadı (P2 zaten
+    // "THE MOST COMMON FAILURE" diyor); bu yüzden selfie'lerin GÖZLERİNİN
+    // kullanılmayacağı burada, referansların tanımlandığı yerde söyleniyor.
+    "The target is almost certainly looking INTO THE LENS in every selfie, because that is how selfies " +
+    "are taken. Do NOT carry that over. Copy the eye SHAPE, colour, lids and lashes from the selfies, " +
+    "but take the DIRECTION the eyes point only from the FIRST image. Treat the selfies as if the " +
+    "irises in them were unusable.\n\n" +
     "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
     "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
     "viewer would not immediately recognise the selfie person, the edit failed.\n" +
-    "P2 GAZE AND HEAD ANGLE — THE MOST COMMON FAILURE: renders drift the eyes toward the camera when " +
-    "the base person is looking away. Do not do this. If the BASE person looks to the side, down, up " +
-    "or off-frame, your output MUST look exactly there too — same direction, same angle, irises in the " +
-    "same corner of each eye opening. Eyes meeting the viewer when the base's do not is an automatic " +
-    "failure, no matter how good the rest looks. A coarse match (both roughly 'left') is NOT enough if " +
-    "the irises sit in a different place. The head must keep the BASE person's turn angle to the same " +
-    "degree: do not rotate, straighten or re-centre it, and do not shift it on the shoulders. If the " +
-    "base is in profile or three-quarter, the output stays at that exact angle. Ignore where the target " +
-    "looks in their own selfies — the base decides gaze and angle, always.\n" +
+    // P2 YENİDEN YAZILDI (2026-09-15). Eski metin kusuru doğru tarif ediyordu
+    // ama yalnızca YASAKLIYORDU ve ölçüm gösterdi ki yasak tek başına
+    // yetmiyor: 29 ölçümün 10'u hâlâ CAMERA çıktı. Yasağın yerine PROSEDÜR
+    // konuldu — modele bitirmeden önce yapacağı somut bir kontrol veriliyor.
+    // Aynı yaklaşım bu dosyada daha önce işe yaradı: "yargı sorma, ölçüm
+    // iste" (bkz. 2026-09-06 BASE_HEAD_SPAN/OUTPUT_HEAD_SPAN notu).
+    "P2 GAZE — THE SINGLE MOST COMMON FAILURE, and it is always the same one: the eyes end up looking " +
+    "into the camera when the base person was looking somewhere else. Before you finish, run this " +
+    "check:\n" +
+    "  (a) Look at the FIRST image and say where that person's eyes point — into the lens, or to the " +
+    "left / right / up / down / off into the distance.\n" +
+    "  (b) Look at your own output and answer the same question.\n" +
+    "  (c) If the two answers differ, you have failed. Move the irises until they match, then check " +
+    "again.\n" +
+    "If the base is NOT looking at the lens, your output must NOT look at the lens — this one rule " +
+    "overrides how natural or flattering a camera-facing gaze might seem. Match the direction, the " +
+    "angle, and the position of each iris within the eye opening; a coarse match (both roughly 'left') " +
+    "is not enough if the irises sit in a different place.\n" +
+    "HEAD ANGLE — keep the BASE person's turn to the same degree: do not rotate, straighten or " +
+    "re-centre it, and do not shift it on the shoulders. If the base is in profile or three-quarter, " +
+    "the output stays at that exact angle.\n" +
     "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
     "that same count in the output. Never take head scale " +
     "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
