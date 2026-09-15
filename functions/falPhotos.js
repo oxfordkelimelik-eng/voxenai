@@ -3008,7 +3008,32 @@ async function acceptStageIfIdentityHolds(prev, prevDist, next, refDescriptor, l
  * ağırlık verilen konum. Yalnızca retry'da (attempt > 1) ve yalnızca
  * önceki reddin sebebi biliniyorsa eklenir.
  */
+// DÜZELTİRKEN BAŞKA ŞEYİ BOZMA (2026-09-15, ÖLÇÜLMÜŞ YAN ETKİ).
+//
+// Leke yasağı ilk üretimde çalışıyor ama retry'da bozuluyordu: yasak
+// sonrası 11 artefakt reddinin yalnızca 2'si 1. denemede, 9'u RETRY'da
+// çıktı. Sebep zincirleme: gaze reddinden sonra yapılan 9 retry'ın 5'inde
+// (%56) yeni bir LEKE belirdi. Düzeltici uyarı modeli yüze odaklıyor, model
+// o bölgeyi yeniden boyuyor ve boyarken düz bir yama bırakıyor.
+//
+// Bu ek, her düzeltici uyarının SONUNA konur: yalnızca söyleneni düzelt,
+// gerisini olduğu gibi bırak. Tek bir kusuru düzeltirken yenisini üretmek
+// ret döngüsünün asıl yakıtıydı.
+const RETRY_DO_NO_HARM =
+  "While you fix this, change NOTHING else. Keep the identity, framing, " +
+  "pose, clothing, background and lighting exactly as they were. In " +
+  "particular do not repaint the facial skin: leave it continuous and " +
+  "evenly toned, with no flat grey or white patch, no straight-edged block " +
+  "and no streak anywhere on the forehead, brows, nose, cheeks or chin. " +
+  "Fix the one defect named above and leave the rest of the frame alone.\n\n";
+
 function retryCorrectionPrefix(lastGate, gazeFacts = null, artifactWhere = null) {
+  const body = retryCorrectionBody(lastGate, gazeFacts, artifactWhere);
+  // Boş uyarıya ek koyma — uyarı yoksa ortada düzeltilecek bir şey de yok.
+  return body ? body + RETRY_DO_NO_HARM : "";
+}
+
+function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null) {
   if (!lastGate) return "";
   const g = String(lastGate);
   if (g === "vision-gaze" || g === "iris-gaze") {

@@ -75,3 +75,30 @@ test("bilinmeyen/boş kapı boş string döner", () => {
   assert.equal(retryCorrectionPrefix(null), "");
   assert.equal(retryCorrectionPrefix("bilinmeyen-kapi"), "");
 });
+
+// DÜZELTİRKEN BAŞKA ŞEYİ BOZMA (2026-09-15). Ölçüm: leke yasağı sonrası
+// 11 artefakt reddinin 9'u RETRY'da çıktı ve gaze reddi sonrası yapılan
+// 9 retry'ın 5'inde (%56) yeni leke belirdi — düzeltici uyarı modeli yüze
+// odaklayıp o bölgeyi yeniden boyatıyordu.
+test("her düzeltici uyarı 'başka şeyi bozma' ekiyle biter", () => {
+  for (const gate of ["vision-gaze", "face-artifact", "yaw-drift",
+                      "skin-tone", "vision-identity"]) {
+    const hint = retryCorrectionPrefix(gate);
+    assert.match(hint, /change NOTHING else/i, `${gate} eki almalı`);
+    assert.match(hint, /do not repaint the facial skin/i, `${gate} leke koruması almalı`);
+  }
+});
+
+test("boş uyarıya ek EKLENMEZ", () => {
+  // Uyarı yoksa düzeltilecek bir şey de yok; boş string boş kalmalı.
+  assert.equal(retryCorrectionPrefix(null), "");
+  assert.equal(retryCorrectionPrefix("tanimsiz-kapi"), "");
+});
+
+test("ek, asıl düzeltme metninden SONRA gelir", () => {
+  const hint = retryCorrectionPrefix("vision-gaze", { base: "RIGHT", out: "CAMERA" });
+  assert.ok(
+    hint.indexOf("RIGHT") < hint.indexOf("change NOTHING else"),
+    "önce kusur anlatılmalı, sonra koruma eki gelmeli"
+  );
+});
