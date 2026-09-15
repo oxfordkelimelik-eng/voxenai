@@ -4585,36 +4585,37 @@ exports.startPhotoGeneration = onCall(
 
       const balance = wallet.photoBalance || 0;
       if (balance < unitsNeeded) {
-        // AI FOTO ÜCRETSİZ DENEMESİ GEÇİCİ OLARAK GERİ AÇILDI (2026-09-10).
+        // AI FOTO ÜCRETSİZ DENEMESİ KAPATILDI (2026-09-15).
         //
-        // NEDEN: 2026-09-09'da bu blok yorum satırına alınıp SUNUCUYA deploy
-        // edildi, ama aynı değişikliğin istemci tarafı (dating_providers.dart
-        // canAffordStyles) App Store'a HENÜZ YÜKLENMEDİ. Kullanıcıların
-        // telefonundaki sürüm (1.0.2+4) hâlâ "1 stil ücretsiz" sanıp sunucuya
-        // istek atıyor, sunucu ise reddediyordu. Sonuç: 10 Eylül'de 41 işten
-        // 40'ı başarısız oldu, 25 kullanıcı hiç foto alamadı.
+        // GEÇMİŞ: 2026-09-09'da kapatılmış ama 10 Eylül'de geri açılmıştı.
+        // Sebep sıralama hatasıydı: sunucu kapatıldığında ücretsiz denemesi
+        // KAPALI istemci sürümü henüz App Store'da değildi. Telefonlardaki
+        // sürüm hâlâ "1 stil ücretsiz" sanıp istek atıyor, sunucu reddediyordu
+        // — 41 işten 40'ı başarısız oldu, 25 kullanıcı hiç foto alamadı.
         //
-        // KAPATMA SIRASI (kullanıcı kararı): (1) ücretsiz denemesi KAPALI
-        // istemci sürümü App Store'da yayına girsin, (2) kullanıcıların
-        // çoğu o sürüme geçsin, (3) ANCAK O ZAMAN burası tekrar yorum
-        // satırına alınsın. Önce sunucuyu kapatmak, eski istemcileri kırar.
+        // ŞİMDİ GÜVENLİ, çünkü planlanan üç adımın üçü de tamamlandı:
+        //   (1) ücretsiz denemesi kapalı istemci App Store'da yayında,
+        //   (2) kullanıcılar o sürüme geçti,
+        //   (3) sunucu kapatıldı — burası.
+        // Ölçüm bunu doğruluyor: 11 Eylül'de 25 ücretsiz iş vardı, 14 ve 15
+        // Eylül'de SIFIR. Yani eski sürümde kalan kullanıcı pratikte yok.
         //
-        // Foto analizindeki ücretsiz deneme (freeAnalysisUsed, aiProxy.js)
-        // BUNDAN AYRI, hiç dokunulmadı.
-        if (!wallet.freePhotoUsed && styles.length === 1) {
-          unitsToCharge = 0;
-          usedFreeTier = true;
-        } else if (!wallet.freePhotoUsed && styles.length > 1) {
-          throw new HttpsError(
-            "failed-precondition",
-            "Ücretsiz deneme için yalnızca 1 stil seçebilirsin. Daha fazlası için paket al."
-          );
-        } else if (balance > 0) {
+        // Eski bir istemci yine de denerse aşağıdaki mesajı alır — sessizce
+        // başarısız olmaz, ne yapması gerektiğini okur.
+        if (balance > 0) {
           // Bakiyesi var ama seçtiği stil sayısından az — net yönlendirme yap.
           throw new HttpsError(
             "failed-precondition",
             `Paketinde ${balance} stil hakkın var ama ${styles.length} stil seçtin. ` +
             `${balance} stil seç ya da daha fazla paket al.`
+          );
+        } else if (!wallet.freePhotoUsed) {
+          // Hiç paket almamış ve ücretsiz hakkını da hiç kullanmamış hesap:
+          // büyük ihtimalle ücretsiz deneme bekleyen ESKİ bir istemci.
+          // Genel "hakkın kalmadı" mesajı burada yanıltıcı olurdu.
+          throw new HttpsError(
+            "failed-precondition",
+            "Ücretsiz deneme sona erdi. Devam etmek için AI Foto paketi al."
           );
         } else {
           throw new HttpsError(

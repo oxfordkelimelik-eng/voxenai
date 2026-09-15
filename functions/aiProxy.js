@@ -120,6 +120,34 @@ exports.analyzeImage = onCall(
       throw new HttpsError("invalid-argument", "prompt ve en az bir görsel zorunlu.");
     }
 
+    // ANALİZ HAKKI ÖN KONTROLÜ (2026-09-15) — MALİYETİ KESEN KATMAN.
+    //
+    // Ücretsiz analiz hakkı kapatıldı. Eski akışta kontrol analiz BİTTİKTEN
+    // sonra (consumeAnalysis) yapılıyordu: kullanıcı fotoğrafları yüklüyor,
+    // OpenAI çağrısı çalışıp ücretlendiriliyor, sonra "hakkın yok" denip tüm
+    // sonuçlar kilitli gösteriliyordu. Hak kapatılınca bu, her denemede boşa
+    // OpenAI maliyeti demekti (ölçüm: 119 hesabın ücretsiz analiz hakkı hâlâ
+    // kullanılmamış durumda). Kontrol buraya alındı — hakkı olmayan çağrı
+    // modele hiç gitmiyor.
+    //
+    // YALNIZCA DATING SKORLAMASINI KAPSAR. analyzeImage üç ayrı özelliğe
+    // hizmet ediyor (bkz. claude_api_service.dart): scoreDatingPhotos (hak
+    // gerektirir), analyzeFace ve analyzeBody (gerektirmez — bunlar
+    // uygulamanın ücretsiz temel özellikleri). Ayrım prompt'un kendisinden
+    // yapılıyor: yalnızca dating skorlama prompt'u "dating/profil fotoğrafı
+    // uzmanısın" ifadesiyle başlar ve JSON dizisi ister.
+    const isDatingScoring = /dating\/profil fotoğrafı uzmanısın/i.test(String(prompt));
+    if (isDatingScoring) {
+      const walletSnap = await db.doc(`users/${request.auth.uid}/private/wallet`).get();
+      const w = walletSnap.data() || {};
+      if ((w.analysisBalance || 0) <= 0) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Foto analizi için paket hakkın yok. Devam etmek için analiz paketi al."
+        );
+      }
+    }
+
     // detail:"high" — analizde yüz ayrıntısı şart; "low" (512px) kadraj/ışık
     // dışındaki nüansları ayırt etmeye yetmiyor.
     const content = [
@@ -271,11 +299,22 @@ exports.consumeAnalysis = onCall(
       const analysisBalance = (wallet.analysisBalance || 0);
       const freeUsed = wallet.freeAnalysisUsed === true;
 
-      // 1) Ücretsiz hak (hesap başına ömür boyu bir kez) — yalnızca bu set
-      //    için henüz hiç açılmamışsa (alreadyUnlocked === 0) uygulanır.
+      // 1) ÜCRETSİZ ANALİZ HAKKI KAPATILDI (2026-09-15, kullanıcı kararı).
+      //
+      // Foto üretimindeki ücretsiz deneme daha önce kapatılmıştı; analiz de
+      // aynı karara bağlandı. Blok SİLİNMEDİ, etkisiz bırakıldı: geçmişte
+      // ücretsiz hakkını kullanmış hesaplarda freeAnalysisUsed=true olarak
+      // kalıyor ve ileride geri açılmak istenirse tek satır yeter.
+      //
+      // ASIL ENGEL BURADA DEĞİL: bu fonksiyon analiz ZATEN ÇALIŞTIKTAN sonra
+      // çağrılıyor, yani burada reddetmek OpenAI maliyetini önlemez —
+      // yalnızca sonuçları kilitler. Maliyeti kesen kontrol analyzeImage'ın
+      // başındadır (bkz. oradaki "ANALİZ HAKKI ÖN KONTROLÜ"). Bu satır o
+      // kontrolü atlatan eski istemciler için ikinci savunma katmanıdır.
+      const FREE_ANALYSIS_ENABLED = false;
       let newlyUnlocked = 0;
       let usedFree = false;
-      if (!freeUsed && alreadyUnlocked === 0) {
+      if (FREE_ANALYSIS_ENABLED && !freeUsed && alreadyUnlocked === 0) {
         newlyUnlocked = Math.min(FREE_ANALYSIS_PHOTOS, toUnlock);
         usedFree = newlyUnlocked > 0;
       }
