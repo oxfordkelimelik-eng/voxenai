@@ -322,7 +322,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             'seçtiğin mekân ve tarzda profesyonel fotoğraflar üretir.',
                         bullets: [
                           'Stile özel arka plan',
-                          'İlk fotoğraf ücretsiz önizleme',
+                          'Yüzünü koruyan gerçekçi sonuç',
                           '${DatingConfig.photoStandardPhotos} veya '
                               '${DatingConfig.photoPremiumPhotos} fotoğraf paketleri',
                         ],
@@ -341,7 +341,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             'söyler ve hangisini kullanmanı önerir.',
                         bullets: [
                           'Çekicilik skoru',
-                          'İlk analiz ücretsiz',
+                          'Somut iyileştirme önerileri',
                           '${_price(DatingConfig.analysisSingleProductId)} tekli · '
                               '${_price(DatingConfig.analysisStandardProductId)} standart',
                         ],
@@ -445,7 +445,9 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: const Text('Hemen Ücretsiz Başla',
+                  // "Ücretsiz" ibaresi kaldırıldı (2026-09-15): foto üretimi
+                  // ve analizde ücretsiz hak kapatıldı, vaat artık doğru değil.
+                  child: const Text('Hemen Başla',
                       style: TextStyle(
                           fontSize: 16, fontWeight: FontWeight.w900)),
                 ),

@@ -1540,8 +1540,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           const SizedBox(height: 6),
           Text(
             locked > 0
-                ? 'İlk fotoğrafın ücretsiz. Kalan $locked fotoğrafın kilidini '
-                    'açmak için AI Foto paketi al.'
+                ? '$locked fotoğrafın kilitli. Açmak için AI Foto paketi al.'
                 : 'Tüm fotoğrafların açık — indirebilir veya paylaşabilirsin.',
             style: const TextStyle(
                 fontSize: 13, color: AppColors.textSecondary),
@@ -2202,6 +2201,9 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
   // AI'den dönen gerçek puanlama sonuçları — KULLANICININ SEÇTİĞİ sırada.
   List<PhotoScore> _scores = [];
   String? _errorMessage;
+  /// Hata, paket hakkı olmamasından mı kaynaklandı? Hata ekranı buna göre
+  /// "Tekrar Dene" yerine "Paket Al" gösterir (bkz. _errorView).
+  bool _needsPack = false;
 
   Future<void> _pickAndValidate() async {
     final files = await _pickImages(multi: true, limit: 6);
@@ -2230,6 +2232,18 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
 
   Future<void> _run() async {
     if (_photos.isEmpty) return;
+    // PAKET KONTROLÜ EN BAŞTA (2026-09-15). Ücretsiz analiz hakkı kapatıldı;
+    // bakiyesi olmayan kullanıcıyı analiz çalıştırıp sonra hatayla karşılamak
+    // yerine doğrudan pakete yönlendiriyoruz. Sunucu da aynı kontrolü
+    // yapıyor (analyzeImage başındaki ön kontrol) — burası kullanıcıyı
+    // bekletmemek ve net yönlendirme vermek için.
+    if (ref.read(packBalanceProvider).analysis <= 0) {
+      await context.push('${DatingRoutes.paywall}?mode=analysis');
+      if (!mounted) return;
+      // Paywall'dan dönüldü: satın alma olduysa bakiye tazelenmiş olur.
+      // Hâlâ bakiye yoksa kullanıcı satın almaktan vazgeçmiştir, sessizce dur.
+      if (ref.read(packBalanceProvider).analysis <= 0) return;
+    }
     // ÜÇÜNCÜ TARAF AI RIZASI — fotoğraflar OpenAI'a gönderilmeden önce
     // (App Store 5.1.1(i)/5.1.2(i), bkz. ai_consent_gate.dart).
     if (!await ensureAiProcessingConsent(context,
@@ -2259,10 +2273,20 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
       ReviewPromptService().maybePromptAfterSuccess();
     } catch (e) {
       if (!mounted) return;
+      // SUNUCU "hakkın yok" DEDİYSE PAKETE YÖNLENDİR (2026-09-15). Yukarıdaki
+      // ön kontrol bunu normalde yakalar; buraya yalnızca bakiye tam da bu
+      // sırada tükenirse ya da eski bir istemci sürümünde gelinir. Genel
+      // "biraz sonra tekrar dene" mesajı o durumda yanıltıcı: kullanıcı
+      // beklemekle çözülmeyecek bir şeyi bekler.
+      final needsPack = e is FirebaseFunctionsException &&
+          e.code == 'failed-precondition';
       setState(() {
         _stage = 3;
-        _errorMessage =
-            'Analiz şu an yapılamadı. Lütfen biraz sonra tekrar dene.';
+        _needsPack = needsPack;
+        _errorMessage = needsPack
+            ? (e.message ??
+                'Foto analizi için paket hakkın yok. Devam etmek için analiz paketi al.')
+            : 'Analiz şu an yapılamadı. Lütfen biraz sonra tekrar dene.';
       });
     }
   }
@@ -2299,9 +2323,29 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
                 style: const TextStyle(
                     fontSize: 15, color: AppColors.textSecondary)),
             const SizedBox(height: 20),
-            PrimaryButton(
-                label: 'Tekrar Dene',
-                onPressed: () => setState(() => _stage = 0)),
+            // Paket eksikse "Tekrar Dene" işe yaramaz — doğrudan pakete
+            // yönlendir (2026-09-15, ücretsiz analiz hakkı kapatıldı).
+            if (_needsPack)
+              PrimaryButton(
+                label: 'Analiz Paketi Al',
+                onPressed: () async {
+                  await context.push('${DatingRoutes.paywall}?mode=analysis');
+                  if (!mounted) return;
+                  // Satın alma olduysa doğrudan analize dön; olmadıysa
+                  // kullanıcı bu ekranda kalır ve tekrar deneyebilir.
+                  if (ref.read(packBalanceProvider).analysis > 0) {
+                    setState(() {
+                      _needsPack = false;
+                      _errorMessage = null;
+                      _stage = 0;
+                    });
+                  }
+                },
+              )
+            else
+              PrimaryButton(
+                  label: 'Tekrar Dene',
+                  onPressed: () => setState(() => _stage = 0)),
           ],
         ),
       ),
@@ -2322,7 +2366,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
           const SizedBox(height: 6),
           const Text(
               'Her fotoğrafı puanlar; güçlü/zayıf yönlerini ve nasıl daha iyi '
-              'olacağını söyleriz. İlk fotoğrafın analizi ücretsiz.',
+              'olacağını söyleriz. Analiz paketi gerekir.',
               style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
           const SizedBox(height: 16),
           const PhotoQualityGuide(),
@@ -2385,8 +2429,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         const SizedBox(height: 4),
         Text(
             lockedCount > 0
-                ? 'İlk fotoğrafın analizi ücretsiz. Kalan $lockedCount fotoğraf '
-                    'için paket al.'
+                ? '$lockedCount fotoğrafın analizi kilitli. Açmak için paket al.'
                 : 'Her fotoğrafa dokunarak detaylı analizini gör.',
             style: const TextStyle(
                 fontSize: 13, color: AppColors.textSecondary)),

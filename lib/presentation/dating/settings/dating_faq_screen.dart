@@ -12,9 +12,9 @@ class DatingFaqScreen extends StatelessWidget {
     _FaqCategory('PAKETLER & ÖDEME', [
       _FaqItem(
         'Uygulamanın abonelik ücreti var mı?',
-        'Hayır. VOXEN AI\'da abonelik yok. İlk çıktı (ilk fotoğraf / ilk analiz) '
-            'her zaman ücretsiz gösterilir; devamını görmek istersen tek '
-            'seferlik bir paket satın alırsın. Otomatik yenileme yapılmaz.',
+        'Hayır. VOXEN AI\'da abonelik yok. Fotoğraf üretimi ve analiz için '
+            'tek seferlik paket satın alırsın; kullandıkça biter, otomatik '
+            'yenileme yapılmaz.',
       ),
       _FaqItem(
         'Paketler neler?',
@@ -71,8 +71,8 @@ class DatingFaqScreen extends StatelessWidget {
       _FaqItem(
         'Fotoğraf analizi nasıl çalışır?',
         'Yüklediğin fotoğrafları çekicilik, ışık, kadraj gibi kriterlere göre '
-            'puanlar ve dating profilin için en iyi fotoğrafları önerir. İlk '
-            'analiz sonucu ücretsiz gösterilir.',
+            'puanlar ve dating profilin için en iyi fotoğrafları önerir. Analiz '
+            'için analiz paketi gerekir.',
       ),
       _FaqItem(
         'Analiz sonuçları kesin bir ölçüm mü?',

@@ -394,7 +394,9 @@ class _PlanBadge extends StatelessWidget {
               color: AppColors.gold,
               size: 15),
           const SizedBox(width: 5),
-          Text(hasPack ? 'Paket aktif' : 'Ücretsiz',
+          // "Ücretsiz" -> "Paket yok" (2026-09-15): ücretsiz hak kapatıldı,
+          // paketi olmayan kullanıcıya ücretsiz kullanım vaat edilmemeli.
+          Text(hasPack ? 'Paket aktif' : 'Paket yok',
               style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
