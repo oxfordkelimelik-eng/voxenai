@@ -148,8 +148,12 @@ function specularStatsFromPixels(px, box) {
 /**
  * Speküler piksellerin L*'sini medyana çeker. data yerinde değişir.
  * Döner: değişen piksel sayısı.
+ *
+ * strength: 0..1, medyana ne kadar çekileceği. Varsayılan REDUCE_STRENGTH
+ * (çıktı tarafı, agresif). Selfie ön normalizasyonu daha nazik bir değer
+ * geçer — bkz. normalizeSelfieLighting / SELFIE_REDUCE_STRENGTH.
  */
-function applySpecularReduction(data, width, height, box, scale, medianL) {
+function applySpecularReduction(data, width, height, box, scale, medianL, strength = REDUCE_STRENGTH) {
   let changed = 0;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -159,7 +163,7 @@ function applySpecularReduction(data, width, height, box, scale, medianL) {
       const lab = rgbToLab(r, g, b);
       const spec = isNearWhite(r, g, b) || (isSkinLike(r, g, b) && isSpecularLab(lab, medianL));
       if (!spec) continue;
-      const newL = lab[0] + (medianL - lab[0]) * REDUCE_STRENGTH;
+      const newL = lab[0] + (medianL - lab[0]) * strength;
       const rgb = labToRgb(newL, lab[1], lab[2]);
       data[o] = rgb[0];
       data[o + 1] = rgb[1];
@@ -222,15 +226,99 @@ async function reduceFaceSpecular(outputBuf, { selfieLit = false } = {}) {
   }
 }
 
+/**
+ * SELFIE'Yİ MODELE VERMEDEN ÖNCE NORMALLEŞTİR (2026-09-16).
+ *
+ * NEDEN — ölçülmüş kök neden. Son 12 işte 44 artefakt reddi çıktı ve
+ * reddedilen karelerin tarifi neredeyse kelimesi kelimesine aynıydı:
+ *   "forehead and hairline — Grey patch on forehead, unnatural texture"
+ *   "cheeks and temples    — Grey patch on left cheek, unnatural texture"
+ * ALIN ve YANAK — yani selfie'de flaşın vurduğu yerler. Artefakt rastgele
+ * değil, ışık düzeltmesinin yapıldığı yerde oluşuyor.
+ *
+ * Sebep prompt'taki şu talimat: "If a selfie was shot under flash, do NOT
+ * copy that sheen — STRIP that extra light and place the skin under the
+ * FIRST image's scene light". "Strip that extra light" modele yüzü YENİDEN
+ * BOYAMASINI söylüyor. Model bunu piksel düzeyinde yapamıyor; alnın parlak
+ * kısmını düz gri bir blokla değiştiriyor — kapının "flat grey block with a
+ * hard edge" diye elediği şey tam olarak bu.
+ *
+ * ÇÖZÜM: ışığı modelden değil, ön işlemeden almak. Selfie modele girmeden
+ * önce parlama burada, sayısal olarak alınır; model artık düzeltecek bir şey
+ * görmez, dolayısıyla boyamaz. reduceFaceSpecular ile AYNI ölçüm/düzeltme
+ * çekirdeğini kullanır (specularStatsFromPixels + applySpecularReduction).
+ *
+ * ÇIKTI TARAFINDAN İKİ FARKI VAR, ikisi de bilinçli:
+ *  1) DAHA NAZİK (SELFIE_REDUCE_STRENGTH 0.6 < REDUCE_STRENGTH 0.88).
+ *     Selfie KİMLİK kaynağı — burada agresif düzeltme cildi düzleştirir ve
+ *     math-identity mesafesini bozar, yani artefakt reddini identity reddine
+ *     çevirir (kapıyı değil sorunu taşımak). Amaç parlamayı yok etmek değil,
+ *     modelin "düzeltmem gerek" diye bakmayacağı seviyeye indirmek.
+ *  2) EŞİK DAHA YÜKSEK (SELFIE_NORMALIZE_MIN 0.035): hafif parlamaya hiç
+ *     dokunulmaz. Zaten temiz bir selfie'yi işlemek saf risktir.
+ *
+ * SHINE_AREA_MAX tavanı burada da geçerli: parlak alan yüzün %18'ini aşıyorsa
+ * bu flaş değil genel sahne ışığıdır, dokunulmaz.
+ */
+const SELFIE_NORMALIZE_MIN = 0.035;
+const SELFIE_REDUCE_STRENGTH = 0.6;
+
+async function normalizeSelfieLighting(selfieBuf) {
+  const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, ...extra });
+  try {
+    if (!selfieBuf) return skip("insufficient-input");
+    const { detectMainFace } = require("./faceQuality");
+    const face = await detectMainFace(selfieBuf);
+    if (!face || !face.box) return skip("no-face");
+
+    const { data, info } = await sharp(selfieBuf)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (!info.width || !info.height) return skip("insufficient-input");
+
+    const stats = specularStatsFromPixels(
+      { data, width: info.width, height: info.height, scale: 1 },
+      face.box
+    );
+    if (!stats) return skip("insufficient-sample");
+    if (stats.shineRatio > SHINE_AREA_MAX) {
+      return skip("area-too-large", { shineRatio: stats.shineRatio });
+    }
+    if (stats.shineRatio < SELFIE_NORMALIZE_MIN) {
+      return skip("no-shine", { shineRatio: stats.shineRatio });
+    }
+
+    const changed = applySpecularReduction(
+      data, info.width, info.height, face.box, 1, stats.medianL,
+      SELFIE_REDUCE_STRENGTH
+    );
+    if (changed < 8) return skip("shift-negligible", { shineRatio: stats.shineRatio });
+
+    // quality 95: selfie kimlik kaynağı, sıkıştırma kaybı kimlik mesafesini
+    // etkilememeli (çıktı tarafıyla aynı değer).
+    const buf = await sharp(data, {
+      raw: { width: info.width, height: info.height, channels: 3 },
+    }).jpeg({ quality: 95 }).toBuffer();
+    return { applied: true, reason: null, buf, shineRatio: stats.shineRatio, changed };
+  } catch (e) {
+    console.error("Selfie ışık normalizasyonu hata verdi (fail-safe atlandı):", e.message || e);
+    return skip("error");
+  }
+}
+
 module.exports = {
   specularStatsFromPixels,
   applySpecularReduction,
   shouldReduceShine,
   reduceFaceSpecular,
+  normalizeSelfieLighting,
   isSpecularLab,
   inShineBand,
   SELFIE_SHINE_MIN,
   OUTPUT_SHINE_MIN,
   OUTPUT_SHINE_MIN_IF_SELFIE,
   SHINE_AREA_MAX,
+  SELFIE_NORMALIZE_MIN,
+  SELFIE_REDUCE_STRENGTH,
 };

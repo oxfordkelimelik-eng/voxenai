@@ -657,9 +657,16 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "LIGHTING (strict): the face's skin colour and tone must look IDENTICAL to the reference photos — " +
     "as if no extra light was added at all. Absolutely do NOT brighten, whiten, lighten, glow, shine, " +
     "shimmer or add any radiance, sheen or luminous quality to the skin — the face must NOT look lit-up, " +
-    "highlighted or enhanced compared to the rest of the scene. The ONLY lighting fix allowed is removing " +
-    "genuinely BAD lighting: harsh shadows across the eyes or nose, or the face being so dark it is hard " +
-    "to see. Otherwise the face must sit under the exact same light direction, intensity and colour as " +
+    "highlighted or enhanced compared to the rest of the scene. " +
+    // "TEK İZİN VERİLEN DÜZELTME" MADDESİ KALDIRILDI (2026-09-16), P800'deki
+    // "strip that extra light" ile aynı gerekçe: modele yüzdeki ışığı
+    // DÜZELTME izni vermek, onu yüzü yeniden boyamaya davet ediyor ve sonuç
+    // düz gri blok oluyor. Parlama artık selfie modele girmeden önce
+    // alınıyor (faceShine.normalizeSelfieLighting), bu yüzden modelin
+    // düzeltecek bir şeyi yok.
+    "Do NOT attempt any lighting correction on the face at all — no relighting, no shadow removal, no " +
+    "flattening of bright areas. The references have already been normalised. " +
+    "The face must sit under the exact same light direction, intensity and colour as " +
     "the rest of the base scene, with no separate or extra light on it. There must be NO unexplained " +
     "dark blotch, black smudge, dirty patch or hard shadow stuck on the face — facial skin stays clean " +
     "and evenly toned in the person's real colour.\n" +
@@ -1129,10 +1136,23 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
     "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
     "TATTOOS: the output has none — remove the base person's.\n\n" +
-    "QUALITY: the face sits under the scene's existing light; add none of your own. If a selfie was " +
-    "shot under flash or a bright key light, do NOT copy that sheen or hot-spot onto the output face — " +
-    "strip that extra light and place the skin under the FIRST image's scene light only, consistent " +
-    "with the visible arms. The result must " +
+    // "STRIP THAT EXTRA LIGHT" KALDIRILDI (2026-09-16) — ölçülmüş kök neden.
+    //
+    // Eski metin modele "selfie flaşlıysa o ışığı SÖK" diyordu. Model bunu
+    // piksel düzeyinde yapamıyor: alnın/yanağın parlak kısmını düz gri bir
+    // blokla değiştiriyor. Son 12 işteki 44 artefakt reddinin tarifi bunu
+    // birebir doğruluyor ("Grey patch on forehead / on left cheek") — kusur
+    // rastgele değil, tam olarak ışık düzeltmesinin istendiği yerde.
+    //
+    // Parlama artık selfie modele GİRMEDEN ÖNCE sayısal olarak alınıyor
+    // (bkz. faceShine.normalizeSelfieLighting, uploadReferencePhotos içinde).
+    // Model düzeltecek bir şey görmediği için boyamıyor. Bu yüzden talimat
+    // "ışığı sök"ten "olduğu gibi taşı"ya çevrildi.
+    "QUALITY: the face sits under the scene's existing light; add none of your own. The selfies have " +
+    "already been normalised to even, neutral lighting — carry their skin tone across AS IT IS. Do " +
+    "not try to remove, rebalance or repaint any lighting on the face: no relighting pass, no " +
+    "flattening of highlights, no painting over bright areas. Simply place that tone under the FIRST " +
+    "image's scene light, consistent with the visible arms. The result must " +
     "look like an ordinary unedited phone photo — real skin texture, no airbrush, beauty filter or " +
     "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
     "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
@@ -1510,8 +1530,43 @@ async function uploadReferencePhotos(uid, jobId) {
       console.error("İçerik moderasyonu kontrolü başarısız (filtresiz devam ediliyor):", e);
     }
 
+    // SELFIE IŞIK NORMALİZASYONU (2026-09-16) — ARTEFAKT REDDİNİN KÖK NEDENİ.
+    //
+    // Ölçüm: son 12 işte 44 artefakt reddi, tarifleri neredeyse aynı —
+    // "Grey patch on forehead", "Grey patch on left cheek". Alın ve yanak,
+    // yani selfie'de flaşın vurduğu yerler. Prompt modele "strip that extra
+    // light" diyor, model yüzü yeniden boyuyor ve oraya düz gri blok
+    // bırakıyor (bkz. faceShine.normalizeSelfieLighting başlığı).
+    //
+    // Parlamayı BURADA, sayısal olarak alıyoruz; model artık düzeltecek bir
+    // şey görmediği için boyamıyor. Düzeltilmiş baytlar Storage'a GERİ
+    // YAZILIYOR, çünkü modele giden şey imzalı URL — tampon değil.
+    //
+    // FAIL-SAFE: normalizasyon başarısız olursa (yüz bulunamadı, parlama yok,
+    // hata) orijinal kare aynen kullanılır, üretim asla engellenmez.
+    let outBuf = buf;
+    try {
+      const { normalizeSelfieLighting } = require("./faceShine");
+      const norm = await normalizeSelfieLighting(buf);
+      if (norm.applied && norm.buf) {
+        await file.save(norm.buf, { contentType: "image/jpeg", resumable: false });
+        outBuf = norm.buf;
+        console.log(
+          `SELFIE IŞIK NORMALİZASYONU (foto ${idx + 1}): UYGULANDI ` +
+          `parlamaOranı=${norm.shineRatio.toFixed(3)} piksel=${norm.changed}`
+        );
+      } else {
+        console.log(
+          `SELFIE IŞIK NORMALİZASYONU (foto ${idx + 1}): atlandı [${norm.reason}]` +
+          `${norm.shineRatio != null ? ` parlamaOranı=${norm.shineRatio.toFixed(3)}` : ""}`
+        );
+      }
+    } catch (e) {
+      console.error("Selfie ışık normalizasyonu atlandı (orijinal kare kullanılıyor):", e);
+    }
+
     const url = await signedDownloadUrl(file);
-    return { url, buf };
+    return { url, buf: outBuf };
   }));
   return { urls: results.map((r) => r.url), buffers: results.map((r) => r.buf) };
 }
@@ -2495,27 +2550,40 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (gazeLine && /WRONG_DIRECTION/i.test(gazeLine)) {
       return { ok: false, reason: "gaze", detail: verdictDetail() || "WRONG_DIRECTION", inconclusive: false };
     }
-    // GAZE_POINT DIFFERENT — kaba token aynı kalsa bile bakış noktası ayrı
-    // (b1d6972b c1/c2/c3: her iki satır CAMERA veya RIGHT, kullanıcı yine
-    // "aynı yere bakmıyor" dedi).
+    // GAZE_POINT KAPISI KALDIRILDI (2026-09-16) — ÖLÇÜMLE.
     //
-    // gazeSource:"point" İLE İŞARETLENİR (2026-09-08 gerçek olay, job
-    // db963457): bu soru irisin göz boşluğu İÇİNDEKİ tam konumunu
-    // karşılaştırıyor — yaw/head-dx'teki landmark ölçümüyle AYNI zayıflığı
-    // taşıyor: kafa yüksek profildeyken (bkz. PROFILE_UNRELIABLE_MIN) bir
-    // göz kısmen/hiç görünmez, "aynı noktaya mı bakıyor" sorusu doğası
-    // gereği güvenilmez hale gelir. Bu işte 19 denemenin 15'i zaten
-    // YAW ÖLÇÜM: ÖLÇÜLEMEDİ[profile] idi ve chunk 5 art arda 6 farklı
-    // şablonda da hep bu yüzden GAZE_POINT DIFFERENT ile elendi — kısır
-    // döngü. Çağıran taraf (runOpenAiDirectChunk) bu işareti görüp
-    // templateYaw/outYaw profilde ise bu reddi görmezden gelecek; kaba
-    // isGazeMismatch (yukarıda) ve WRONG_DIRECTION profilde de nispeten
-    // güvenilir kaldığı için onlara dokunulmadı.
+    // Bu satır bir zamanlar eliyordu: "kaba token aynı kalsa bile bakış
+    // noktası ayrı" (b1d6972b c1/c2/c3). Sonra 2026-09-08'de profil kafada
+    // güvenilmez olduğu anlaşıldı ve çağıran tarafta yaw>PROFILE_UNRELIABLE_MIN
+    // ise reddi geçersiz sayan bir yama eklendi. Yama yetmedi.
+    //
+    // SON 12 İŞİN ÖLÇÜMÜ (47 gaze reddi):
+    //   1. deneme: 31 gaze reddi   |  2. deneme: 21 artefakt reddi
+    //   47 gaze reddinin 17'si (%36) BİR SONRAKİ denemede ARTEFAKTA dönüştü.
+    //   Gaze'in gaze olarak tekrarı yalnızca 7.
+    // Yani bu kapı kusuru düzeltmiyor, kusur SINIFI değiştiriyor: model
+    // "gözleri düzelt" uyarısını alıp yüzü yeniden boyuyor ve alnında gri
+    // blok bırakıyor. İş 515543e5 chunk 8 bunu çıplak gösteriyor —
+    // gaze→artefakt→gaze→artefakt→gaze, 5 denemede hiç yakınsamadan.
+    //
+    // NEDEN BU KAPI, kaba token kapısı değil: bu soru irisin göz boşluğu
+    // İÇİNDEKİ tam konumunu karşılaştırıyor — yorumsal ve tekrarlanabilir
+    // değil. İki kare arka arkaya SAME/DIFFERENT alabiliyor. Kaba
+    // isGazeMismatch (BASE_GAZE vs OUTPUT_GAZE, yukarıda) gerçek kusuru —
+    // taban yana bakarken çıktının merceğe dönmesi — zaten yakalıyor ve
+    // ölçümde o kusurun tamamı (10/29) kaba tokenla görünür durumda.
+    //
+    // limb-ghost'ta (2026-09-15) aynı gerekçeyle aynı karar verildi ve
+    // doğru çıktı: yorumsal bir kapının yanlış elemesi, yakaladığı gerçek
+    // kusurdan pahalıya mal oluyor.
+    //
+    // GAZE_POINT satırı prompt'ta DURUYOR ve loglanıyor (bkz. gazePointLine) —
+    // ölçüm olarak izlemeye devam ediyoruz, yalnızca ELEME yetkisi alındı.
     if (gazePointLine && /DIFFERENT/i.test(gazePointLine)) {
-      return {
-        ok: false, reason: "gaze", gazeSource: "point",
-        detail: verdictDetail() || "GAZE_POINT DIFFERENT", inconclusive: false,
-      };
+      console.log(
+        "VISION ÖLÇÜM (bakış noktası): DIFFERENT — kapı kaldırıldığı için " +
+        "eleme yapılmadı (2026-09-16, bkz. yukarıdaki gerekçe)"
+      );
     }
     // BLURRY_OR_MALFORMED bağlayıcıdır — aynı yöntem: 2026-08-13'te kullanıcı,
     // tüm-kare netlik kapısı ve RENK-odaklı ten kapısı geçtiği hâlde elin
@@ -3717,25 +3785,13 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         // Bakış reddinde ÖLÇÜLEN yönler bir sonraki denemenin düzeltici
         // uyarısına taşınır (bkz. retryCorrectionPrefix, 2026-09-14).
         if (v.gazeBase && v.gazeOut) lastGazeFacts = { base: v.gazeBase, out: v.gazeOut };
-        // GAZE_POINT REDDİ PROFİLDE GEÇERSİZ SAYILIR (2026-09-08 gerçek olay,
-        // job db963457): bu soru irisin göz boşluğu İÇİNDEKİ tam konumunu
-        // karşılaştırıyor — yaw/head-dx'teki landmark ölçümüyle AYNI zayıflığı
-        // taşıyor (bkz. PROFILE_UNRELIABLE_MIN kullanımı yukarıdaki YAW
-        // KAPISI'nda). Bu işte chunk 5, 6 farklı şablonda da hep yüksek
-        // profildeydi (çıktı yaw'ı 0.49-0.89) ve 5/6 denemede aynı gerekçeyle
-        // ("eyes look at a different point") elendi — kısır döngü, kullanıcı
-        // kredisini boşa yaktı. gazeSource:"point" SADECE bu ince-taneli
-        // soruyu işaretler; kaba isGazeMismatch/WRONG_DIRECTION profilde de
-        // nispeten güvenilir kaldığı için etkilenmez.
-        if (!visionOk && visionReason === "gaze" && v.gazeSource === "point") {
-          const { PROFILE_UNRELIABLE_MIN } = require("./faceQuality");
-          const yawProfile = (templateYaw != null && templateYaw > PROFILE_UNRELIABLE_MIN) ||
-                              (outYaw != null && outYaw > PROFILE_UNRELIABLE_MIN);
-          if (yawProfile) {
-            console.warn(`VISION BAKIŞ-NOKTASI REDDİ GEÇERSİZ SAYILDI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): çıktı/şablon yaw profilde (çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"} > ${PROFILE_UNRELIABLE_MIN}) — göz boşluğu ölçümü güvenilmez, kare KABUL edildi`);
-            visionOk = true;
-          }
-        }
+        // NOT: buradaki "GAZE_POINT reddi profilde geçersiz sayılır" yaması
+        // 2026-09-16'da KALDIRILDI — çünkü GAZE_POINT kapısının kendisi
+        // kaldırıldı (bkz. assessOutputWithVision içindeki gerekçe). Yama,
+        // güvenilmez bir kapıyı yalnızca profil kafada susturuyordu; ölçüm
+        // kapının profil dışında da kusur sınıfını gaze'den artefakta
+        // çevirdiğini gösterdi, bu yüzden kapı tümden gitti ve yamaya
+        // gerek kalmadı.
         console.log(`VISION ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${visionOk ? (visionInconclusive ? "KARARSIZ(kabul)" : "GEÇTİ") : "RED[" + visionReason + "]"}${visionDetail ? ` — "${visionDetail}"` : ""}`);
       } catch (e) {
         console.error("OpenAI yolu: Vision kontrolü hata verdi (fail-safe kabul):", e);
