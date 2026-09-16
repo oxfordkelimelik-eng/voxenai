@@ -31,6 +31,17 @@ const MAX_REMINDER_DAY = 4; // gün 0-3 gönderilir, gün 4'te durur (4 bildirim
 // kaçınmak için ayrı tanımlandı — iki dosya birbirini import etmiyor).
 const OPS_EMAIL = "destek@voxenai.com.tr";
 
+// SATIŞ BİLDİRİMİ KANALI (Android). İstemcideki
+// NotificationService._salesChannel ile AYNI OLMAK ZORUNDA — sunucu bu id ile
+// gönderir, ses o kanaldan gelir. Eşleşmezse bildirim düşer ama SESSİZ olur
+// (Android bilinmeyen kanal id'sini varsayılan kanala düşürür).
+//
+// Kanal 'voxen_reminders'tan AYRI: Android'de bir kanalın sesi oluşturulduktan
+// sonra uygulama tarafından değiştirilemez, ayrıca satış sesinin kullanıcı
+// hatırlatmalarından bağımsız olması isteniyor (admin bunu kapatmadan
+// hatırlatmaları kapatabilsin).
+const SALES_CHANNEL_ID = "voxen_sales";
+
 const PRODUCT_PRICES_TRY = {
   dating_pack_photo10: 349, dating_pack_photo50: 999,
   dating_pack_analysis1: 99, dating_pack_analysis5: 249,
@@ -212,6 +223,31 @@ async function notifyOpsOfNewSale(uid, purchase) {
       notification: {
         title: "💰 Yeni satış",
         body: `${label} — ${price} TL — ${buyerEmail}`,
+      },
+      // SATIŞ SESİ (2026-09-16) — kullanıcı isteği: "bildirim geliyor ama
+      // bildirim sesi gelmiyor, Shopify satış para sesini ekleyelim".
+      //
+      // Ses PLATFORM BLOKLARINDA verilmek ZORUNDA; üstteki ortak
+      // `notification` nesnesinin sound alanı yok. İki platform ayrı davranır:
+      //
+      // ANDROID: ses KANALA bağlıdır, mesaja değil. channelId burada verilen
+      // kanal, istemcide sesli olarak oluşturulmuş olmalı (bkz.
+      // notification_service.dart _salesChannel). Kanal adı res/raw/sale.mp3
+      // dosyasını gösterir. UYARI: Android'de var olan bir kanalın sesi
+      // sonradan DEĞİŞTİRİLEMEZ — bu yüzden mevcut sessiz 'voxen_reminders'
+      // kanalı kullanılmıyor, satışa özel YENİ bir kanal açıldı.
+      //
+      // iOS: ses doğrudan mesajda taşınır ve UZANTIYLA verilir ('sale.wav').
+      // Dosya MP3 OLAMAZ — Apple yalnızca Linear PCM / IMA4 / µLaw / aLaw
+      // kabul eder (.wav/.aiff/.caf kabında) ve 30 saniyeden kısa olmalı.
+      // Bu yüzden aynı ses iki formatta paketleniyor: Android .mp3, iOS .wav.
+      android: {
+        priority: "high",
+        notification: { channelId: SALES_CHANNEL_ID, sound: "sale" },
+      },
+      apns: {
+        headers: { "apns-priority": "10" },
+        payload: { aps: { sound: "sale.wav" } },
       },
       data: { type: "new_sale", productId: purchase.productId || "" },
     });

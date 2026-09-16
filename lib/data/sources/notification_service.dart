@@ -54,6 +54,24 @@ class NotificationService {
     importance: Importance.high,
   );
 
+  /// Satış bildirimleri (yalnızca admin hesabına gelir) — KENDİ SESİ olan ayrı
+  /// bir kanal. Id, sunucudaki notifications.js SALES_CHANNEL_ID ile AYNI
+  /// OLMAK ZORUNDA; eşleşmezse bildirim gelir ama sessiz olur.
+  ///
+  /// Neden ayrı kanal: Android'de bir kanalın sesi, kanal bir kez
+  /// oluşturulduktan sonra uygulama tarafından DEĞİŞTİRİLEMEZ. Mevcut
+  /// 'voxen_reminders' sessiz olarak kurulmuştu, ona ses eklenemezdi. Ayrıca
+  /// admin satış sesini, kullanıcı hatırlatmalarından bağımsız yönetebilsin.
+  ///
+  /// Ses dosyası: android/app/src/main/res/raw/sale.mp3 (uzantısız ad verilir).
+  static const _salesChannel = AndroidNotificationChannel(
+    'voxen_sales',
+    'Satış bildirimleri',
+    description: 'Yeni satın alma gerçekleştiğinde bildirim',
+    importance: Importance.max,
+    sound: RawResourceAndroidNotificationSound('sale'),
+  );
+
   /// Uygulama açılışında çağrılır. İzin ister, kanalı kurar, FCM'i bağlar.
   /// Hata olursa sessizce geçer.
   ///
@@ -75,6 +93,11 @@ class NotificationService {
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
       await androidImpl?.createNotificationChannel(_androidChannel);
+      // Satış kanalı (sesli) — yalnızca admin hesabına bildirim gelir ama
+      // kanal herkeste oluşturulur: hangi hesabın admin olduğu istemcide
+      // bilinmiyor ve boş bir kanal zararsız (bildirim gelmezse kullanıcı
+      // ayarlarında da görünmez).
+      await androidImpl?.createNotificationChannel(_salesChannel);
       await androidImpl?.deleteNotificationChannel(_legacyChannelId);
       await androidImpl?.requestNotificationsPermission();
       await androidImpl?.requestExactAlarmsPermission();
@@ -125,11 +148,21 @@ class NotificationService {
         _registerToken(newToken);
       });
 
-      // Uygulama ön plandayken gelen push'u yerel bildirime çevir
+      // Uygulama ön plandayken gelen push'u yerel bildirime çevir.
+      //
+      // ÖN PLAN AYRIMI (2026-09-16): iOS/Android ön plandayken sunucunun
+      // gönderdiği ses ÇALMAZ — bildirimi burada BİZ oluşturuyoruz, dolayısıyla
+      // sesi de burada seçmemiz gerekiyor. data.type=='new_sale' ise satış
+      // kanalı (sesli) kullanılır; aksi halde normal hatırlatma kanalı.
+      // Bu olmadan admin panel açıkken satış bildirimi sessiz gelirdi.
       FirebaseMessaging.onMessage.listen((RemoteMessage m) {
         final n = m.notification;
         if (n != null) {
-          _showNow(n.title ?? 'Voxen AI', n.body ?? '');
+          _showNow(
+            n.title ?? 'Voxen AI',
+            n.body ?? '',
+            isSale: m.data['type'] == 'new_sale',
+          );
         }
       });
     } catch (e) {
@@ -149,26 +182,40 @@ class NotificationService {
     }
   }
 
-  Future<void> _showNow(String title, String body) async {
+  Future<void> _showNow(String title, String body, {bool isSale = false}) async {
     await _local.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title,
       body,
-      _details(),
+      _details(isSale: isSale),
     );
   }
 
-  NotificationDetails _details() => NotificationDetails(
+  /// isSale: satış bildirimi (admin) — sesli satış kanalını ve iOS'ta
+  /// sale.wav'ı kullanır. Diğer tüm bildirimler sessiz hatırlatma kanalında
+  /// kalır (mevcut davranış korunur).
+  NotificationDetails _details({bool isSale = false}) {
+    final ch = isSale ? _salesChannel : _androidChannel;
+    return NotificationDetails(
         android: AndroidNotificationDetails(
-          _androidChannel.id,
-          _androidChannel.name,
-          channelDescription: _androidChannel.description,
-          importance: Importance.high,
+          ch.id,
+          ch.name,
+          channelDescription: ch.description,
+          importance: isSale ? Importance.max : Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          // Android'de ses KANALDAN gelir; yine de açıkça veriyoruz ki
+          // bildirim doğru kaynağı gösterdiğini kendi içinde belgelesin.
+          sound: isSale ? const RawResourceAndroidNotificationSound('sale') : null,
         ),
-        iOS: const DarwinNotificationDetails(),
-      );
+        iOS: isSale
+            // iOS: MP3 DESTEKLENMEZ (Apple yalnızca Linear PCM/IMA4/µLaw/aLaw
+            // kabul eder) — bu yüzden ios/Runner/sale.wav paketleniyor ve
+            // burada UZANTISIYLA veriliyor.
+            ? const DarwinNotificationDetails(sound: 'sale.wav', presentSound: true)
+            : const DarwinNotificationDetails(),
+    );
+  }
 
   /// Kullanıcının GERÇEK durumuna göre hatırlatmaları yeniden kurar.
   /// Uygulama her açıldığında ve cüzdan durumu değiştiğinde çağrılmalı —
