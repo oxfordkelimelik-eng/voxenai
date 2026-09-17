@@ -3474,6 +3474,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // başına yetmiyor: model aynı önyargıyı (gözü kameraya çekme) farklı
   // şablonda da tekrarlıyordu.
   let lastRejectGate = null;
+  // YÜZ ONARIMI CHUNK BAŞINA BİR KEZ (2026-09-17). Onarım bir OpenAI
+  // çağrısı; her denemede tekrar denemek kusuru çözmeden para yakar.
+  // Bir kez denenir, tutmazsa o chunk normal ret akışına döner.
+  let artifactRepairTried = false;
   // AYNI KAPI TEKRAR SAYACI (2026-09-13). gate -> o kapıdan kaç kez elendik.
   //
   // NEDEN: job f483d510'da chunk 3, "vision-hair" kapısından ÜÇ KEZ ÜST ÜSTE
@@ -4094,6 +4098,81 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               `RED ATLANDI — kapı bu chunk için devre dışı, kare KABUL edildi`
             );
           } else if (fa.bad) {
+            // ÖNCE ONAR, SONRA RED (2026-09-17) — bkz. faceRepair.js başlığı.
+            //
+            // Bu kusuru ÖNLEMEK için üç teori denendi ve üçü de ölçümle
+            // çürüdü (selfie flaşı / kenar dikişi / sayısal tespit). Kusur
+            // modelin kendi üretim gürültüsü; prompt'la engellenemiyor.
+            //
+            // Ama kapı yamayı GÖRÜYOR ve yerini biliyor. Kareyi atıp baştan
+            // üretmek yerine (tam üretim maliyeti + yeni kusur riski)
+            // yalnızca yüz bölgesini maskeleyip yeniden çizdiriyoruz; poz,
+            // kıyafet, arka plan ve kadraj maske dışında kaldığı için
+            // piksel piksel korunuyor.
+            //
+            // Onarım SADECE BİR KEZ denenir: onarılmış kare yine yamalıysa
+            // sorun bu karede daha derindir, ikinci onarım para yakar.
+            // Onarım başarısızsa akış aşağıdaki normal redde düşer — yani
+            // en kötü ihtimalle bugünkü davranış.
+            let repaired = false;
+            if (!artifactRepairTried) {
+              artifactRepairTried = true;
+              try {
+                const { repairFaceArtifact } = require("./faceRepair");
+                const rep = await repairFaceArtifact(buf, faceBoxForArtifact, OPENAI_KEY.value());
+                if (rep.ok && rep.buf) {
+                  // KİMLİK KORUMASI: onarım yüzü yeniden çiziyor, yani
+                  // teorik olarak kişiyi değiştirebilir. Kapıdan geçmesi
+                  // "yama yok" demek, "aynı kişi" demek DEĞİL. Bu yüzden
+                  // onarılmış kare kimlik ölçümünden de geçmek zorunda;
+                  // geçmezse onarım ÇÖPE gider ve normal ret akışı işler.
+                  let idOk = true;
+                  let idDist = null;
+                  if (refDescriptor) {
+                    try {
+                      const { matchesIdentity } = require("./faceQuality");
+                      const m = await matchesIdentity(rep.buf, refDescriptor);
+                      idDist = m.distance;
+                      idOk = m.distance == null ? true : m.match; // ölçülemezse engelleme
+                    } catch (e) {
+                      console.error("Onarım kimlik kontrolü hata verdi (onarım kabul ediliyor):", e.message || e);
+                    }
+                  }
+                  const re = idOk
+                    ? await judgeFaceArtifact(rep.buf, faceBoxForArtifact, OPENAI_KEY.value())
+                    : { ok: true, bad: true, where: "kimlik" };
+                  if (!idOk) {
+                    console.warn(
+                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                      `REDDEDİLDİ — onarım kimliği bozdu (mesafe=${idDist != null ? idDist.toFixed(3) : "?"}), normal redde düşülüyor`
+                    );
+                  } else if (re.ok && !re.bad) {
+                    buf = rep.buf;
+                    repaired = true;
+                    console.log(
+                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                      `BAŞARILI — yama giderildi (önceki bölge="${fa.where}", kimlik mesafesi=${idDist != null ? idDist.toFixed(3) : "ölçülmedi"}), kare KABUL edildi`
+                    );
+                  } else {
+                    console.warn(
+                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                      `yama sürüyor (${re.ok ? `bölge="${re.where}"` : `kapı ${re.reason}`}) — normal redde düşülüyor`
+                    );
+                  }
+                } else {
+                  console.warn(
+                    `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                    `yapılamadı [${rep.reason}] — normal redde düşülüyor`
+                  );
+                }
+              } catch (e) {
+                console.error("Yüz onarımı çağrısı hata verdi (normal redde düşülüyor):", e.message || e);
+              }
+            }
+            if (repaired) {
+              // Onarıldı: bu kapıdan geçmiş sayılır, akış normal şekilde
+              // sonraki kapılara/kaydetmeye devam eder.
+            } else {
             recordGateRejection("face-artifact");
             console.log(
               `YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
@@ -4107,6 +4186,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             });
             if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
             break;
+            }
           } else {
             console.log(`YÜZ ARTEFAKT KIRPMA (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): GEÇTİ`);
           }
