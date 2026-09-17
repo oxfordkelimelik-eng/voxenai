@@ -681,7 +681,14 @@ function buildEditPrompt(identityCaption, bodyProfile) {
     "rectangular or straight-edged block, no thin streak or line across the forehead, brows, nose, " +
     "cheeks or chin, and no region that looks pasted on, painted over or pixelated differently from " +
     "the skin around it. Real skin has continuous tone and texture — every part of the face must blend " +
-    "smoothly into the next with no hard or geometric borders anywhere.\n\n" +
+    "smoothly into the next with no hard or geometric borders anywhere.\n" +
+    // Bkz. buildEditPromptP800'deki aynı başlık (2026-09-17): yamaların
+    // ölçülen konumu yüzün KENARI (X=0.05/0.06/0.93/0.95), yani bu bir
+    // dikiş kusuru. Asıl üretim modu P800 ama bu yol da aynı korumayı almalı.
+    "FACE EDGE: the boundary where your edited face meets the original hair, temples and ears must be " +
+    "invisible. Never end the edit at a straight line and never leave a block, rectangle or dull patch " +
+    "along the hairline, temples, outer brows or the sides of the forehead. Carry skin texture and " +
+    "tone continuously outward into the hairline so the edited region has no detectable edge.\n\n" +
     "CRAFT: keep it looking like an ordinary, unedited phone photo of a real person — natural skin with " +
     "real texture, and do NOT invent blemishes or facial asymmetry not present in the references. True-" +
     "to-life colour and contrast, natural available light, no added brightness or glow.\n\n" +
@@ -1164,6 +1171,32 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "rectangle, or a thin streak sitting on the forehead, brows, nose, cheeks or chin. Facial skin " +
     "must have continuous tone and texture throughout, blending smoothly with no hard or geometric " +
     "borders and no area that looks pasted on or painted over.\n\n" +
+    // YAMA KUSURUNUN GERÇEK KÖK NEDENİ (2026-09-17, ÖLÇÜLDÜ).
+    //
+    // 2026-09-16'daki teori ("model selfie'deki flaşı sökmeye çalışırken
+    // boyuyor") ÇÜRÜDÜ: selfie parlaması kaynakta alındı (üç selfie de
+    // normalize edildi, loglarda doğrulandı) ve yama AYNEN devam etti —
+    // iş 19a5ab23'te 7 artefakt reddi, üçü 1. denemede.
+    //
+    // ASIL KANIT yamaların KONUMU. Yedi reddedilen karede yamanın yüz
+    // kutusuna göre merkezi ölçüldü:
+    //   X = 0.05, 0.06, 0.08, 0.22, 0.93, 0.95, 0.14
+    // Yani yamalar yüzün İÇİNDE rastgele değil, neredeyse hepsi SOL ya da
+    // SAĞ KENARINDA — şakak/saç çizgisi/kaş ucu hattında. Gözle bakıldığında
+    // da öyle: kaşın üzerinde keskin kenarlı, dokusuz, dikdörtgen bir blok.
+    //
+    // Bu bir IŞIK kusuru değil, bir DİKİŞ kusuru: modelin "yüzü değiştir,
+    // gerisine dokunma" sınırında bıraktığı geçiş izi. Prompt şimdiye kadar
+    // yamayı YASAKLIYORDU ama bu sınırın NASIL ele alınacağını hiç
+    // söylemiyordu — model de sınırı sert bir kesikle çözüyordu.
+    "FACE EDGE — WHERE YOUR EDIT MEETS THE REST OF THE HEAD: you are replacing this person's face, so " +
+    "there is a boundary where your new face meets the original hair, temples, ears and jaw. That " +
+    "boundary must be INVISIBLE. Do not stop your edit at a straight line, and never leave a block, " +
+    "rectangle, smear or dull patch along the hairline, the temples, the outer brows or the sides of " +
+    "the forehead — this is exactly where the seam shows. Carry real skin texture, tone and the " +
+    "scene's lighting continuously OUTWARD from the centre of the face into the hairline and temples, " +
+    "so that no viewer can tell where the edited region ends. Individual hairs must sit ON TOP of " +
+    "continuous forehead skin, not against a flat painted edge.\n\n" +
     "FACE RENDERING QUALITY — spend your detail budget on the face. It must be the sharpest, cleanest " +
     "region of the frame: crisp eyes with visible catchlights and iris detail, defined lashes and brow " +
     "hairs, clean lip edges, and skin that reads as living tissue with fine pores and natural " +
@@ -3186,6 +3219,14 @@ function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null) {
       "photograph — a flat grey/white block or smear sitting on the skin with " +
       "a hard edge.\n" +
       whereSentence +
+      // DİKİŞ VURGUSU (2026-09-17): ölçüm bu kusurun yüzün KENARINDA
+      // oluştuğunu gösterdi (yedi karede X=0.05..0.08 ve 0.93..0.95), yani
+      // modelin düzenlemeyi bitirdiği sınırda. Genel "yüzü temiz çiz"
+      // uyarısı bu sınırı adreslemiyordu.
+      "This defect almost always sits where your edit ENDS — along the " +
+      "hairline, the temples, the outer brows or the sides of the forehead. " +
+      "Do not stop the edit at a hard line there: blend the new skin " +
+      "outward into the hairline and temples so the boundary is invisible.\n" +
       "Render the facial skin as one continuous, evenly lit " +
       "surface with natural pores and tone across the whole face. No flat " +
       "blocks, no straight-edged areas, no washed-out regions on the " +
@@ -3422,6 +3463,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
   // Şablon değişirse aşağıda undefined'a döndürülür ki yeniden ölçülsün.
   let templateYaw;
+  // Şablonun BAKIŞ yönü ("CAMERA" | "their LEFT" | "their RIGHT") — aynı
+  // yaşam döngüsü: şablon başına bir kez ölçülür, şablon değişince sıfırlanır.
+  // undefined = ölçülmedi, null = ölçülemedi (ipucu eklenmez).
+  let templateGazeHint;
 
   let finalBuf = null;
   // SON REDDİN SEBEBİ — bir sonraki denemenin prompt'una düzeltici uyarı
@@ -3494,9 +3539,64 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       if (next) {
         ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
+        templateGazeHint = undefined; // ve bakış yönü de (yeni şablon, yeni yön)
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
+    // ŞABLONUN BAKIŞINI ÖNCEDEN ÖLÇ VE SÖYLE (2026-09-17) — GAZE REDDİNİN
+    // KÖK ÇÖZÜMÜ.
+    //
+    // ÖLÇÜM (98 gerçek Vision ölçümü, 2 gün): bakış uyuşmazlıklarının
+    // %91-94'ü TEK VE AYNI kusur — taban yana bakıyor, çıktı KAMERAYA
+    // dönüyor (RIGHT->CAMERA 17, LEFT->CAMERA 9; ters yön yalnızca 1).
+    // Ve BASE_GAZE CAMERA olan her ölçüm (5/5) temiz geçti: taban zaten
+    // kameraya bakıyorsa çatışma yok.
+    //
+    // NEDEN ŞİMDİYE KADAR ÇÖZÜLEMEDİ: düzeltici uyarı (retryCorrectionBody)
+    // ölçülen yönü SÖYLÜYOR ama yalnızca RET ALINDIKTAN SONRA. İlk denemede
+    // model tabanın nereye baktığını kendi yorumuna bırakıyor ve sistematik
+    // olarak merceğe çeviriyor — prompt'taki yasaklar (P2, selfie-iris
+    // yasağı) üç kez denendi, üçü de bu önyargıyı kıramadı.
+    //
+    // ÇÖZÜM: yönü İLK DENEMEDE, ret oluşmadan önce söyle. Ölçüm sayısal ve
+    // deterministik (measureIrisGaze -> irisX, gözün 0..1 neresinde), Vision
+    // yorumuna bağlı değil. Şablon başına BİR KEZ ölçülür, şablon değişince
+    // yeniden. Ölçülemezse hiçbir şey eklenmez (fail-safe: eski davranış).
+    if (templateGazeHint === undefined) {
+      templateGazeHint = null;
+      try {
+        const tplBufForGaze = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+        if (tplBufForGaze) {
+          const { measureIrisGaze } = require("./faceQuality");
+          const ir = await measureIrisGaze(tplBufForGaze);
+          if (ir && ir.irisX != null) {
+            // irisX: 0=gözün iç/sol ucu, 1=dış/sağ ucu, 0.5=ortada(merceğe).
+            // Eşik 0.12: ortadan bu kadar sapma "yana bakıyor" demek.
+            const d = ir.irisX - 0.5;
+            const dir = Math.abs(d) < 0.12 ? "CAMERA" : (d < 0 ? "their RIGHT" : "their LEFT");
+            templateGazeHint = dir;
+            console.log(`ŞABLON BAKIŞ ÖLÇÜMÜ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): irisX=${ir.irisX.toFixed(3)} -> ${dir} (göz=${ir.eyes})`);
+          } else {
+            console.log(`ŞABLON BAKIŞ ÖLÇÜMÜ (style=${styleId}, chunk=${chunkIdx}): ÖLÇÜLEMEDİ — yönlendirme eklenmiyor`);
+          }
+        }
+      } catch (e) {
+        console.error("Şablon bakış ölçümü hata verdi (atlanıyor):", e.message || e);
+      }
+    }
+    const gazeDirectHint = templateGazeHint
+      ? (templateGazeHint === "CAMERA"
+          ? "GAZE TARGET (measured on the FIRST image): the base person is looking " +
+            "INTO THE LENS. Your output must also look into the lens.\n\n"
+          : "GAZE TARGET (measured on the FIRST image): the base person is NOT " +
+            `looking at the camera — their eyes point to ${templateGazeHint}, ` +
+            "with the irises sitting off-centre in that direction. Your output " +
+            "MUST point the eyes the same way, with the irises in the SAME corner " +
+            "of the eye opening. Do NOT centre the eyes and do NOT turn them " +
+            "toward the lens — that is the single most common failure here and " +
+            "it is an automatic rejection.\n\n")
+      : "";
+
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
     const retryHint = attempt > 1
       ? retryCorrectionPrefix(lastRejectGate, lastGazeFacts, lastArtifactWhere)
@@ -3504,9 +3604,12 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     if (retryHint) {
       console.log(`DÜZELTİCİ UYARI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki red "${lastRejectGate}" — prompt'a hedefli uyarı eklendi`);
     }
+    // Sıra ÖNEMLİ: retryHint (varsa) en başta — "önceki deneme reddedildi"
+    // uyarısı ilk okunacak şey olmalı. Bakış hedefi hemen ardından gelir ve
+    // her denemede tekrarlanır, çünkü kusur ilk denemede de oluşuyor.
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor, retryHint
+      refDescriptor, retryHint + gazeDirectHint
     );
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk

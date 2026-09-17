@@ -138,3 +138,40 @@ test("göz çok dar veya ölçü yoksa iris kapısı susar", () => {
   assert.equal(isIrisGazeMismatch({ irisX: 0.2, eyeWidth: 6 }, { irisX: 0.8, eyeWidth: 6 }), false);
   assert.equal(isIrisGazeMismatch(null, { irisX: 0.8, eyeWidth: 14 }), false);
 });
+
+// ---------------------------------------------------------------------------
+// ŞABLON BAKIŞ YÖNÜ EŞLEMESİ (2026-09-17)
+// ---------------------------------------------------------------------------
+// falPhotos içindeki gazeDirectHint, measureIrisGaze'in irisX'ini yöne çevirir
+// ve bunu modele SÖYLER. Yön TERS olursa modele yanlış talimat gider ve durum
+// KÖTÜLEŞİR — bu yüzden eşleme burada kilitleniyor.
+//
+// Eşleme GERÇEK karelerle gözle doğrulandı (2026-09-17):
+//   irisX=0.232 -> kişi kendi SAĞINA bakıyordu  (their RIGHT)  ✓
+//   irisX=0.721 -> kişi kendi SOLUNA bakıyordu  (their LEFT)   ✓
+//   irisX=0.542 -> kişi kameraya bakıyordu      (CAMERA)       ✓
+
+function dirFromIrisX(irisX) {
+  const d = irisX - 0.5;
+  return Math.abs(d) < 0.12 ? "CAMERA" : (d < 0 ? "their RIGHT" : "their LEFT");
+}
+
+test("irisX yön eşlemesi: düşük=sağ, yüksek=sol, orta=kamera", () => {
+  // Gerçek ölçülmüş ve GÖZLE doğrulanmış üç vaka.
+  assert.equal(dirFromIrisX(0.232), "their RIGHT");
+  assert.equal(dirFromIrisX(0.721), "their LEFT");
+  assert.equal(dirFromIrisX(0.542), "CAMERA");
+});
+
+test("kamera bandı simetrik ve 0.12 eşiğinde", () => {
+  assert.equal(dirFromIrisX(0.50), "CAMERA");
+  assert.equal(dirFromIrisX(0.61), "CAMERA");   // sınırın hemen içi
+  assert.equal(dirFromIrisX(0.39), "CAMERA");
+  assert.equal(dirFromIrisX(0.63), "their LEFT");  // sınırın hemen dışı
+  assert.equal(dirFromIrisX(0.37), "their RIGHT");
+});
+
+test("uç değerler makul yön verir (ölçüm bozulursa yakalanır)", () => {
+  assert.equal(dirFromIrisX(0.0), "their RIGHT");
+  assert.equal(dirFromIrisX(1.0), "their LEFT");
+});

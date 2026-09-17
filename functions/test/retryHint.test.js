@@ -102,3 +102,33 @@ test("ek, asıl düzeltme metninden SONRA gelir", () => {
     "önce kusur anlatılmalı, sonra koruma eki gelmeli"
   );
 });
+
+// ---------------------------------------------------------------------------
+// ARTEFAKT = DİKİŞ KUSURU (2026-09-17)
+// ---------------------------------------------------------------------------
+// 2026-09-16'daki "ışık" teorisi çürüdü: selfie parlaması kaynakta alındı
+// (loglarda üç selfie de UYGULANDI) ve yama aynen devam etti. Yedi reddedilen
+// karede yamanın yüz kutusundaki konumu ölçüldü: X=0.05/0.06/0.08/0.93/0.95 —
+// yüzün İÇİ değil, KENARI. Yani modelin düzenlemeyi bitirdiği dikiş.
+// Uyarı artık bu sınırı adresliyor.
+
+test("artefakt uyarısı DİKİŞİ (kenarı) adresler, sadece 'temiz çiz' demez", () => {
+  const { retryCorrectionPrefix } = require("../falPhotos")._testables;
+  const t = retryCorrectionPrefix("face-artifact");
+  assert.match(t, /hairline/i, "saç çizgisi adreslenmeli");
+  assert.match(t, /temples/i, "şakak adreslenmeli");
+  assert.match(t, /blend/i, "geçişin yumuşatılması istenmeli");
+  // Eski davranış korunmalı: düz blok yasağı hâlâ orada.
+  assert.match(t, /flat|block/i);
+});
+
+test("dikiş vurgusu yalnızca artefakt kapılarına gider", () => {
+  const { retryCorrectionPrefix } = require("../falPhotos")._testables;
+  for (const g of ["face-artifact", "vision-artifact"]) {
+    assert.match(retryCorrectionPrefix(g), /hairline/i, `${g} dikiş metnini almalı`);
+  }
+  // Bakış/ten kapıları bu metni ALMAMALI — yanlış teşhis yanlış düzeltme yaptırır.
+  for (const g of ["vision-gaze", "skin-tone", "yaw-drift"]) {
+    assert.doesNotMatch(retryCorrectionPrefix(g), /hairline/i, `${g} dikiş metnini ALMAMALI`);
+  }
+});
