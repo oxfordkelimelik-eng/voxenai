@@ -328,3 +328,4 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+// test: push sonrasi Codemagic build tetikleniyor mu (2026-09-17)
