@@ -57,6 +57,52 @@ const PRODUCT_LABELS = {
 // yazım bu sınıra göre parçalanır.
 const FCM_BATCH_SIZE = 500;
 
+// Bir cihazın token'ı bu kodlarla dönerse token GERÇEKTEN ölüdür ve
+// listeden çıkarılmalı. Başka hatalar (ağ, kota, sunucu) GEÇİCİDİR —
+// onlarda token'a DOKUNULMAZ, yoksa geçici bir aksaklık kullanıcının
+// bildirimlerini kalıcı olarak kapatır.
+const DEAD_TOKEN_CODES = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+  "messaging/invalid-argument",
+]);
+
+/**
+ * Bir kampanya dokümanından gönderilecek TÜM token'ları çıkarır.
+ *
+ * Hem yeni `fcmTokens` dizisini hem eski tekil `fcmToken` alanını okur:
+ * eski dokümanlar ve bu sürümü henüz almamış istemciler tekil alanı
+ * yazmaya devam ediyor (bkz. registerFcmToken'daki geriye uyumluluk notu).
+ * Tekrarlar ayıklanır.
+ */
+function collectTokens(data) {
+  if (!data) return [];
+  const out = new Set();
+  if (Array.isArray(data.fcmTokens)) {
+    for (const t of data.fcmTokens) {
+      if (typeof t === "string" && t.length > 0) out.add(t);
+    }
+  }
+  if (typeof data.fcmToken === "string" && data.fcmToken.length > 0) {
+    out.add(data.fcmToken);
+  }
+  return [...out];
+}
+
+/**
+ * Ölü token'ları dokümandan çıkarır. Yalnızca DEAD_TOKEN_CODES ile
+ * işaretlenenleri siler; tekil `fcmToken` alanı da o token'a eşitse
+ * temizlenir ki eski okuyucular ölü token'ı görmesin.
+ */
+async function pruneDeadTokens(ref, deadTokens, currentSingle) {
+  if (!deadTokens.length) return;
+  const update = {
+    fcmTokens: admin.firestore.FieldValue.arrayRemove(...deadTokens),
+  };
+  if (currentSingle && deadTokens.includes(currentSingle)) update.fcmToken = null;
+  await ref.set(update, { merge: true });
+}
+
 /** Gün 0-3 için bildirim metinleri (2026-09-10'da basitleştirildi — artık
  * "ücretsiz hakkını kullan" değil, genel bir davet: kullanıcı daha hiç
  * paket almamış, amaç ilk satın almayı tetiklemek). */
@@ -128,9 +174,30 @@ exports.registerFcmToken = onCall(
       const hasAnyBalance = !!wallet &&
         ((wallet.photoBalance || 0) > 0 || (wallet.analysisBalance || 0) > 0);
 
+      // ÇOK CİHAZ TOKEN LİSTESİ (2026-09-17) — "bildirim bazen geliyor
+      // bazen gelmiyor" şikayetinin kök nedeni.
+      //
+      // Eskiden tek bir `fcmToken` alanı vardı ve her kayıt öncekini
+      // EZİYORDU. Sonuçları:
+      //  - İki cihazda giriş yapılmışsa yalnızca SON cihaz bildirim alırdı.
+      //  - FCM token'ı yenilendiğinde (Android periyodik yeniler, uygulama
+      //    silinip kurulunca da değişir) eski token ölür; gönderim
+      //    'registration-token-not-registered' alıp alanı null'lardı ve
+      //    kullanıcı uygulamayı bir daha AÇANA KADAR hiç bildirim gelmezdi.
+      //    Gerçek kanıt: admin token'ı 2026-09-17 18:46'da kaydedildi, o
+      //    günün üç satışı (07:15 / 09:59 / 17:39) bildirimsiz geçti.
+      //
+      // Artık token'lar `fcmTokens` DİZİSİNDE birikiyor; gönderim hepsine
+      // yapılır ve yalnızca mağazanın "bu token ölü" dediği tekil token
+      // listeden çıkarılır — diğer cihazlar çalışmaya devam eder.
+      //
+      // `fcmToken` (tekil) alanı GERİYE UYUMLULUK için yazılmaya devam
+      // ediyor: bu sürümü henüz almamış istemcilerden gelen kayıtlar ve
+      // eski dokümanlar okunabilir kalsın (bkz. collectTokens).
       const update = {
         uid,
         fcmToken: token,
+        fcmTokens: admin.firestore.FieldValue.arrayUnion(token),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
       // Admin hesabı (destek@voxenai.com.tr) hiçbir zaman "satın almadın"
@@ -204,9 +271,15 @@ async function notifyOpsOfNewSale(uid, purchase) {
   }
   if (uid === adminUid) return; // admin kendi hesabıyla test satın alması yaptıysa bildirim gönderme
 
-  const adminCampSnap = await db.doc(`${CAMPAIGNS_COL}/${adminUid}`).get();
-  const token = adminCampSnap.exists ? adminCampSnap.data().fcmToken : null;
-  if (!token) {
+  // HEDEF YALNIZCA ADMIN: token'lar admin'in KENDİ kampanya dokümanından
+  // okunur (adminUid, e-postadan çözüldü). Satın almayı yapan kullanıcının
+  // dokümanına hiç bakılmaz — yani bu bildirim başka kimseye gidemez.
+  // Admin birden fazla cihazdan panele girdiyse HEPSİNE gider.
+  const adminCampRef = db.doc(`${CAMPAIGNS_COL}/${adminUid}`);
+  const adminCampSnap = await adminCampRef.get();
+  const adminData = adminCampSnap.exists ? adminCampSnap.data() : null;
+  const tokens = collectTokens(adminData);
+  if (tokens.length === 0) {
     console.warn("SATIŞ BİLDİRİMİ: admin FCM token yok, gönderilemedi.");
     return;
   }
@@ -218,8 +291,8 @@ async function notifyOpsOfNewSale(uid, purchase) {
   const price = PRODUCT_PRICES_TRY[purchase.productId] || 0;
 
   try {
-    await admin.messaging().send({
-      token,
+    const res = await admin.messaging().sendEachForMulticast({
+      tokens,
       notification: {
         title: "💰 Yeni satış",
         body: `${label} — ${price} TL — ${buyerEmail}`,
@@ -251,13 +324,26 @@ async function notifyOpsOfNewSale(uid, purchase) {
       },
       data: { type: "new_sale", productId: purchase.productId || "" },
     });
+
+    // Cihaz cihaz sonuç: biri başarısız olsa bile diğerleri gitmiş olabilir.
+    const dead = [];
+    res.responses.forEach((r, i) => {
+      if (r.success) return;
+      const code = r.error && r.error.code;
+      if (DEAD_TOKEN_CODES.has(code)) dead.push(tokens[i]);
+      else console.warn(`SATIŞ BİLDİRİMİ: cihaz ${i + 1} geçici hata kod=${code}`);
+    });
+    console.log(
+      `SATIŞ BİLDİRİMİ: ${res.successCount}/${tokens.length} cihaza gönderildi` +
+      (dead.length ? ` — ${dead.length} ölü token temizlendi` : "")
+    );
+    // Ölü token'ları çıkar; geçici hata alanlara DOKUNMA (bkz.
+    // DEAD_TOKEN_CODES gerekçesi).
+    await pruneDeadTokens(adminCampRef, dead, adminData && adminData.fcmToken);
   } catch (e) {
-    const code = e && e.code;
-    console.warn("SATIŞ BİLDİRİMİ: gönderim başarısız kod=", code);
-    if (code === "messaging/registration-token-not-registered" ||
-        code === "messaging/invalid-registration-token") {
-      await db.doc(`${CAMPAIGNS_COL}/${adminUid}`).set({ fcmToken: null }, { merge: true });
-    }
+    // Buraya yalnızca çağrının KENDİSİ patlarsa düşülür (ağ/kimlik).
+    // Tekil cihaz hataları yukarıda ele alındı.
+    console.warn("SATIŞ BİLDİRİMİ: gönderim başarısız kod=", e && e.code);
   }
 }
 
@@ -339,9 +425,12 @@ exports.opsSendCompensationNotice = onCall(
       const campRef = db.doc(`${CAMPAIGNS_COL}/${uid}`);
       const camp = (await campRef.get()).data() || {};
       if (camp.compensationNotifiedAt) { skipped.alreadyNotified++; continue; }
-      if (!camp.fcmToken) { skipped.noToken++; continue; }
+      // Çok cihaz: tek seferlik bir duyuru, kullanıcı başına TEK cihaza
+      // gider (aynı bilgiyi her cihazda tekrar göstermenin anlamı yok).
+      const campTokens = collectTokens(camp);
+      if (campTokens.length === 0) { skipped.noToken++; continue; }
 
-      targets.push({ uid, ref: campRef, token: camp.fcmToken, photo, analysis });
+      targets.push({ uid, ref: campRef, token: campTokens[0], photo, analysis });
     }
 
     if (dryRun) {
@@ -391,9 +480,12 @@ exports.opsSendCompensationNotice = onCall(
           failed++;
           const code = r.error && r.error.code;
           console.warn(`TELAFİ BİLDİRİMİ: başarısız uid=${group[i].uid} kod=${code}`);
-          if (code === "messaging/registration-token-not-registered" ||
-              code === "messaging/invalid-registration-token") {
-            batch.set(group[i].ref, { fcmToken: null }, { merge: true });
+          if (DEAD_TOKEN_CODES.has(code)) {
+            // Yalnızca denenen token'ı çıkar — diğer cihazlar kalsın.
+            const dead = group[i].token;
+            batch.set(group[i].ref, {
+              fcmTokens: admin.firestore.FieldValue.arrayRemove(dead),
+            }, { merge: true });
           }
         }
       });
@@ -422,9 +514,15 @@ exports.sendEngagementReminders = onSchedule(
       return;
     }
 
+    // ÇOK CİHAZ (2026-09-17): artık token'lar dizide tutuluyor (bkz.
+    // registerFcmToken). Hatırlatma "günde bir kez" mantığıyla çalıştığı
+    // ve reminderDay KULLANICI başına ilerlediği için, kullanıcının TÜM
+    // cihazlarına aynı anda göndermek onu aynı gün birden çok kez rahatsız
+    // ederdi. Bu yüzden kullanıcı başına TEK cihaz seçilir; ölü çıkarsa
+    // sonraki turda listeden düşer ve sıradaki cihaz devreye girer.
     const candidates = snap.docs
-      .map((doc) => ({ ref: doc.ref, data: doc.data() }))
-      .filter((c) => typeof c.data.fcmToken === "string" && c.data.fcmToken.length > 0);
+      .map((doc) => ({ ref: doc.ref, data: doc.data(), tokens: collectTokens(doc.data()) }))
+      .filter((c) => c.tokens.length > 0);
 
     console.log(`ENGAGEMENT HATIRLATMA: ${snap.size} aktif kampanya, ${candidates.length} geçerli token.`);
     if (candidates.length === 0) return;
@@ -436,7 +534,7 @@ exports.sendEngagementReminders = onSchedule(
         const day = c.data.reminderDay || 0;
         const copy = reminderCopyFor(day);
         return {
-          token: c.data.fcmToken,
+          token: c.tokens[0],
           notification: { title: copy.title, body: copy.body },
           data: { type: "engagement_reminder", day: String(day) },
         };
@@ -465,11 +563,18 @@ exports.sendEngagementReminders = onSchedule(
         } else {
           failedCount++;
           const code = r.error && r.error.code;
-          if (code === "messaging/registration-token-not-registered" ||
-              code === "messaging/invalid-registration-token") {
-            // Token geçersiz — yenilenene kadar tekrar denemenin anlamı yok.
+          if (DEAD_TOKEN_CODES.has(code)) {
+            // Token GERÇEKTEN ölü — yalnızca onu listeden çıkar. Kullanıcının
+            // diğer cihazları dokunulmadan kalır ve sonraki turda denenir
+            // (eskiden tüm alan null'lanıyordu, bu da diğer cihazları da
+            // sessizce kapatıyordu).
             cleanedCount++;
-            batch.set(c.ref, { fcmToken: null }, { merge: true });
+            const dead = c.tokens[0];
+            const update = {
+              fcmTokens: admin.firestore.FieldValue.arrayRemove(dead),
+            };
+            if (c.data.fcmToken === dead) update.fcmToken = null;
+            batch.set(c.ref, update, { merge: true });
           } else {
             console.warn(`ENGAGEMENT HATIRLATMA: gönderim başarısız uid=${c.data.uid} kod=${code}`);
           }
@@ -481,3 +586,8 @@ exports.sendEngagementReminders = onSchedule(
     console.log(`ENGAGEMENT HATIRLATMA sonucu: gönderildi=${sentCount} başarısız=${failedCount} temizlenen-token=${cleanedCount}`);
   }
 );
+
+// Saf yardımcılar — test edilebilsin diye dışa açılır. index.js'teki seçili
+// export listesine EKLENMEZ, dolayısıyla Cloud Function olarak deploy
+// edilmez (aynı desen: opsPanel.js _testables).
+exports._testables = { collectTokens, DEAD_TOKEN_CODES };
