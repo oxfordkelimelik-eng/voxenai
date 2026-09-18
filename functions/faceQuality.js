@@ -79,7 +79,20 @@ const OVEREXPOSURE_CLIP_MAX = 0.65;
 // Ret = kare atılmaz, ÖNCE yeniden denenir (OPENAI_DIRECT_MAX_ATTEMPTS=2);
 // iki deneme de tutmazsa o kare eksik kalır. Foto kaybı görülürse 0.60'a
 // çekilebilir; "yüz benzemiyor" şikayeti sürerse 0.50'ye.
-const FACE_MATCH_THRESHOLD = 0.55;
+//
+// 0.55 -> 0.50 (2026-09-18, YUKARIDAKİ NOTUN ÖNGÖRDÜĞÜ ADIM — şikâyet geldi):
+// kullanıcı iş 6315c14c'nin 7. fotoğrafını (chunk 6) "başka birinin fotosu
+// gibi" diye işaretledi. Ölçüldü: o karenin mesafesi 0.546 — eşiği 0.004
+// farkla geçmiş. Aynı işteki diğer dokuz kare 0.225-0.375 aralığında, yani
+// kare dağılımdan bariz ayrık.
+//
+// MALİYETİ ÖLÇÜLDÜ (489 gerçek kabul ölçümü, 14-18 Eylül):
+//   p50=0.338  p75=0.378  p90=0.436  p95=0.479  p99=0.742
+//   eşik 0.55 -> %2.5 ret   |   eşik 0.50 -> %3.7 ret
+// Yani sıkılaştırmanın bedeli fazladan ~%1.2 (489 karede 6 kare). Bir
+// kullanıcıya BAŞKASININ yüzünü teslim etmenin bedeli bundan çok yüksek.
+// Daha fazla sıkmak (0.45 -> %8.4) ana kütleye girmeye başlıyor, yapılmadı.
+const FACE_MATCH_THRESHOLD = 0.50;
 
 let _initPromise = null;
 let _faceapi = null;
@@ -1431,15 +1444,24 @@ async function correctLimbChroma(outputBuf, templateBuf, refSkinTone) {
     const maskWork = Buffer.alloc(N);
     for (let i = 0; i < N; i++) maskWork[i] = selected[i] ? 255 : 0;
     const feather = Math.max(1, Math.round(Math.max(meta.width, meta.height) / 260));
-    const maskFull = await sharp(maskWork, { raw: { width: W, height: H, channels: 1 } })
+    // KANAL SAYISI VARSAYILMAZ, OKUNUR (2026-09-18, ölçülmüş gerçek hata):
+    // sharp tek kanallı ham maskeyi resize/blur sonrası ÜÇ kanal döndürüyor
+    // (ölçüm: 1122x1402 için 4.719.132 bayt = W*H*3). maskFull[i] diye
+    // indekslemek maskeyi tamamen kaydırıyordu — düzeltme uzva değil karenin
+    // ÜST ÜÇTE BİRİNE (gökyüzü/arka plan) uygulanıyordu. Bu yüzden bu katman
+    // 45 karede "UYGULANDI" deyip hiçbir eli düzeltmemiş, buna karşılık
+    // gökyüzünde/kumda bant oluşturmuştu. Aynı tuzak faceRepair.js'te de
+    // yaşandı, bkz. o dosyanın buildFaceMask başlığı.
+    const { data: maskFull, info: mInfo } = await sharp(maskWork, { raw: { width: W, height: H, channels: 1 } })
       .resize(meta.width, meta.height, { fit: "fill" })
       .blur(feather)
-      .raw().toBuffer();
+      .raw().toBuffer({ resolveWithObject: true });
+    const mc = mInfo.channels;
 
     const { data, info } = await sharp(outputBuf).removeAlpha()
       .raw().toBuffer({ resolveWithObject: true });
     for (let i = 0; i < info.width * info.height; i++) {
-      const alpha = maskFull[i] / 255;
+      const alpha = maskFull[i * mc] / 255;
       if (alpha <= 0.004) continue;
       const o = i * 3;
       const lab = rgbToLab(data[o], data[o + 1], data[o + 2]);
@@ -1458,6 +1480,225 @@ async function correctLimbChroma(outputBuf, templateBuf, refSkinTone) {
     };
   } catch (e) {
     console.error("Uzuv kroma düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);
+    return skip("error");
+  }
+}
+
+// ===========================================================================
+// EL TONU DÜZELTMESİ — KUTUYLA SINIRLI (2026-09-18)
+// ===========================================================================
+//
+// NEDEN AYRI BİR FONKSİYON: kullanıcı üç TESLİM EDİLMİŞ karede "eller taban
+// kişinin eli gibi koyu kalmış" bildirdi. İki farklı kullanıcının aynı
+// sahnesindeki eller BİREBİR AYNI çıktı — model şablonun ellerine hiç
+// dokunmuyor, yüzü ve kolları değiştirip elleri olduğu gibi bırakıyor.
+//
+// MEVCUT KATMANLARIN ÜÇÜ DE KAÇIRDI (ölçüldü):
+//   • Vision SKIN_TONE       : 39 karenin 39'una "CONSISTENT" dedi.
+//   • Sayısal ten kapısı     : 310 ölçümün %57'si "ölçülemedi", 2 ret.
+//   • correctLimbChroma      : 214 karenin yalnızca %21'inde uygulandı;
+//                              bir örnekte fark 17.7 iken "nothing-to-fix".
+//
+// KUSUR KROMADA DEĞİL AÇIKLIKTA (aynı karelerde, yüz bandına göre):
+//   ŞİKÂYETLİ 6315c14c c2 : açıklık 20.6  kroma 4.7
+//   ŞİKÂYETLİ 509eb35a c5 : açıklık  9.3  kroma 5.5
+//   TEMİZ     6315c14c c0 : açıklık  1.3  kroma 1.8
+// Kroma sınıfları ayırmıyor (örtüşüyor), açıklık ayırıyor. correctLimbChroma
+// yalnızca a*/b*'ye baktığı için bu kusuru göremiyordu.
+//
+// NEDEN correctLimbChroma'YA L* EKLEMEK YETMEDİ (denendi ve geri alındı):
+// o fonksiyon TÜM KAREDE ten arar. Gece plajı karesinde isSkinLike KUMU ve
+// gökyüzünü ten saydı; düzeltme eli hiç değiştirmeyip arka planı boyadı ve
+// kenarlarda bant oluşturdu (gözle doğrulandı). Ten araması kare geneline
+// bırakılırsa bu kaçınılmaz.
+//
+// BU FONKSİYONUN FARKI: ten araması YALNIZCA locateLimbRegions'ın verdiği el/
+// önkol kutularının İÇİNDE yapılır ve her kutuda yalnızca EN BÜYÜK bağlantılı
+// ten bileşeni (elin kendisi) seçilir. Kum, gökyüzü ve kıyafet kutunun dışında
+// kaldığı için düzeltmeye hiç giremez.
+//
+// FAIL-SAFE: her hata/kararsızlıkta applied:false ve buf null — çağıran
+// orijinal kareyi kullanmaya devam eder, hiçbir kare bozulmaz.
+
+// Tam eşitleme YAPILMAZ: gerçek insanlarda el, güneş yüzünden yüzden bir tık
+// koyudur; birebir eşitlemek yapay okunur ve elin hacmini yassılaştırır.
+const HAND_FIX_STRENGTH = 0.75;
+// Kaymanın mutlak tavanı (L* birimi). 20.6'lık uç vakada bile elin kendi
+// gölge/parlama dokusu korunur — tüm bileşene AYNI sabit kayma uygulanır,
+// yeniden ölçekleme yapılmaz.
+const HAND_FIX_MAX_SHIFT_L = 14;
+const HAND_FIX_MAX_SHIFT_AB = 8;
+// Bundan küçük fark gözle görünmez (temiz karede ölçülen 1.3 idi).
+const HAND_FIX_MIN_DELTA_L = 3;
+// Kutu içinde bundan az ten pikseli varsa medyan gürültüdür.
+const HAND_FIX_MIN_COMPONENT_PX = 120;
+// Bir kutunun ten maskesi kutunun bu oranını aşarsa kutu ele değil düz bir
+// yüzeye (kum/duvar) oturmuştur — o kutu ATLANIR.
+//
+// 0.85 -> 0.98 (2026-09-18, ölçümle): 0.85 GERÇEK elleri reddediyordu. İyi
+// nişan almış bir el kutusu zaten neredeyse tamamen tendir (doğrulanmış
+// kutuda %81.5 ölçüldü ve sıkı kutuda eşiği aşıyordu). Kuma/duvara karşı
+// asıl koruma bu oran değil, kutuların bir EL BULUCUDAN gelmesi
+// (locateLimbRegions) — bu eşik yalnızca kutunun tamamen düz bir yüzeye
+// oturduğu uç durumu eler.
+const HAND_FIX_MAX_BOX_FILL = 0.98;
+
+/**
+ * Verilen el/önkol kutularındaki ten tonunu çıktının KENDİ yüz tonuna çeker.
+ *
+ * outputBuf : üretilen kare
+ * boxes     : locateLimbRegions'ın döndürdüğü oransal {x,y,w,h} kutular
+ *
+ * Döner: { applied, reason, buf, deltaLBefore, deltaLAfter, shiftL, boxesFixed }
+ */
+async function correctHandToneInBoxes(outputBuf, boxes) {
+  const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, ...extra });
+  try {
+    if (!outputBuf) return skip("insufficient-input");
+    if (!Array.isArray(boxes) || boxes.length === 0) return skip("no-box");
+
+    const face = await detectMainFace(outputBuf);
+    if (!face) return skip("no-face");
+    const px = await rawPixels(outputBuf);
+    if (!px) return skip("insufficient-input");
+    const faceTone = sampleFaceTone(px, face.box);
+    if (!faceTone) return skip("insufficient-sample");
+
+    const W = px.width, H = px.height, N = W * H;
+    const s = px.scale;
+    // Yüz kutusu ASLA düzeltilmez — hedef tonun kaynağı o.
+    const fx0 = face.box.x * s, fx1 = (face.box.x + face.box.width) * s;
+    const fy0 = face.box.y * s, fy1 = (face.box.y + face.box.height) * s;
+
+    // Seçilen piksellerin birleşik maskesi ve ölçüm örnekleri.
+    const selected = new Uint8Array(N);
+    const sampleL = [], sampleA = [], sampleB = [];
+    let boxesFixed = 0;
+
+    for (const b of boxes) {
+      const bx0 = Math.max(0, Math.floor(b.x * W));
+      const by0 = Math.max(0, Math.floor(b.y * H));
+      const bx1 = Math.min(W, Math.ceil((b.x + b.w) * W));
+      const by1 = Math.min(H, Math.ceil((b.y + b.h) * H));
+      const bw = bx1 - bx0, bh = by1 - by0;
+      if (bw < 4 || bh < 4) continue;
+
+      // 1) Kutu içindeki ten piksellerini işaretle (yüz kutusu hariç).
+      const local = new Uint8Array(N);
+      let skinCount = 0;
+      for (let y = by0; y < by1; y++) {
+        for (let x = bx0; x < bx1; x++) {
+          if (x >= fx0 && x <= fx1 && y >= fy0 && y <= fy1) continue;
+          const i = y * W + x, o = i * 3;
+          if (!isSkinLike(px.data[o], px.data[o + 1], px.data[o + 2])) continue;
+          local[i] = 1;
+          skinCount++;
+        }
+      }
+      if (skinCount < HAND_FIX_MIN_COMPONENT_PX) continue;
+      // Kutu neredeyse tamamen "ten" ise bu kutu ele değil düz bir yüzeye
+      // oturmuş demektir (kum/duvar). Böyle bir kutuyu boyamak zarar verir.
+      if (skinCount / (bw * bh) > HAND_FIX_MAX_BOX_FILL) continue;
+
+      // 2) Delikleri kapat, sonra EN BÜYÜK bağlantılı bileşeni seç — el bu.
+      const closed = boxMorph(
+        boxMorph(local, W, H, CHROMA_FIX_CLOSE_RADIUS, true),
+        W, H, CHROMA_FIX_CLOSE_RADIUS, false,
+      );
+      const label = new Int32Array(N).fill(-1);
+      let best = null, bestSize = 0;
+      const stack = [];
+      for (let start = by0 * W; start < by1 * W; start++) {
+        if (!closed[start] || label[start] !== -1) continue;
+        label[start] = start;
+        stack.length = 0; stack.push(start);
+        const members = [];
+        while (stack.length) {
+          const i = stack.pop();
+          members.push(i);
+          const x = i % W, y = (i / W) | 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (!dx && !dy) continue;
+              const xx = x + dx, yy = y + dy;
+              if (xx < bx0 || xx >= bx1 || yy < by0 || yy >= by1) continue;
+              const j = yy * W + xx;
+              if (closed[j] && label[j] === -1) { label[j] = start; stack.push(j); }
+            }
+          }
+        }
+        if (members.length > bestSize) { bestSize = members.length; best = members; }
+      }
+      if (!best || bestSize < HAND_FIX_MIN_COMPONENT_PX) continue;
+
+      // 3) Bileşenin GERÇEK ten piksellerinden örnek al (morfoloji ile
+      //    eklenen dolgu pikselleri tonu kirletmesin).
+      for (const i of best) {
+        if (selected[i]) continue;
+        selected[i] = 1;
+        if (!local[i]) continue;
+        const o = i * 3;
+        const lab = rgbToLab(px.data[o], px.data[o + 1], px.data[o + 2]);
+        sampleL.push(lab[0]); sampleA.push(lab[1]); sampleB.push(lab[2]);
+      }
+      boxesFixed++;
+    }
+
+    if (!boxesFixed || sampleL.length < HAND_FIX_MIN_COMPONENT_PX) {
+      return skip("no-hand-skin");
+    }
+
+    const handL = medianOf(sampleL);
+    const deltaLBefore = faceTone[0] - handL;
+    if (Math.abs(deltaLBefore) < HAND_FIX_MIN_DELTA_L) {
+      return skip("tone-already-matches", { deltaLBefore });
+    }
+
+    const clamp = (v, lim) => (v > lim ? lim : v < -lim ? -lim : v);
+    const shiftL = clamp(deltaLBefore * HAND_FIX_STRENGTH, HAND_FIX_MAX_SHIFT_L);
+    const shiftA = clamp((faceTone[1] - medianOf(sampleA)) * HAND_FIX_STRENGTH, HAND_FIX_MAX_SHIFT_AB);
+    const shiftB = clamp((faceTone[2] - medianOf(sampleB)) * HAND_FIX_STRENGTH, HAND_FIX_MAX_SHIFT_AB);
+    const deltaLAfter = deltaLBefore - shiftL;
+
+    // 4) Maskeyi tam çözünürlüğe taşı, kenarı yumuşat (bant oluşmasın).
+    const meta = await sharp(outputBuf).metadata();
+    if (!meta.width || !meta.height) return skip("insufficient-input", { deltaLBefore });
+    const maskWork = Buffer.alloc(N);
+    for (let i = 0; i < N; i++) maskWork[i] = selected[i] ? 255 : 0;
+    const feather = Math.max(1, Math.round(Math.max(meta.width, meta.height) / 400));
+    // Kanal sayısı OKUNUR, varsayılmaz — bkz. correctLimbChroma'daki aynı
+    // yerdeki açıklama (sharp tek kanallı maskeyi 3 kanal döndürüyor).
+    const { data: maskFull, info: mInfo } = await sharp(maskWork, { raw: { width: W, height: H, channels: 1 } })
+      .resize(meta.width, meta.height, { fit: "fill" })
+      .blur(feather)
+      .raw().toBuffer({ resolveWithObject: true });
+    const mc = mInfo.channels;
+
+    const { data, info } = await sharp(outputBuf).removeAlpha()
+      .raw().toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < info.width * info.height; i++) {
+      const alpha = maskFull[i * mc] / 255;
+      if (alpha <= 0.004) continue;
+      const o = i * 3;
+      // Tam çözünürlükte de ten şartı aranır: maskenin yumuşatılmış kenarı
+      // tırnağa/arka plana taşsa bile onları boyamayız.
+      if (!isSkinLike(data[o], data[o + 1], data[o + 2])) continue;
+      const lab = rgbToLab(data[o], data[o + 1], data[o + 2]);
+      let L = lab[0] + shiftL * alpha;
+      if (L < 0) L = 0; else if (L > 100) L = 100;
+      const [r, g, bb] = labToRgb(L, lab[1] + shiftA * alpha, lab[2] + shiftB * alpha);
+      data[o] = r; data[o + 1] = g; data[o + 2] = bb;
+    }
+    const buf = await sharp(data, {
+      raw: { width: info.width, height: info.height, channels: 3 },
+    }).jpeg({ quality: 95 }).toBuffer();
+
+    return {
+      applied: true, reason: null, buf,
+      deltaLBefore, deltaLAfter, shiftL, shiftA, shiftB, boxesFixed,
+    };
+  } catch (e) {
+    console.error("El tonu düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);
     return skip("error");
   }
 }
@@ -1940,6 +2181,7 @@ module.exports = {
   measureLimbRegion,
   measureFaceToneVsRef,
   correctLimbChroma,
+  correctHandToneInBoxes,
   measureHeadPlacement,
   measureLimbSharpness,
   measureIrisGaze,

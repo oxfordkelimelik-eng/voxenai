@@ -4234,6 +4234,33 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           // UZUV TEN ÖLÇÜMÜ (yukarıda) KALIYOR: zaten elemiyordu, yalnızca
           // ölçüp logluyor ve gelecekte kalibre edilebilecek veri biriktiriyor.
           // locateLimbRegions de kalıyor — ten ölçümü onun kutularını kullanıyor.
+
+          // EL TONU DÜZELTMESİ (2026-09-18) — ELEMEZ, DÜZELTİR.
+          //
+          // KULLANICI ŞİKÂYETİ: üç TESLİM EDİLMİŞ karede eller taban kişinin
+          // eli gibi kalmış. İki farklı kullanıcının aynı sahnesindeki eller
+          // BİREBİR AYNI çıktı — model şablonun ellerine dokunmuyor.
+          //
+          // NEDEN BURADA: locateLimbRegions'ın kutuları tam burada hazır ve
+          // ek maliyeti yok (aynı çağrı ten ölçümü için zaten yapılıyor).
+          // Ten araması YALNIZCA bu kutuların içinde yapılır; kum, gökyüzü
+          // ve kıyafet kutunun dışında kaldığı için boyanamaz.
+          //
+          // NEDEN ELEME DEĞİL DÜZELTME: eşik koyup reddetmek ölçüldü ve
+          // 385 karenin %37'sini elerdi — ret zaten asıl maliyet kalemi.
+          try {
+            const { correctHandToneInBoxes } = require("./faceQuality");
+            const hc = await correctHandToneInBoxes(buf, loc.boxes);
+            console.log(
+              `EL TONU DÜZELTME (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `${hc.applied ? "UYGULANDI" : `ATLANDI[${hc.reason}]`} ` +
+              `yüzeGöreAçıklık=${hc.deltaLBefore != null ? hc.deltaLBefore.toFixed(1) : "null"}` +
+              `${hc.applied ? ` -> ${hc.deltaLAfter.toFixed(1)} kaymaL=${hc.shiftL.toFixed(1)} kutu=${hc.boxesFixed}` : ""}`
+            );
+            if (hc.applied && hc.buf) buf = hc.buf;
+          } catch (e) {
+            console.error("OpenAI yolu: el tonu düzeltmesi hata verdi (atlanıyor):", e);
+          }
         }
       } catch (e) {
         console.error("OpenAI yolu: uzuv kapısı hata verdi (bu katman atlanıyor):", e);
