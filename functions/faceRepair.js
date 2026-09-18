@@ -43,6 +43,25 @@ const OPENAI_MODEL_ID = "gpt-image-2";
 // hattında da çıkabiliyor (ilk ölçümde X=0.05/0.95 idi) ve maske tam
 // kutuya oturursa o bant onarım dışında kalır.
 const MASK_PAD = 0.18;
+
+// KİMLİK ŞERİDİ — MASKE DIŞINDA TUTULUR (2026-09-18).
+//
+// İlk sürüm TÜM yüzü maskeliyordu ve 6 onarımın 5'i kimlik kontrolünden
+// düştü (ölçülen mesafeler 0.617 / 0.642 / 0.677 / 0.698 / 0.755; eşik
+// 0.55). Sebep: gözler, kaşlar ve ağız yeniden çizilince kişi değişiyor —
+// yüz tanıma mesafesini asıl bunlar belirler. "Kimliği koru" talimatı
+// prompt'ta vardı ve yetmedi; model maskelenen her şeyi yeniden üretir.
+//
+// Bu yüzden göz-kaş bandı ve ağız bandı OPAK bırakılıyor: yama genelde
+// alın, yanak, burun sırtı ve çenede çıkıyor — oralar onarılabiliyor,
+// kimlik hatlarına ise hiç dokunulmuyor.
+//
+// Oranlar yüz kutusunun yüksekliğine göre (0=kutunun üstü, 1=altı).
+// Tipik bir yüz kutusunda: kaşlar ~0.25, göz ortası ~0.35, ağız ~0.72.
+const EYE_BAND_TOP = 0.20;   // kaşların biraz üstü
+const EYE_BAND_BOTTOM = 0.47; // göz altı torbasının altı
+const MOUTH_BAND_TOP = 0.62;
+const MOUTH_BAND_BOTTOM = 0.84;
 // Onarım YÜKSEK kalitede yapılır. Asıl üretim maliyet gerekçesiyle "medium"
 // (bkz. generateWithOpenAI) — ama onarım tek ve küçük bir bölge, buradaki
 // fark kuruşlar, kazanç ise kusurun tekrarlamaması.
@@ -52,14 +71,16 @@ const REPAIR_PROMPT =
   "Repaint ONLY the masked facial skin so it becomes clean, continuous, " +
   "photographic skin. Remove any flat grey, white, brown or washed-out " +
   "patch, any rectangular or straight-edged block, any pixelated or " +
-  "smeared region sitting on the forehead, brows, temples, nose, cheeks, " +
-  "chin or under the eyes. Replace them with natural skin that has real " +
-  "pores and fine texture, matching the surrounding skin's exact colour, " +
-  "tone and lighting so the repair is invisible. " +
-  "Keep the person's identity, facial features, expression, eyes, eyebrows, " +
-  "beard, moles and hairline EXACTLY as they are — this is a blemish " +
-  "cleanup, not a redesign. Do not smooth, airbrush or beautify the face, " +
-  "do not change its shape, and do not alter anything outside the mask.";
+  "smeared region sitting on the forehead, temples, nose, cheeks or chin. " +
+  "Replace them with natural skin that has real pores and fine texture, " +
+  "matching the surrounding skin's exact colour, tone and lighting so the " +
+  "repair is invisible. " +
+  "This is a blemish cleanup on skin only, NOT a face redesign. The eyes, " +
+  "eyebrows and mouth are outside the mask and must stay untouched; paint " +
+  "the skin around them so it joins them seamlessly. Keep the person's " +
+  "identity, bone structure, expression, beard, moles and hairline exactly " +
+  "as they are. Do not smooth, airbrush, slim or beautify the face, do not " +
+  "change its shape, and do not alter anything outside the mask.";
 
 /**
  * Yüz kutusundan maske üretir: onarılacak bölge ŞEFFAF (alpha=0), korunacak
@@ -88,8 +109,19 @@ async function buildFaceMask(width, height, faceBox) {
   const cx = x0 + rx;
   const cy = y0 + ry;
 
+  // Kimlik şeritleri PAD'siz, HAM yüz kutusuna göre hesaplanır — pad'li
+  // kutuya göre hesaplanırsa bantlar kayar ve gözleri açıkta bırakır.
+  const eyeTop = faceBox.y + faceBox.height * EYE_BAND_TOP;
+  const eyeBottom = faceBox.y + faceBox.height * EYE_BAND_BOTTOM;
+  const mouthTop = faceBox.y + faceBox.height * MOUTH_BAND_TOP;
+  const mouthBottom = faceBox.y + faceBox.height * MOUTH_BAND_BOTTOM;
+
   const alpha = Buffer.alloc(width * height, 255); // her yer opak
   for (let y = y0; y < y1; y++) {
+    // Göz/kaş ve ağız bantları hiç açılmaz: kimliği bunlar taşıyor.
+    const inEyeBand = y >= eyeTop && y < eyeBottom;
+    const inMouthBand = y >= mouthTop && y < mouthBottom;
+    if (inEyeBand || inMouthBand) continue;
     for (let x = x0; x < x1; x++) {
       const nx = (x + 0.5 - cx) / rx;
       const ny = (y + 0.5 - cy) / ry;
@@ -112,12 +144,22 @@ async function buildFaceMask(width, height, faceBox) {
   const bc = bInfo.channels;
 
   // RGBA PNG: renk kanalları önemsiz, alpha belirleyici.
+  //
+  // Blur kimlik şeritlerinin İÇİNE sızar (yarıçapı bant yüksekliğine yakın
+  // olabiliyor) ve göz hattını kısmen şeffaf bırakır — kısmi şeffaflık da
+  // modelin orayı yeniden çizmesine yetiyor. Bu yüzden şeritler blur'DAN
+  // SONRA tekrar tam opak yapılıyor; koruma blur'a bırakılmıyor.
   const rgba = Buffer.alloc(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    rgba[i * 4] = 0;
-    rgba[i * 4 + 1] = 0;
-    rgba[i * 4 + 2] = 0;
-    rgba[i * 4 + 3] = blurred[i * bc];
+  for (let y = 0; y < height; y++) {
+    const protectedRow =
+      (y >= eyeTop && y < eyeBottom) || (y >= mouthTop && y < mouthBottom);
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      rgba[i * 4] = 0;
+      rgba[i * 4 + 1] = 0;
+      rgba[i * 4 + 2] = 0;
+      rgba[i * 4 + 3] = protectedRow ? 255 : blurred[i * bc];
+    }
   }
   return sharp(rgba, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
@@ -174,4 +216,8 @@ module.exports = {
   buildFaceMask,
   MASK_PAD,
   REPAIR_QUALITY,
+  EYE_BAND_TOP,
+  EYE_BAND_BOTTOM,
+  MOUTH_BAND_TOP,
+  MOUTH_BAND_BOTTOM,
 };

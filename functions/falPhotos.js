@@ -3463,11 +3463,6 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
   // Şablon değişirse aşağıda undefined'a döndürülür ki yeniden ölçülsün.
   let templateYaw;
-  // Şablonun BAKIŞ yönü ("CAMERA" | "their LEFT" | "their RIGHT") — aynı
-  // yaşam döngüsü: şablon başına bir kez ölçülür, şablon değişince sıfırlanır.
-  // undefined = ölçülmedi, null = ölçülemedi (ipucu eklenmez).
-  let templateGazeHint;
-
   let finalBuf = null;
   // SON REDDİN SEBEBİ — bir sonraki denemenin prompt'una düzeltici uyarı
   // olarak geçer (bkz. retryCorrectionPrefix). Şablon değiştirmek tek
@@ -3543,63 +3538,36 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       if (next) {
         ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
-        templateGazeHint = undefined; // ve bakış yönü de (yeni şablon, yeni yön)
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
-    // ŞABLONUN BAKIŞINI ÖNCEDEN ÖLÇ VE SÖYLE (2026-09-17) — GAZE REDDİNİN
-    // KÖK ÇÖZÜMÜ.
+    // ŞABLON BAKIŞ YÖNLENDİRMESİ KALDIRILDI (2026-09-18) — ÖLÇÜMLE ÇÜRÜDÜ,
+    // ÜSTELİK REDDİN KENDİSİNİ ÜRETİYORDU. TEKRAR EKLEMEDEN ÖNCE OKU.
     //
-    // ÖLÇÜM (98 gerçek Vision ölçümü, 2 gün): bakış uyuşmazlıklarının
-    // %91-94'ü TEK VE AYNI kusur — taban yana bakıyor, çıktı KAMERAYA
-    // dönüyor (RIGHT->CAMERA 17, LEFT->CAMERA 9; ters yön yalnızca 1).
-    // Ve BASE_GAZE CAMERA olan her ölçüm (5/5) temiz geçti: taban zaten
-    // kameraya bakıyorsa çatışma yok.
+    // 2026-09-17'de buraya "şablonun bakış yönünü measureIrisGaze ile ölç ve
+    // prompt'a yaz" eklendi. Ertesi gün 37 gerçek Vision kararı ölçüldü:
     //
-    // NEDEN ŞİMDİYE KADAR ÇÖZÜLEMEDİ: düzeltici uyarı (retryCorrectionBody)
-    // ölçülen yönü SÖYLÜYOR ama yalnızca RET ALINDIKTAN SONRA. İlk denemede
-    // model tabanın nereye baktığını kendi yorumuna bırakıyor ve sistematik
-    // olarak merceğe çeviriyor — prompt'taki yasaklar (P2, selfie-iris
-    // yasağı) üç kez denendi, üçü de bu önyargıyı kıramadı.
+    // 1) ÖLÇÜM ARACI YANLIŞTI. Kendi irisX ölçümüm ile Vision'ın BASE_GAZE'i
+    //    35 karşılaştırmanın 25'inde ÇELİŞTİ. irisX neredeyse her şablona
+    //    "CAMERA" diyordu (0.47-0.62 arası kümeleniyor) çünkü irisX gözün
+    //    KUTUSU içindeki iris konumunu ölçer — insan yana bakarken bile iris
+    //    kutunun ortasına yakın kalır, yönü belirleyen KAFA yönelimidir.
+    //    Örnek: irisX=0.512 -> "CAMERA" dedim, Vision "LEFT" dedi.
     //
-    // ÇÖZÜM: yönü İLK DENEMEDE, ret oluşmadan önce söyle. Ölçüm sayısal ve
-    // deterministik (measureIrisGaze -> irisX, gözün 0..1 neresinde), Vision
-    // yorumuna bağlı değil. Şablon başına BİR KEZ ölçülür, şablon değişince
-    // yeniden. Ölçülemezse hiçbir şey eklenmez (fail-safe: eski davranış).
-    if (templateGazeHint === undefined) {
-      templateGazeHint = null;
-      try {
-        const tplBufForGaze = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
-        if (tplBufForGaze) {
-          const { measureIrisGaze } = require("./faceQuality");
-          const ir = await measureIrisGaze(tplBufForGaze);
-          if (ir && ir.irisX != null) {
-            // irisX: 0=gözün iç/sol ucu, 1=dış/sağ ucu, 0.5=ortada(merceğe).
-            // Eşik 0.12: ortadan bu kadar sapma "yana bakıyor" demek.
-            const d = ir.irisX - 0.5;
-            const dir = Math.abs(d) < 0.12 ? "CAMERA" : (d < 0 ? "their RIGHT" : "their LEFT");
-            templateGazeHint = dir;
-            console.log(`ŞABLON BAKIŞ ÖLÇÜMÜ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): irisX=${ir.irisX.toFixed(3)} -> ${dir} (göz=${ir.eyes})`);
-          } else {
-            console.log(`ŞABLON BAKIŞ ÖLÇÜMÜ (style=${styleId}, chunk=${chunkIdx}): ÖLÇÜLEMEDİ — yönlendirme eklenmiyor`);
-          }
-        }
-      } catch (e) {
-        console.error("Şablon bakış ölçümü hata verdi (atlanıyor):", e.message || e);
-      }
-    }
-    const gazeDirectHint = templateGazeHint
-      ? (templateGazeHint === "CAMERA"
-          ? "GAZE TARGET (measured on the FIRST image): the base person is looking " +
-            "INTO THE LENS. Your output must also look into the lens.\n\n"
-          : "GAZE TARGET (measured on the FIRST image): the base person is NOT " +
-            `looking at the camera — their eyes point to ${templateGazeHint}, ` +
-            "with the irises sitting off-centre in that direction. Your output " +
-            "MUST point the eyes the same way, with the irises in the SAME corner " +
-            "of the eye opening. Do NOT centre the eyes and do NOT turn them " +
-            "toward the lens — that is the single most common failure here and " +
-            "it is an automatic rejection.\n\n")
-      : "";
+    // 2) BU YÜZDEN REDDİ KENDİM ÜRETTİM. Yanlış "CAMERA" ölçümü prompt'a
+    //    "merceğe bak" yazdırdı, model İTAAT ETTİ, Vision "taban yana
+    //    bakıyordu" deyip reddetti. O günün 8 gaze reddinin 8'i de aynı
+    //    desendeydi: LEFT->CAMERA 4 ret / 0 geçiş, RIGHT->CAMERA 4 ret /
+    //    0 geçiş.
+    //
+    // 3) YÖNLENDİRMESİZ HAL ZATEN DAHA İYİYDİ: RIGHT->RIGHT 11 geçiş / 2 ret,
+    //    CAMERA->CAMERA 6 geçiş / 0 ret, LEFT->LEFT 4 geçiş / 1 ret. Model
+    //    yönlendirilmediğinde tabanın bakışını kendiliğinden taklit ediyor.
+    //
+    // DERS: bakış yönünü prompt'a yazmadan önce ölçümün Vision'ın BASE_GAZE'i
+    // ile uyuştuğunu KANITLA. Yanlış yönlendirme, yönlendirmemekten kötüdür —
+    // model itaat eder ve kusuru sen yaratırsın. Ret alındıktan SONRA çalışan
+    // retryCorrectionPrefix güvenlidir (Vision'ın kendi ölçtüğü yönü söyler).
 
     // let: uzuv kroma düzeltmesi (aşağıda) düzeltilmiş kareyle DEĞİŞTİRİR.
     const retryHint = attempt > 1
@@ -3613,7 +3581,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // her denemede tekrarlanır, çünkü kusur ilk denemede de oluşuyor.
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor, retryHint + gazeDirectHint
+      refDescriptor, retryHint
     );
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
