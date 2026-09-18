@@ -699,6 +699,30 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     return ok == true;
   }
 
+  // GERİ EKLENDİ (2026-09-19, Codemagic archive hatası): paket restructuring
+  // sırasında bu yardımcının TANIMI silinmişti ama _captureFaceAngles
+  // içindeki çağrısı unutulmuştu ("_styles" tabanlı ikinci çağrı — "Devam
+  // Et" butonu — stil seçim adımıyla birlikte bilerek kaldırılmıştı, bu
+  // tek başına kalan çağrı kazayla atlanmış). flutter analyze bu ortamda
+  // çalıştırılamadığı için derleme hatası ancak Codemagic'te görüldü.
+  //
+  // Mantık aynı, yalnızca ölçü birimi güncellendi: canAffordStyles(_styles)
+  // -> canAffordPhotos(_photoCount) — bkz. _openPaywallThenMaybeGenerate'in
+  // kullandığı aynı desen.
+  /// Bakiye/ücretsiz hak var mı? Yoksa pakete yönlendirir ve dönüşte tekrar
+  /// bakar. `true` dönerse üretim yolunda ilerlenebilir.
+  ///
+  /// Selfie çekimi BAŞLAMADAN önce çağrılır (bkz. _captureFaceAngles) —
+  /// kullanıcı boşuna selfie çekip en sonda paywall'a çarpmasın diye.
+  Future<bool> _ensureCanAfford() async {
+    if (ref.read(packBalanceProvider).canAffordPhotos(_photoCount)) {
+      return true;
+    }
+    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
+    if (!mounted) return false;
+    return ref.read(packBalanceProvider).canAffordPhotos(_photoCount);
+  }
+
   Future<void> _captureFaceAngles() async {
     // KREDİ KAPISI: selfie çekmeye (kamera izni, zaman, çaba) BAŞLAMADAN önce
     // bakiye/ücretsiz hak kontrol edilir — yoksa doğrudan pakete yönlendirilir.
