@@ -1543,6 +1543,40 @@ const HAND_FIX_MIN_COMPONENT_PX = 120;
 // oturduğu uç durumu eler.
 const HAND_FIX_MAX_BOX_FILL = 0.98;
 
+// ===========================================================================
+// KUMAŞ KORUMASI (2026-09-18) — KULLANICI ŞİKÂYETİ, TESLİM EDİLMİŞ KARELER
+// ===========================================================================
+//
+// ŞİKÂYET: iki ayrı işte teslim edilen karelerde GÖMLEK bölgesi "seçilmiş"
+// gibi düz bir lekeye dönmüştü ("chunk 2'de gömlek bağlarken eller siyah
+// kalmış ve o kısım tamamen blurlanmış", "chunk 5'te gömlek kısmı seçilmiş
+// blurlanmış"). İki kare de KABUL edilmişti — hiçbir kapı bunu görmüyor.
+//
+// SEBEP BU KATMAN: kutular limbBox'ın 6x8'lik IZGARASINDAN geliyor, yani en
+// küçük kutu bile Person kırpmasının ~%17'si x ~%12'si. İki-üç komşu hücre
+// işaretlendiğinde kutu gövdeyi/gömleği de içine alıyor. İçeride "en büyük
+// bağlantılı ten bileşeni" aranınca ELİN DEĞİL GÖMLEĞİN bileşeni kazanıyor
+// (isSkinLike bej/ten rengi kumaşı ten sayar) ve tüm o alan tek bir sabit
+// L* kaymasıyla boyanıyor. Loglarda kayma ±14'e kadar çıkıyor
+// (ölçülen uç: açıklık -19.2 -> kayma -14.0), yani kumaş düz ve koyu bir
+// lekeye dönüyor — kullanıcının "blurlanmış" dediği şey bu.
+//
+// KORUMA KUTU DOLULUĞUYLA YAPILAMAZ: o eşik 0.85'ten 0.98'e çıkarılmıştı
+// çünkü 0.85 GERÇEK elleri eliyordu (iyi nişan almış el kutusu zaten
+// neredeyse tamamen tendir). Yani doluluk eli kumaştan ayırmıyor.
+//
+// AYIRAN ÖLÇÜ: BİLEŞENİN YÜZE GÖRE BÜYÜKLÜĞÜ. İnsan eli kabaca yüz
+// büyüklüğündedir; el+önkol en fazla iki katı. Gövde/gömleğin görünen
+// alanı ise yüzün 6-12 katıdır. Ölçek bağımsız olduğu için kadraj
+// değiştiğinde de geçerli kalır.
+const HAND_FIX_MAX_COMPONENT_VS_FACE = 2.5;
+// Tüm kutuların toplamı için de tavan: iki el + iki önkol bile bunu aşmaz.
+const HAND_FIX_MAX_TOTAL_VS_FACE = 5.0;
+// Bileşen kutunun DÖRT kenarından bu kadarına değiyorsa kutuyu baştan sona
+// dolduruyor demektir — el kutuya sığar, kumaş sığmaz (bileğin girdiği bir
+// kenar, karşıdan çıktığı ikinci kenar normaldir; üçü artık yüzeydir).
+const HAND_FIX_MAX_BORDERS_TOUCHED = 2;
+
 /**
  * Verilen el/önkol kutularındaki ten tonunu çıktının KENDİ yüz tonuna çeker.
  *
@@ -1570,10 +1604,16 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
     const fx0 = face.box.x * s, fx1 = (face.box.x + face.box.width) * s;
     const fy0 = face.box.y * s, fy1 = (face.box.y + face.box.height) * s;
 
+    // Yüz alanı ÖLÇEK REFERANSI: "bu bileşen bir el olabilir mi" sorusu
+    // piksel sayısıyla değil yüze oranla cevaplanır (bkz. kumaş koruması).
+    const faceArea = Math.max(1, (fx1 - fx0) * (fy1 - fy0));
+
     // Seçilen piksellerin birleşik maskesi ve ölçüm örnekleri.
     const selected = new Uint8Array(N);
     const sampleL = [], sampleA = [], sampleB = [];
     let boxesFixed = 0;
+    let selectedCount = 0;
+    let skippedFabric = 0;
 
     for (const b of boxes) {
       const bx0 = Math.max(0, Math.floor(b.x * W));
@@ -1631,11 +1671,37 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
       }
       if (!best || bestSize < HAND_FIX_MIN_COMPONENT_PX) continue;
 
+      // 2b) KUMAŞ KORUMASI — bkz. HAND_FIX_MAX_COMPONENT_VS_FACE başlığı.
+      //     Bileşen yüze göre bir elden çok daha büyükse, ya da kutuyu
+      //     kenardan kenara dolduruyorsa bu bir el değil bir YÜZEY'dir
+      //     (gömlek, gövde, duvar). Boyamak kareyi bozar.
+      if (bestSize > faceArea * HAND_FIX_MAX_COMPONENT_VS_FACE) {
+        skippedFabric++;
+        continue;
+      }
+      let borders = 0;
+      {
+        let l = false, r = false, t = false, bo = false;
+        for (const i of best) {
+          const x = i % W, y = (i / W) | 0;
+          if (x === bx0) l = true;
+          else if (x === bx1 - 1) r = true;
+          if (y === by0) t = true;
+          else if (y === by1 - 1) bo = true;
+        }
+        borders = (l ? 1 : 0) + (r ? 1 : 0) + (t ? 1 : 0) + (bo ? 1 : 0);
+      }
+      if (borders > HAND_FIX_MAX_BORDERS_TOUCHED) {
+        skippedFabric++;
+        continue;
+      }
+
       // 3) Bileşenin GERÇEK ten piksellerinden örnek al (morfoloji ile
       //    eklenen dolgu pikselleri tonu kirletmesin).
       for (const i of best) {
         if (selected[i]) continue;
         selected[i] = 1;
+        selectedCount++;
         if (!local[i]) continue;
         const o = i * 3;
         const lab = rgbToLab(px.data[o], px.data[o + 1], px.data[o + 2]);
@@ -1645,7 +1711,13 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
     }
 
     if (!boxesFixed || sampleL.length < HAND_FIX_MIN_COMPONENT_PX) {
-      return skip("no-hand-skin");
+      return skip(skippedFabric ? "fabric-only" : "no-hand-skin", { skippedFabric });
+    }
+    // TOPLAM TAVAN: kutular tek tek geçse bile birlikte bir elden fazlasını
+    // kapsıyorsa düzeltme yapılmaz. Tek bir kutunun kaçırdığı durumda bile
+    // kare bozulmasın diye ikinci bir emniyet.
+    if (selectedCount > faceArea * HAND_FIX_MAX_TOTAL_VS_FACE) {
+      return skip("area-too-large", { skippedFabric, areaVsFace: selectedCount / faceArea });
     }
 
     const handL = medianOf(sampleL);
@@ -1696,6 +1768,7 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
     return {
       applied: true, reason: null, buf,
       deltaLBefore, deltaLAfter, shiftL, shiftA, shiftB, boxesFixed,
+      skippedFabric, areaVsFace: selectedCount / faceArea,
     };
   } catch (e) {
     console.error("El tonu düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);

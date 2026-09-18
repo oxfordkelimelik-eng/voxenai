@@ -87,9 +87,25 @@ test("farklı eksen (DOWN vs RIGHT) uyuşmazlıktır", () => {
   assert.equal(isGazeMismatch("BASE_GAZE: AWAY_DOWN", "OUTPUT_GAZE: AWAY_LEFT"), true);
 });
 
-test("CAMERA ile herhangi bir yön — eski davranış korunur", () => {
+// ÇIKTI MERCEĞE BAKIYORSA KUSUR YOK (2026-09-18) — bkz. gazeGate.js'teki
+// "ÇIKTININ MERCEĞE BAKMASI ARTIK KUSUR DEĞİL" ölçümü. Taban bizim
+// şablonumuz; kullanıcı onu hiç görmüyor ve flört profilinde merceğe bakan
+// kare zaten istenen karedir. Ölçümde RIGHT->CAMERA 21, LEFT->CAMERA 11 ret
+// üretmişti ve bu karelerin hiçbiri geçemiyordu.
+test("çıktı CAMERA ise taban ne olursa olsun uyuşmazlık DEĞİL", () => {
+  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_RIGHT", "OUTPUT_GAZE: CAMERA"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: RIGHT", "OUTPUT_GAZE: CAMERA"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: LEFT", "OUTPUT_GAZE: CAMERA"), false);
+  assert.equal(isGazeMismatch("BASE_GAZE: DOWN", "OUTPUT_GAZE: CAMERA"), false);
+});
+
+// TERS YÖN KORUNUYOR: kapıyı doğuran şikâyetler (420fd8c6 elegance_6,
+// 7160f104 elegance_5, f0bc4d5c c1) "taban merceğe bakıyor, çıktı kaçıyor"
+// yönündeydi. Bu muafiyet o korumayı GEVŞETMEMELİ.
+test("taban CAMERA iken çıktının kaçması HÂLÂ uyuşmazlık", () => {
   assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", "OUTPUT_GAZE: AWAY_LEFT"), true);
-  assert.equal(isGazeMismatch("BASE_GAZE: AWAY_RIGHT", "OUTPUT_GAZE: CAMERA"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", "OUTPUT_GAZE: RIGHT"), true);
+  assert.equal(isGazeMismatch("BASE_GAZE: CAMERA", "OUTPUT_GAZE: DOWN"), true);
 });
 
 test("bileşik token çıplak olandan ÖNCE eşleşir (sıralama regresyonu)", () => {

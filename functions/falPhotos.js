@@ -145,7 +145,18 @@ const PHOTO_MODES = [
 // STYLE_SCENES'te stil başına 20 varyant var, bu yüzden 10'a çıkmak
 // (2026-08-12, eskiden 5) tekrarsız çeşitliliği bozmuyor — pickScene'in
 // modulo'su 20'nin altında hiç devreye girmiyor.
-const IMAGES_PER_STYLE = 10; // DatingConfig.photosPerSet ile senkron (ödenen vaat)
+// PAKET BOYLARI (2026-09-18) — DatingConfig.photoPackSizes ile EL İLE senkron.
+// Bir iş TEK SEFERDE bu kadar foto üretir; 10'luk paket iki adet 5'lik üretim
+// DEĞİLDİR (kullanıcı kararı). 25'lik pakette toplam süre 8-10 dakikayı
+// bulabilir — istemci loader'ında bu uyarı gösteriliyor.
+const PHOTO_PACK_SIZES = [5, 10, 25];
+// Sonuç haritasındaki tek kova anahtarı (stil kalktı). Eski istemciler
+// results[styleId] okuduğu için o istekte anahtar styleId olarak korunur —
+// bkz. startPhotoGeneration'daki bucketId.
+const PHOTO_BUCKET_ID = "photos";
+// Eski istemci `styles: [...]` gönderdiğinde stil başına kaç foto sayılacağı.
+// Eski dünyada 1 stil = 10 foto idi; bu sabit yalnızca o çeviri için var.
+const LEGACY_PHOTOS_PER_STYLE = 10;
 // Ücretsiz ilk deneme artık TÜM stili (10 foto) değil, tek bir stildeki TEK
 // fotoğrafı üretir — kalanı hiç ÜRETİLMEZ (kilitli kalır, API maliyeti
 // yok). Kullanıcı paket alıp tekrar "Oluştur"a basınca YENİ bir iş tam
@@ -346,6 +357,27 @@ const STYLE_SCENES = {
   ],
 };
 
+// STİL MANTIĞI KALDIRILDI (2026-09-18, kullanıcı kararı) — TEK SAHNE HAVUZU.
+//
+// Eskiden kullanıcı bir "stil" seçiyor ve yalnızca o stilin 20 sahnesi
+// kullanılıyordu. Stil seçimi arayüzden tamamen kalktı; artık paket yalnızca
+// FOTO SAYISI belirliyor (5 / 10 / 25) ve şablonlar yalnızca BOY BANDINA
+// (short / middle / tall) göre seçiliyor.
+//
+// NEDEN BİRLEŞTİRMEK ZORUNLU: pickScene sahneyi `variantIdx % havuzBoyu` ile
+// seçiyor. Tek stilin havuzu 20 sahne olduğu için 25 fotoluk pakette 21-25.
+// fotoğraflar İLK 5 SAHNEYİ TEKRAR EDERDİ — kullanıcı aynı mekânda iki kare
+// görürdü. Beş stilin sahneleri birleşince havuz 100'e çıkıyor ve 25 foto
+// rahatça tekrarsız kalıyor.
+//
+// STYLE_SCENES SİLİNMEDİ, yalnızca artık tek havuz olarak okunuyor: sahne
+// metinleri değerli ve kategorilere ayrılmış hâlleri okunabilirliği
+// koruyor. Sıra sabit (elegance, athletic, traveller, nightout, car) —
+// pickScene zaten jobId ile karıştırdığı için sıranın kendisi çeşitliliği
+// etkilemiyor, ama sabit olması aynı işin tekrar çalıştığında aynı sonucu
+// vermesini (determinizm) koruyor.
+const ALL_SCENES = Object.values(STYLE_SCENES).flat();
+
 // Chunk index (0-4) -> kompozisyon tarifi. Stil FARK ETMEKSİZİN her stildeki
 // 5 foto bu 5 kompozisyonu kullanır — böylece bir setin fotoğrafları birbirinin
 // aynı "stüdyo portresi" formülünün kopyaları değil, gerçek bir telefon
@@ -400,18 +432,22 @@ function mulberry32(seed) {
 }
 
 /**
- * Bir stilin sahne havuzundan (stil başına 20 varyant) jobId+styleId'e göre
- * DETERMİNİSTİK ama İŞE ÖZGÜ karışık bir sıra üretir. Aynı iş içindeki
- * IMAGES_PER_STYLE (10) chunk (variantIdx 0-9) bu karışık sıradan İLK 10'unu
- * alır — set içinde hiç tekrar olmaz (havuz 20 olduğu için hâlâ bol pay
- * kalır). Farklı bir iş (farklı jobId) aynı stili seçse bile FARKLI bir alt
- * küme/sıra kullanır — böylece aynı stili tekrar tekrar test etmek artık
- * hep aynı arka planları vermez (bkz. "arka planları hep aynı
- * üretiyorsun" şikayeti — kök neden buydu: eskiden sabit ilk-5 seçilirdi).
+ * BİRLEŞİK sahne havuzundan (ALL_SCENES, 100 varyant) jobId'e göre
+ * DETERMİNİSTİK ama İŞE ÖZGÜ karışık bir sıra üretir. Aynı iş içindeki her
+ * chunk (variantIdx 0..fotoSayısı-1) bu karışık sıradan sırayla alır — set
+ * içinde hiç tekrar olmaz, çünkü en büyük paket (25) havuzun çok altında.
+ * Farklı bir iş (farklı jobId) FARKLI bir alt küme/sıra kullanır — böylece
+ * tekrar tekrar üretmek hep aynı arka planları vermez (bkz. "arka planları
+ * hep aynı üretiyorsun" şikayeti — kök neden buydu: eskiden sabit ilk-5
+ * seçilirdi).
+ *
+ * bucketId tohuma DAHİL (2026-09-18): stil kalktıktan sonra tek kova var ve
+ * değeri sabit; tohumda kalması eski işlerin aynı sahneleri üretmesini
+ * (determinizm) korur ve ileride birden çok kova gerekirse çakışmayı önler.
  */
-function pickScene(styleId, jobId, variantIdx) {
-  const pool = STYLE_SCENES[styleId];
-  const seed = seedFromString(`${jobId}:${styleId}`);
+function pickScene(bucketId, jobId, variantIdx) {
+  const pool = ALL_SCENES;
+  const seed = seedFromString(`${jobId}:${bucketId}`);
   const rand = mulberry32(seed);
   const order = pool.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
@@ -1306,8 +1342,19 @@ function buildEditPromptShort(identityCaption, bodyProfile) {
   );
 }
 
-function styleUnitsFor(styleCount) {
-  return styleCount; // bakiye "stil/set" cinsinden — bkz. DatingConfig.
+// BAKİYE ARTIK FOTO CİNSİNDEN (2026-09-18, stil mantığı kaldırıldı).
+//
+// ESKİDEN: photoBalance "stil/set" sayardı ve 1 birim = 10 foto demekti.
+// Paketler 5/10/25 fotoya geçince bu birim anlamsızlaştı — 5 foto bir
+// "birimin yarısı" olurdu. Artık photoBalance doğrudan FOTOĞRAF sayar.
+//
+// MEVCUT CÜZDANLAR: ölçüldü (2026-09-18) — 229 cüzdanın 6'sında bakiye var,
+// toplam 18 birim = 180 foto. Bu 6 doküman ×10 ile foto birimine çevrilmeli;
+// hak birebir korunur (1 birim -> 10 foto, 5 birim -> 50 foto). Çevrim
+// YAPILMADAN bu kod canlıya alınırsa o 6 kullanıcı bakiyesini 10 kat AZ
+// görür (1 foto sanır) — üretim engellenir ama kredi KAYBOLMAZ.
+function photoUnitsFor(photoCount) {
+  return photoCount; // bakiye "foto" cinsinden — bkz. DatingConfig.
 }
 
 // fal.ai sağlayıcı tarafı kalıcı hataları (bakiye bitti / hesap kilitli).
@@ -2209,7 +2256,22 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "STRETCHED_OR_DETACHED or PUSHED_BACK -> BAD_ATTACHMENT. HANDS_OR_ARMS_MISMATCH -> BAD_SKIN. " +
          "BLURRY_OR_MALFORMED -> BAD_HANDS. BLOWN_OUT -> BAD_EXPOSURE. FACE_OVERLIT -> BAD_FACE_LIGHT. " +
          "WRONG_FOR_SCENE -> BAD_ORIENTATION. TRANSPARENT_OR_GHOSTED -> BAD_GHOSTING. " +
-         "PULLED_TO_CAMERA -> BAD_PULLED. GAZE_POINT DIFFERENT -> BAD_GAZE. " +
+         // GAZE_POINT'İ BAD_GAZE'E BAĞLAYAN KURAL BURADAN KALDIRILDI
+         // (2026-09-18).
+         //
+         // GAZE_POINT kapısı 2026-09-16'da ölçümle kaldırılmıştı (bkz. aşağıda
+         // gazePointLine'ın yanındaki gerekçe) — ama YALNIZCA SATIR KAPISI
+         // kaldırılmıştı. Bu bağlayıcı kural burada kalınca model, GAZE_POINT
+         // DIFFERENT gördüğü her karede verdict'i BAD_GAZE yazmaya devam etti
+         // ve aşağıdaki "BAD_GAZE -> reason:gaze" güvencesi o reddi aynen
+         // uyguladı. Yani kapı kaldırıldı sanılırken ARKA KAPIDAN elemeye
+         // devam ediyordu.
+         //
+         // KANIT (2026-09-16..18, 21 iş, 212 ret): 106 vision-gaze reddinin
+         // 97'sinin gerekçe metni harfi harfine GAZE_POINT'in ifadesiydi
+         // ("eyes look at a different point than the base"). Yani iki gün
+         // önce kaldırılmasına karar verilen kapı, tüm retlerin %46'sını tek
+         // başına üretiyordu.
          "PATCH -> BAD_ARTIFACT. " +
          "Check every question before answering GOOD. Verdict is one of:\n" +
          "GOOD: <why it passes>\n" +
@@ -2716,9 +2778,35 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // diye verdict satırından ayrıca güvence — aynı "identity" dışı, hakem
     // tarafından geçersiz kılınamaz sebep ailesi.
     if (answer.startsWith("BAD_ATTACHMENT")) return { ok: false, reason: "attachment", detail, inconclusive: false };
-    // BAD_GAZE: GAZE_DIRECTION satırı yakalayamazsa diye verdict satırından
-    // ayrıca güvence — NECK_ATTACHMENT/BAD_ATTACHMENT ile aynı desen.
-    if (answer.startsWith("BAD_GAZE")) return { ok: false, reason: "gaze", detail, inconclusive: false };
+    // BAD_GAZE VERDICT'İ ARTIK ELEMİYOR (2026-09-18) — ARKA KAPI KAPATILDI.
+    //
+    // Bu satır "GAZE_DIRECTION satırı yakalayamazsa diye güvence" olarak
+    // eklenmişti. Ama buraya GELEBİLMEK için karenin gaze SATIRLARININ
+    // hepsinden temiz geçmiş olması gerekiyor: GAZE_DIRECTION
+    // WRONG_DIRECTION ve isGazeMismatch (BASE_GAZE/OUTPUT_GAZE) kontrolleri
+    // yukarıda ve ikisi de erken return ediyor. Yani bu satıra ulaşan bir
+    // BAD_GAZE, satırların hiçbirinin desteklemediği bir verdict demektir.
+    //
+    // Pratikte bu verdict'in TEK kaynağı GAZE_POINT'ti: kaldırılmasına
+    // 2026-09-16'da karar verilen o kapı, prompt'taki bağlayıcı kural
+    // sayesinde verdict'e yazılıyor ve buradan eleniyordu. 212 retin 106'sı
+    // (%50) bu yoldan geliyordu; 97'sinin gerekçesi harfiyen GAZE_POINT'in
+    // cümlesiydi. Kapı kaldırıldıysa verdict'i de bağlamamalı.
+    //
+    // ÖLÇÜM DURUYOR: satır hâlâ isteniyor ve loglanıyor (bkz. gazePointLine),
+    // yalnızca ELEME yetkisi alındı — GAZE_POINT satır kapısıyla aynı usul.
+    if (answer.startsWith("BAD_GAZE")) {
+      console.log(
+        `VISION ÖLÇÜM (bakış verdict'i): BAD_GAZE — gaze satırları temiz ` +
+        `geçtiği için eleme yapılmadı (2026-09-18, bkz. yukarıdaki gerekçe)` +
+        `${detail ? ` — "${detail}"` : ""}`
+      );
+      // AÇIKÇA KABUL DÖNÜLÜYOR: aşağıda "BAD ile başlayan her şey -> quality"
+      // diye bir yakalayıcı var (referanssız mod için). Sadece loglayıp
+      // düşseydik BAD_GAZE oraya takılır ve red sınıfı değişerek aynı kare
+      // yine elenirdi. Buraya gelen kare tüm satır kapılarından geçmiştir.
+      return { ok: true, reason: null, detail, inconclusive: false };
+    }
     // BAD_HANDS: HAND_QUALITY satırı yakalayamazsa diye verdict satırından
     // ayrıca güvence — aynı desen.
     if (answer.startsWith("BAD_HANDS")) return { ok: false, reason: "hands", detail, inconclusive: false };
@@ -2903,6 +2991,103 @@ const OPENAI_DIRECT_MAX_ATTEMPTS = 6;
 // üretimle, düzeltici uyarıyla aynı sonuç alınmışsa üçüncüsü de aynı gelir.
 // 3 yapsaydık f483d510'daki israfın yalnızca son denemesini önlerdik.
 const GATE_REPEAT_DISABLE_AFTER = 2;
+
+// ===========================================================================
+// ARTEFAKT ONARIM BÜTÇESİ VE KİMLİK TOLERANSI (2026-09-18)
+// ===========================================================================
+//
+// ÖLÇÜM (2026-09-16..18, 21 iş): 212 reddin 74'ü (%35) artefakt —
+// face-artifact 47, vision-artifact 27. Aynı dönemde onarım YALNIZCA 30 kez
+// denendi ve 24'ü BAŞARILI oldu (%80). Yani onarım çalışıyor, sorun onarımın
+// ÇOĞU ARTEFAKTA HİÇ ULAŞAMAMASI:
+//
+//   1) Onarım chunk başına BİR KEZ deneniyordu (artifactRepairTried). Bir
+//      chunk 6 denemenin 4'ünde yama üretebiliyor; ilk denemeden sonrakiler
+//      onarıma hiç girmeden reddediliyordu.
+//   2) TAM KARE Vision'ın artefakt reddi (vision-artifact, 27 ret) onarım
+//      yoluna HİÇ UĞRAMIYORDU — o red, kırpma kapısından ÖNCE, doğrudan
+//      reddediyordu.
+//   3) 30 onarımın 6'sı yalnızca kimlik kontrolünden düştü (ölçülen: 0.512
+//      gibi eşiğin hemen üstü değerler).
+//
+// BÜTÇE NEDEN 3: onarım tek görsel + kısa prompt; bir REDDİN bedeli ise tam
+// bir yeniden üretim (daha uzun prompt, daha çok görsel) + bir deneme
+// hakkının yanması. Yani onarım redden UCUZ — bütçeyi 1'den 3'e çıkarmak
+// beklenen maliyeti DÜŞÜRÜYOR. Sınırsız değil: aynı chunk üç kez onarılıp
+// hâlâ yamalıysa kusur karede daha derindir, dördüncüsü para yakar.
+// (Bu, OPENAI_DIRECT_MAX_ATTEMPTS'ten AYRI bir sayaçtır ve deneme hakkı
+// tüketmez — bkz. o sabitin başlığındaki kredi yakma uyarısı.)
+const ARTIFACT_REPAIR_MAX_PER_CHUNK = 3;
+
+// KİMLİK: MUTLAK EŞİK DEĞİL, SÜRÜKLENME ÖLÇÜLÜR.
+//
+// Onarımın kimlik kontrolü FACE_MATCH_THRESHOLD'u (0.50) mutlak sınır
+// sayıyordu. Ama doğru soru "bu kare eşiğin altında mı" değil, "ONARIM
+// kimliği bozdu mu": kare onarımdan ÖNCE zaten kimlik kapısından geçmişti.
+// Mesafesi 0.46 olan bir kare onarımdan sonra 0.512 ölçülünce çöpe gidiyor
+// ve yerine YENİ bir üretim yapılıyordu — oysa onarım göz/kaş ve ağız
+// bantlarına hiç dokunmuyor (bkz. faceRepair.js), yani bu fark ölçüm
+// gürültüsü mertebesinde.
+//
+// Onarım yine de kimliği bozabilir, o yüzden iki kapı birden aranır:
+// sürüklenme bu kadarı geçmeyecek VE hiçbir koşulda sert tavanı aşmayacak.
+const REPAIR_IDENTITY_MAX_DRIFT = 0.08;
+const REPAIR_IDENTITY_HARD_MAX = 0.58;
+
+/**
+ * Yüz yamasını onarmayı dener ve onarımı kimlik + artefakt kapısından
+ * geçirir. İKİ ÇAĞIRAN VAR (tam kare Vision reddi ve kırpma kapısı reddi),
+ * bu yüzden ortak fonksiyon.
+ *
+ * preDist: onarımdan ÖNCEKİ karenin kimlik mesafesi (null olabilir).
+ *
+ * Döner: { ok:true, buf, dist } — onarılmış kare kullanılabilir
+ *        { ok:false, why }      — çağıran ESKİ kareyle normal redde düşer
+ * ASLA throw etmez.
+ */
+async function tryArtifactRepair({ buf, faceBox, apiKey, refDescriptor, preDist }) {
+  try {
+    const { repairFaceArtifact } = require("./faceRepair");
+    const { judgeFaceArtifact } = require("./faceArtifactCrop");
+
+    const rep = await repairFaceArtifact(buf, faceBox, apiKey);
+    if (!rep.ok || !rep.buf) return { ok: false, why: `yapılamadı[${rep.reason}]` };
+
+    let dist = null;
+    let idOk = true;
+    if (refDescriptor) {
+      try {
+        const { matchesIdentity } = require("./faceQuality");
+        const m = await matchesIdentity(rep.buf, refDescriptor);
+        dist = m.distance;
+        if (dist != null) {
+          idOk = m.match
+            || (preDist != null
+                && dist <= preDist + REPAIR_IDENTITY_MAX_DRIFT
+                && dist <= REPAIR_IDENTITY_HARD_MAX);
+        }
+        // dist null ise ölçülemedi demektir — ölçememek kusur kanıtı
+        // değildir, dosyanın her yerindeki fail-safe yönü (engelleme yok).
+      } catch (e) {
+        console.error("Onarım kimlik kontrolü hata verdi (onarım kabul ediliyor):", e.message || e);
+      }
+    }
+    const d = dist != null ? dist.toFixed(3) : "ölçülmedi";
+    if (!idOk) {
+      return { ok: false, why: `kimlik bozuldu (mesafe=${d}, öncesi=${preDist != null ? preDist.toFixed(3) : "?"})` };
+    }
+
+    // Onarım kimliği korudu; yama gerçekten gitmiş mi? Kırpma kapısı tam
+    // kare satırından daha duyarlı (bkz. judgeFaceArtifact gerekçesi), bu
+    // yüzden doğrulama İKİ çağıran için de ondan yapılıyor.
+    const re = await judgeFaceArtifact(rep.buf, faceBox, apiKey);
+    if (re.ok && !re.bad) return { ok: true, buf: rep.buf, dist };
+    return { ok: false, why: re.ok ? `yama sürüyor (bölge="${re.where}")` : `doğrulanamadı[${re.reason}]` };
+  } catch (e) {
+    console.error("Yüz onarımı çağrısı hata verdi (normal redde düşülüyor):", e.message || e);
+    return { ok: false, why: "hata" };
+  }
+}
 
 // Bu kapılar tekrar sayacına GİRER (Vision'ın öznel yargısı — yanlış pozitif
 // verebilir). Listede OLMAYAN her kapı (math-*, yaw-*, head-dx, eyes-closed,
@@ -3469,10 +3654,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // başına yetmiyor: model aynı önyargıyı (gözü kameraya çekme) farklı
   // şablonda da tekrarlıyordu.
   let lastRejectGate = null;
-  // YÜZ ONARIMI CHUNK BAŞINA BİR KEZ (2026-09-17). Onarım bir OpenAI
-  // çağrısı; her denemede tekrar denemek kusuru çözmeden para yakar.
-  // Bir kez denenir, tutmazsa o chunk normal ret akışına döner.
-  let artifactRepairTried = false;
+  // YÜZ ONARIMI BÜTÇESİ — chunk başına sayılır (2026-09-18, eskiden tek
+  // seferlikti). Gerekçe ve ölçüm: ARTIFACT_REPAIR_MAX_PER_CHUNK başlığı.
+  let artifactRepairsUsed = 0;
   // AYNI KAPI TEKRAR SAYACI (2026-09-13). gate -> o kapıdan kaç kez elendik.
   //
   // NEDEN: job f483d510'da chunk 3, "vision-hair" kapısından ÜÇ KEZ ÜST ÜSTE
@@ -3934,6 +4118,56 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         );
         visionOk = true;
       }
+      // TAM KARE ARTEFAKT REDDİ DE ÖNCE ONARILIR (2026-09-18).
+      //
+      // Bu yol daha önce onarıma HİÇ uğramıyordu: aşağıdaki blok kareyi
+      // doğrudan reddediyor ve `continue` ile bir sonraki denemeye geçiyordu,
+      // yani onarımı yapan kırpma kapısına (çok aşağıda) hiç gelinmiyordu.
+      // Ölçümde bu, 27 vision-artifact reddinin tamamının onarımsız yanması
+      // demekti — oysa aynı onarım diğer yolda 30 denemenin 24'ünde yamayı
+      // gideriyor.
+      //
+      // Yüz kutusu burada henüz hesaplanmamış (aşağıda, faceBoxForArtifact).
+      // Bu yüzden yalnızca artefakt reddinde ve yalnızca bütçe varken bir
+      // detectMainFace çağrısı yapılıyor — diğer red sebeplerinde bu blok
+      // hiç çalışmaz, ek maliyet doğurmaz.
+      if (!visionOk && visionReason === "artifact"
+          && artifactRepairsUsed < ARTIFACT_REPAIR_MAX_PER_CHUNK) {
+        try {
+          const { detectMainFace } = require("./faceQuality");
+          const fd = await detectMainFace(buf);
+          if (!fd || !fd.box) {
+            console.log(
+              `YÜZ ONARIMI (tam kare) (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `ATLANDI[yüz-yok] — normal redde düşülüyor`
+            );
+          } else {
+            artifactRepairsUsed++;
+            const rr = await tryArtifactRepair({
+              buf, faceBox: fd.box, apiKey: OPENAI_KEY.value(),
+              refDescriptor, preDist: mathDist,
+            });
+            if (rr.ok) {
+              buf = rr.buf;
+              visionOk = true;
+              console.log(
+                `YÜZ ONARIMI (tam kare) (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                `BAŞARILI — yama giderildi (Vision "${visionDetail || "PATCH"}", ` +
+                `kimlik mesafesi=${rr.dist != null ? rr.dist.toFixed(3) : "ölçülmedi"}, ` +
+                `bütçe ${artifactRepairsUsed}/${ARTIFACT_REPAIR_MAX_PER_CHUNK}), kare KABUL edildi`
+              );
+            } else {
+              console.warn(
+                `YÜZ ONARIMI (tam kare) (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                `${rr.why} — normal redde düşülüyor ` +
+                `(bütçe ${artifactRepairsUsed}/${ARTIFACT_REPAIR_MAX_PER_CHUNK})`
+              );
+            }
+          }
+        } catch (e) {
+          console.error("Tam kare artefakt onarımı hata verdi (normal redde düşülüyor):", e.message || e);
+        }
+      }
       if (!visionOk) {
         const visionGate = `vision-${visionReason || "?"}`;
         // AYNI KAPI TEKRAR KIRICISI (2026-09-13, bkz. gateRejectCounts).
@@ -4078,64 +4312,38 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             // kıyafet, arka plan ve kadraj maske dışında kaldığı için
             // piksel piksel korunuyor.
             //
-            // Onarım SADECE BİR KEZ denenir: onarılmış kare yine yamalıysa
-            // sorun bu karede daha derindir, ikinci onarım para yakar.
-            // Onarım başarısızsa akış aşağıdaki normal redde düşer — yani
-            // en kötü ihtimalle bugünkü davranış.
+            // Onarım CHUNK BAŞINA BÜTÇELİ (2026-09-18, eskiden tek seferlik):
+            // bkz. ARTIFACT_REPAIR_MAX_PER_CHUNK başlığındaki ölçüm. Bütçe
+            // dolduysa ya da onarım tutmazsa akış aşağıdaki normal redde
+            // düşer — yani en kötü ihtimalle bugünkü davranış.
             let repaired = false;
-            if (!artifactRepairTried) {
-              artifactRepairTried = true;
-              try {
-                const { repairFaceArtifact } = require("./faceRepair");
-                const rep = await repairFaceArtifact(buf, faceBoxForArtifact, OPENAI_KEY.value());
-                if (rep.ok && rep.buf) {
-                  // KİMLİK KORUMASI: onarım yüzü yeniden çiziyor, yani
-                  // teorik olarak kişiyi değiştirebilir. Kapıdan geçmesi
-                  // "yama yok" demek, "aynı kişi" demek DEĞİL. Bu yüzden
-                  // onarılmış kare kimlik ölçümünden de geçmek zorunda;
-                  // geçmezse onarım ÇÖPE gider ve normal ret akışı işler.
-                  let idOk = true;
-                  let idDist = null;
-                  if (refDescriptor) {
-                    try {
-                      const { matchesIdentity } = require("./faceQuality");
-                      const m = await matchesIdentity(rep.buf, refDescriptor);
-                      idDist = m.distance;
-                      idOk = m.distance == null ? true : m.match; // ölçülemezse engelleme
-                    } catch (e) {
-                      console.error("Onarım kimlik kontrolü hata verdi (onarım kabul ediliyor):", e.message || e);
-                    }
-                  }
-                  const re = idOk
-                    ? await judgeFaceArtifact(rep.buf, faceBoxForArtifact, OPENAI_KEY.value())
-                    : { ok: true, bad: true, where: "kimlik" };
-                  if (!idOk) {
-                    console.warn(
-                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                      `REDDEDİLDİ — onarım kimliği bozdu (mesafe=${idDist != null ? idDist.toFixed(3) : "?"}), normal redde düşülüyor`
-                    );
-                  } else if (re.ok && !re.bad) {
-                    buf = rep.buf;
-                    repaired = true;
-                    console.log(
-                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                      `BAŞARILI — yama giderildi (önceki bölge="${fa.where}", kimlik mesafesi=${idDist != null ? idDist.toFixed(3) : "ölçülmedi"}), kare KABUL edildi`
-                    );
-                  } else {
-                    console.warn(
-                      `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                      `yama sürüyor (${re.ok ? `bölge="${re.where}"` : `kapı ${re.reason}`}) — normal redde düşülüyor`
-                    );
-                  }
-                } else {
-                  console.warn(
-                    `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                    `yapılamadı [${rep.reason}] — normal redde düşülüyor`
-                  );
-                }
-              } catch (e) {
-                console.error("Yüz onarımı çağrısı hata verdi (normal redde düşülüyor):", e.message || e);
+            if (artifactRepairsUsed < ARTIFACT_REPAIR_MAX_PER_CHUNK) {
+              artifactRepairsUsed++;
+              const rr = await tryArtifactRepair({
+                buf, faceBox: faceBoxForArtifact, apiKey: OPENAI_KEY.value(),
+                refDescriptor, preDist: mathDist,
+              });
+              if (rr.ok) {
+                buf = rr.buf;
+                repaired = true;
+                console.log(
+                  `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                  `BAŞARILI — yama giderildi (önceki bölge="${fa.where}", ` +
+                  `kimlik mesafesi=${rr.dist != null ? rr.dist.toFixed(3) : "ölçülmedi"}, ` +
+                  `bütçe ${artifactRepairsUsed}/${ARTIFACT_REPAIR_MAX_PER_CHUNK}), kare KABUL edildi`
+                );
+              } else {
+                console.warn(
+                  `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                  `${rr.why} — normal redde düşülüyor ` +
+                  `(bütçe ${artifactRepairsUsed}/${ARTIFACT_REPAIR_MAX_PER_CHUNK})`
+                );
               }
+            } else {
+              console.log(
+                `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+                `ATLANDI — chunk onarım bütçesi doldu (${ARTIFACT_REPAIR_MAX_PER_CHUNK})`
+              );
             }
             if (repaired) {
               // Onarıldı: bu kapıdan geçmiş sayılır, akış normal şekilde
@@ -4255,7 +4463,13 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               `EL TONU DÜZELTME (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
               `${hc.applied ? "UYGULANDI" : `ATLANDI[${hc.reason}]`} ` +
               `yüzeGöreAçıklık=${hc.deltaLBefore != null ? hc.deltaLBefore.toFixed(1) : "null"}` +
-              `${hc.applied ? ` -> ${hc.deltaLAfter.toFixed(1)} kaymaL=${hc.shiftL.toFixed(1)} kutu=${hc.boxesFixed}` : ""}`
+              `${hc.applied ? ` -> ${hc.deltaLAfter.toFixed(1)} kaymaL=${hc.shiftL.toFixed(1)} kutu=${hc.boxesFixed}` : ""}` +
+              // Kumaş koruması ölçülüyor: kaç kutu "el değil yüzey" diye
+              // atlandı ve boyanan alan yüzün kaç katı (bkz. faceQuality.js
+              // kumaş koruması başlığı). Eşikler ancak bu dağılım görülerek
+              // kalibre edilebilir — dosyadaki diğer kapılarla aynı usul.
+              `${hc.skippedFabric ? ` kumaşAtlanan=${hc.skippedFabric}` : ""}` +
+              `${hc.areaVsFace != null ? ` alanYüzeGöre=${hc.areaVsFace.toFixed(2)}` : ""}`
             );
             if (hc.applied && hc.buf) buf = hc.buf;
           } catch (e) {
@@ -4676,17 +4890,49 @@ exports.startPhotoGeneration = onCall(
     }
     const uid = request.auth.uid;
     checkAppAttestation(request, "startPhotoGeneration");
-    const { styles, jobId, model, mode } = request.data || {};
-    if (!Array.isArray(styles) || styles.length === 0 || !jobId) {
-      throw new HttpsError("invalid-argument", "styles ve jobId zorunlu.");
+    const { styles, photoCount: rawPhotoCount, jobId, model, mode } = request.data || {};
+    if (!jobId) {
+      throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
     assertSafeId(jobId, "jobId");
+
+    // ESKİ İSTEMCİ UYUMLULUĞU (2026-09-18) — ATLANAMAZ, GERÇEK OLAY VAR.
+    //
+    // 2026-09-10'da sunucu, istemci güncellenmeden önce değiştirildi ve
+    // telefonlardaki sürüm eski alanı göndermeye devam ettiği için 41 işten
+    // 40'ı başarısız oldu, 25 kullanıcı hiç foto alamadı (bkz. ücretsiz
+    // deneme bloğundaki not). Aynı hatayı tekrarlamamak için bu fonksiyon
+    // HER İKİ isteği de kabul eder:
+    //
+    //   YENİ istemci : { photoCount: 5 | 10 | 25 }
+    //   ESKİ istemci : { styles: ["elegance"] }  -> stil başına 10 foto
+    //
+    // Eski istemci ayrıca sonucu `results[styleId]` altında okur; bu yüzden
+    // aşağıda kova anahtarı (bucketId) eski istekte styleId olarak KALIR.
+    // Böylece güncellenmemiş telefonlar çalışmaya devam eder.
+    const legacyStyles = Array.isArray(styles) && styles.length > 0 ? styles : null;
+    let photoCount;
+    if (rawPhotoCount !== undefined) {
+      photoCount = Number(rawPhotoCount);
+      if (!Number.isInteger(photoCount) || !PHOTO_PACK_SIZES.includes(photoCount)) {
+        throw new HttpsError(
+          "invalid-argument",
+          `photoCount ${PHOTO_PACK_SIZES.join(" / ")} olmalı.`
+        );
+      }
+    } else if (legacyStyles) {
+      photoCount = legacyStyles.length * LEGACY_PHOTOS_PER_STYLE;
+    } else {
+      throw new HttpsError("invalid-argument", "photoCount zorunlu.");
+    }
+    // Sonuç haritasının anahtarı. Yeni istemcide sabit; eski istemcide
+    // gönderdiği stil adı (o istemci sonucu bu anahtarla arıyor).
+    const bucketId = legacyStyles && rawPhotoCount === undefined
+      ? legacyStyles[0]
+      : PHOTO_BUCKET_ID;
+    assertSafeId(bucketId, "bucketId");
     // OpenAI görsel üretimi + Vision kontrolü = çağrı başına en yüksek maliyet.
     await enforceRateLimit(uid, "startPhotoGeneration", RL_GENERATE);
-    const invalidStyle = styles.find((s) => !STYLE_SCENES[s]);
-    if (invalidStyle) {
-      throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${invalidStyle}`);
-    }
     // Tek buton bu alanı 'gpt-image-2' gönderir -> useOpenAiDirect=true,
     // doğrudan OpenAI'ye gider (bkz. OPENAI_MODEL_ID tanımı). MODEL_CATALOG
     // içindeki "gpt-image-2" girdisi (fal-wrapped, artık kullanılmıyor) bu
@@ -4793,19 +5039,23 @@ exports.startPhotoGeneration = onCall(
     // pickTemplatesFromPool aynı dosyayı döngüsel tekrarla doldurur (bkz. o
     // fonksiyonun ve aşağıdaki TEKİLLEŞTİRME'nin gerekçesi) — bazı boy/beden
     // bantlarında son denemeler yine de aynı şablona düşebilir, fail-safe.
-    const templatesByStyle = {};
-    const sparesByStyle = {};
-    for (const styleId of styles) {
-      const all = pickTemplatesFromPool(
-        files, jobId, IMAGES_PER_STYLE * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
-      );
-      templatesByStyle[styleId] = all.slice(0, IMAGES_PER_STYLE);
-      sparesByStyle[styleId] = all.slice(IMAGES_PER_STYLE);
-    }
+    //
+    // 25'LİK PAKET VE HAVUZ BOYU (2026-09-18, ölçüldü): istenen şablon sayısı
+    // photoCount * 6'dır — 25 foto için 150. Gerçek havuzlar bundan küçük
+    // (short 59, middle 72, tall 83), bu yüzden pickTemplatesFromPool döngüsel
+    // tekrarla doldurur. TESLİM EDİLEN kareler yine de tekrarsızdır (25 < 59);
+    // tekrar yalnızca YEDEK listesine düşer, yani bir chunk çok kez reddedilirse
+    // ileri denemeleri aynı tabana dönebilir. Kabul edilebilir; bant başına
+    // şablon eklemek bunu tamamen giderir.
+    const pickedAll = pickTemplatesFromPool(
+      files, jobId, photoCount * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
+    );
+    const primaryTemplates = pickedAll.slice(0, photoCount);
+    const spareTemplates = pickedAll.slice(photoCount);
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
-    // Ücretsiz deneme: daha önce kullanılmadıysa 1 stil ücretsiz (bakiye 0 olsa bile).
-    const unitsNeeded = styleUnitsFor(styles.length);
+    // Bakiye artık FOTO cinsinden (bkz. photoUnitsFor başlığı).
+    const unitsNeeded = photoUnitsFor(photoCount);
     let unitsToCharge = unitsNeeded;
     let usedFreeTier = false;
 
@@ -4837,11 +5087,11 @@ exports.startPhotoGeneration = onCall(
         // Eski bir istemci yine de denerse aşağıdaki mesajı alır — sessizce
         // başarısız olmaz, ne yapması gerektiğini okur.
         if (balance > 0) {
-          // Bakiyesi var ama seçtiği stil sayısından az — net yönlendirme yap.
+          // Bakiyesi var ama istenen foto sayısından az — net yönlendirme yap.
           throw new HttpsError(
             "failed-precondition",
-            `Paketinde ${balance} stil hakkın var ama ${styles.length} stil seçtin. ` +
-            `${balance} stil seç ya da daha fazla paket al.`
+            `Paketinde ${balance} fotoğraf hakkın var ama ${photoCount} fotoğraf ` +
+            `istendi. Daha küçük bir paket seç ya da yeni paket al.`
           );
         } else if (!wallet.freePhotoUsed) {
           // Hiç paket almamış ve ücretsiz hakkını da hiç kullanmamış hesap:
@@ -4874,9 +5124,14 @@ exports.startPhotoGeneration = onCall(
       // identityCaption korunur.
       tx.set(jobRef, {
         status: "generating",
-        styles,
+        // photoCount YENİ ALAN; `styles` yalnızca eski istemci gönderdiyse
+        // yazılır (ops paneli ve eski raporlar onu okuyabilsin diye).
+        photoCount,
+        bucketId,
+        ...(legacyStyles ? { styles: legacyStyles } : {}),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        pendingStyles: styles.length,
+        // Tek kova var; "kaç kova bitmeyi bekliyor" sayacı artık hep 1.
+        pendingStyles: 1,
         results: {},
         errorMessage: null,
         packUnitsCharged: unitsToCharge,
@@ -4901,11 +5156,10 @@ exports.startPhotoGeneration = onCall(
     // üretilen ilk kare sayılır — kilitli kalanlar "görülmüş" değildir.
     const usedTemplateNames = [
       ...new Set(
-        styles.flatMap((styleId) => {
-          const full = templatesByStyle[styleId];
-          const gen = usedFreeTier ? full.slice(0, FREE_TIER_CHUNK_COUNT) : full;
-          return gen.map((f) => f.name);
-        })
+        (usedFreeTier
+          ? primaryTemplates.slice(0, FREE_TIER_CHUNK_COUNT)
+          : primaryTemplates
+        ).map((f) => f.name)
       ),
     ];
     await jobRef.set({ templateNames: usedTemplateNames }, { merge: true });
@@ -4917,88 +5171,95 @@ exports.startPhotoGeneration = onCall(
         // bkz. finalizeChunk), SONRA üretim TAM OLARAK burada, senkron
         // bekleniyor (webhook'un yapacağı işi runOpenAiDirectChunk yapıyor).
         // Fonksiyon bu Promise.all bitmeden dönmez — bkz. onCall timeoutSeconds.
-        await Promise.all(styles.map(async (styleId) => {
-          const fullPicked = templatesByStyle[styleId];
-          // Ücretsiz denemede sadece İLK chunk üretilir; kalanı hiç
-          // ÇALIŞTIRILMAZ (API maliyeti yok) — "chunks" haritasına da
-          // GİRMEZ ki finalizeChunk'ın "tüm chunk'lar bitti mi" kontrolü
-          // yalnızca gerçekten üretilenleri beklesin. Kilitli kalan sayısı
-          // ayrı bir alanda (lockedCount) saklanır — istemci kilit/"paket al"
-          // kartlarını buradan gösterir.
-          const picked = usedFreeTier ? fullPicked.slice(0, FREE_TIER_CHUNK_COUNT) : fullPicked;
-          const lockedCount = fullPicked.length - picked.length;
+        // Tek kova (stil kalktı): photoCount kadar chunk PARALEL üretilir.
+        // 10'luk paket iki adet 5'lik üretim DEĞİLDİR — tek işte 10 chunk
+        // (kullanıcı kararı, 2026-09-18).
+        //
+        // Ücretsiz denemede sadece İLK chunk üretilir; kalanı hiç
+        // ÇALIŞTIRILMAZ (API maliyeti yok) — "chunks" haritasına da GİRMEZ ki
+        // finalizeChunk'ın "tüm chunk'lar bitti mi" kontrolü yalnızca
+        // gerçekten üretilenleri beklesin. Kilitli kalan sayısı ayrı bir
+        // alanda (lockedCount) saklanır — istemci kilit/"paket al" kartlarını
+        // buradan gösterir.
+        {
+          const picked = usedFreeTier
+            ? primaryTemplates.slice(0, FREE_TIER_CHUNK_COUNT)
+            : primaryTemplates;
+          const lockedCount = primaryTemplates.length - picked.length;
           const initialChunks = Object.fromEntries(
             picked.map((_, i) => [String(i), { photoUrls: [], status: "pending", retries: 0 }])
           );
           await jobRef.set({
-            results: { [styleId]: {
+            results: { [bucketId]: {
               status: "pending", photoUrls: [], chunks: initialChunks,
               ...(lockedCount > 0 ? { lockedCount } : {}),
             } },
           }, { merge: true });
 
-          const spares = sparesByStyle[styleId] || [];
           await Promise.all(picked.map(async (file, i) => {
             // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
-            // (i, IMAGES_PER_STYLE+i, 2*IMAGES_PER_STYLE+i, ... konumları),
-            // böylece paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi
-            // üretmez. Yedek sayısı (OPENAI_DIRECT_MAX_ATTEMPTS - 1 = 5) o
-            // sabitle senkron — bkz. tanımının yanındaki gerekçe.
+            // (i, photoCount+i, 2*photoCount+i, ... konumları), böylece
+            // paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi üretmez.
+            // Yedek sayısı (OPENAI_DIRECT_MAX_ATTEMPTS - 1 = 5) o sabitle
+            // senkron — bkz. tanımının yanındaki gerekçe.
             const candidates = [
               file,
               ...Array.from(
                 { length: OPENAI_DIRECT_MAX_ATTEMPTS - 1 },
-                (_, k) => spares[k * IMAGES_PER_STYLE + i]
+                (_, k) => spareTemplates[k * photoCount + i]
               ),
             ].filter(Boolean);
-            // TEKİLLEŞTİRME (2026-08-12): havuz IMAGES_PER_STYLE*ATTEMPTS'ten
-            // küçükse (ör. test için elle küçültülmüş bir havuz)
-            // pickTemplatesFromPool aynı dosyayı döngüsel tekrarla dolduruyor
-            // — bu durumda birincil ve "yedekler" AYNI GCS nesnesine işaret
-            // edebiliyor. signedDownloadUrl her çağrıda dosyanın metadata'sına
-            // yeni bir token YAZIYOR
-            // (file.setMetadata); aynı nesneye 2-3 eşzamanlı yazma isteği
-            // GERÇEK bir olay: "metadata was edited during the operation" 409
-            // hatasıyla çöküyordu. İsme göre tekilleştirip her benzersiz dosya
-            // için TEK imzalı URL üretmek çakışmayı kökten kaldırıyor.
+            // TEKİLLEŞTİRME (2026-08-12): havuz photoCount*ATTEMPTS'ten
+            // küçükse pickTemplatesFromPool aynı dosyayı döngüsel tekrarla
+            // dolduruyor — bu durumda birincil ve "yedekler" AYNI GCS
+            // nesnesine işaret edebiliyor. signedDownloadUrl her çağrıda
+            // dosyanın metadata'sına yeni bir token YAZIYOR (file.setMetadata);
+            // aynı nesneye 2-3 eşzamanlı yazma isteği GERÇEK bir olay:
+            // "metadata was edited during the operation" 409 hatasıyla
+            // çöküyordu. İsme göre tekilleştirip her benzersiz dosya için TEK
+            // imzalı URL üretmek çakışmayı kökten kaldırıyor.
+            //
+            // 25'LİK PAKETTE BU YOL DAHA SIK DEVREYE GİRER: havuz 150'ye
+            // yetmediği için yedekler tekrarlı gelebilir (bkz. yukarıdaki not).
             const uniqueCandidates = [
               ...new Map(candidates.map((f) => [f.name, f])).values(),
             ];
             const urls = await Promise.all(uniqueCandidates.map(signedDownloadUrl));
             await runOpenAiDirectChunk(
-              uid, jobId, styleId, i, urls, refUrls, identityCaption,
+              uid, jobId, bucketId, i, urls, refUrls, identityCaption,
               bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine
             );
           }));
-        }));
+        }
       } else {
         // fal.ai YOLU — submit hızlı döner, webhook sonuçlandırıyor.
-        await Promise.all(styles.map(async (styleId) => {
-          const fullPicked = templatesByStyle[styleId];
-          const picked = usedFreeTier ? fullPicked.slice(0, FREE_TIER_CHUNK_COUNT) : fullPicked;
-          const lockedCount = fullPicked.length - picked.length;
-          const submissions = await Promise.all(
-            picked.map(async (file, i) => {
-              const templateUrl = await signedDownloadUrl(file);
-              const falJob = await submitStyleJob(
-                uid, jobId, styleId, i, templateUrl, refUrls, identityCaption, bodyProfile, modelId
-              );
-              return [String(i), {
-                requestId: falJob.request_id,
-                photoUrls: [],
-                status: "pending",
-                retries: 0,
-              }];
-            })
-          );
-          const chunks = Object.fromEntries(submissions);
-          await jobRef.set({
-            results: { [styleId]: {
-              status: "pending", photoUrls: [], chunks,
-              ...(lockedCount > 0 ? { lockedCount } : {}),
-            } },
-          }, { merge: true });
-        }));
+        // fal 2026-08-20'de akıştan çıkarıldı; bu dal yalnızca geri dönmek
+        // gerekirse diye duruyor (bkz. useOpenAiDirect).
+        const picked = usedFreeTier
+          ? primaryTemplates.slice(0, FREE_TIER_CHUNK_COUNT)
+          : primaryTemplates;
+        const lockedCount = primaryTemplates.length - picked.length;
+        const submissions = await Promise.all(
+          picked.map(async (file, i) => {
+            const templateUrl = await signedDownloadUrl(file);
+            const falJob = await submitStyleJob(
+              uid, jobId, bucketId, i, templateUrl, refUrls, identityCaption, bodyProfile, modelId
+            );
+            return [String(i), {
+              requestId: falJob.request_id,
+              photoUrls: [],
+              status: "pending",
+              retries: 0,
+            }];
+          })
+        );
+        const chunks = Object.fromEntries(submissions);
+        await jobRef.set({
+          results: { [bucketId]: {
+            status: "pending", photoUrls: [], chunks,
+            ...(lockedCount > 0 ? { lockedCount } : {}),
+          } },
+        }, { merge: true });
       }
     } catch (e) {
       console.error("startPhotoGeneration hata:", e);
@@ -5415,9 +5676,11 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
         const r = results[k];
         return r?.status === "done" && Array.isArray(r.photoUrls) && r.photoUrls.length > 0;
       }).length;
-      const failedCount = Object.keys(results).filter(
-        (k) => results[k]?.status === "failed"
-      ).length;
+      // NOT: eskiden ayrı bir `failedCount` vardı ve iade "başarısız stil
+      // sayısı + eksik stil sayısı" olarak hesaplanırdı. Foto birimine
+      // geçince bu hesap yanlış oldu; iade artık doğrudan EKSİK FOTO sayısı
+      // üzerinden yapılıyor (bkz. missingPhotos) ve başarısız kovanın
+      // fotoğrafları da o toplamın içinde.
 
       // EKSİK TESLİM = HAK İADESİ (2026-08-04; "7-10 foto" gevşetmesi
       // 2026-08-16'da geri alındı — bkz. OPENAI_DIRECT_MAX_ATTEMPTS: artık
@@ -5429,17 +5692,32 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       // edilen foto sayısı BEKLENENDEN azsa o stilin birimi geri veriliyor;
       // kullanıcı setin tamamını (IMAGES_PER_STYLE) baştan üretebiliyor.
       //
-      // "Beklenen" = o stil için AÇILAN chunk sayısı. Bu tanım ücretsiz
-      // denemeyi ve kilitli fotoğrafları doğru şekilde dışarıda bırakır:
-      // ücretsiz denemede zaten yalnızca FREE_TIER_CHUNK_COUNT kadar chunk
-      // açılıyor (kilitli 4 foto hiç chunk değil), dolayısıyla 1/1 teslim
-      // "tam" sayılır. Ayrıca packUnitsCharged>0 koşulu, ücretsiz denemede
+      // "Beklenen" = AÇILAN chunk sayısı. Bu tanım ücretsiz denemeyi ve
+      // kilitli fotoğrafları doğru şekilde dışarıda bırakır: ücretsiz
+      // denemede zaten yalnızca FREE_TIER_CHUNK_COUNT kadar chunk açılıyor
+      // (kilitli kalanlar hiç chunk değil), dolayısıyla 1/1 teslim "tam"
+      // sayılır. Ayrıca packUnitsCharged>0 koşulu, ücretsiz denemede
       // (charged=0) iade yapılmasını ayrıca engeller.
       const expectedChunkCount = (k) => {
         if (k === styleId) return chunkKeys.length;
         const ch = (j.results || {})[k]?.chunks;
         return ch ? Object.keys(ch).length : 0;
       };
+      // İADE ARTIK FOTO BAŞINA (2026-09-18, birim değişikliğinin zorunlu
+      // sonucu). ESKİDEN birim "stil"di ve eksik teslimde O STİLİN 1 birimi
+      // iade edilirdi — 10 fotodan 7'si gelse 1 birim (=10 foto) geri gelirdi.
+      // Artık photoBalance FOTO sayıyor: 25'lik pakette 22 foto teslim
+      // edilirse eski mantık yalnızca 1 foto iade ederdi, yani kullanıcı 3
+      // fotoyu kaybederdi. Doğrusu EKSİK KALAN KADAR iade etmek.
+      const missingPhotos = Object.keys(results).reduce((sum, k) => {
+        const r = results[k];
+        if (!Array.isArray(r?.photoUrls)) return sum;
+        const expected = expectedChunkCount(k);
+        if (expected <= 0) return sum;
+        // Başarısız kova: hiç foto yok, tamamı eksik.
+        const delivered = r.status === "done" ? r.photoUrls.length : 0;
+        return sum + Math.max(0, expected - delivered);
+      }, 0);
       const incompleteCount = Object.keys(results).filter((k) => {
         const r = results[k];
         if (r?.status !== "done" || !Array.isArray(r.photoUrls)) return false;
@@ -5448,11 +5726,10 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       }).length;
 
       if (successCount > 0) {
-        // Kısmi başarı: üretilen stilleri göster. Başarısız VE eksik teslim
-        // edilen stillerin birimleri iade edilir.
-        const creditUnits = failedCount + incompleteCount;
-        if (creditUnits > 0 && (j.packUnitsCharged || 0) > 0) {
-          const refundUnits = Math.min(creditUnits, j.packUnitsCharged || 0);
+        // Kısmi başarı: üretilenleri göster, TESLİM EDİLMEYEN HER FOTO için
+        // hak iade et.
+        if (missingPhotos > 0 && (j.packUnitsCharged || 0) > 0) {
+          const refundUnits = Math.min(missingPhotos, j.packUnitsCharged || 0);
           const walletSnap = await tx.get(walletRef);
           const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
           tx.set(walletRef, {
@@ -5465,8 +5742,8 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
             // üretebilirsin" diyebilsin diye ayrıca işaretleniyor.
             update.incompleteDelivery = true;
             console.warn(
-              `EKSİK TESLİM: ${incompleteCount} stil beklenenden az foto üretti ` +
-              `— ${refundUnits} hak iade edildi (uid=${uid}, job=${jobId})`
+              `EKSİK TESLİM: beklenenden ${missingPhotos} foto az üretildi ` +
+              `— ${refundUnits} foto hakkı iade edildi (uid=${uid}, job=${jobId})`
             );
           }
         }

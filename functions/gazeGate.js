@@ -68,6 +68,30 @@ function isGazeMismatch(baseLine, outputLine) {
   if (!base || !out) return false;
   if (base === out) return false;
 
+  // ÇIKTININ MERCEĞE BAKMASI ARTIK KUSUR DEĞİL (2026-09-18, ölçümle).
+  //
+  // TABAN BİZİM ŞABLONUMUZ, KULLANICININ FOTOĞRAFI DEĞİL. Kullanıcı şablonu
+  // hiç görmüyor; "çıktının bakışı şablonunkine eşit olsun" kuralının son
+  // kullanıcıya dönen hiçbir karşılığı yok. Sahne metinlerimizin çoğu
+  // bilerek "looking out at the horizon / away from the lens" diyor, model
+  // ise yüzü kullanıcının selfie'lerinden kurarken gözü ısrarla merceğe
+  // çeviriyor. Yani kuralın kendisi, kendi şablon havuzumuzla modelin
+  // değişmez davranışı arasındaki bir çelişkiyi kareye fatura ediyordu.
+  //
+  // ÖLÇÜM (2026-09-16..18, 21 iş, 212 ret): vision-gaze 106 retle tek
+  // başına tüm retlerin %50'si. Yön çiftleri ayrıştırıldığında:
+  //   RIGHT -> CAMERA : 21 ret / 0 geçiş
+  //   LEFT  -> CAMERA : 11 ret / 0 geçiş
+  // Bu karelerin HİÇBİRİ geçemiyor, çünkü kusur karede değil kuralda.
+  // Kullanıcı aynı kareleri gözle inceleyip "bazıları ret edilmemeliydi"
+  // dedi — flört profili için merceğe bakan kare zaten İSTENEN karedir.
+  //
+  // TERS YÖN KORUNUYOR: taban merceğe bakarken çıktının yana kaçması
+  // (CAMERA -> LEFT/RIGHT/...) hâlâ uyuşmazlık. Kapıyı doğuran şikâyetler
+  // (420fd8c6 elegance_6, 7160f104 elegance_5, f0bc4d5c c1) bu yöndeydi ve
+  // o koruma yerinde kalıyor. Ölçümde bu yöndeki ret sayısı 34'ün 2'siydi.
+  if (out === "CAMERA") return false;
+
   // ÇIPLAK AWAY ARTIK HER ŞEYİ AFFETMİYOR (2026-09-14).
   //
   // Eskiden tek tarafta AWAY görmek elemeyi TAMAMEN kapatıyordu ve bu,
