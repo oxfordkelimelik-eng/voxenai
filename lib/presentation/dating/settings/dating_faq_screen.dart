@@ -18,9 +18,11 @@ class DatingFaqScreen extends StatelessWidget {
       ),
       _FaqItem(
         'Paketler neler?',
-        'AI Foto Üretimi: Standart paket ${DatingConfig.photoStandardPhotos} '
-            'fotoğraf (1 stil), Premium paket '
-            '${DatingConfig.photoPremiumPhotos} fotoğraf (5 stil).\n\n'
+        'AI Foto Üretimi: Başlangıç ${DatingConfig.photoStarterPhotos} '
+            'fotoğraf, Standart ${DatingConfig.photoStandardPhotos} fotoğraf '
+            '+ ${DatingConfig.photoStandardGiftAnalyses} analiz hediye, '
+            'Premium ${DatingConfig.photoPremiumPhotos} fotoğraf '
+            '+ ${DatingConfig.photoPremiumGiftAnalyses} analiz hediye.\n\n'
             'Fotoğraf Analizi: Tekli ${DatingConfig.analysisSingleRuns} '
             'analiz, Standart ${DatingConfig.analysisStandardRuns} analiz.\n\n'
             'Güncel fiyatlar "Paket Al" ekranında, kendi ülkenin para '
@@ -49,14 +51,19 @@ class DatingFaqScreen extends StatelessWidget {
             've iyi ışıklandırılmış olması sonucu doğrudan etkiler.',
       ),
       _FaqItem(
-        'Hangi stiller mevcut?',
-        PhotoStyle.coreStyles.map((s) => '• ${s.label} — ${s.description}').join('\n'),
+        'Fotoğraflarım nasıl çeşitleniyor?',
+        'Stil seçmene gerek yok. Her fotoğraf farklı bir mekân, kadraj ve '
+            'ışıkta üretilir; kullanılacak taban görseller boyuna göre '
+            'otomatik seçilir.',
       ),
       _FaqItem(
         'Üretim ne kadar sürer?',
-        'Genellikle birkaç dakika içinde tamamlanır. Üretim sırasında '
-            'uygulamadan çıkabilirsin; sonuçların hazır olduğunda seni '
-            'bilgilendiririz.',
+        '${DatingConfig.photoStarterPhotos} ve '
+            '${DatingConfig.photoStandardPhotos} fotoluk paketlerde genellikle '
+            '5-6 dakika sürer. ${DatingConfig.photoPremiumPhotos} fotoluk '
+            'pakette tek seferde daha çok kare üretildiği için 8-10 dakikayı '
+            'bulabilir. Üretim sırasında uygulamadan çıkabilirsin; sonuçların '
+            'hazır olduğunda seni bilgilendiririz.',
       ),
       _FaqItem(
         'Fotoğraflarım kimlerle paylaşılıyor?',

@@ -380,9 +380,13 @@ class PackBalance {
         freeAnalysisUsed: freeAnalysisUsed ?? this.freeAnalysisUsed,
       );
 
-  /// Verilen sayıda stil üretimini karşılayabilir mi? Sunucudaki
+  /// Verilen sayıda FOTOĞRAF üretimini karşılayabilir mi? Sunucudaki
   /// startPhotoGeneration mantığıyla aynı — kredi harcamadan ÖNCE
   /// istemcide kontrol için.
+  ///
+  /// BİRİM DEĞİŞTİ (2026-09-18): `photo` bakiyesi artık STİL/SET değil
+  /// FOTOĞRAF sayar (bkz. functions/falPhotos.js photoUnitsFor). Stil
+  /// mantığı tamamen kaldırıldı.
   ///
   /// TEKLİ ÜCRETSİZ DENEME KALDIRILDI (2026-09-10, TestFlight test sürümü —
   /// App Store'a henüz atılmadı, kullanıcı bilerek TestFlight'ta deneyip
@@ -392,9 +396,9 @@ class PackBalance {
   /// sunucu onu reddederse aynı "zaman aşımı" olayı (bkz. 2026-09-10 gerçek
   /// olay) tekrarlanır. Sunucu ancak bu istemci App Store'da yayına girip
   /// kullanıcıların çoğu güncelledikten SONRA kapatılmalı.
-  bool canAffordStyles(int styleCount) {
-    if (photo >= styleCount) return true;
-    // if (styleCount == 1 && !freePhotoUsed) return true;
+  bool canAffordPhotos(int photoCount) {
+    if (photo >= photoCount) return true;
+    // if (photoCount == 1 && !freePhotoUsed) return true;
     return false;
   }
 }

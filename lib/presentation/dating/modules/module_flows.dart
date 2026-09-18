@@ -153,22 +153,13 @@ class AiPhotoFlow extends ConsumerStatefulWidget {
   ConsumerState<AiPhotoFlow> createState() => _AiPhotoFlowState();
 }
 
-enum _AiStage { style, package, loading, result, error, teaser }
+enum _AiStage { package, loading, result, error, teaser }
 
 class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
-  // STİL KATEGORİLERİ KALDIRILDI (2026-08-02): taban görseller artık tek düz
-  // havuzda (Storage: dating_templates/) ve her üretimde oradan rastgele —
-  // önceki işlerde kullanılmayanlara öncelikle — 5 tane seçiliyor (bkz.
-  // falPhotos.js pickTemplatesFromPool). Bu yüzden stil seçim adımı atlanır
-  // ve akış doğrudan selfie/paket adımıyla başlar.
-  //
-  // Sunucu API'si hâlâ "styles" dizisi bekliyor (cüzdan/chunk/iade mantığı
-  // stil birimi üzerinden çalışıyor) — tek sabit birim gönderiliyor. _AiStage
-  // .style ve _styleStep() kodu SİLİNMEDİ; kategoriler geri gelirse
-  // _stage'i tekrar .style yapmak yeterli.
-  static const String _defaultStyleId = 'elegance';
+  // STİL MANTIĞI TAMAMEN KALDIRILDI (2026-09-18, kullanıcı kararı).
+  // Sunucu artık `photoCount` bekliyor (bkz. functions/falPhotos.js
+  // PHOTO_PACK_SIZES); stil adı hiçbir yere gönderilmiyor.
   _AiStage _stage = _AiStage.package;
-  final Set<String> _styles = {_defaultStyleId};
   /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
   String? _errorMessage;
@@ -215,10 +206,49 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     'Hâlâ çalışıyoruz, son adımlar biraz uzun sürebilir…',
     'Son kontroller…',
   ];
+  // 25'lik pakette süre beklentisi farklı — kullanıcı "takıldı" sanmasın diye
+  // adım metinleri de 8-10 dakikayı söylüyor (2026-09-18 kullanıcı kararı).
+  static const _generatingStepsLong = [
+    'Yüzün referans alınıyor…',
+    '25 fotoğraf üretiliyor — bu işlem 8-10 dakika sürebilir…',
+    'Sahneler uygulanıyor…',
+    'Kalite kontrolleri yapılıyor, düşük kaliteli kareler otomatik eleniyor…',
+    'Bazı kareler daha iyi hâle getiriliyor…',
+    'Hâlâ çalışıyoruz — 25 fotoluk üretim tek seferde yapılıyor…',
+    'Son kontroller…',
+  ];
 
-  // Her seçilen stil DatingConfig.photosPerSet foto üretir (ör. 1 stil → 10,
-  // 5 stil → 50). Paket bakiyesi de "stil" cinsinden tutulur.
-  int get _photoCount => _styles.length * DatingConfig.photosPerSet;
+  // BU ÜRETİMDE KAÇ FOTO ÇIKACAK (2026-09-18).
+  //
+  // Bakiye artık doğrudan FOTOĞRAF sayıyor. Kullanıcı ayrıca bir sayı
+  // seçmiyor: bakiyesinin karşıladığı EN BÜYÜK paket boyu tek seferde
+  // üretilir. Böylece 5'lik alan 5, 10'luk alan 10, 25'lik alan 25 foto alır
+  // — 10'luk paket iki ayrı 5'lik üretim DEĞİLDİR (kullanıcı kararı).
+  //
+  // Bakiye hiçbir paketi karşılamıyorsa en küçük boy döner; bu durumda
+  // _generate zaten paywall'a yönlendirir (canAffordPhotos false).
+  int get _photoCount {
+    final balance = ref.read(packBalanceProvider).photo;
+    final affordable =
+        DatingConfig.photoPackSizes.where((n) => n <= balance).toList();
+    if (affordable.isEmpty) return DatingConfig.photoPackSizes.first;
+    return affordable.reduce((a, b) => a > b ? a : b);
+  }
+
+  /// ÇALIŞMAKTA OLAN işin foto sayısı — _generate bakiyeyi düşmeden ÖNCE
+  /// buraya yazar.
+  ///
+  /// NEDEN AYRI ALAN: _photoCount bakiyeden hesaplanıyor, ama loader
+  /// göründüğünde bakiye ZATEN DÜŞÜLMÜŞ oluyor. 25 fotoluk üretimde bakiye
+  /// 0'a inip _photoCount 5'e döner ve "8-10 dakika" uyarısı hiç
+  /// görünmezdi — yani kullanıcının istediği uyarı tam da gerektiği anda
+  /// kaybolurdu.
+  int? _activePhotoCount;
+
+  /// 25'lik pakette üretim 8-10 dakika sürebiliyor; loader'da kullanıcıya
+  /// bunu açıkça söylüyoruz (bkz. DatingConfig.longJobNoticeText).
+  bool get _isLongJob =>
+      (_activePhotoCount ?? _photoCount) >= DatingConfig.longJobPhotoThreshold;
 
   /// Erişim etiketi: paket bakiyesi varsa kalan hak, yoksa nazik bir davet.
   String get _accessLabel {
@@ -251,7 +281,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   ///   'staged' -> 3 ardışık üretim (kimlik -> geometri/bakış -> ışık), 3x maliyet
   ///   'short'  -> tek atım, kısaltılmış prompt
   Future<void> _generate({String? modelId, String? mode}) async {
-    if (!_refsReady || _styles.isEmpty) return;
+    if (!_refsReady) return;
     if (mode != null) _lastMode = mode;
 
     var answers = ref.read(datingAnswersProvider);
@@ -265,13 +295,20 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     // de paket hakkı harcanır. Bunun yerine blurlu "teaser" gösterilir; blura
     // dokununca paket ekranına yönlendirilir.
     final pack = ref.read(packBalanceProvider);
-    if (!pack.canAffordStyles(_styles.length)) {
+    // Bu üretimde çıkacak foto sayısı BİR KEZ sabitlenir: bakiye akış
+    // sırasında (başka bir cihazdan satın alma, iade) değişebilir ve
+    // kontrol ettiğimiz sayı ile sunucuya gönderdiğimiz sayı farklı olursa
+    // kullanıcı beklemediği bir tutar öder.
+    final photoCount = _photoCount;
+    if (!pack.canAffordPhotos(photoCount)) {
       setState(() {
         _stage = _AiStage.teaser;
         _errorMessage = null;
       });
       return;
     }
+    // Loader bu sayıyı bakiyeden DEĞİL buradan okur (bkz. _activePhotoCount).
+    _activePhotoCount = photoCount;
 
     final uid = ref.read(authServiceProvider).uid;
     if (uid == null) {
@@ -321,7 +358,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           )
           .call({
         'jobId': jobId,
-        'styles': _styles.toList(),
         'bodyProfile': {
           'heightRange': answers.heightRange,
           'bodyType': answers.bodyType,
@@ -380,7 +416,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           )
           .call({
-        'styles': _styles.toList(),
+        // STİL GÖNDERİLMİYOR (2026-09-18): sunucu artık yalnızca kaç foto
+        // üretileceğini bilmek istiyor (bkz. falPhotos.js PHOTO_PACK_SIZES).
+        'photoCount': photoCount,
         'jobId': jobId,
         'model': ?modelId,
         'mode': ?mode,
@@ -514,7 +552,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     final status = _jobData?['status'] as String?;
     switch (status) {
       case 'generating':
-        return _generatingSteps;
+        return _isLongJob ? _generatingStepsLong : _generatingSteps;
       default:
         return _uploadingSteps;
     }
@@ -544,13 +582,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     _jobSub?.cancel();
     _jobTimeoutTimer?.cancel();
     setState(() {
-      // Stil seçimi kalktı — başlangıç adımı doğrudan selfie/paket adımı
-      // ve sabit tek birim (bkz. _defaultStyleId).
+      // Stil kavramı kaldırıldı — başlangıç adımı doğrudan selfie/paket adımı.
       _stage = _AiStage.package;
       _facePhotos.clear();
-      _styles
-        ..clear()
-        ..add(_defaultStyleId);
+      _activePhotoCount = null;
       _jobData = null;
       _showRejected = false;
       _errorMessage = null;
@@ -776,125 +811,25 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
   }
 
-  void _openStyleSheet(PhotoStyle style) {
-    final selected = _styles.contains(style.id);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            12,
-            20,
-            20 + MediaQuery.of(ctx).padding.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.borderSubtle,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(style.icon, color: AppColors.gold, size: 24),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      style.label,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                style.description,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Bu stilde üretilecek örnek kareler',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                  color: AppColors.textMuted,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 140,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: 3,
-                  separatorBuilder: (_, _) => const SizedBox(width: 10),
-                  itemBuilder: (_, i) => DatingModuleImage(
-                    assetPath: DatingAssetPaths.styleSample(style.id, i + 1),
-                    width: 105,
-                    height: 140,
-                    fallbackIcon: style.icon,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              PrimaryButton(
-                label: selected ? 'Seçimi Kaldır' : 'Bu Stili Seç',
-                onPressed: () {
-                  setState(() {
-                    if (selected) {
-                      _styles.remove(style.id);
-                    } else {
-                      _styles.add(style.id);
-                    }
-                  });
-                  Navigator.pop(ctx);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return ModuleScaffold(
       title: 'AI Dating Fotoğrafı',
       body: switch (_stage) {
-        _AiStage.style => _styleStep(),
         _AiStage.package => _packageStep(),
+        // 25'LİK PAKET DAHA UZUN SÜRER (2026-09-18, kullanıcı kararı):
+        // ipucu metni ve ilerleme süresi foto sayısına göre değişiyor, aksi
+        // halde çubuk 5 dakikada tavana dayanıp kullanıcı takıldığını sanıyor.
         _AiStage.loading => AiLoadingView(
             steps: _loadingSteps,
-            hint: 'Bu işlem genelde 5-6 dakika sürer',
+            hint: _isLongJob
+                ? DatingConfig.longJobNoticeText
+                : 'Bu işlem genelde 5-6 dakika sürer',
             // Sabit süreli değil, geçen gerçek süreye dayalı ilerleme —
-            // 5-6 dakikalık gerçek üretim süresince asla %-sinde donmaz
+            // gerçek üretim süresince asla %-sinde donmaz
             // (bkz. AiLoadingView.continuousProgress dokümantasyonu).
             continuousProgress: true,
-            progressDuration: const Duration(minutes: 5),
+            progressDuration: Duration(minutes: _isLongJob ? 9 : 5),
             progressCeiling: 0.97,
             stepInterval: const Duration(seconds: 14),
           ),
@@ -936,20 +871,21 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     if (!mounted) return;
     // Paketten dönüldü: artık karşılanabiliyorsa gerçek üretimi başlat.
     // Kullanıcının bastığı butonun modu korunur (bkz. _lastMode).
-    if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
+    if (ref.read(packBalanceProvider).canAffordPhotos(_photoCount)) {
       _generate(modelId: 'gpt-image-2', mode: _lastMode);
     }
   }
 
   Widget _teaserStep() {
-    // Seçilen stillerin örnek görsellerinden blurlu bir vitrin oluştur.
+    // Blurlu vitrin: stil kavramı kalktığı için örnekler artık tek bir
+    // temsilî setten geliyor (bkz. DatingAssetPaths.styleSample — varlık
+    // yolları korunuyor, yalnızca seçim sabit).
+    const sampleStyleId = 'elegance';
     final previews = <String>[];
-    for (final id in _styles) {
-      for (int i = 1; i <= 3; i++) {
-        previews.add(DatingAssetPaths.styleSample(id, i));
-      }
+    for (int i = 1; i <= 3; i++) {
+      previews.add(DatingAssetPaths.styleSample(sampleStyleId, i));
     }
-    // Grid'i doldurmak için en az 6 kare (tek stilde 3 örnek → döngüyle tekrar).
+    // Grid'i doldurmak için en az 6 kare (3 örnek → döngüyle tekrar).
     final base = List<String>.from(previews);
     for (int k = 0; previews.length < 6 && base.isNotEmpty; k++) {
       previews.add(base[k % base.length]);
@@ -1034,232 +970,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // Adım 1: mekan/stil seç
-  Widget _styleStep() {
-    return Column(
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 8, 20, 4),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Önce mekân / stil seç',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textPrimary)),
-          ),
-        ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('Fotoğraflarının hangi tarzda olacağını seç.',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-          ),
-        ),
-        // Bakiye/seçim bilgisi: kullanıcı kaç stil üretebileceğini üretimden
-        // ÖNCE net görsün (her stil 1 paket hakkı = photosPerSet foto).
-        // TEKLİ ÜCRETSİZ DENEME KALDIRILDI (2026-09-10, TestFlight test
-        // sürümü) — bkz. dating_providers.dart canAffordStyles aynı
-        // tarihli not.
-        Builder(builder: (_) {
-          final bal = ref.watch(packBalanceProvider).photo;
-          final selected = _styles.length;
-          final tooMany = bal > 0 && selected > bal;
-          final text = bal > 0
-              ? 'Paketinde $bal stil hakkın var · $selected stil seçtin'
-              : 'Devam etmek için paket almalısın';
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: tooMany ? AppColors.error.withValues(alpha: 0.12)
-                    : AppColors.goldSurface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: tooMany ? AppColors.error : AppColors.borderGold,
-                    width: 0.8),
-              ),
-              child: Row(
-                children: [
-                  Icon(tooMany ? Icons.warning_amber_rounded
-                      : Icons.info_outline_rounded,
-                      size: 16,
-                      color: tooMany ? AppColors.error : AppColors.gold),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      tooMany
-                          ? '$bal stil hakkın var, $selected seçtin. $bal stil '
-                              'seç ya da paket al.'
-                          : text,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: tooMany
-                              ? AppColors.error
-                              : AppColors.textSecondary),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.5,
-                children: [
-                  for (final s in PhotoStyle.coreStyles)
-                    GestureDetector(
-                      onTap: () => _openStyleSheet(s),
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: _styles.contains(s.id)
-                              ? AppColors.goldSurface
-                              : AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                              color: _styles.contains(s.id)
-                                  ? AppColors.gold
-                                  : AppColors.borderSubtle,
-                              width: _styles.contains(s.id) ? 1.5 : 1),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(s.icon,
-                                color: _styles.contains(s.id)
-                                    ? AppColors.gold
-                                    : AppColors.textSecondary,
-                                size: 26),
-                            const Spacer(),
-                            Text(s.label,
-                                style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w800,
-                                    color: _styles.contains(s.id)
-                                        ? AppColors.gold
-                                        : AppColors.textPrimary)),
-                            Text(s.description,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.textSecondary)),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              // Stil seçilir seçilmez o stile ait örnek fotoğraflar önizlemesi.
-              _stylePreview(),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-          child: PrimaryButton(
-            label: 'Devam Et',
-            onPressed: _styles.isEmpty
-                ? null
-                : () async {
-                    if (await _ensureCanAfford() && mounted) {
-                      setState(() => _stage = _AiStage.package);
-                    }
-                  },
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Bakiye/ücretsiz hak var mı? Yoksa pakete yönlendirir ve dönüşte tekrar
-  /// bakar. `true` dönerse üretim yolunda ilerlenebilir.
-  ///
-  /// Selfie çekimi BAŞLAMADAN önce çağrılır (bkz. _captureFaceAngles) —
-  /// kullanıcı boşuna selfie çekip en sonda paywall'a çarpmasın diye
-  /// (bkz. kullanıcı talebi: "kredi almadan selfie çekmeye izin verme").
-  Future<bool> _ensureCanAfford() async {
-    if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
-      return true;
-    }
-    await context.push('${DatingRoutes.paywall}?mode=ai_photo');
-    if (!mounted) return false;
-    return ref.read(packBalanceProvider).canAffordStyles(_styles.length);
-  }
-
-  /// Seçilen her stil için örnek fotoğraf önizlemesi. Görseller henüz
-  /// oluşturulmadığı için arkada ikon gösterilir (kullanıcı sonradan
-  /// gerçek örnek fotoğrafları ekleyecek). Stil seçilir seçilmez belirir.
-  Widget _stylePreview() {
-    if (_styles.isEmpty) return const SizedBox.shrink();
-    final selected = PhotoStyle.coreStyles
-        .where((s) => _styles.contains(s.id))
-        .toList();
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 2),
-            child: Text('Örnek fotoğraflar',
-                style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary)),
-          ),
-          const Text('Seçtiğin stilde üretilecek karelerden örnekler.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 12),
-          for (final s in selected) ...[
-            Row(
-              children: [
-                Icon(s.icon, color: AppColors.gold, size: 18),
-                const SizedBox(width: 6),
-                Text(s.label,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.gold)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 96,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: 3,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, i) => DatingModuleImage(
-                  assetPath: DatingAssetPaths.styleSample(s.id, i + 1),
-                  width: 76,
-                  height: 96,
-                  fallbackIcon: s.icon,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-          ],
-        ],
       ),
     );
   }
@@ -1472,18 +1182,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           //   onPressed: () => _generate(modelId: 'gpt-image-2', mode: 'p1400'),
           // ),
           const SizedBox(height: 8),
-          // Stil kategorileri kaldırıldığı için "← Stili değiştir" bağlantısı
-          // da kaldırıldı — artık gidilecek bir stil adımı yok (bkz.
-          // _defaultStyleId). Kategoriler geri gelirse yorumdan çıkarılır.
-          // Center(
-          //   child: TextButton(
-          //     onPressed: _preparing
-          //         ? null
-          //         : () => setState(() => _stage = _AiStage.style),
-          //     child: const Text('← Stili değiştir',
-          //         style: TextStyle(color: AppColors.textSecondary)),
-          //   ),
-          // ),
         ],
       ),
     );
@@ -1731,7 +1429,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         onTap: () async {
           await context.push('${DatingRoutes.paywall}?mode=ai_photo');
           if (!mounted) return;
-          if (ref.read(packBalanceProvider).canAffordStyles(_styles.length)) {
+          if (ref.read(packBalanceProvider).canAffordPhotos(_photoCount)) {
             _generate(modelId: 'gpt-image-2', mode: _lastMode);
           }
         },

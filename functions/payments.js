@@ -16,11 +16,32 @@ const IOS_BUNDLE_ID = "com.voxenai.app";
 // productId -> kredilenecek miktar. dating_constants.dart'taki sabitlerle
 // EL İLE senkron tutulmalı (Dart/Node arasında paylaşılan kaynak yok).
 // Bkz. lib/core/constants/dating_constants.dart
+// Bir ürün BİRDEN ÇOK alana kredi verebilir (2026-09-18): yeni foto
+// paketlerinde HEDİYE ANALİZ var, yani tek satın alma hem photoBalance hem
+// analysisBalance yüklüyor. Eski yapı ürünü tek bir alana eşliyordu ve
+// hediye sessizce yüklenmezdi.
+//
+// photoBalance ARTIK FOTO SAYAR (eskiden "stil/set" sayardı, 1 birim = 10
+// foto). Bkz. falPhotos.photoUnitsFor.
 const PRODUCT_CREDITS = {
-  dating_pack_analysis1: { field: "analysisBalance", amount: 1 },
-  dating_pack_analysis5: { field: "analysisBalance", amount: 5 },
-  dating_pack_photo10: { field: "photoBalance", amount: 1 }, // 1 "set/stil"
-  dating_pack_photo50: { field: "photoBalance", amount: 5 }, // 5 "set/stil"
+  dating_pack_analysis1: { analysisBalance: 1 },
+  dating_pack_analysis5: { analysisBalance: 5 },
+
+  // --- YENİ FOTO PAKETLERİ (2026-09-18) ---
+  // Fiyatlar App Store Connect / Play Console'da tanımlı; kod fiyat bilmez.
+  dating_pack_photos5: { photoBalance: 5 },                        // ₺349
+  dating_pack_photos10: { photoBalance: 10, analysisBalance: 1 },  // ₺449 (+1 hediye)
+  dating_pack_photos25: { photoBalance: 25, analysisBalance: 3 },  // ₺999 (+3 hediye)
+
+  // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
+  // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:
+  //  1) "Satın Alımları Geri Yükle" eski bir makbuzu tekrar sunabilir,
+  //  2) kaldırma anında ödemesi YOLDA olan bir satın alma tamamlanabilir.
+  // Haritadan silinirlerse o kullanıcı "Bilinmeyen ürün" hatası alır ve
+  // parasının karşılığını alamaz. Foto birimine çevrilmiş hâlleriyle
+  // duruyorlar: eskiden 1 birim = 10 foto, 5 birim = 50 foto idi.
+  dating_pack_photo10: { photoBalance: 10 },
+  dating_pack_photo50: { photoBalance: 50 },
 };
 
 function sleep(ms) {
@@ -211,17 +232,24 @@ exports.verifyPurchase = onCall(
         return current;
       }
 
+      // Ürünün TÜM alanları yüklenir (foto + varsa hediye analiz).
       const updated = {
         ...current,
-        [credit.field]: (current[credit.field] || 0) + credit.amount,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
+      for (const [field, amount] of Object.entries(credit)) {
+        updated[field] = (current[field] || 0) + amount;
+      }
       tx.set(walletRef, updated, { merge: true });
       tx.set(processedRef, {
         productId,
         platform,
-        creditedField: credit.field,
-        creditedAmount: credit.amount,
+        // Yüklenen alanların TAMAMI kaydedilir. Eski tekil alanlar
+        // (creditedField/creditedAmount) ops paneli ve geçmiş raporlar için
+        // korunuyor — çok alanlı üründe BİRİNCİ alanı gösterirler.
+        credited: credit,
+        creditedField: Object.keys(credit)[0],
+        creditedAmount: Object.values(credit)[0],
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       return updated;

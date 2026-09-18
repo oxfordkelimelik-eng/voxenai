@@ -232,8 +232,8 @@ class _ModuleMeta {
   static const Map<String, _ModuleMeta> byId = {
     'ai_photo': _ModuleMeta(
       'EN POPÜLER',
-      'Kendi selfie\'lerinden stile özel stüdyo kalitesinde dating fotoğrafları üret.',
-      ['Studio ışık', 'Doğal stil', 'Outdoor'],
+      'Kendi selfie\'lerinden stüdyo kalitesinde dating fotoğrafları üret.',
+      ['Her karede farklı mekân', 'Doğal ışık', 'Outdoor'],
     ),
     'photo_analysis': _ModuleMeta(
       'HIZLI',

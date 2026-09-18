@@ -15,14 +15,15 @@ class DatingConfig {
   // gösterilir; devamını görmek/indirmek için paket satın alınır. AI FOTO
   // ÜRETİMİNDEKİ ücretsiz ilk deneme 2026-09-09'da yorum satırına alındı
   // (bkz. functions/falPhotos.js startPhotoGeneration, dating_providers.dart
-  // canAffordStyles) — foto üretiminde artık baştan paket gerekiyor.
+  // canAffordPhotos) — foto üretiminde artık baştan paket gerekiyor.
   // Yenilenen abonelik yoktur; paket biter, kullanıcı yeniden alır.
   //
   // PAKETLER:
   //   Foto Analizi : Tekli   1 analiz  → ₺99
   //                  Standart 5 analiz  → ₺249
-  //   AI Foto Üretimi : Standart 10 foto (1 stil)  → ₺349 (eski ₺700'den)
-  //                     Premium  50 foto (5 stil)  → ₺999 (eski ₺2000'den)
+  //   AI Foto Üretimi : Başlangıç  5 foto             → ₺349
+  //                     Standart  10 foto + 1 analiz → ₺449
+  //                     Premium   25 foto + 3 analiz → ₺999
   //   Not: yukarıdaki foto üretimi fiyatları mağaza (App Store Connect /
   //   Play Console) tarafında ayarlanır, bu dosyadaki *PriceLabel sabitleri
   //   artık UI'da kullanılmıyor (bkz. aşağıdaki uyarı) — gerçek tahsilat
@@ -30,15 +31,32 @@ class DatingConfig {
   // ============================================================
 
   // --- Üretim birimi ---
-  // Stil başına üretilen foto sayısı. Her foto AYRI bir sahne varyantıdır
-  // (bkz. functions/falPhotos.js STYLE_SCENES — havuzda stil başına 20 varyant
-  // var, 10 fotoya çıkmak tekrarsız çeşitliliği bozmuyor).
-  // functions/falPhotos.js IMAGES_PER_STYLE ile EL İLE senkron tutulmalı.
-  // "10 foto garantisi" (2026-08-16): bir chunk kalite kapısından geçemezse
+  // STİL MANTIĞI KALDIRILDI (2026-09-18, kullanıcı kararı). Artık kullanıcı
+  // stil seçmiyor; paket yalnızca KAÇ FOTO üretileceğini belirliyor ve
+  // şablonlar yalnızca BOY BANDINA (short / middle / tall) göre seçiliyor.
+  //
+  // Bir paket TEK ÜRETİMDE o kadar foto üretir: 10'luk paket iki adet 5'lik
+  // üretim DEĞİLDİR, tek işte 10 fotoğraftır.
+  // functions/falPhotos.js PHOTO_PACK_SIZES ile EL İLE senkron tutulmalı.
+  static const List<int> photoPackSizes = [5, 10, 25];
+
+  // Foto sayısı bunu aşan paketlerde üretim uzun sürer; loader'da kullanıcıya
+  // beklemesi gerektiği açıkça söylenir (bkz. longJobNoticeText).
+  static const int longJobPhotoThreshold = 25;
+  static const String longJobNoticeText =
+      'Bu paket 25 fotoğraf üretiyor — işlem 8-10 dakika sürebilir. '
+      'Uygulamayı açık bırak.';
+
+  // "Foto garantisi" (2026-08-16): bir chunk kalite kapısından geçemezse
   // sunucu FARKLI bir şablonla ta OPENAI_DIRECT_MAX_ATTEMPTS'e (6) kadar
-  // yeniden dener — eksik teslim artık istisna, "7-10 aralık" vaadi
-  // (2026-08-15 denemesi) bu yüzden geri alındı.
-  static const int photosPerSet = 10; // tek üretimde/stilde çıkan foto sayısı
+  // yeniden dener; yine de eksik teslim olursa EKSİK KALAN HER FOTO için hak
+  // iade edilir (bkz. functions/falPhotos.js missingPhotos).
+  //
+  // ESKİ SABİT — yalnızca güncellenmemiş istemcilerle uyum için duruyor:
+  // sunucu `styles` gönderen eski istemcide stil başına bu kadar foto sayar
+  // (bkz. functions/falPhotos.js LEGACY_PHOTOS_PER_STYLE). Yeni akışta
+  // KULLANILMAZ.
+  static const int photosPerSet = 10;
 
   // AI foto üretimi referansları: 3 canlı yüz (ön / sağ / sol).
   //
@@ -74,36 +92,43 @@ class DatingConfig {
   static const String analysisStandardPriceLabel = '₺249';
   static const String analysisStandardProductId = 'dating_pack_analysis5';
 
-  // --- AI Foto Üretimi paketleri ---
-  // NOT (2026-08-12): photosPerSet 10 -> 5 -> tekrar 10 oldu. Ürün ID'leri
-  // ('...photo10' / '...photo50') zaten ESKİDEN 10/50 fotoya göre adlandırılmıştı
-  // ve mağaza kaydına bağlı olduğu için hiç değişmedi — şimdi isimleri gerçek
-  // teslim edilen miktarla yeniden örtüşüyor. Kullanıcıya gösterilen sayı her
-  // zaman photoStandardPhotos / photoPremiumPhotos üzerinden gelir.
-  static const int photoStandardSets = 1; // Standart: 1 stil (10 foto)
-  static const int photoStandardPhotos = photosPerSet * photoStandardSets; // 10
-  static const String photoStandardPriceLabel = '₺349';
-  static const String photoStandardProductId = 'dating_pack_photo10';
+  // --- AI Foto Üretimi paketleri (2026-09-18 yapısı) ---
+  //
+  // ÜÇ PAKET, STİL YOK, HEDİYE ANALİZ VAR:
+  //   Başlangıç :  5 foto              — ₺349
+  //   Standart  : 10 foto + 1 analiz   — ₺449
+  //   Premium   : 25 foto + 3 analiz   — ₺999
+  //
+  // YENİ ÜRÜN ID'LERİ: eski ID'ler ('...photo10' / '...photo50') farklı bir
+  // içeriğe bağlıydı (₺349 = 10 foto, ₺999 = 50 foto). Aynı ID'yi yeni
+  // içerikle yeniden kullanmak, mağazadan gelen eski makbuzların yanlış
+  // kredilenmesine yol açardı; bu yüzden üç YENİ ID tanımlandı. Eski ID'ler
+  // sunucuda hâlâ TANINIYOR (geri yükleme + yolda olan ödeme için) —
+  // bkz. functions/payments.js PRODUCT_CREDITS.
+  //
+  // Mağaza kaydı (App Store Connect + Play Console) kullanıcı tarafından
+  // yapılır; kod fiyatı doğrulayamaz, fiyat HER ZAMAN mağazadan gelir.
+  static const int photoStarterPhotos = 5;
+  static const int photoStarterGiftAnalyses = 0;
+  static const String photoStarterPriceLabel = '₺349';
+  static const String photoStarterProductId = 'dating_pack_photos5';
 
-  static const int photoPremiumSets = 5; // Premium: 5 stil (50 foto)
-  static const int photoPremiumPhotos = photosPerSet * photoPremiumSets; // 50
+  static const int photoStandardPhotos = 10;
+  static const int photoStandardGiftAnalyses = 1;
+  static const String photoStandardPriceLabel = '₺449';
+  static const String photoStandardProductId = 'dating_pack_photos10';
+
+  static const int photoPremiumPhotos = 25;
+  static const int photoPremiumGiftAnalyses = 3;
   static const String photoPremiumPriceLabel = '₺999';
-  static const String photoPremiumProductId = 'dating_pack_photo50';
+  static const String photoPremiumProductId = 'dating_pack_photos25';
 
-  // --- "Eski fiyattan indirim" gösterimi için SADECE görsel referans ---
-  // UYARI: Bunlar GERÇEK tahsilat değildir, hiçbir satın alma akışında
-  // kullanılmaz. Yalnızca paywall/vitrin kartlarında üstü çizili "eski
-  // fiyat" olarak gösterilir; gerçek fiyat HER ZAMAN datingStorePrice() ile
-  // mağazadan gelir (bkz. dating_providers.dart:24-38 uyarısı). Mağazadaki
-  // gerçek fiyat kademesi (₺349 / ₺999) kullanıcı tarafından App Store
-  // Connect + Play Console'da ayarlanır — kod bunu doğrulayamaz.
-  static const String photoStandardOldPriceLabel = '₺700';
-  static const int photoStandardOldPriceTl = 700;
-  static const int photoStandardNewPriceTargetTl = 349;
-
-  static const String photoPremiumOldPriceLabel = '₺2000';
-  static const int photoPremiumOldPriceTl = 2000;
-  static const int photoPremiumNewPriceTargetTl = 999;
+  // FOTO PAKETLERİNİN "ESKİ FİYAT" SABİTLERİ KALDIRILDI (2026-09-18).
+  // Paket içerikleri değişti (₺349 eskiden 10 fotoydu, artık 5); eski
+  // rakamları üstü çizili "indirim" olarak göstermek yanıltıcı olurdu ve
+  // App Store bunu "yanıltıcı fiyat" gerekçesiyle reddedebilir. Paywall ve
+  // vitrin kartları artık foto paketlerinde indirim rozeti göstermiyor.
+  // discountPercent yardımcısı duruyor — analiz paketleri için kullanılabilir.
 
   /// Eski/hedef TL'den yüzde indirim hesaplar — mağaza fiyat string'i
   /// PARSE EDİLMEZ (format riski, "$4.99"/"₺249,00" gibi yerel biçimler
@@ -124,13 +149,16 @@ class DatingConfig {
   static const String supportEmail = 'destek@voxenai.com.tr';
 }
 
-/// AI foto üretimi stilleri (Bölüm 6.3 — çekirdek 5 stil)
+/// ARTIK ARAYÜZDE KULLANILMIYOR (2026-09-18): stil seçimi tamamen kaldırıldı,
+/// kullanıcı yalnızca paket (foto sayısı) seçiyor ve şablonlar boy bandına
+/// göre geliyor. Bu sınıf SİLİNMEDİ çünkü sunucudaki sahne havuzu
+/// (functions/falPhotos.js STYLE_SCENES) sahneleri hâlâ bu kategori adları
+/// altında gruplu tutuyor — okunabilirlik için. Buraya yeni bir şey eklemek
+/// artık arayüzde hiçbir şey değiştirmez.
 ///
 /// NOT: Eskiden 7 stildi. "Old Money" ayrı bir seçenek olmaktan çıkarıldı —
 /// o estetiğin taban fotoğrafları artık "elegance" ile aynı Storage
-/// klasörüne (dating_templates/elegance/) yükleniyor, ayrı stil olarak
-/// SUNULMUYOR. "Beach Body" tamamen kaldırıldı. Storage'daki taban fotoğraf
-/// klasör sayısı da buna göre 7'den 5'e düştü.
+/// klasörüne yükleniyordu. "Beach Body" tamamen kaldırıldı.
 class PhotoStyle {
   final String id;
   final String label;

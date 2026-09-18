@@ -165,16 +165,30 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                     if (_showAiPhoto) ...[
                       const _SectionLabel('AI DATING FOTOĞRAFI'),
                       const SizedBox(height: 10),
+                      // ÜÇ PAKET, STİL YOK (2026-09-18). Üstü çizili "eski
+                      // fiyat" GÖSTERİLMİYOR: paketlerin içeriği değişti
+                      // (₺349 eskiden 10 fotoydu, artık 5), eski rakamı
+                      // indirim gibi göstermek yanıltıcı olur ve App Store
+                      // bunu "yanıltıcı fiyat" olarak reddedebilir.
+                      _PackCard(
+                        icon: Icons.auto_awesome,
+                        title: 'Başlangıç Paketi',
+                        sub: '${DatingConfig.photoStarterPhotos} fotoğraf',
+                        price: _price(DatingConfig.photoStarterProductId),
+                        busy: _busyProductId ==
+                            DatingConfig.photoStarterProductId,
+                        onTap: _busy
+                            ? null
+                            : () => _buy(DatingConfig.photoStarterProductId),
+                      ),
+                      const SizedBox(height: 10),
                       _PackCard(
                         icon: Icons.auto_awesome,
                         title: 'Standart Paket',
-                        sub:
-                            '${DatingConfig.photoStandardPhotos} fotoğraf · 1 stil',
+                        sub: '${DatingConfig.photoStandardPhotos} fotoğraf'
+                            ' + ${DatingConfig.photoStandardGiftAnalyses}'
+                            ' analiz hediye',
                         price: _price(DatingConfig.photoStandardProductId),
-                        oldPriceLabel:
-                            DatingConfig.photoStandardOldPriceLabel,
-                        discountPercentLabel:
-                            '%${DatingConfig.discountPercent(DatingConfig.photoStandardOldPriceTl, DatingConfig.photoStandardNewPriceTargetTl)}',
                         busy: _busyProductId ==
                             DatingConfig.photoStandardProductId,
                         onTap: _busy
@@ -185,12 +199,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                       _PackCard(
                         icon: Icons.auto_awesome,
                         title: 'Premium Paket',
-                        sub:
-                            '${DatingConfig.photoPremiumPhotos} fotoğraf · 5 farklı stil',
+                        sub: '${DatingConfig.photoPremiumPhotos} fotoğraf'
+                            ' + ${DatingConfig.photoPremiumGiftAnalyses}'
+                            ' analiz hediye',
                         price: _price(DatingConfig.photoPremiumProductId),
-                        oldPriceLabel: DatingConfig.photoPremiumOldPriceLabel,
-                        discountPercentLabel:
-                            '%${DatingConfig.discountPercent(DatingConfig.photoPremiumOldPriceTl, DatingConfig.photoPremiumNewPriceTargetTl)}',
                         badge: 'EN İYİ DEĞER',
                         busy: _busyProductId ==
                             DatingConfig.photoPremiumProductId,

@@ -6,8 +6,14 @@
 /// yönetiliyor — hem satış listesi hem günlük kartlar hem iş listesi
 /// aynı ismi kullanır.
 String opsProductLabel(String? productId) => switch (productId) {
-      'dating_pack_photo10' => 'AI Dating Foto Üretimi (10\'luk)',
-      'dating_pack_photo50' => 'AI Dating Foto Üretimi (50\'lik)',
+      // Güncel paketler (2026-09-18).
+      'dating_pack_photos5' => 'AI Foto Başlangıç (5)',
+      'dating_pack_photos10' => 'AI Foto Standart (10 + 1 analiz)',
+      'dating_pack_photos25' => 'AI Foto Premium (25 + 3 analiz)',
+      // Eski paketler — geçmiş raporlarda hâlâ görünüyorlar, bu yüzden
+      // etiketleri korunuyor (bkz. functions/payments.js PRODUCT_CREDITS).
+      'dating_pack_photo10' => 'AI Foto (eski 10\'luk)',
+      'dating_pack_photo50' => 'AI Foto (eski 50\'lik)',
       'dating_pack_analysis1' => 'Foto Analizi (Tekli)',
       'dating_pack_analysis5' => 'Foto Analizi (5\'li)',
       null => 'Bilinmiyor',

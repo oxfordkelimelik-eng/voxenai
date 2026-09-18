@@ -35,6 +35,7 @@ class DatingPurchaseService {
   static const Set<String> productIds = {
     DatingConfig.analysisSingleProductId,
     DatingConfig.analysisStandardProductId,
+    DatingConfig.photoStarterProductId,
     DatingConfig.photoStandardProductId,
     DatingConfig.photoPremiumProductId,
   };

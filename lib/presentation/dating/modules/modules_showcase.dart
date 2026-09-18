@@ -21,7 +21,7 @@ class ModulesShowcaseScreen extends ConsumerStatefulWidget {
       _ModulesShowcaseScreenState();
 }
 
-enum _PackKind { analysis1, analysis5, photo10, photo50 }
+enum _PackKind { analysis1, analysis5, photoStarter, photoStandard, photoPremium }
 
 class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   final _pageController = PageController();
@@ -34,7 +34,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
       DatingAssetPaths.showcaseSlide1,
       Icons.auto_awesome,
       'Stüdyo kalitesinde dating fotoğrafları',
-      'Stilini seç, AI yüzünü koruyarak yeni kareler üretsin.'
+      'Birkaç selfie yükle, AI yüzünü koruyarak yeni kareler üretsin.'
     ),
     (
       DatingAssetPaths.showcaseSlide2,
@@ -96,8 +96,9 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
     final productId = switch (kind) {
       _PackKind.analysis1 => DatingConfig.analysisSingleProductId,
       _PackKind.analysis5 => DatingConfig.analysisStandardProductId,
-      _PackKind.photo10 => DatingConfig.photoStandardProductId,
-      _PackKind.photo50 => DatingConfig.photoPremiumProductId,
+      _PackKind.photoStarter => DatingConfig.photoStarterProductId,
+      _PackKind.photoStandard => DatingConfig.photoStandardProductId,
+      _PackKind.photoPremium => DatingConfig.photoPremiumProductId,
     };
     // Bu ekran GİRİŞSİZ gezilebiliyor; mağaza akışı başlamadan önce giriş şart
     // (bkz. purchase_auth_gate.dart — 2026-08-19 App Store 2.1(b) reddi).
@@ -321,9 +322,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             'Canlı yüz çekimi yeter. AI yüzünü koruyarak '
                             'seçtiğin mekân ve tarzda profesyonel fotoğraflar üretir.',
                         bullets: [
-                          'Stile özel arka plan',
+                          'Her fotoğrafta farklı mekân ve kadraj',
                           'Yüzünü koruyan gerçekçi sonuç',
-                          '${DatingConfig.photoStandardPhotos} veya '
+                          '${DatingConfig.photoStarterPhotos}, '
+                              '${DatingConfig.photoStandardPhotos} veya '
                               '${DatingConfig.photoPremiumPhotos} fotoğraf paketleri',
                         ],
                       ),
@@ -392,20 +394,33 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
+                          // Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paket
+                          // içerikleri değişti (₺349 eskiden 10 fotoydu,
+                          // artık 5), eski rakamı indirim gibi göstermek
+                          // yanıltıcı olur (App Store "yanıltıcı fiyat").
+                          Expanded(
+                            child: _PriceRow(
+                              icon: Icons.auto_awesome,
+                              title: 'AI Foto Başlangıç',
+                              sub:
+                                  '${DatingConfig.photoStarterPhotos} fotoğraf',
+                              price:
+                                  _price(DatingConfig.photoStarterProductId),
+                              busy: _busy,
+                              onTap: () => _buy(_PackKind.photoStarter),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                           Expanded(
                             child: _PriceRow(
                               icon: Icons.auto_awesome,
                               title: 'AI Foto Standart',
                               sub:
-                                  '${DatingConfig.photoStandardPhotos} foto · 1 stil',
+                                  '${DatingConfig.photoStandardPhotos} foto + ${DatingConfig.photoStandardGiftAnalyses} analiz',
                               price:
                                   _price(DatingConfig.photoStandardProductId),
                               busy: _busy,
-                              onTap: () => _buy(_PackKind.photo10),
-                              oldPriceLabel:
-                                  DatingConfig.photoStandardOldPriceLabel,
-                              discountPercentLabel:
-                                  '%${DatingConfig.discountPercent(DatingConfig.photoStandardOldPriceTl, DatingConfig.photoStandardNewPriceTargetTl)}',
+                              onTap: () => _buy(_PackKind.photoStandard),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -414,15 +429,11 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.workspace_premium_rounded,
                               title: 'AI Foto Premium',
                               sub:
-                                  '${DatingConfig.photoPremiumPhotos} foto · 5 stil',
+                                  '${DatingConfig.photoPremiumPhotos} foto + ${DatingConfig.photoPremiumGiftAnalyses} analiz',
                               price:
                                   _price(DatingConfig.photoPremiumProductId),
                               busy: _busy,
-                              onTap: () => _buy(_PackKind.photo50),
-                              oldPriceLabel:
-                                  DatingConfig.photoPremiumOldPriceLabel,
-                              discountPercentLabel:
-                                  '%${DatingConfig.discountPercent(DatingConfig.photoPremiumOldPriceTl, DatingConfig.photoPremiumNewPriceTargetTl)}',
+                              onTap: () => _buy(_PackKind.photoPremium),
                             ),
                           ),
                         ],

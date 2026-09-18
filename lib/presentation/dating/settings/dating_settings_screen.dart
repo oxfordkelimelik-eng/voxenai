@@ -69,13 +69,13 @@ class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
           _section('SATIN ALMALAR'),
           _tile(Icons.workspace_premium_outlined, 'Paket Bakiyem',
               // TEKLİ ÜCRETSİZ DENEME KALDIRILDI (2026-09-10, TestFlight
-              // test sürümü) — bkz. dating_providers.dart canAffordStyles
+              // test sürümü) — bkz. dating_providers.dart canAffordPhotos
               // aynı tarihli not.
               subtitle: (pack.photo > 0 || pack.analysis > 0)
-                  ? '${pack.photo} stil · ${pack.analysis} analiz kaldı'
+                  ? '${pack.photo} fotoğraf · ${pack.analysis} analiz kaldı'
                   : 'Paket yok — devam etmek için paket al',
               onTap: () => _info(context, 'Paket Bakiyem',
-                  'AI foto üretimi: ${pack.photo} stil hakkı\nFotoğraf analizi: ${pack.analysis} analiz hakkı\n\nAbonelik yoktur; ihtiyacın kadar tek seferlik paket alırsın.')),
+                  'AI foto üretimi: ${pack.photo} fotoğraf hakkı\nFotoğraf analizi: ${pack.analysis} analiz hakkı\n\nAbonelik yoktur; ihtiyacın kadar tek seferlik paket alırsın.')),
           _tile(Icons.shopping_bag_outlined, 'Paket Al',
               onTap: () => context.push(DatingRoutes.paywall)),
           _tile(Icons.restore_rounded, 'Satın Alımları Geri Yükle',
@@ -137,17 +137,9 @@ class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'Grafik ve istatistikler temsilidir; kesin ölçüm değildir.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, color: AppColors.textMuted),
-              ),
-            ),
-          ),
+          // "Grafik ve istatistikler temsilidir" satırı KALDIRILDI
+          // (2026-09-18, kullanıcı kararı). Aynı ifade gizlilik politikası
+          // metninde (_privacyText) duruyor — orası hukuki metin, silinmedi.
         ],
       ),
     );
