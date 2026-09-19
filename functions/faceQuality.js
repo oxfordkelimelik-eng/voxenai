@@ -682,6 +682,14 @@ const OUTPUT_FACE_RATIO_MAX = 0.45;
 // ölçülüp kodda karşılaştırılıyor (bkz. VISION_HEAD_SPAN_DROP_MAX).
 const OUTPUT_FACE_GROWTH_MAX = 1.25;
 
+// Göreceli büyümenin YANINDA aranan MUTLAK taban (2026-09-19). Gerekçe ve
+// ölçüm: assessOutputFace içindeki 2b maddesi. Özet: "büyüme" çoğu zaman
+// şablon tespitindeki varyansı ölçüyor; kabul edilen karelerin yüzOranı
+// bandı (p95=0.232, maks=0.315) reddedilenlerle (0.172-0.26) ÖRTÜŞÜYOR.
+// Bir kare, kendisinden büyük kafaların rutin olarak kabul edildiği bir
+// bantta "kafa büyümüş" diye elenemez.
+const OUTPUT_FACE_GROWTH_MIN_RATIO = 0.28;
+
 // Bu derecenin üstünde kafa yana dönüktür ve kimlik mesafesi güvenilmez
 // sayılır (bkz. profileDegreeFromLandmarks). 0.45, gerçek ölçümde önden
 // karelerin oluşturduğu dar kümenin (maks 0.32) üstünde, profil karelerin
@@ -798,9 +806,33 @@ async function assessOutputFace(buf, refDescriptor, templateFaceRatio = null) {
   }
   // 2b) Şablona göre büyüme: model kafayı büyüttü mü? Sabit eşikten farkı,
   // kadrajdan bağımsız olması (bkz. OUTPUT_FACE_GROWTH_MAX).
+  //
+  // İKİ KOŞUL BİRDEN ARANIR (2026-09-19): göreceli büyüme TEK BAŞINA yeterli
+  // değil, çıktının yüzü MUTLAK olarak da büyük olmalı.
+  //
+  // NEDEN: bu dosyanın kendi notu (bkz. OUTPUT_FACE_GROWTH_MAX başlığı) zaten
+  // söylüyordu — "yüksek büyüme kafanın büyümesinden değil, ŞABLONUN yüzünün
+  // küçük tespit edilmesinden geliyor". 4 günlük gerçek üretim bunu ölçtü:
+  //
+  //   GEÇEN 485 kare : yüzOranı min=0.127 p50=0.168 p95=0.232 maks=0.315
+  //   head-grew ile REDDEDİLEN 11 kare: 0.172 0.175 0.180 0.180 0.189 0.195
+  //                                     0.201 0.234 0.251 0.260 0.322
+  //
+  // Yani reddedilen 11 karenin 10'u, YÜZLERCE kabul edilmiş karenin tam
+  // içinde kaldığı bir bantta. Geçen karelerin 91'inin yüzOranı 0.19'un
+  // ÜSTÜNDE — reddedilen 0.195'ten büyük. Aynı işte (7ba606d0) chunk4
+  // yüzOranı=0.210 ile KABUL edilirken chunk7 yüzOranı=0.195 ile REDDEDİLDİ:
+  // daha BÜYÜK kafalı kare geçti, küçüğü elendi. Fark kareden değil
+  // şablondan geliyordu. Kullanıcı da o karede gözle büyüme olmadığını
+  // doğruladı.
+  //
+  // MUTLAK TABAN 0.28: geçen dağılımın p95'inin (0.232) belirgin üstünde,
+  // ama tek gerçek aykırının (yüzOranı=0.322, büyüme=2.17) altında. Yani
+  // bugünkü yanlış pozitiflerin 10'unu birden kaldırır, bariz büyütmeyi
+  // yakalamaya devam eder. Eşiği DÜŞÜRMEDEN önce bu dağılımı yeniden ölç.
   if (templateFaceRatio && templateFaceRatio > 0) {
     const growth = faceRatio / templateFaceRatio;
-    if (growth > OUTPUT_FACE_GROWTH_MAX) {
+    if (growth > OUTPUT_FACE_GROWTH_MAX && faceRatio > OUTPUT_FACE_GROWTH_MIN_RATIO) {
       return { ok: false, distance, faceRatio, blurScore, reason: "head-grew", growth, profileDegree: db.profileDegree };
     }
   }
@@ -976,6 +1008,24 @@ function isSkinLike(r, g, b) {
   const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
   const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
   return y > 60 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
+}
+
+/**
+ * isSkinLike'ın LUMA TABANI OLMAYAN hâli — renk (cb/cr) şartı aynı.
+ *
+ * NEDEN (2026-09-19, ölçümle): isSkinLike'ın `y > 60` tabanı, koyu tenin
+ * GÖLGELİ kısımlarını ten saymıyor. Şikâyet edilen karede kol piksellerinin
+ * yalnızca %72-75'i isSkinLike'tan geçiyordu; kalan %25 hiç boyanmadan
+ * kalıyor ve kol gözle hâlâ şablonun teninde görünüyordu.
+ *
+ * YALNIZCA ton düzeltmesinin tam çözünürlük kapısında kullanılır ve orada
+ * "bileşenin ölçülen tonundan daha koyu olmak" şartıyla birlikte aranır —
+ * tek başına kullanılırsa koyu arka planı da ten sayar.
+ */
+function isSkinHueIgnoringLuma(r, g, b) {
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
 }
 
 // Ortalama DEĞİL medyan: tek bir parlak yansıma ya da koyu gölge ortalamayı
@@ -1522,16 +1572,34 @@ async function correctLimbChroma(outputBuf, templateBuf, refSkinTone) {
 
 // Tam eşitleme YAPILMAZ: gerçek insanlarda el, güneş yüzünden yüzden bir tık
 // koyudur; birebir eşitlemek yapay okunur ve elin hacmini yassılaştırır.
-const HAND_FIX_STRENGTH = 0.75;
-// Kaymanın mutlak tavanı (L* birimi). 20.6'lık uç vakada bile elin kendi
-// gölge/parlama dokusu korunur — tüm bileşene AYNI sabit kayma uygulanır,
+//
+// 0.75 -> 0.88 (2026-09-19): "bir tık koyu" payı, GERÇEK kusurun yanında
+// çok büyük kalıyordu. Şikâyet edilen karede fark 10.6 L* idi; 0.75 bunun
+// 2.65'ini olduğu gibi bırakıyor ve şablonun teni hâlâ okunuyordu. 0.88
+// payı ~1.3'e indiriyor — doğal el/yüz farkı mertebesinde, ama şablonun
+// tenini taşımıyor. 1.0 YAPILMADI: birebir eşitleme elin hacmini düzleştirir.
+const HAND_FIX_STRENGTH = 0.88;
+// Kaymanın mutlak tavanı (L* birimi). Uç vakada bile elin kendi gölge/
+// parlama dokusu korunur — tüm bileşene AYNI sabit kayma uygulanır,
 // yeniden ölçekleme yapılmaz.
-const HAND_FIX_MAX_SHIFT_L = 14;
+//
+// 14 -> 20 (2026-09-19, ölçümle): tavan gerçek üretimde SÜREKLİ dayanıyordu
+// ve düzeltmeyi yarım bırakıyordu. Tek işte (7ba606d0) dört kare tavana
+// çarptı ve kalan fark gözle görünür kaldı:
+//   19.2 -> 5.2   19.5 -> 5.5   20.1 -> 6.1   21.5 -> 7.5   (hepsi kayma=14.0)
+// Kullanıcı tam bu karelerde "kollar şablonun teni gibi kalmış" dedi.
+const HAND_FIX_MAX_SHIFT_L = 20;
 const HAND_FIX_MAX_SHIFT_AB = 8;
 // Bundan küçük fark gözle görünmez (temiz karede ölçülen 1.3 idi).
 const HAND_FIX_MIN_DELTA_L = 3;
 // Kutu içinde bundan az ten pikseli varsa medyan gürültüdür.
 const HAND_FIX_MIN_COMPONENT_PX = 120;
+
+
+
+
+// (HAND_FIX_TONE_NEAR_MAX kaldırıldı — ton-yakınlığı fazla genişti, yerine
+// luma-tabansız ten HUE kontrolü kullanılıyor: isSkinHueIgnoringLuma.)
 // Bir kutunun ten maskesi kutunun bu oranını aşarsa kutu ele değil düz bir
 // yüzeye (kum/duvar) oturmuştur — o kutu ATLANIR.
 //
@@ -1565,17 +1633,34 @@ const HAND_FIX_MAX_BOX_FILL = 0.98;
 // çünkü 0.85 GERÇEK elleri eliyordu (iyi nişan almış el kutusu zaten
 // neredeyse tamamen tendir). Yani doluluk eli kumaştan ayırmıyor.
 //
-// AYIRAN ÖLÇÜ: BİLEŞENİN YÜZE GÖRE BÜYÜKLÜĞÜ. İnsan eli kabaca yüz
-// büyüklüğündedir; el+önkol en fazla iki katı. Gövde/gömleğin görünen
-// alanı ise yüzün 6-12 katıdır. Ölçek bağımsız olduğu için kadraj
-// değiştiğinde de geçerli kalır.
-const HAND_FIX_MAX_COMPONENT_VS_FACE = 2.5;
-// Tüm kutuların toplamı için de tavan: iki el + iki önkol bile bunu aşmaz.
-const HAND_FIX_MAX_TOTAL_VS_FACE = 5.0;
-// Bileşen kutunun DÖRT kenarından bu kadarına değiyorsa kutuyu baştan sona
-// dolduruyor demektir — el kutuya sığar, kumaş sığmaz (bileğin girdiği bir
-// kenar, karşıdan çıktığı ikinci kenar normaldir; üçü artık yüzeydir).
-const HAND_FIX_MAX_BORDERS_TOUCHED = 2;
+// BOYUT ÖLÇÜSÜ DENENDİ VE ÖLÇÜMLE ÇÜRÜDÜ (2026-09-19) — TEKRAR DENEME.
+//
+// 2026-09-18'de "bileşen yüz alanının 2.5 katını aşarsa kumaştır" kuralı
+// eklenmişti; varsayım "insan eli kabaca yüz büyüklüğündedir" idi. Gerçek
+// üretim karelerinde ölçüldü ve YANLIŞ çıktı — bu kutular eli değil KOLU
+// kapsıyor ve face-api'nin yüz kutusu çok dar:
+//
+//   kare    yüzAlanı   uzuv bileşeni      yüze oranı
+//   chunk1  2760px     42778px            15.5x
+//   chunk2  1254px     21369px            17.0x
+//   chunk8  2446px     60909px            24.9x
+//   chunk9  1828px     35320px            19.3x
+//
+// 9 karenin 7'sinde düzeltme TAMAMEN atlanırdı; yani kural, düzeltmeyi
+// öldürüp kullanıcının asıl şikâyetini (kollar şablonun teninde kalıyor)
+// büyütürdü. Boyut, eli kumaştan AYIRMIYOR.
+//
+// AYIRAN ÖLÇÜ: a* (KIRMIZILIK), YÜZE GÖRE. Aynı kişinin kolu yüzüyle aynı
+// renk ailesindedir — kusur AÇIKLIKTA (L*), hue'da değil. Ahşap/hasır/duvar
+// ise belirgin daha az kırmızıdır. Aynı karelerde ölçüldü:
+//
+//   GERÇEK UZUV  : da(yüz−bileşen) = 1.4 / 1.7 / 0.6 / -0.3 / 0.0
+//   YÜZEY        : da              = 3.6 (hasır) / 5.0 (ahşap) / 13.5 (duvar)
+//                                    10.5 (beyaz tişört)
+//
+// 3.0 bu iki kümenin arasına düşüyor. Siyah gömlek zaten isSkinLike'tan
+// hiç geçmiyor (ölçüldü: %0), yani o bölge bu katmana en baştan girmiyor.
+const HAND_FIX_MAX_A_BELOW_FACE = 3.0;
 
 /**
  * Verilen el/önkol kutularındaki ten tonunu çıktının KENDİ yüz tonuna çeker.
@@ -1671,27 +1756,24 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
       }
       if (!best || bestSize < HAND_FIX_MIN_COMPONENT_PX) continue;
 
-      // 2b) KUMAŞ KORUMASI — bkz. HAND_FIX_MAX_COMPONENT_VS_FACE başlığı.
-      //     Bileşen yüze göre bir elden çok daha büyükse, ya da kutuyu
-      //     kenardan kenara dolduruyorsa bu bir el değil bir YÜZEY'dir
-      //     (gömlek, gövde, duvar). Boyamak kareyi bozar.
-      if (bestSize > faceArea * HAND_FIX_MAX_COMPONENT_VS_FACE) {
-        skippedFabric++;
-        continue;
+      // 2b) KUMAŞ KORUMASI — bkz. HAND_FIX_MAX_A_BELOW_FACE başlığı.
+      //
+      // Bileşenin KENDİ a* medyanı yüzünkinden belirgin DÜŞÜKSE bu bir uzuv
+      // değil bir yüzeydir (ahşap, hasır, duvar, açık renk kumaş). Aynı
+      // kişinin kolu yüzüyle aynı renk ailesindedir; kusur açıklıktadır.
+      //
+      // Örnek YALNIZCA gerçek ten piksellerinden alınır (morfolojiyle
+      // eklenen dolgu pikselleri tonu kirletmesin) — 3. adımdaki örnekleme
+      // ile aynı kural.
+      const compA = [];
+      for (const i of best) {
+        if (!local[i]) continue;
+        const o = i * 3;
+        compA.push(rgbToLab(px.data[o], px.data[o + 1], px.data[o + 2])[1]);
       }
-      let borders = 0;
-      {
-        let l = false, r = false, t = false, bo = false;
-        for (const i of best) {
-          const x = i % W, y = (i / W) | 0;
-          if (x === bx0) l = true;
-          else if (x === bx1 - 1) r = true;
-          if (y === by0) t = true;
-          else if (y === by1 - 1) bo = true;
-        }
-        borders = (l ? 1 : 0) + (r ? 1 : 0) + (t ? 1 : 0) + (bo ? 1 : 0);
-      }
-      if (borders > HAND_FIX_MAX_BORDERS_TOUCHED) {
+      if (compA.length < HAND_FIX_MIN_COMPONENT_PX) continue;
+      const compAMed = medianOf(compA);
+      if (faceTone[1] - compAMed > HAND_FIX_MAX_A_BELOW_FACE) {
         skippedFabric++;
         continue;
       }
@@ -1712,12 +1794,6 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
 
     if (!boxesFixed || sampleL.length < HAND_FIX_MIN_COMPONENT_PX) {
       return skip(skippedFabric ? "fabric-only" : "no-hand-skin", { skippedFabric });
-    }
-    // TOPLAM TAVAN: kutular tek tek geçse bile birlikte bir elden fazlasını
-    // kapsıyorsa düzeltme yapılmaz. Tek bir kutunun kaçırdığı durumda bile
-    // kare bozulmasın diye ikinci bir emniyet.
-    if (selectedCount > faceArea * HAND_FIX_MAX_TOTAL_VS_FACE) {
-      return skip("area-too-large", { skippedFabric, areaVsFace: selectedCount / faceArea });
     }
 
     const handL = medianOf(sampleL);
@@ -1746,20 +1822,45 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
       .raw().toBuffer({ resolveWithObject: true });
     const mc = mInfo.channels;
 
+    // Bileşenin ÖLÇÜLEN tonu — tam çözünürlükteki kapı buna göre kurulur.
+    const compLab = [handL, medianOf(sampleA), medianOf(sampleB)];
+
     const { data, info } = await sharp(outputBuf).removeAlpha()
       .raw().toBuffer({ resolveWithObject: true });
+    let painted = 0, skippedByGate = 0;
     for (let i = 0; i < info.width * info.height; i++) {
       const alpha = maskFull[i * mc] / 255;
       if (alpha <= 0.004) continue;
       const o = i * 3;
-      // Tam çözünürlükte de ten şartı aranır: maskenin yumuşatılmış kenarı
-      // tırnağa/arka plana taşsa bile onları boyamayız.
-      if (!isSkinLike(data[o], data[o + 1], data[o + 2])) continue;
       const lab = rgbToLab(data[o], data[o + 1], data[o + 2]);
+      // TAM ÇÖZÜNÜRLÜK KAPISI: isSkinLike TEK BAŞINA YETMİYORDU (2026-09-19).
+      //
+      // Buradaki eski kural yalnızca isSkinLike'tı ve maskenin kenarının
+      // tırnağa/arka plana taşmasını engellemek için konmuştu. Ama
+      // isSkinLike'ın `y > 60` luma tabanı, KOYU tenin gölgeli kısımlarını
+      // da eliyor: şikâyet edilen karede kol piksellerinin yalnızca
+      // %72-75'i bu kapıdan geçiyordu. Yani düzeltme, kolun açık
+      // kısımlarını aydınlatıp KOYU kısımlarını olduğu gibi bırakıyordu —
+      // "UYGULANDI" logu gerçek ama kol gözle hâlâ şablonun teninde.
+      //
+      // YENİ KURAL — HEDEFLİ: yalnızca LUMA TABANI gevşetilir, renk
+      // (cb/cr) şartı aynen korunur. Yani "aynı ten renginde ama gölgede
+      // kaldığı için karanlık" piksel içeri girer; farklı RENKTEKİ hiçbir
+      // piksel girmez. Tümden ton-yakınlığına açmak (labDistance) denendi
+      // ve fazla genişti — hue kayması olan komşu yüzeyleri de alıyordu.
+      //
+      // Ek emniyet: gevşetme yalnızca bileşenin ölçülen tonundan DAHA KOYU
+      // pikseller için geçerli. Daha açık bir piksel gölge değildir.
+      if (!isSkinLike(data[o], data[o + 1], data[o + 2])
+          && !(lab[0] < compLab[0] && isSkinHueIgnoringLuma(data[o], data[o + 1], data[o + 2]))) {
+        skippedByGate++;
+        continue;
+      }
       let L = lab[0] + shiftL * alpha;
       if (L < 0) L = 0; else if (L > 100) L = 100;
       const [r, g, bb] = labToRgb(L, lab[1] + shiftA * alpha, lab[2] + shiftB * alpha);
       data[o] = r; data[o + 1] = g; data[o + 2] = bb;
+      painted++;
     }
     const buf = await sharp(data, {
       raw: { width: info.width, height: info.height, channels: 3 },
@@ -1769,6 +1870,9 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
       applied: true, reason: null, buf,
       deltaLBefore, deltaLAfter, shiftL, shiftA, shiftB, boxesFixed,
       skippedFabric, areaVsFace: selectedCount / faceArea,
+      // Boyanan/kapıda elenen piksel oranı: tam çözünürlük kapısının ne
+      // kadar piksel bıraktığını izlemek için (eski kural %25'ini eliyordu).
+      paintedPx: painted, gateSkippedPx: skippedByGate,
     };
   } catch (e) {
     console.error("El tonu düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);

@@ -126,26 +126,80 @@ test("sürüklenme toleransı sert tavanı geçersiz kılamaz (değer kontrolü)
 // seçiliyor ve tüm alan tek bir L* kaymasıyla (ölçülen uç: -14.0) düz bir
 // lekeye dönüyor.
 
-test("kumaş koruması yüze göre ölçüyor (piksel eşiği değil)", () => {
-  assert.match(FQ, /const HAND_FIX_MAX_COMPONENT_VS_FACE = [\d.]+;/);
-  assert.match(FQ, /const HAND_FIX_MAX_TOTAL_VS_FACE = [\d.]+;/);
-  assert.match(FQ, /bestSize > faceArea \* HAND_FIX_MAX_COMPONENT_VS_FACE/);
-  assert.match(FQ, /selectedCount > faceArea \* HAND_FIX_MAX_TOTAL_VS_FACE/);
+// BOYUT ÖLÇÜSÜ GERİ ALINDI (2026-09-19) — GERÇEK ÜRETİMLE ÇÜRÜDÜ.
+//
+// "Bileşen yüz alanının 2.5 katını aşarsa kumaştır" kuralı, gerçek uzuv
+// bileşenlerini eliyordu: ölçülen oranlar 15.5x / 17.0x / 24.9x / 19.3x —
+// çünkü bu kutular eli değil KOLU kapsıyor ve face-api'nin yüz kutusu dar.
+// 9 karenin 7'sinde düzeltme tamamen atlanırdı. Bu test, o kuralın kod
+// olarak geri sızmamasını kilitler.
+test("boyut tabanlı kumaş kuralı geri gelmemiş", () => {
+  assert.doesNotMatch(FQ, /bestSize > faceArea \* HAND_FIX_MAX_COMPONENT_VS_FACE/);
+  assert.doesNotMatch(FQ, /selectedCount > faceArea \* HAND_FIX_MAX_TOTAL_VS_FACE/);
+  assert.doesNotMatch(FQ, /borders > HAND_FIX_MAX_BORDERS_TOUCHED/);
 });
 
-test("kenar-dolduran bileşen (yüzey) atlanıyor", () => {
-  assert.match(FQ, /const HAND_FIX_MAX_BORDERS_TOUCHED = \d+;/);
-  assert.match(FQ, /borders > HAND_FIX_MAX_BORDERS_TOUCHED/);
+// AYIRAN ÖLÇÜ a*: aynı kişinin kolu yüzüyle aynı renk ailesindedir (kusur
+// açıklıkta), ahşap/hasır/duvar ise belirgin daha az kırmızıdır.
+// Ölçülen: gerçek uzuv da<=1.7, yüzey da>=3.6.
+test("kumaş koruması a* (kırmızılık) ile yüzeye göre ölçüyor", () => {
+  assert.match(FQ, /const HAND_FIX_MAX_A_BELOW_FACE = [\d.]+;/);
+  assert.match(FQ, /faceTone\[1\] - compAMed > HAND_FIX_MAX_A_BELOW_FACE/);
 });
 
-// El kabaca yüz büyüklüğündedir; gövde yüzün 6-12 katıdır. Eşik bu aralığın
-// ORTASINDA olmalı: 1'in altına inerse gerçek eller elenir, 5'i geçerse
-// gömlek yine içeri girer.
-test("yüze göre eşikler el ile gövdeyi ayırabilecek aralıkta", () => {
-  const perBox = Number(/const HAND_FIX_MAX_COMPONENT_VS_FACE = ([\d.]+);/.exec(FQ)[1]);
-  const total = Number(/const HAND_FIX_MAX_TOTAL_VS_FACE = ([\d.]+);/.exec(FQ)[1]);
-  assert.ok(perBox >= 1.5 && perBox <= 4, `kutu başı eşik ${perBox} aralık dışı`);
-  assert.ok(total >= perBox && total <= 8, `toplam eşik ${total} aralık dışı`);
+test("a* eşiği ölçülen iki kümenin ARASINDA", () => {
+  const v = Number(/const HAND_FIX_MAX_A_BELOW_FACE = ([\d.]+);/.exec(FQ)[1]);
+  // Gerçek uzuvların en kötüsü 1.7, yüzeylerin en iyisi 3.6 — eşik bu ikisinin
+  // arasında kalmalı, yoksa ya gerçek kolu eler ya kumaşı içeri alır.
+  assert.ok(v > 1.7 && v < 3.6, `a* eşiği ${v} iki kümenin arasında değil`);
+});
+
+// Tam çözünürlük kapısı: isSkinLike TEK BAŞINA kalmamalı — luma tabanı
+// (y>60) koyu tenin gölgeli kısmını eliyordu ve kol piksellerinin %25'i
+// hiç boyanmadan kalıyordu.
+test("tam çözünürlük kapısı gölgeli teni de kabul ediyor", () => {
+  assert.match(FQ, /function isSkinHueIgnoringLuma/);
+  assert.match(FQ, /isSkinHueIgnoringLuma\(data\[o\]/);
+});
+
+// GEVŞETME SINIRLI OLMALI: luma-tabansız hue kontrolü TEK BAŞINA koyu arka
+// planı da ten sayar. Bu yüzden yalnızca bileşenin ölçülen tonundan DAHA
+// KOYU pikseller için geçerli — "gölge" tanımı bu.
+test("gölge gevşetmesi yalnızca daha KOYU piksellere açık", () => {
+  assert.match(FQ, /lab\[0\] < compLab\[0\] && isSkinHueIgnoringLuma/);
+});
+
+// Tam ton-yakınlığı (labDistance) denendi ve fazla genişti — hue kayması
+// olan komşu yüzeyleri de alıyordu. Geri sızmasın.
+test("labDistance tabanlı geniş gevşetme geri gelmemiş", () => {
+  assert.doesNotMatch(FQ, /labDistance\(lab, compLab\)/);
+});
+
+// Düzeltme gücü/tavanı: tavan gerçek üretimde sürekli dayanıyordu
+// (19.2->5.2, 20.1->6.1, 21.5->7.5 hepsi kayma=14.0 ile tavanda).
+test("düzeltme gücü ve tavanı artırıldı ama tam eşitleme yapılmıyor", () => {
+  const s = Number(/const HAND_FIX_STRENGTH = ([\d.]+);/.exec(FQ)[1]);
+  const cap = Number(/const HAND_FIX_MAX_SHIFT_L = (\d+);/.exec(FQ)[1]);
+  assert.ok(s > 0.8 && s < 1.0, `güç ${s} — 1.0 elin hacmini düzleştirir`);
+  assert.ok(cap >= 20, `tavan ${cap} ölçülen 21.5'lik farkı karşılamıyor`);
+});
+
+// ===========================================================================
+// KAFA BÜYÜMESİ — MUTLAK TABAN
+// ===========================================================================
+//
+// 4 günlük üretim: head-grew ile reddedilen 11 karenin 10'u, YÜZLERCE kabul
+// edilmiş karenin yüzOranı bandındaydı (geçenler p95=0.232 maks=0.315;
+// reddedilenler 0.172-0.26). Aynı işte yüzOranı=0.210 KABUL, 0.195 RED.
+test("head-grew artık mutlak yüz oranını da arıyor", () => {
+  assert.match(FQ, /const OUTPUT_FACE_GROWTH_MIN_RATIO = [\d.]+;/);
+  assert.match(FQ, /growth > OUTPUT_FACE_GROWTH_MAX && faceRatio > OUTPUT_FACE_GROWTH_MIN_RATIO/);
+});
+
+test("mutlak taban geçen dağılımın üstünde, gerçek aykırının altında", () => {
+  const v = Number(/const OUTPUT_FACE_GROWTH_MIN_RATIO = ([\d.]+);/.exec(FQ)[1]);
+  // Geçen karelerin p95'i 0.232; tek gerçek aykırı 0.322.
+  assert.ok(v > 0.232 && v < 0.322, `mutlak taban ${v} ölçülen aralıkta değil`);
 });
 
 test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
