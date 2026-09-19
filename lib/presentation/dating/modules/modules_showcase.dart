@@ -414,7 +414,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                           Expanded(
                             child: _PriceRow(
                               icon: Icons.auto_awesome,
-                              title: 'AI Foto Standart',
+                              title: 'AI Foto Premium',
                               sub:
                                   '${DatingConfig.photoStandardPhotos} foto + ${DatingConfig.photoStandardGiftAnalyses} analiz',
                               price:
@@ -427,7 +427,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                           Expanded(
                             child: _PriceRow(
                               icon: Icons.workspace_premium_rounded,
-                              title: 'AI Foto Premium',
+                              title: 'AI Foto Diamond',
                               sub:
                                   '${DatingConfig.photoPremiumPhotos} foto + ${DatingConfig.photoPremiumGiftAnalyses} analiz',
                               price:

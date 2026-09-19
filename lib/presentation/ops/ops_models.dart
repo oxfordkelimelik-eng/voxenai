@@ -6,10 +6,11 @@
 /// yönetiliyor — hem satış listesi hem günlük kartlar hem iş listesi
 /// aynı ismi kullanır.
 String opsProductLabel(String? productId) => switch (productId) {
-      // Güncel paketler (2026-09-18).
+      // Güncel paketler (2026-09-19: isimler Standart/Premium'dan
+      // Premium/Diamond'a değişti — kullanıcı kararı).
       'dating_pack_photos5' => 'AI Foto Başlangıç (5)',
-      'dating_pack_photos10' => 'AI Foto Standart (10 + 1 analiz)',
-      'dating_pack_photos25' => 'AI Foto Premium (25 + 3 analiz)',
+      'dating_pack_photos10' => 'AI Foto Premium (10 + 1 analiz)',
+      'dating_pack_photos25' => 'AI Foto Diamond (25 + 3 analiz)',
       // Eski paketler — geçmiş raporlarda hâlâ görünüyorlar, bu yüzden
       // etiketleri korunuyor (bkz. functions/payments.js PRODUCT_CREDITS).
       'dating_pack_photo10' => 'AI Foto (eski 10\'luk)',

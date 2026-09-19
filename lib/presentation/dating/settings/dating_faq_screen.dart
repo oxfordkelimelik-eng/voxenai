@@ -19,9 +19,9 @@ class DatingFaqScreen extends StatelessWidget {
       _FaqItem(
         'Paketler neler?',
         'AI Foto Üretimi: Başlangıç ${DatingConfig.photoStarterPhotos} '
-            'fotoğraf, Standart ${DatingConfig.photoStandardPhotos} fotoğraf '
+            'fotoğraf, Premium ${DatingConfig.photoStandardPhotos} fotoğraf '
             '+ ${DatingConfig.photoStandardGiftAnalyses} analiz hediye, '
-            'Premium ${DatingConfig.photoPremiumPhotos} fotoğraf '
+            'Diamond ${DatingConfig.photoPremiumPhotos} fotoğraf '
             '+ ${DatingConfig.photoPremiumGiftAnalyses} analiz hediye.\n\n'
             'Fotoğraf Analizi: Tekli ${DatingConfig.analysisSingleRuns} '
             'analiz, Standart ${DatingConfig.analysisStandardRuns} analiz.\n\n'

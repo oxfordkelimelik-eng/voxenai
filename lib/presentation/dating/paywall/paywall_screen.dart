@@ -184,7 +184,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                       const SizedBox(height: 10),
                       _PackCard(
                         icon: Icons.auto_awesome,
-                        title: 'Standart Paket',
+                        title: 'Premium Paket',
                         sub: '${DatingConfig.photoStandardPhotos} fotoğraf'
                             ' + ${DatingConfig.photoStandardGiftAnalyses}'
                             ' analiz hediye',
@@ -198,7 +198,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                       const SizedBox(height: 10),
                       _PackCard(
                         icon: Icons.auto_awesome,
-                        title: 'Premium Paket',
+                        title: 'Diamond Paket',
                         sub: '${DatingConfig.photoPremiumPhotos} fotoğraf'
                             ' + ${DatingConfig.photoPremiumGiftAnalyses}'
                             ' analiz hediye',
