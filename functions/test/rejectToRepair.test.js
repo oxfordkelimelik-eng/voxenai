@@ -9,6 +9,14 @@ const path = require("node:path");
 const FAL = fs.readFileSync(path.join(__dirname, "..", "falPhotos.js"), "utf8");
 const FQ = fs.readFileSync(path.join(__dirname, "..", "faceQuality.js"), "utf8");
 
+// "Geri gelmemiş" testleri YORUMLARA takılmamalı: bu dosyada geri alınan her
+// kural, neden geri alındığıyla birlikte açıklama olarak SAKLANIYOR. Kuralın
+// metni yorumda geçtiği için doesNotMatch yanlışlıkla patlıyordu — bu yüzden
+// yalnızca ÇALIŞAN kodu içeren bir kopya tutuluyor.
+const stripComments = (src) =>
+  src.split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+const FQ_CODE = stripComments(FQ);
+
 // ===========================================================================
 // GAZE — GAZE_POINT ARKA KAPISI
 // ===========================================================================
@@ -154,19 +162,57 @@ test("a* eşiği ölçülen iki kümenin ARASINDA", () => {
   assert.ok(v > 1.7 && v < 3.6, `a* eşiği ${v} iki kümenin arasında değil`);
 });
 
-// Tam çözünürlük kapısı: isSkinLike TEK BAŞINA kalmamalı — luma tabanı
-// (y>60) koyu tenin gölgeli kısmını eliyordu ve kol piksellerinin %25'i
-// hiç boyanmadan kalıyordu.
-test("tam çözünürlük kapısı gölgeli teni de kabul ediyor", () => {
-  assert.match(FQ, /function isSkinHueIgnoringLuma/);
-  assert.match(FQ, /isSkinHueIgnoringLuma\(data\[o\]/);
+// ===========================================================================
+// TAM ÇÖZÜNÜRLÜK AĞIRLIĞI — BENEK ÜRETEN İKİLİ KAPI GERİ GELMESİN
+// ===========================================================================
+//
+// GERÇEK KUSUR (2026-09-20, teslim edilmiş kare 5fd3c3bc chunk7): yumruğun
+// üstünde basamaklı, benekli bir yama. Sebep, maske YUMUŞATILDIKTAN SONRA tam
+// çözünürlükte çalışan İKİLİ kapıydı; üstelik eşiği (lab[0] < compLab[0])
+// bölgenin KENDİ MEDYANI olduğu için bölgenin her yerinde açılıp kapanıyordu.
+//
+// ÖLÇÜLDÜ (komşu piksele verilen ağırlığın >0.5 zıpladığı oran):
+//   bölge              ESKİ     YENİ
+//   c7 yumruk (bozuk)  6.09%    0.17%
+//   c8 eller (temiz)   1.27%    0.00%
+//   c4 sol kol         0.87%    0.06%
+//   dün c0 sol kol     1.13%    0.01%
+// Bozuk kare, temiz karelerden 5-7 kat daha fazla sert zıplama üretiyordu —
+// yani ölçülen şey gerçekten kusurun kendisi.
+
+test("tam çözünürlük kararı SÜREKLİ, ikili değil", () => {
+  // Ağırlık bir rampadan gelmeli ve boyama o ağırlıkla çarpılmalı.
+  assert.match(FQ, /const chromaW\s*=/);
+  assert.match(FQ, /const w = alpha \* chromaW/);
+  assert.match(FQ, /lab\[0\] \+ shiftL \* w/);
 });
 
-// GEVŞETME SINIRLI OLMALI: luma-tabansız hue kontrolü TEK BAŞINA koyu arka
-// planı da ten sayar. Bu yüzden yalnızca bileşenin ölçülen tonundan DAHA
-// KOYU pikseller için geçerli — "gölge" tanımı bu.
-test("gölge gevşetmesi yalnızca daha KOYU piksellere açık", () => {
-  assert.match(FQ, /lab\[0\] < compLab\[0\] && isSkinHueIgnoringLuma/);
+test("benek üreten ikili kapı geri gelmemiş", () => {
+  // Medyanın kendisini eşik yapan koşul bir daha yazılmamalı.
+  assert.doesNotMatch(FQ_CODE, /lab\[0\] < compLab\[0\]/);
+  // Luma tabanlı ikili ten testi boyama döngüsünde eleme yapmamalı.
+  assert.doesNotMatch(FQ_CODE, /if \(!isSkinLike\(data\[o\]/);
+});
+
+// Gölgedeki tenin düzeltilmesi 2026-09-19 kazanımıydı; yeni kural LUMA'ya
+// hiç bakmadığı için bu kazanım korunuyor — kroma rampasında L* geçmemeli.
+test("kroma rampası luma kullanmıyor (gölgedeki ten tam ağırlıkta)", () => {
+  const m = /const dChroma = ([^;]+);/.exec(FQ);
+  assert.ok(m, "dChroma hesabı bulunamadı");
+  assert.match(m[1], /lab\[1\][\s\S]*lab\[2\]/);
+  assert.doesNotMatch(m[1], /lab\[0\]/);
+});
+
+// Eşikler ölçülen iki kümenin ARASINDA olmalı: gerçek tenin en kötü p95'i
+// 20.3, ayrışan yüzeylerin en iyi p10'u 22.1.
+test("kroma eşikleri ölçülen iki kümenin arasında", () => {
+  const full = Number(/const HAND_FIX_CHROMA_FULL = ([\d.]+);/.exec(FQ)[1]);
+  const zero = Number(/const HAND_FIX_CHROMA_ZERO = ([\d.]+);/.exec(FQ)[1]);
+  assert.ok(full < zero, "tam güç eşiği sıfır eşiğinin altında olmalı");
+  // Gerçek tenin çoğunluğu tam güçte kalsın (ölçülen p50'ler 3.6-10.4).
+  assert.ok(full >= 12, `tam güç eşiği ${full} çok düşük — gerçek teni sönümler`);
+  // Ayrışan yüzeyler (p10 >= 22.1) sıfıra yakın ağırlık almalı.
+  assert.ok(zero <= 30, `sıfır eşiği ${zero} çok yüksek — yabancı yüzeyi boyar`);
 });
 
 // Tam ton-yakınlığı (labDistance) denendi ve fazla genişti — hue kayması

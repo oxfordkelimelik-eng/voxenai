@@ -1010,23 +1010,10 @@ function isSkinLike(r, g, b) {
   return y > 60 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
 }
 
-/**
- * isSkinLike'ın LUMA TABANI OLMAYAN hâli — renk (cb/cr) şartı aynı.
- *
- * NEDEN (2026-09-19, ölçümle): isSkinLike'ın `y > 60` tabanı, koyu tenin
- * GÖLGELİ kısımlarını ten saymıyor. Şikâyet edilen karede kol piksellerinin
- * yalnızca %72-75'i isSkinLike'tan geçiyordu; kalan %25 hiç boyanmadan
- * kalıyor ve kol gözle hâlâ şablonun teninde görünüyordu.
- *
- * YALNIZCA ton düzeltmesinin tam çözünürlük kapısında kullanılır ve orada
- * "bileşenin ölçülen tonundan daha koyu olmak" şartıyla birlikte aranır —
- * tek başına kullanılırsa koyu arka planı da ten sayar.
- */
-function isSkinHueIgnoringLuma(r, g, b) {
-  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  return cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
-}
+// (isSkinHueIgnoringLuma KALDIRILDI — 2026-09-20. Tam çözünürlük kapısı artık
+// ikili bir ten testi değil, kroma uzaklığına dayalı SÜREKLİ bir ağırlık;
+// bkz. HAND_FIX_CHROMA_FULL başlığı. Luma hiç kullanılmadığı için gölgedeki
+// tenin düzeltilmesi kazanımı korunuyor, benek üreten ikili eşik ise gitti.)
 
 // Ortalama DEĞİL medyan: tek bir parlak yansıma ya da koyu gölge ortalamayı
 // kaydırır, medyanı kaydırmaz.
@@ -1598,8 +1585,10 @@ const HAND_FIX_MIN_COMPONENT_PX = 120;
 
 
 
-// (HAND_FIX_TONE_NEAR_MAX kaldırıldı — ton-yakınlığı fazla genişti, yerine
-// luma-tabansız ten HUE kontrolü kullanılıyor: isSkinHueIgnoringLuma.)
+// (HAND_FIX_TONE_NEAR_MAX kaldırıldı — ton-yakınlığı fazla genişti. Yerine
+// önce luma-tabansız ten HUE kontrolü geldi, o da benek ürettiği için
+// 2026-09-20'de sürekli kroma rampasıyla değiştirildi; bkz.
+// HAND_FIX_CHROMA_FULL başlığı.)
 // Bir kutunun ten maskesi kutunun bu oranını aşarsa kutu ele değil düz bir
 // yüzeye (kum/duvar) oturmuştur — o kutu ATLANIR.
 //
@@ -1661,6 +1650,47 @@ const HAND_FIX_MAX_BOX_FILL = 0.98;
 // 3.0 bu iki kümenin arasına düşüyor. Siyah gömlek zaten isSkinLike'tan
 // hiç geçmiyor (ölçüldü: %0), yani o bölge bu katmana en baştan girmiyor.
 const HAND_FIX_MAX_A_BELOW_FACE = 3.0;
+
+// ===========================================================================
+// TAM ÇÖZÜNÜRLÜK AĞIRLIĞI — KROMA RAMPASI (2026-09-20, ölçümle)
+// ===========================================================================
+//
+// ŞİKÂYET: teslim edilen karede (iş 5fd3c3bc, chunk7) yumruğun üstünde
+// basamaklı, benekli, doğal olmayan bir yama. Kullanıcı "el rengi bozuk"
+// dedi. Kare KABUL edilmişti; hiçbir kapı bunu görmüyor.
+//
+// KÖK NEDEN, bu katmanın KENDİSİ. Eski tam çözünürlük kapısı şuydu:
+//   if (!isSkinLike(...) && !(lab[0] < compLab[0] && isSkinHueIgnoringLuma(...)))
+//     continue;   // piksele hiç dokunma
+// İki kusuru vardı:
+//  1) İKİLİ ve YUMUŞATILMAMIŞ. Maske blur'lanıp yumuşatılıyor, ama bu kapı
+//     ondan SONRA, tam çözünürlükte, piksel piksel sert açılıp kapanıyor.
+//     Yani maskenin İÇİNDE keskin kenarlar üretiyor — maskenin kendi
+//     yumuşatması bu kenarları hiç göremiyor.
+//  2) `lab[0] < compLab[0]` eşiği bölgenin KENDİ MEDYANI. Tanımı gereği
+//     piksellerin ~yarısı altında, yarısı üstünde kalır; kapı bölgenin her
+//     yerinde açılıp kapanır. Kayma büyükken (ölçülen: kaymaL=18.8) komşu
+//     iki piksel arasında 18.8 L* fark oluşur — tuz-biber leke tam olarak bu.
+//
+// YENİ KURAL: pikselin KROMASININ (a*,b*) bileşenin ölçülen kromasına
+// uzaklığı, sürekli bir ağırlığa çevrilir. LUMA HİÇ KULLANILMAZ — gölgedeki
+// ten tam ağırlıkla düzeltilmeye devam eder (2026-09-19 kazanımı korunur),
+// ama eşik artık bölgenin ortasında değil, ten renk ailesinin DIŞINDA.
+//
+// EŞİKLER ÖLÇÜLDÜ (teslim edilmiş 5 gerçek uzuv bölgesi, bileşen medyanına
+// olan kroma uzaklığı):
+//   BÖLGE            TEN p95   TEN p99   |  TEN-DIŞI p10
+//   c4 sol kol       18.3      21.6      |  23.7
+//   c4 sağ kol       18.8      22.1      |  25.6
+//   c7 yumruk        20.3      23.2      |  12.3  (gün batımı, sıcak taş duvar)
+//   c8 eller          9.5      14.3      |   6.0  (deve tüyü kazak)
+//   dün c0 sol kol   17.2      18.9      |  22.1
+// Gerçek tenin en kötü p95'i 20.3; ayrışan yüzeylerin en iyi p10'u 22.1.
+// 18 -> tam güç, 26 -> sıfır: gerçek tenin %95'i tam güçte kalır, ayrışan
+// yüzeyler sönümlenir, ARADAKİ belirsiz bölge (sıcak duvar, ten rengi kumaş)
+// sert bir kararla değil YUMUŞAK bir geçişle ele alınır — benek üretmez.
+const HAND_FIX_CHROMA_FULL = 18;
+const HAND_FIX_CHROMA_ZERO = 26;
 
 /**
  * Verilen el/önkol kutularındaki ten tonunu çıktının KENDİ yüz tonuna çeker.
@@ -1813,7 +1843,15 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
     if (!meta.width || !meta.height) return skip("insufficient-input", { deltaLBefore });
     const maskWork = Buffer.alloc(N);
     for (let i = 0; i < N; i++) maskWork[i] = selected[i] ? 255 : 0;
-    const feather = Math.max(1, Math.round(Math.max(meta.width, meta.height) / 400));
+    // FEATHER MASKENİN KENDİ PİKSEL ADIMINA BAĞLANIR (2026-09-20).
+    //
+    // Maske SKIN_WORK_MAX_DIM (384) ölçeğinde kuruluyor ve tam çözünürlüğe
+    // büyütülüyor: bir çalışma pikseli, 1402px'lik bir karede 3.65 gerçek
+    // piksele denk geliyor. Eski sabit (uzunKenar/400) bu adımdan bağımsızdı
+    // ve büyütmenin bıraktığı MERDİVENİ tam kapatacağı garanti değildi.
+    // Adımın 1.5 katı blur, basamağı görünmez hâle getirir.
+    const workStep = Math.max(meta.width, meta.height) / Math.max(W, H);
+    const feather = Math.max(2, Math.round(workStep * 1.5));
     // Kanal sayısı OKUNUR, varsayılmaz — bkz. correctLimbChroma'daki aynı
     // yerdeki açıklama (sharp tek kanallı maskeyi 3 kanal döndürüyor).
     const { data: maskFull, info: mInfo } = await sharp(maskWork, { raw: { width: W, height: H, channels: 1 } })
@@ -1833,32 +1871,33 @@ async function correctHandToneInBoxes(outputBuf, boxes) {
       if (alpha <= 0.004) continue;
       const o = i * 3;
       const lab = rgbToLab(data[o], data[o + 1], data[o + 2]);
-      // TAM ÇÖZÜNÜRLÜK KAPISI: isSkinLike TEK BAŞINA YETMİYORDU (2026-09-19).
+      // TAM ÇÖZÜNÜRLÜK AĞIRLIĞI — bkz. HAND_FIX_CHROMA_FULL başlığı.
       //
-      // Buradaki eski kural yalnızca isSkinLike'tı ve maskenin kenarının
-      // tırnağa/arka plana taşmasını engellemek için konmuştu. Ama
-      // isSkinLike'ın `y > 60` luma tabanı, KOYU tenin gölgeli kısımlarını
-      // da eliyor: şikâyet edilen karede kol piksellerinin yalnızca
-      // %72-75'i bu kapıdan geçiyordu. Yani düzeltme, kolun açık
-      // kısımlarını aydınlatıp KOYU kısımlarını olduğu gibi bırakıyordu —
-      // "UYGULANDI" logu gerçek ama kol gözle hâlâ şablonun teninde.
+      // BURADA ASLA İKİLİ KARAR VERİLMEZ. Eski ikili kapı, maske
+      // yumuşatıldıktan SONRA tam çözünürlükte sert açılıp kapandığı için
+      // maskenin İÇİNDE keskin kenarlar üretiyordu; üstelik eşiği bölgenin
+      // kendi medyanı olduğundan bölgenin her yerinde flip flop yapıyordu.
+      // Sonuç, teslim edilmiş bir karede (5fd3c3bc chunk7) benekli yamaydı.
       //
-      // YENİ KURAL — HEDEFLİ: yalnızca LUMA TABANI gevşetilir, renk
-      // (cb/cr) şartı aynen korunur. Yani "aynı ten renginde ama gölgede
-      // kaldığı için karanlık" piksel içeri girer; farklı RENKTEKİ hiçbir
-      // piksel girmez. Tümden ton-yakınlığına açmak (labDistance) denendi
-      // ve fazla genişti — hue kayması olan komşu yüzeyleri de alıyordu.
-      //
-      // Ek emniyet: gevşetme yalnızca bileşenin ölçülen tonundan DAHA KOYU
-      // pikseller için geçerli. Daha açık bir piksel gölge değildir.
-      if (!isSkinLike(data[o], data[o + 1], data[o + 2])
-          && !(lab[0] < compLab[0] && isSkinHueIgnoringLuma(data[o], data[o + 1], data[o + 2]))) {
+      // Karar artık SÜREKLİ bir ağırlık: pikselin kroması bileşenin ölçülen
+      // kromasından uzaklaştıkça düzeltme sönümlenir. Luma hiç bakılmaz, yani
+      // gölgedeki ten tam ağırlıkla düzeltilir.
+      const dChroma = Math.hypot(lab[1] - compLab[1], lab[2] - compLab[2]);
+      const chromaW =
+        dChroma <= HAND_FIX_CHROMA_FULL
+          ? 1
+          : dChroma >= HAND_FIX_CHROMA_ZERO
+            ? 0
+            : (HAND_FIX_CHROMA_ZERO - dChroma) /
+              (HAND_FIX_CHROMA_ZERO - HAND_FIX_CHROMA_FULL);
+      const w = alpha * chromaW;
+      if (w <= 0.004) {
         skippedByGate++;
         continue;
       }
-      let L = lab[0] + shiftL * alpha;
+      let L = lab[0] + shiftL * w;
       if (L < 0) L = 0; else if (L > 100) L = 100;
-      const [r, g, bb] = labToRgb(L, lab[1] + shiftA * alpha, lab[2] + shiftB * alpha);
+      const [r, g, bb] = labToRgb(L, lab[1] + shiftA * w, lab[2] + shiftB * w);
       data[o] = r; data[o + 1] = g; data[o + 2] = bb;
       painted++;
     }
