@@ -22,7 +22,7 @@ class DatingConfig {
   //   Foto Analizi : Tekli   1 analiz  → ₺99
   //                  Standart 5 analiz  → ₺249
   //   AI Foto Üretimi : Başlangıç  5 foto             → ₺349
-  //                     Standart  10 foto + 1 analiz → ₺449
+  //                     Standart  10 foto + 1 analiz → ₺499
   //                     Premium   25 foto + 3 analiz → ₺999
   //   Not: yukarıdaki foto üretimi fiyatları mağaza (App Store Connect /
   //   Play Console) tarafında ayarlanır, bu dosyadaki *PriceLabel sabitleri
@@ -96,7 +96,7 @@ class DatingConfig {
   //
   // ÜÇ PAKET, STİL YOK, HEDİYE ANALİZ VAR:
   //   Başlangıç :  5 foto              — ₺349
-  //   Standart  : 10 foto + 1 analiz   — ₺449
+  //   Standart  : 10 foto + 1 analiz   — ₺499
   //   Premium   : 25 foto + 3 analiz   — ₺999
   //
   // YENİ ÜRÜN ID'LERİ: eski ID'ler ('...photo10' / '...photo50') farklı bir
@@ -115,7 +115,7 @@ class DatingConfig {
 
   static const int photoStandardPhotos = 10;
   static const int photoStandardGiftAnalyses = 1;
-  static const String photoStandardPriceLabel = '₺449';
+  static const String photoStandardPriceLabel = '₺499';
   static const String photoStandardProductId = 'dating_pack_photos10';
 
   static const int photoPremiumPhotos = 25;

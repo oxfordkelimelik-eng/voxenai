@@ -26,7 +26,7 @@ const {
 // yalnızca bu tablo eksikti.
 const PRODUCT_PRICES_TRY = {
   dating_pack_photos5: 349,
-  dating_pack_photos10: 449,
+  dating_pack_photos10: 499,
   dating_pack_photos25: 999,
   // Eski paketler — geçmiş satışlar hâlâ bu ID'lerle kayıtlı, satıştan
   // kalksalar bile geçmiş rapor tutarlılığı için burada kalıyorlar.

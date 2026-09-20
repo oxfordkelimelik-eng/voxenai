@@ -238,7 +238,7 @@ const { priceForProduct, PRODUCT_PRICES_TRY } = require("../opsPanel")._testable
 
 test("priceForProduct: üç güncel paket de tabloda (0 dönmüyor)", () => {
   assert.equal(priceForProduct("dating_pack_photos5"), 349);
-  assert.equal(priceForProduct("dating_pack_photos10"), 449);
+  assert.equal(priceForProduct("dating_pack_photos10"), 499);
   assert.equal(priceForProduct("dating_pack_photos25"), 999);
 });
 

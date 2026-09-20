@@ -30,7 +30,7 @@ const PRODUCT_CREDITS = {
   // --- YENİ FOTO PAKETLERİ (2026-09-18) ---
   // Fiyatlar App Store Connect / Play Console'da tanımlı; kod fiyat bilmez.
   dating_pack_photos5: { photoBalance: 5 },                        // ₺349
-  dating_pack_photos10: { photoBalance: 10, analysisBalance: 1 },  // ₺449 (+1 hediye)
+  dating_pack_photos10: { photoBalance: 10, analysisBalance: 1 },  // ₺499 (+1 hediye)
   dating_pack_photos25: { photoBalance: 25, analysisBalance: 3 },  // ₺999 (+3 hediye)
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
