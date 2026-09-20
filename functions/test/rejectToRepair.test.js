@@ -254,3 +254,42 @@ test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
   assert.match(FAL, /kumaşAtlanan=/);
   assert.match(FAL, /alanYüzeGöre=/);
 });
+
+// ===========================================================================
+// KAFA DÖNÜŞÜ — YASAK DEĞİL PROSEDÜR
+// ===========================================================================
+//
+// KULLANICI ŞİKÂYETİ (2026-09-20): "kafanın dönüş açısı taban fotoğraf ile
+// tamamen aynı olmalı, birkaç fotoda bunu kaçırıyoruz."
+//
+// ÖLÇÜLDÜ (362 teslim edilmiş kare, KONUM ÖLÇÜM loglarından):
+//   |yaw farkı| p50=0.120 p90=0.370 maks=0.810; fark>0.20 olan %31.5.
+//   En kötü 12 vakanın 11'inde çıktı şablondan DAHA ÇOK dönmüş.
+// Gözle doğrulandı (9f0d9406 chunk2, fark 0.570): şablon cepheye yakın,
+// çıktı üç-çeyrek dönmüş — metrik gerçek kusuru ölçüyor.
+
+test("kafa dönüşü ölçülebilir bir PROSEDÜR olarak anlatılıyor", () => {
+  assert.match(FAL, /P2b HEAD TURN/);
+  // Modelin İKİ GÖRSELİ DE kendisi ölçüp karşılaştırdığı üç adım.
+  assert.match(FAL, /\(a\) In the FIRST image, find the two outer eye corners/);
+  assert.match(FAL, /\(b\) Answer the same question about your own output/);
+  assert.match(FAL, /\(c\) If the two answers differ, you rotated the head/);
+});
+
+test("kafa dönüşü ikinci bir yoldan da çapraz kontrol ediliyor", () => {
+  // Tek ölçü yanılabilir; uzak yanak/kulak görünürlüğü bağımsız bir kontrol.
+  assert.match(FAL, /how much of the FAR cheek and the FAR ear is visible/);
+});
+
+test("eski salt-yasak metni yerinde kalmamış (iki kural çakışmasın)", () => {
+  assert.doesNotMatch(FAL, /HEAD ANGLE — keep the BASE person's turn to the same degree/);
+});
+
+// EN ÖNEMLİSİ: kendi ölçümümüzü prompt'a YAZMIYORUZ. Bu 2026-09-17'de
+// denendi ve reddi kendisi üretti (ölçüm yanlışsa model itaat ediyor).
+// Model iki görseli de KENDİSİ ölçmeli.
+test("ölçülen yaw değeri prompt'a enjekte EDİLMİYOR", () => {
+  const m = /function buildEditPromptP800[\s\S]*?\n}\r?\n/.exec(FAL);
+  assert.ok(m, "buildEditPromptP800 bulunamadı");
+  assert.doesNotMatch(m[0], /\$\{[^}]*(yaw|Yaw|profileDegree)[^}]*\}/);
+});

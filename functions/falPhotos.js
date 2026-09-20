@@ -1124,9 +1124,46 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "overrides how natural or flattering a camera-facing gaze might seem. Match the direction, the " +
     "angle, and the position of each iris within the eye opening; a coarse match (both roughly 'left') " +
     "is not enough if the irises sit in a different place.\n" +
-    "HEAD ANGLE — keep the BASE person's turn to the same degree: do not rotate, straighten or " +
-    "re-centre it, and do not shift it on the shoulders. If the base is in profile or three-quarter, " +
-    "the output stays at that exact angle.\n" +
+    // KAFA DÖNÜŞÜ — PROSEDÜRE ÇEVRİLDİ (2026-09-20, ölçülmüş).
+    //
+    // KULLANICI ŞİKÂYETİ: "kafanın dönüş açısı taban fotoğraf ile tamamen
+    // aynı olmalı, birkaç fotoda bunu kaçırıyoruz."
+    //
+    // ÖLÇÜLDÜ (KONUM ÖLÇÜM loglarından 362 teslim edilmiş kare, 14-20 Eylül;
+    // yaw = profileDegree, burun ucunun göz köşeleri arasındaki konumu):
+    //   |yaw farkı| p50=0.120  p75=0.240  p90=0.370  p95=0.460  maks=0.810
+    //   fark > 0.20 olan: %31.5      fark > 0.30 olan: %18.8
+    // En kötü 12 vakanın 11'inde çıktı şablondan DAHA ÇOK dönmüş — kusur
+    // rastgele değil, tek yönlü: model kafayı fazla çeviriyor.
+    //
+    // GÖZLE DOĞRULANDI: iş 9f0d9406 chunk2 (fark 0.570) — şablon neredeyse
+    // cepheden bakarken çıktı belirgin üç-çeyrek dönmüş. chunk7'de de aynı.
+    // Yani metrik gerçek ve görünür bir kusuru ölçüyor (head-grew'un aksine).
+    //
+    // NEDEN SADECE YASAK DEĞİL PROSEDÜR: eski metin ("aynı derecede tut, çevirme")
+    // zaten bir YASAKTI ve ölçüm yetmediğini gösterdi. Bu dosyada işe yarayan
+    // yaklaşım "yargı sorma, ölçüm iste" (bkz. P2 GAZE ve BASE_HEAD_SPAN notu):
+    // modele kendi ölçeceği somut bir kontrol verilir.
+    //
+    // DİKKAT — BİZİM ÖLÇÜMÜMÜZ PROMPT'A YAZILMIYOR. Ölçülen bir değeri
+    // prompt'a yazmak 2026-09-17'de denendi ve reddi kendisi üretti
+    // (bkz. gaze-tell-direction-upfront): ölçüm yanlışsa model itaat eder.
+    // Burada model İKİ GÖRSELİ DE KENDİSİ ölçüp karşılaştırıyor.
+    "P2b HEAD TURN — measure it, do not eyeball it. The output keeps the BASE person's head " +
+    "rotation to the same degree. Before you finish, run this check:\n" +
+    "  (a) In the FIRST image, find the two outer eye corners and the tip of the nose. Say where " +
+    "the nose tip sits between those corners: exactly midway (head square to the viewer), or " +
+    "pushed toward one side — and how far toward it.\n" +
+    "  (b) Answer the same question about your own output.\n" +
+    "  (c) If the two answers differ, you rotated the head. Turn it back until the nose tip sits " +
+    "in the same relative position, then check again.\n" +
+    "Cross-check the same turn a second way: how much of the FAR cheek and the FAR ear is visible. " +
+    "If the base shows both ears, the output shows both; if the base hides the far ear behind the " +
+    "cheek, the output hides it too. Turning the head FURTHER than the base and straightening it " +
+    "toward the viewer are equally wrong — turning it further is the one that actually happens.\n" +
+    "Keep the chin height and the sideways lean exactly as the base has them, and do not shift the " +
+    "head on the shoulders. If the base is in profile or three-quarter, the output stays at that " +
+    "exact angle.\n" +
     "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
     "that same count in the output. Never take head scale " +
     "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
