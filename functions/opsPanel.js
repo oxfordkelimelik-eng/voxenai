@@ -16,7 +16,20 @@ const {
 // productId -> TL fiyat. payments.js'teki PRODUCT_CREDITS ile EL İLE senkron
 // tutulmalı (kredi tarafı orada, fiyat tarafı burada — panel sadece ciro
 // göstermek için fiyatı biliyor, doğrulama akışı fiyata bakmaz).
+//
+// EKSİK GİRİŞ = SESSİZCE ₺0 (2026-09-20, gerçek olay): 19 Eylül'de paketler
+// 5/10/25'e geçince bu tablo GÜNCELLENMEDİ. priceForProduct bilmediği bir
+// productId'de 0 döndürüyor — panelde "AI Foto Diamond (25 + 3 analiz)"
+// satışı ₺0 göründü. Krediler doğruydu (payments.js ayrı bir yoldan,
+// PRODUCT_CREDITS'ten okuyor) — yalnızca panelin CİRO SAYACI kördü.
+// Apple'ın işlemin kendisine sorulmasıyla doğrulandı: kredi tarafı sağlamdı,
+// yalnızca bu tablo eksikti.
 const PRODUCT_PRICES_TRY = {
+  dating_pack_photos5: 349,
+  dating_pack_photos10: 449,
+  dating_pack_photos25: 999,
+  // Eski paketler — geçmiş satışlar hâlâ bu ID'lerle kayıtlı, satıştan
+  // kalksalar bile geçmiş rapor tutarlılığı için burada kalıyorlar.
   dating_pack_photo10: 349,
   dating_pack_photo50: 999,
   dating_pack_analysis1: 99,
@@ -424,4 +437,6 @@ exports._testables = {
   buildJobSummary,
   safeString,
   buildDailyBreakdown,
+  priceForProduct,
+  PRODUCT_PRICES_TRY,
 };

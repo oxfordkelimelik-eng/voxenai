@@ -221,3 +221,45 @@ test("buildJobSummary: boş iş listesi için sıfırlanmış özet", () => {
   assert.equal(s.paidJobs, 0);
   assert.equal(s.failedJobs, 0);
 });
+
+// ===========================================================================
+// FİYAT TABLOSU — BİLİNMEYEN ÜRÜN SESSİZCE ₺0 OLMASIN
+// ===========================================================================
+//
+// GERÇEK OLAY (2026-09-20): paketler 5/10/25'e geçti ama bu tablo
+// güncellenmedi; priceForProduct bilmediği productId'de 0 döndürdü ve
+// panelde gerçek bir Diamond (₺999) satışı ₺0 ciro olarak göründü.
+// Krediler payments.js'teki AYRI PRODUCT_CREDITS'ten okunduğu için
+// doğruydu — yalnızca panelin ciro sayacı kördü. Bu testler üç güncel
+// ürünün de tabloda olduğunu ve bilinmeyen bir ürünün SESSİZCE 0 yerine
+// en azından ölçülebilir/loglanabilir kalmasını (0 dönüşü kendisi değil,
+// üç canlı ürünün eksik OLMAMASI) kilitler.
+const { priceForProduct, PRODUCT_PRICES_TRY } = require("../opsPanel")._testables;
+
+test("priceForProduct: üç güncel paket de tabloda (0 dönmüyor)", () => {
+  assert.equal(priceForProduct("dating_pack_photos5"), 349);
+  assert.equal(priceForProduct("dating_pack_photos10"), 449);
+  assert.equal(priceForProduct("dating_pack_photos25"), 999);
+});
+
+test("priceForProduct: eski ürünler geçmiş rapor tutarlılığı için duruyor", () => {
+  assert.equal(priceForProduct("dating_pack_photo10"), 349);
+  assert.equal(priceForProduct("dating_pack_photo50"), 999);
+  assert.equal(priceForProduct("dating_pack_analysis1"), 99);
+  assert.equal(priceForProduct("dating_pack_analysis5"), 249);
+});
+
+test("priceForProduct: bilinmeyen ürün 0 döner (davranış belgelensin, sürpriz olmasın)", () => {
+  assert.equal(priceForProduct("hic-olmayan-urun"), 0);
+});
+
+// PRODUCT_PRICES_TRY, payments.js'teki PRODUCT_CREDITS ile EL İLE senkron
+// tutuluyor (yorumda da yazıyor) — yeni bir foto paketi eklenip bu tabloya
+// girilmezse bir sonraki satış yine sessizce ₺0 görünür. Bu test o riski
+// tamamen kapatmaz (iki dosya farklı kaynak) ama en azından üç bilinen
+// güncel ürünün ANAHTAR OLARAK var olduğunu doğrular.
+test("PRODUCT_PRICES_TRY: güncel üç foto paketi anahtar olarak mevcut", () => {
+  for (const id of ["dating_pack_photos5", "dating_pack_photos10", "dating_pack_photos25"]) {
+    assert.ok(Object.prototype.hasOwnProperty.call(PRODUCT_PRICES_TRY, id), `${id} tabloda yok`);
+  }
+});
