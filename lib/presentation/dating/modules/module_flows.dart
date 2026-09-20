@@ -113,36 +113,12 @@ Future<List<File>> _pickImages({bool multi = false, int limit = 3}) async {
   return x == null ? [] : [File(x.path)];
 }
 
-/// Referans karesinde en az bir yüz görünüyor mu? (Hafif, YEREL ön kontrol.)
-///
-/// Yalnızca GALERİDEN seçilen kareler için çalışır — kamerayla çekilenlerin
-/// açısı GuidedCaptureScreen'de zaten doğrulanıyor. Amacı, yüz içermeyen bir
-/// kare yüzünden sunucuya boşuna gidilmesini önlemek.
-///
-/// NOT (2026-08-20): fonksiyon adı tam boy fotoğraf döneminden kalmadır; tam
-/// boy fotoğraf artık istenmiyor, bu kontrol yüz kareleri için kullanılıyor.
-Future<bool> _isValidBodyReferencePhoto(File file) async {
-  // GEVŞETİLDİ (2026-07-26): minFaceSize:0.03 ile uzaktan çekilmiş karelerdeki
-  // küçük yüzler tespit edilemeyip foto boşuna reddediliyordu. Eşik 0.03 ->
-  // 0.01. Ayrıca "tam olarak 1 yüz" katı şartı yerine "en az 1 yüz" (arkada
-  // geçen kişiler yüzünden ret olmasın) — asıl tek-yüz/+18 kontrolü
-  // sunucudaki prepareReferencePhotos'ta zaten var.
-  final detector = FaceDetector(
-    options: FaceDetectorOptions(
-      performanceMode: FaceDetectorMode.accurate,
-      minFaceSize: 0.01,
-    ),
-  );
-  try {
-    final faces =
-        await detector.processImage(InputImage.fromFilePath(file.path));
-    return faces.isNotEmpty;
-  } catch (_) {
-    return false;
-  } finally {
-    await detector.close();
-  }
-}
+// _isValidBodyReferencePhoto KALDIRILDI (2026-09-20): yalnızca GALERİDEN
+// seçilen kareleri ön-kontrol ediyordu (yüz içermeyen bir kare yüzünden
+// sunucuya boşuna gidilmesin diye). Galeri seçimi kaldırılınca çağıranı
+// kalmadı: kamerayla çekilen karelerin açısı GuidedCaptureScreen'de canlı
+// doğrulanıyor, tek-yüz/+18 kontrolü de sunucudaki prepareReferencePhotos'ta
+// zaten yapılıyor.
 
 // ============================================================
 // 1) AI DATING FOTOĞRAFI — önce stil/mekan seç → paket → üret
@@ -163,7 +139,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
   String? _errorMessage;
-  bool _validatingPhotos = false; // galeriden seçimde yüz kontrolü
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
   String? _prepareError; // doğrulama başarısızsa paket adımında gösterilir
   // Kullanıcının bastığı üretim butonunun modu — bakiye yetmeyip paywall'a
@@ -723,6 +698,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     return ref.read(packBalanceProvider).canAffordPhotos(_photoCount);
   }
 
+  // GALERİDEN SEÇİM KALDIRILDI (2026-09-20, kullanıcı kararı).
+  //
+  // Referans kareler artık YALNIZCA rehberli canlı çekimle alınıyor. Eskiden
+  // bir alt menü çıkıp "kamera" ile "galeriden seç" arasında seçim yaptırıyordu
+  // (galeri test kolaylığı için eklenmişti).
+  //
+  // NEDEN: galeriden gelen karede açı/ışık/tazelik doğrulanamıyor —
+  // GuidedCaptureScreen'in yaptığı canlı ön/sağ/sol açı kontrolü devre dışı
+  // kalıyor ve kötü referans doğrudan üretim kalitesine yansıyor. Tek yol
+  // kalınca akış da kısaldı: buton artık doğrudan çekimi açıyor, aradaki
+  // seçim adımı yok.
   Future<void> _captureFaceAngles() async {
     // KREDİ KAPISI: selfie çekmeye (kamera izni, zaman, çaba) BAŞLAMADAN önce
     // bakiye/ücretsiz hak kontrol edilir — yoksa doğrudan pakete yönlendirilir.
@@ -730,107 +716,18 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     if (!await _ensureCanAfford()) return;
     if (!mounted) return;
 
-    // Kamera (rehberli canlı açı çekimi) VEYA galeriden seçim — test kolaylığı
-    // için galeri de destekleniyor.
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Yüz fotoğrafları',
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary)),
-              const SizedBox(height: 6),
-              Text(
-                  'Önden ve iki yandan ${DatingConfig.faceCaptureCount} kare. '
-                  'Rehberli çekim en iyi sonucu verir; galeriden de seçebilirsin.',
-                  style: const TextStyle(
-                      fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(ctx, 'camera'),
-                icon: const Icon(Icons.photo_camera_outlined,
-                    color: AppColors.gold),
-                label: const Text('Rehberli çekim (kamera)',
-                    style: TextStyle(color: AppColors.gold)),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(ctx, 'gallery'),
-                icon: const Icon(Icons.photo_library_outlined,
-                    color: AppColors.gold),
-                label: Text('Galeriden ${DatingConfig.faceCaptureCount} foto seç',
-                    style: const TextStyle(color: AppColors.gold)),
-              ),
-            ],
-          ),
-        ),
+    final files = await Navigator.of(context).push<List<File>>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
       ),
     );
-    if (choice == null || !mounted) return;
-
-    if (choice == 'camera') {
-      final files = await Navigator.of(context).push<List<File>>(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
-        ),
-      );
-      if (files == null || files.length != DatingConfig.faceCaptureCount) return;
-      if (!mounted) return;
-      setState(() {
-        _facePhotos
-          ..clear()
-          ..addAll(files);
-        _prepareError = null;
-      });
-      return;
-    }
-
-    // Galeri: tam olarak faceCaptureCount adet foto seçilmeli. Canlı açı
-    // doğrulaması yapılamaz (kayıtlı fotoğraf), ama her karede tek net yüz
-    // olduğu hafifçe kontrol edilir — kalan +18/tek-yüz kapıları sunucudaki
-    // prepareReferencePhotos'ta zaten çalışıyor.
-    final picked =
-        await _pickImages(multi: true, limit: DatingConfig.faceCaptureCount);
+    if (files == null || files.length != DatingConfig.faceCaptureCount) return;
     if (!mounted) return;
-    if (picked.length != DatingConfig.faceCaptureCount) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-            'Tam olarak ${DatingConfig.faceCaptureCount} fotoğraf seçmelisin '
-            '(önden ve iki yandan).'),
-      ));
-      return;
-    }
-    setState(() => _validatingPhotos = true);
-    for (final f in picked) {
-      final ok = await _isValidBodyReferencePhoto(f);
-      if (!mounted) return;
-      if (!ok) {
-        setState(() => _validatingPhotos = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Seçtiğin fotoğraflardan birinde net, tek bir yüz görünmüyor. '
-              'Lütfen yüzün belirgin göründüğü kareler seç.'),
-        ));
-        return;
-      }
-    }
     setState(() {
-      _validatingPhotos = false;
       _facePhotos
         ..clear()
-        ..addAll(picked);
+        ..addAll(files);
       _prepareError = null;
     });
   }
@@ -1101,23 +998,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed:
-                (_preparing || _validatingPhotos) ? null : _captureFaceAngles,
-            icon: _validatingPhotos
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppColors.gold),
-                  )
-                : const Icon(Icons.face_retouching_natural,
-                    color: AppColors.gold),
+            // "Fotoğraflar kontrol ediliyor…" ara durumu KALDIRILDI
+            // (2026-09-20): yalnızca galeriden seçilen kareleri yerel olarak
+            // doğrularken görünüyordu. Rehberli çekimde doğrulama zaten
+            // kameranın içinde, canlı yapılıyor.
+            onPressed: _preparing ? null : _captureFaceAngles,
+            icon: const Icon(Icons.face_retouching_natural,
+                color: AppColors.gold),
             label: Text(
-                _validatingPhotos
-                    ? 'Fotoğraflar kontrol ediliyor…'
-                    : _facePhotos.isEmpty
-                        ? 'Yüz çekimini başlat'
-                        : 'Yüz çekimini tekrarla',
+                _facePhotos.isEmpty
+                    ? 'Yüz çekimini başlat'
+                    : 'Yüz çekimini tekrarla',
                 style: const TextStyle(color: AppColors.gold)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.borderGold),
