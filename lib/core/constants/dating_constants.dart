@@ -18,12 +18,19 @@ class DatingConfig {
   // canAffordPhotos) — foto üretiminde artık baştan paket gerekiyor.
   // Yenilenen abonelik yoktur; paket biter, kullanıcı yeniden alır.
   //
-  // PAKETLER:
-  //   Foto Analizi : Tekli   1 analiz  → ₺99
-  //                  Standart 5 analiz  → ₺249
-  //   AI Foto Üretimi : Başlangıç  5 foto             → ₺349
-  //                     Standart  10 foto + 1 analiz → ₺499
-  //                     Premium   25 foto + 3 analiz → ₺999
+  // PAKETLER (2026-09-21 hedef yapısı — geçiş sürüyor):
+  //   AI Foto + OPSİYONEL analiz (varsayılan işaretli, kaldırılabilir):
+  //     Başlangıç  5 foto  ₺349  (+1 analiz ₺99  → ₺448)
+  //     Standart  10 foto  ₺499  (+3 analiz ₺249 → ₺748)
+  //     Premium   25 foto  ₺999  (+5 analiz ₺349 → ₺1.348)
+  //   Analiz paketleri TEK BAŞINA SATILMAZ (yeni kural). Analiz bakiyesi
+  //   biten kullanıcı yukarıdaki foto+analiz seçeneklerine yönlendirilir.
+  //
+  //   GEÇİŞ NOTU: eski yapı (hediye analizli photos10/photos25 ve tek başına
+  //   satılan dating_pack_analysis1/5) mağazada HÂLÂ satışta ve eski
+  //   build'lerde hâlâ görünüyor; yeni paywall yayına girip yayılana kadar
+  //   ikisi bir arada yaşayacak. Ayrıntı: aşağıdaki "OPSİYONEL ANALİZ
+  //   EKLENTİLİ PAKETLER" başlığı.
   //   Not: yukarıdaki foto üretimi fiyatları mağaza (App Store Connect /
   //   Play Console) tarafında ayarlanır, bu dosyadaki *PriceLabel sabitleri
   //   artık UI'da kullanılmıyor (bkz. aşağıdaki uyarı) — gerçek tahsilat
@@ -123,6 +130,41 @@ class DatingConfig {
   static const String photoPremiumPriceLabel = '₺999';
   static const String photoPremiumProductId = 'dating_pack_photos25';
 
+  // --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21 yapısı) ---
+  //
+  // YENİ KURAL: analiz paketleri artık TEK BAŞINA satılmıyor; yalnızca bir
+  // AI Foto paketinin yanına opsiyonel (varsayılan işaretli, kullanıcı
+  // kaldırabilir) ek olarak eklenebiliyor. Yukarıdaki photoStandard/
+  // photoPremiumProductId ("hediye" ID'leri) BİLEREK DOKUNULMADI — mevcut
+  // paywall'da o ID'ler hâlâ "+1/+3 analiz hediye" diye satılıyor, kredi
+  // tablosunu değiştirmek eski build'deki kullanıcıya verilen sözü keserdi
+  // (bkz. functions/payments.js PRODUCT_CREDITS aynı başlıklı not). Bu
+  // yüzden opsiyonel-analiz modeli TAMAMEN YENİ ürün ID'leriyle geliyor;
+  // eskiler mağazadan kaldırılınca (Remove From Sale, asla silinmez) bu
+  // yeni ID'ler onların yerini alacak.
+  //
+  // Başlangıç zaten hediyesizdi (giftAnalyses=0 yukarıda), sade hâli hâlâ
+  // photoStarterProductId — ona ayrı bir "solo" ID gerekmedi.
+  static const int photoStarterAnalysisAddOnRuns = 1;
+  static const String photoStarterAnalysisAddOnPriceLabel = '₺99';
+  static const String photoStarterAnalysisAddOnProductId =
+      'dating_pack_photos5_analysis1';
+  static const String photoStarterBundlePriceLabel = '₺448';
+
+  static const String photoStandardSoloProductId = 'dating_pack_photos10_solo';
+  static const int photoStandardAnalysisAddOnRuns = 3;
+  static const String photoStandardAnalysisAddOnPriceLabel = '₺249';
+  static const String photoStandardAnalysisAddOnProductId =
+      'dating_pack_photos10_analysis3';
+  static const String photoStandardBundlePriceLabel = '₺748';
+
+  static const String photoPremiumSoloProductId = 'dating_pack_photos25_solo';
+  static const int photoPremiumAnalysisAddOnRuns = 5;
+  static const String photoPremiumAnalysisAddOnPriceLabel = '₺349';
+  static const String photoPremiumAnalysisAddOnProductId =
+      'dating_pack_photos25_analysis5';
+  static const String photoPremiumBundlePriceLabel = '₺1.348';
+
   // FOTO PAKETLERİNİN "ESKİ FİYAT" SABİTLERİ KALDIRILDI (2026-09-18).
   // Paket içerikleri değişti (₺349 eskiden 10 fotoydu, artık 5); eski
   // rakamları üstü çizili "indirim" olarak göstermek yanıltıcı olurdu ve
@@ -167,14 +209,25 @@ class PhotoStyle {
   const PhotoStyle(this.id, this.label, this.description, this.icon);
 
   static const List<PhotoStyle> coreStyles = [
-    PhotoStyle('elegance', 'Elegance / Karizma', 'Şık, karizmatik, bakımlı',
-        Icons.diamond_outlined),
-    PhotoStyle('athletic', 'Athletic', 'Atletik, dinamik, formda',
-        Icons.fitness_center),
-    PhotoStyle('traveller', 'World Traveller', 'Dünya gezgini, maceracı',
-        Icons.travel_explore),
-    PhotoStyle('nightout', 'Night Out', 'Gece çıkışı, sosyal',
-        Icons.nightlife),
+    PhotoStyle(
+      'elegance',
+      'Elegance / Karizma',
+      'Şık, karizmatik, bakımlı',
+      Icons.diamond_outlined,
+    ),
+    PhotoStyle(
+      'athletic',
+      'Athletic',
+      'Atletik, dinamik, formda',
+      Icons.fitness_center,
+    ),
+    PhotoStyle(
+      'traveller',
+      'World Traveller',
+      'Dünya gezgini, maceracı',
+      Icons.travel_explore,
+    ),
+    PhotoStyle('nightout', 'Night Out', 'Gece çıkışı, sosyal', Icons.nightlife),
     PhotoStyle('car', 'Car', 'Arabayla, prestij', Icons.directions_car_filled),
     // Kaldırılanlar (Storage klasörleri artık yok, kod referansı da silindi):
     // PhotoStyle('oldmoney', 'Old Money', 'Klasik varlık estetiği',
@@ -191,7 +244,12 @@ class DatingModule {
   final IconData icon;
   final int creditCost;
   const DatingModule(
-      this.id, this.title, this.subtitle, this.icon, this.creditCost);
+    this.id,
+    this.title,
+    this.subtitle,
+    this.icon,
+    this.creditCost,
+  );
 
   static const aiPhoto = DatingModule(
     'ai_photo',
@@ -238,10 +296,7 @@ class DatingModule {
 
   // Aktif modüller. Diğer modüllerin (coach, rizz, bio, looksmaxxing) kodları
   // arka planda korunur ancak şu an pasif — sadece bu ikisi gösterilir.
-  static const List<DatingModule> all = [
-    aiPhoto,
-    photoAnalysis,
-  ];
+  static const List<DatingModule> all = [aiPhoto, photoAnalysis];
 }
 
 /// Dating akışına özel SharedPreferences anahtarları

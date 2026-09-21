@@ -263,3 +263,60 @@ test("PRODUCT_PRICES_TRY: güncel üç foto paketi anahtar olarak mevcut", () =>
     assert.ok(Object.prototype.hasOwnProperty.call(PRODUCT_PRICES_TRY, id), `${id} tabloda yok`);
   }
 });
+
+// --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21) ---
+test("priceForProduct: opsiyonel analizli yeni paketler tabloda", () => {
+  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 448);
+  assert.equal(priceForProduct("dating_pack_photos10_solo"), 499);
+  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 748);
+  assert.equal(priceForProduct("dating_pack_photos25_solo"), 999);
+  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1348);
+});
+
+test("yeni bundle fiyatı = ana paket + ek analiz (tablo kendi içinde tutarlı)", () => {
+  // Ekrandaki fiyat tablosunun aritmetiği: toplam, sade paket + analiz ek
+  // ücreti olmalı. Biri elle değiştirilip diğeri unutulursa bu test yakalar.
+  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 349 + 99);
+  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 499 + 249);
+  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 999 + 349);
+});
+
+test("sade (_solo) paketler hediyeli eskileriyle AYNI fiyatta", () => {
+  // Sade sürümler aynı fiyat basamağında ama hediye analiz İÇERMİYOR;
+  // fiyatın farklılaşması, eski kullanıcıya gösterilen fiyatla yeni
+  // kullanıcınınki arasında açıklanamayan bir fark yaratırdı.
+  assert.equal(
+    priceForProduct("dating_pack_photos10_solo"),
+    priceForProduct("dating_pack_photos10"),
+  );
+  assert.equal(
+    priceForProduct("dating_pack_photos25_solo"),
+    priceForProduct("dating_pack_photos25"),
+  );
+});
+
+// KÖK NEDEN TESTİ: iki tablo İKİ AYRI DOSYADA ve elle senkron tutuluyor —
+// 2026-09-20'deki ₺0 olayının sebebi tam olarak buydu. Yukarıdaki testler
+// ID'leri elle sayıyor, yani BİR SONRAKİ yeni ürün yine unutulabilir. Bu
+// test payments.js'i KAYNAK OLARAK okuyup PRODUCT_CREDITS'teki her ürünün
+// fiyat tablosunda da bulunmasını şart koşuyor; artık yeni ürün eklenip
+// fiyatı girilmezse test kırmızıya döner. (payments.js index.js'te blanket
+// re-export edildiği için _testables eklenemez — eklenirse Firebase onu
+// Cloud Function sanıp deploy'u kırar; o yüzden kaynak metni okunuyor.)
+test("payments.js'teki HER ürün fiyat tablosunda da var (sessiz ₺0 imkânsız)", () => {
+  const src = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "..", "payments.js"),
+    "utf8",
+  );
+  const block = /const PRODUCT_CREDITS = \{([\s\S]*?)\n\};/.exec(src);
+  assert.ok(block, "PRODUCT_CREDITS bloğu payments.js'te bulunamadı");
+  const ids = [...block[1].matchAll(/^\s*([a-z0-9_]+):\s*\{/gm)].map((m) => m[1]);
+  assert.ok(ids.length >= 10, `beklenenden az ürün ayrıştırıldı: ${ids.length}`);
+  for (const id of ids) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(PRODUCT_PRICES_TRY, id),
+      `${id} payments.js'te kredileniyor ama opsPanel fiyat tablosunda YOK ` +
+      "— bu ürünün satışı panelde ₺0 görünür",
+    );
+  }
+});

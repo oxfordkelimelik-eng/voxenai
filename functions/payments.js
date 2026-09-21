@@ -24,14 +24,53 @@ const IOS_BUNDLE_ID = "com.voxenai.app";
 // photoBalance ARTIK FOTO SAYAR (eskiden "stil/set" sayardı, 1 birim = 10
 // foto). Bkz. falPhotos.photoUnitsFor.
 const PRODUCT_CREDITS = {
+  // TEK BAŞINA SATIŞ KALDIRILACAK (2026-09-21, henüz kaldırılmadı): yeni
+  // modelde analiz paketleri yalnızca bir AI Foto paketinin yanında opsiyonel
+  // ek olarak satılacak (bkz. aşağıdaki "OPSİYONEL ANALİZ EKLENTİLİ
+  // PAKETLER"). Ama bu iki ID mağazada (ASC/Play) HÂLÂ satışta ve mevcut
+  // paywall'da hâlâ tek başına satın alınabilir kartlar olarak duruyor —
+  // yeni paywall build'i yayına girip yeterince yayılana KADAR buradan
+  // kaldırılmayacaklar (aksi halde eski build'deki kullanıcı butona basar,
+  // ürün mağazadan kaldırılmışsa hata alır). Satıştan kaldırma sırası:
+  // (1) yeni paywall UI'si yayına girsin, (2) ASC/Play'de Remove From Sale
+  // yapılsın, (3) ancak O ZAMAN bu iki satır "ESKİ ÜRÜNLER" bloğuna taşınır.
   dating_pack_analysis1: { analysisBalance: 1 },
   dating_pack_analysis5: { analysisBalance: 5 },
 
   // --- YENİ FOTO PAKETLERİ (2026-09-18) ---
   // Fiyatlar App Store Connect / Play Console'da tanımlı; kod fiyat bilmez.
+  //
+  // DOKUNULMUYOR (2026-09-21): photos10/photos25'in hediye analizi mevcut
+  // paywall'da kullanıcıya AÇIKÇA vaat ediliyor ("+1/+3 analiz hediye" —
+  // bkz. paywall_screen.dart _PackCard sub metinleri). Bu ID'lerin kredi
+  // tablosunu değiştirmek, henüz güncellemeyen kullanıcılara (eski build
+  // hâlâ App Store'da/cihazlarda) o vaadi kesip parasının karşılığını
+  // eksik vermek demektir. Onun yerine opsiyonel-analiz modeli TAMAMEN
+  // YENİ ID'lerle ekleniyor (bkz. aşağıdaki blok) — tıpkı Ağustos'taki
+  // photo10->photos5 geçişinde yapıldığı gibi (bkz. dating_constants.dart
+  // "YENİ ÜRÜN ID'LERİ" notu).
   dating_pack_photos5: { photoBalance: 5 },                        // ₺349
   dating_pack_photos10: { photoBalance: 10, analysisBalance: 1 },  // ₺499 (+1 hediye)
   dating_pack_photos25: { photoBalance: 25, analysisBalance: 3 },  // ₺999 (+3 hediye)
+
+  // --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21) ---
+  //
+  // YENİ MODEL: analiz paketleri artık TEK BAŞINA satılmıyor (bkz.
+  // dating_pack_analysis1/5'in "ESKİ ÜRÜNLER" bloğuna taşınma gerekçesi
+  // altında); yalnızca bir AI Foto paketinin yanına OPSİYONEL, ödemeli bir
+  // ek olarak eklenebiliyor. Bu, checkbox'ın işaretli/işaretsiz haline göre
+  // İKİ FARKLI SKU satın alınması demek — Apple/Google IAP'de tek ödemede
+  // dinamik fiyat yok, her fiyat noktası ayrı bir üründür.
+  //
+  // Başlangıç (5 foto) zaten hediyesizdi, sade hâli hâlâ dating_pack_photos5
+  // — ona yeni bir "solo" ID gerekmedi. Standart/Premium'un sade hâli ise
+  // YENİ "_solo" ID'lerle geldi çünkü eski ID'ler hediyeli kalmaya devam
+  // ediyor (yukarıdaki not).
+  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺448
+  dating_pack_photos10_solo: { photoBalance: 10 },                          // ₺499 (analizsiz)
+  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺748
+  dating_pack_photos25_solo: { photoBalance: 25 },                          // ₺999 (analizsiz)
+  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.348
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
   // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:
