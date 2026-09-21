@@ -21,7 +21,10 @@ class ModulesShowcaseScreen extends ConsumerStatefulWidget {
       _ModulesShowcaseScreenState();
 }
 
-enum _PackKind { analysis1, analysis5, photoStarter, photoStandard, photoPremium }
+// ANALİZ PAKETLERİ TEK BAŞINA SATILMIYOR (2026-09-21 kuralı) — analysis1/5
+// buradan kaldırıldı, analiz artık yalnızca paywall'daki AI foto
+// paketlerinin altındaki opsiyonel eklenti üzerinden alınabiliyor.
+enum _PackKind { photoStarter, photoStandard, photoPremium }
 
 class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   final _pageController = PageController();
@@ -93,12 +96,13 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   }
 
   Future<void> _buy(_PackKind kind) async {
+    // Bu ekrandaki hızlı satın alma SADE (solo) paketi verir — analiz
+    // eklentisi kararı artık paywall'daki checkbox'a taşındı (2026-09-21
+    // kuralı: analiz tek başına satılmıyor).
     final productId = switch (kind) {
-      _PackKind.analysis1 => DatingConfig.analysisSingleProductId,
-      _PackKind.analysis5 => DatingConfig.analysisStandardProductId,
-      _PackKind.photoStarter => DatingConfig.photoStarterProductId,
-      _PackKind.photoStandard => DatingConfig.photoStandardProductId,
-      _PackKind.photoPremium => DatingConfig.photoPremiumProductId,
+      _PackKind.photoStarter => DatingConfig.photoStarterSoloProductId,
+      _PackKind.photoStandard => DatingConfig.photoStandardSoloProductId,
+      _PackKind.photoPremium => DatingConfig.photoPremiumSoloProductId,
     };
     // Bu ekran GİRİŞSİZ gezilebiliyor; mağaza akışı başlamadan önce giriş şart
     // (bkz. purchase_auth_gate.dart — 2026-08-19 App Store 2.1(b) reddi).
@@ -344,8 +348,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                         bullets: [
                           'Çekicilik skoru',
                           'Somut iyileştirme önerileri',
-                          '${_price(DatingConfig.analysisSingleProductId)} tekli · '
-                              '${_price(DatingConfig.analysisStandardProductId)} standart',
+                          // Analiz artık tek başına satılmıyor (2026-09-21
+                          // kuralı) — AI foto paketi alırken opsiyonel
+                          // eklenti olarak ekleniyor.
+                          'AI foto paketi alırken opsiyonel eklenti olarak eklenir',
                         ],
                       ),
                     ),
@@ -367,45 +373,26 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             letterSpacing: 1,
                             color: AppColors.textMuted)),
                     const SizedBox(height: 8),
+                    // ANALİZ SATIRLARI KALDIRILDI (2026-09-21 kuralı): tek
+                    // başına satılmıyor, yalnızca paywall'daki AI foto
+                    // paketlerinin altında opsiyonel eklenti olarak var.
+                    // Buradaki hızlı satın alma SADE (solo) fiyatı gösterir;
+                    // eklenti eklemek isteyen kullanıcı normal paywall'a
+                    // gider (mode=ai_photo — bkz. paywall_screen.dart).
+                    // Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paket
+                    // içerikleri değişti, eski rakamı indirim gibi göstermek
+                    // yanıltıcı olur (App Store "yanıltıcı fiyat").
                     Expanded(
                       child: Column(
                         children: [
-                          Expanded(
-                            child: _PriceRow(
-                              icon: Icons.insights,
-                              title: 'Tekli Analiz',
-                              sub: '1 analiz',
-                              price:
-                                  _price(DatingConfig.analysisSingleProductId),
-                              busy: _busy,
-                              onTap: () => _buy(_PackKind.analysis1),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _PriceRow(
-                              icon: Icons.insights,
-                              title: 'Standart Analiz',
-                              sub: '5 analiz · Avantajlı',
-                              price: _price(
-                                  DatingConfig.analysisStandardProductId),
-                              busy: _busy,
-                              onTap: () => _buy(_PackKind.analysis5),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          // Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paket
-                          // içerikleri değişti (₺349 eskiden 10 fotoydu,
-                          // artık 5), eski rakamı indirim gibi göstermek
-                          // yanıltıcı olur (App Store "yanıltıcı fiyat").
                           Expanded(
                             child: _PriceRow(
                               icon: Icons.auto_awesome,
                               title: 'AI Foto Başlangıç',
                               sub:
                                   '${DatingConfig.photoStarterPhotos} fotoğraf',
-                              price:
-                                  _price(DatingConfig.photoStarterProductId),
+                              price: _price(
+                                  DatingConfig.photoStarterSoloProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photoStarter),
                             ),
@@ -416,9 +403,9 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.auto_awesome,
                               title: 'AI Foto Premium',
                               sub:
-                                  '${DatingConfig.photoStandardPhotos} foto + ${DatingConfig.photoStandardGiftAnalyses} analiz',
-                              price:
-                                  _price(DatingConfig.photoStandardProductId),
+                                  '${DatingConfig.photoStandardPhotos} fotoğraf',
+                              price: _price(
+                                  DatingConfig.photoStandardSoloProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photoStandard),
                             ),
@@ -429,9 +416,9 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                               icon: Icons.workspace_premium_rounded,
                               title: 'AI Foto Diamond',
                               sub:
-                                  '${DatingConfig.photoPremiumPhotos} foto + ${DatingConfig.photoPremiumGiftAnalyses} analiz',
-                              price:
-                                  _price(DatingConfig.photoPremiumProductId),
+                                  '${DatingConfig.photoPremiumPhotos} fotoğraf',
+                              price: _price(
+                                  DatingConfig.photoPremiumSoloProductId),
                               busy: _busy,
                               onTap: () => _buy(_PackKind.photoPremium),
                             ),

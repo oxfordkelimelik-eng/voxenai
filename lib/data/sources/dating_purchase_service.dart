@@ -33,6 +33,16 @@ class DatingPurchaseService {
   final Map<String, bool> _results = {};
 
   static const Set<String> productIds = {
+    // Yeni yapı (2026-09-21): AI foto paketleri + opsiyonel analiz eklentisi.
+    DatingConfig.photoStarterSoloProductId,
+    DatingConfig.photoStarterAnalysisAddOnProductId,
+    DatingConfig.photoStandardSoloProductId,
+    DatingConfig.photoStandardAnalysisAddOnProductId,
+    DatingConfig.photoPremiumSoloProductId,
+    DatingConfig.photoPremiumAnalysisAddOnProductId,
+    // Eski ürünler — henüz mağazadan kaldırılmadı (Remove From Sale
+    // yapılmadı), eski build'lerdeki kullanıcılar hâlâ bunları satın
+    // alabiliyor/geri yükleyebiliyor. Bkz. dating_constants.dart GEÇİŞ NOTU.
     DatingConfig.analysisSingleProductId,
     DatingConfig.analysisStandardProductId,
     DatingConfig.photoStarterProductId,
