@@ -22,7 +22,7 @@ class DatingConfig {
   //   AI Foto + OPSİYONEL analiz (varsayılan işaretli, kaldırılabilir):
   //     Başlangıç  5 foto  ₺349  (+1 analiz ₺150 → ₺499)
   //     Standart  10 foto  ₺499  (+3 analiz ₺300 → ₺799)
-  //     Premium   25 foto  ₺999  (+5 analiz ₺400 → ₺1.399)
+  //     Premium   25 foto  ₺999  (+5 analiz ₺300 → ₺1.299)
   //   Analiz paketleri TEK BAŞINA SATILMAZ (yeni kural). Analiz bakiyesi
   //   biten kullanıcı yukarıdaki foto+analiz seçeneklerine yönlendirilir.
   //
@@ -165,10 +165,10 @@ class DatingConfig {
 
   static const String photoPremiumSoloProductId = 'dating_pack_photos25_solo';
   static const int photoPremiumAnalysisAddOnRuns = 5;
-  static const String photoPremiumAnalysisAddOnPriceLabel = '₺400';
+  static const String photoPremiumAnalysisAddOnPriceLabel = '₺300';
   static const String photoPremiumAnalysisAddOnProductId =
       'dating_pack_photos25_analysis5';
-  static const String photoPremiumBundlePriceLabel = '₺1.399';
+  static const String photoPremiumBundlePriceLabel = '₺1.299';
 
   // FOTO PAKETLERİNİN "ESKİ FİYAT" SABİTLERİ KALDIRILDI (2026-09-18).
   // Paket içerikleri değişti (₺349 eskiden 10 fotoydu, artık 5); eski

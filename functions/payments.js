@@ -73,7 +73,7 @@ const PRODUCT_CREDITS = {
   dating_pack_photos10_solo: { photoBalance: 10 },                          // ₺499 (analizsiz)
   dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺799
   dating_pack_photos25_solo: { photoBalance: 25 },                          // ₺999 (analizsiz)
-  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.399
+  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.299
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
   // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:

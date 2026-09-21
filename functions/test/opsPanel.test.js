@@ -271,7 +271,7 @@ test("priceForProduct: opsiyonel analizli yeni paketler tabloda", () => {
   assert.equal(priceForProduct("dating_pack_photos10_solo"), 499);
   assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 799);
   assert.equal(priceForProduct("dating_pack_photos25_solo"), 999);
-  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1399);
+  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1299);
 });
 
 test("ek analiz ücreti = bundle - sade (paywall'da gösterilecek fark)", () => {
@@ -281,7 +281,7 @@ test("ek analiz ücreti = bundle - sade (paywall'da gösterilecek fark)", () => 
   const fark = (bundle, solo) => priceForProduct(bundle) - priceForProduct(solo);
   assert.equal(fark("dating_pack_photos5_analysis1", "dating_pack_photos5_solo"), 150);
   assert.equal(fark("dating_pack_photos10_analysis3", "dating_pack_photos10_solo"), 300);
-  assert.equal(fark("dating_pack_photos25_analysis5", "dating_pack_photos25_solo"), 400);
+  assert.equal(fark("dating_pack_photos25_analysis5", "dating_pack_photos25_solo"), 300);
 });
 
 test("sade (_solo) paketler hediyeli eskileriyle AYNI fiyatta", () => {
