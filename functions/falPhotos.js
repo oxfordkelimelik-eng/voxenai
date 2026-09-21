@@ -5233,6 +5233,27 @@ exports.startPhotoGeneration = onCall(
             } },
           }, { merge: true });
 
+          // İŞ GENELİNDE İMZALI-URL ÖNBELLEĞİ (2026-09-21, gerçek olay
+          // fccde0af): eski "TEKİLLEŞTİRME" (2026-08-12, aşağıda kaldı)
+          // yalnızca HER CHUNK'IN KENDİ aday listesini tekilleştiriyordu.
+          // Çakışma ÇAPRAZ çıkabiliyor — chunk i'nin birincili chunk j'nin
+          // yedeğiyle AYNI dosya olabilir (havuz küçükse pickTemplatesFromPool
+          // döngüsel tekrar eder), ve chunk'lar PARALEL (Promise.all)
+          // çalıştığı için ikisi AYNI ANDA signedDownloadUrl'i (=
+          // file.setMetadata) çağırabiliyordu. Gerçek örnek: 56'lık havuzda
+          // iki chunk aynı dosyaya düştü, GCS "metadata was edited during
+          // the operation" ile patladı, bütün iş (10 chunk, hiçbiri
+          // denenmeden) çöktü. Çözüm: her benzersiz dosya için TÜM İŞ
+          // boyunca TEK signedDownloadUrl çağrısı — sonuç bu Map'te
+          // önbelleklenip chunk'lar arasında paylaşılıyor.
+          const signedUrlCache = new Map();
+          const cachedSignedUrl = (file) => {
+            if (!signedUrlCache.has(file.name)) {
+              signedUrlCache.set(file.name, signedDownloadUrl(file));
+            }
+            return signedUrlCache.get(file.name);
+          };
+
           await Promise.all(picked.map(async (file, i) => {
             // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
             // (i, photoCount+i, 2*photoCount+i, ... konumları), böylece
@@ -5246,26 +5267,36 @@ exports.startPhotoGeneration = onCall(
                 (_, k) => spareTemplates[k * photoCount + i]
               ),
             ].filter(Boolean);
-            // TEKİLLEŞTİRME (2026-08-12): havuz photoCount*ATTEMPTS'ten
-            // küçükse pickTemplatesFromPool aynı dosyayı döngüsel tekrarla
-            // dolduruyor — bu durumda birincil ve "yedekler" AYNI GCS
-            // nesnesine işaret edebiliyor. signedDownloadUrl her çağrıda
-            // dosyanın metadata'sına yeni bir token YAZIYOR (file.setMetadata);
-            // aynı nesneye 2-3 eşzamanlı yazma isteği GERÇEK bir olay:
-            // "metadata was edited during the operation" 409 hatasıyla
-            // çöküyordu. İsme göre tekilleştirip her benzersiz dosya için TEK
-            // imzalı URL üretmek çakışmayı kökten kaldırıyor.
-            //
-            // 25'LİK PAKETTE BU YOL DAHA SIK DEVREYE GİRER: havuz 150'ye
-            // yetmediği için yedekler tekrarlı gelebilir (bkz. yukarıdaki not).
+            // TEKİLLEŞTİRME (2026-08-12): bu chunk'ın KENDİ adayları içinde
+            // aynı dosya birden fazla kez geçebiliyordu (havuz küçükse).
+            // Çapraz (chunk'lar arası) tekilleştirme artık signedUrlCache'te
+            // — bkz. yukarıdaki başlık. 25'lik pakette bu yol daha sık
+            // devreye girer: havuz 150'ye yetmediği için yedekler tekrarlı
+            // gelebilir.
             const uniqueCandidates = [
               ...new Map(candidates.map((f) => [f.name, f])).values(),
             ];
-            const urls = await Promise.all(uniqueCandidates.map(signedDownloadUrl));
-            await runOpenAiDirectChunk(
-              uid, jobId, bucketId, i, urls, refUrls, identityCaption,
-              bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine
-            );
+            try {
+              const urls = await Promise.all(uniqueCandidates.map(cachedSignedUrl));
+              await runOpenAiDirectChunk(
+                uid, jobId, bucketId, i, urls, refUrls, identityCaption,
+                bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine
+              );
+            } catch (e) {
+              // TEK CHUNK'IN HATASI BÜTÜN İŞİ GÖTÜRMESİN (2026-09-21, aynı
+              // olay): burada catch yoktu, bir chunk'ın hatası (imzalı URL
+              // üretimindeki transient GCS hatası dahil) Promise.all'u anında
+              // reddedip GERİ KALAN chunk'ları (bazıları çoktan başarılı
+              // olsa bile) tam iptale ve tam iadeye düşürüyordu. Artık bu
+              // chunk finalizeChunk({failed:true}) ile düzgünce kapatılıyor
+              // (idempotent guard'lı — bkz. tanımının yanındaki not) ve
+              // mevcut "EKSİK TESLİM = HAK İADESİ" mantığı yalnızca BU birim
+              // için iade yapar, diğer chunk'lar etkilenmez.
+              console.error(
+                `Chunk hazırlığı başarısız (style=${bucketId}, chunk=${i}) — bu birim düşürülüyor:`, e
+              );
+              await finalizeChunk(uid, jobId, bucketId, i, { failed: true });
+            }
           }));
         }
       } else {
