@@ -266,33 +266,35 @@ test("PRODUCT_PRICES_TRY: güncel üç foto paketi anahtar olarak mevcut", () =>
 
 // --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21) ---
 test("priceForProduct: opsiyonel analizli yeni paketler tabloda", () => {
-  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 448);
+  assert.equal(priceForProduct("dating_pack_photos5_solo"), 349);
+  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 499);
   assert.equal(priceForProduct("dating_pack_photos10_solo"), 499);
-  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 748);
+  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 799);
   assert.equal(priceForProduct("dating_pack_photos25_solo"), 999);
-  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1348);
+  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1399);
 });
 
-test("yeni bundle fiyatı = ana paket + ek analiz (tablo kendi içinde tutarlı)", () => {
-  // Ekrandaki fiyat tablosunun aritmetiği: toplam, sade paket + analiz ek
-  // ücreti olmalı. Biri elle değiştirilip diğeri unutulursa bu test yakalar.
-  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 349 + 99);
-  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 499 + 249);
-  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 999 + 349);
+test("ek analiz ücreti = bundle - sade (paywall'da gösterilecek fark)", () => {
+  // Paywall'daki "+₺150 / +₺300 / +₺400" etiketleri bu farktan türüyor
+  // (dating_constants.dart photo*AnalysisAddOnPriceLabel). Biri elle
+  // değiştirilip diğeri unutulursa kullanıcıya yanlış ek ücret gösterilir.
+  const fark = (bundle, solo) => priceForProduct(bundle) - priceForProduct(solo);
+  assert.equal(fark("dating_pack_photos5_analysis1", "dating_pack_photos5_solo"), 150);
+  assert.equal(fark("dating_pack_photos10_analysis3", "dating_pack_photos10_solo"), 300);
+  assert.equal(fark("dating_pack_photos25_analysis5", "dating_pack_photos25_solo"), 400);
 });
 
 test("sade (_solo) paketler hediyeli eskileriyle AYNI fiyatta", () => {
   // Sade sürümler aynı fiyat basamağında ama hediye analiz İÇERMİYOR;
   // fiyatın farklılaşması, eski kullanıcıya gösterilen fiyatla yeni
   // kullanıcınınki arasında açıklanamayan bir fark yaratırdı.
-  assert.equal(
-    priceForProduct("dating_pack_photos10_solo"),
-    priceForProduct("dating_pack_photos10"),
-  );
-  assert.equal(
-    priceForProduct("dating_pack_photos25_solo"),
-    priceForProduct("dating_pack_photos25"),
-  );
+  for (const [yeni, eski] of [
+    ["dating_pack_photos5_solo", "dating_pack_photos5"],
+    ["dating_pack_photos10_solo", "dating_pack_photos10"],
+    ["dating_pack_photos25_solo", "dating_pack_photos25"],
+  ]) {
+    assert.equal(priceForProduct(yeni), priceForProduct(eski), `${yeni} != ${eski}`);
+  }
 });
 
 // KÖK NEDEN TESTİ: iki tablo İKİ AYRI DOSYADA ve elle senkron tutuluyor —

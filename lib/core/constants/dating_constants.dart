@@ -20,9 +20,9 @@ class DatingConfig {
   //
   // PAKETLER (2026-09-21 hedef yapısı — geçiş sürüyor):
   //   AI Foto + OPSİYONEL analiz (varsayılan işaretli, kaldırılabilir):
-  //     Başlangıç  5 foto  ₺349  (+1 analiz ₺99  → ₺448)
-  //     Standart  10 foto  ₺499  (+3 analiz ₺249 → ₺748)
-  //     Premium   25 foto  ₺999  (+5 analiz ₺349 → ₺1.348)
+  //     Başlangıç  5 foto  ₺349  (+1 analiz ₺150 → ₺499)
+  //     Standart  10 foto  ₺499  (+3 analiz ₺300 → ₺799)
+  //     Premium   25 foto  ₺999  (+5 analiz ₺400 → ₺1.399)
   //   Analiz paketleri TEK BAŞINA SATILMAZ (yeni kural). Analiz bakiyesi
   //   biten kullanıcı yukarıdaki foto+analiz seçeneklerine yönlendirilir.
   //
@@ -143,27 +143,32 @@ class DatingConfig {
   // eskiler mağazadan kaldırılınca (Remove From Sale, asla silinmez) bu
   // yeni ID'ler onların yerini alacak.
   //
-  // Başlangıç zaten hediyesizdi (giftAnalyses=0 yukarıda), sade hâli hâlâ
-  // photoStarterProductId — ona ayrı bir "solo" ID gerekmedi.
+  // ÜÇ TIER'IN DE AYRI "_solo" ID'Sİ VAR (2026-09-21, kullanıcı kararı).
+  // Başlangıç'ın sade hâli içerik ve fiyat olarak photoStarterProductId ile
+  // aynı (5 foto, analizsiz, ₺349) ama yine de ayrı bir ID: yeni paywall
+  // eski nesil ID'lerin hiçbirine bağlanmazsa, eski üçlü ileride tek
+  // seferde satıştan kaldırılabilir. Eskiye bağlı kalsaydı o ürünü sonsuza
+  // kadar satışta tutmak zorunda kalırdık.
+  static const String photoStarterSoloProductId = 'dating_pack_photos5_solo';
   static const int photoStarterAnalysisAddOnRuns = 1;
-  static const String photoStarterAnalysisAddOnPriceLabel = '₺99';
+  static const String photoStarterAnalysisAddOnPriceLabel = '₺150';
   static const String photoStarterAnalysisAddOnProductId =
       'dating_pack_photos5_analysis1';
-  static const String photoStarterBundlePriceLabel = '₺448';
+  static const String photoStarterBundlePriceLabel = '₺499';
 
   static const String photoStandardSoloProductId = 'dating_pack_photos10_solo';
   static const int photoStandardAnalysisAddOnRuns = 3;
-  static const String photoStandardAnalysisAddOnPriceLabel = '₺249';
+  static const String photoStandardAnalysisAddOnPriceLabel = '₺300';
   static const String photoStandardAnalysisAddOnProductId =
       'dating_pack_photos10_analysis3';
-  static const String photoStandardBundlePriceLabel = '₺748';
+  static const String photoStandardBundlePriceLabel = '₺799';
 
   static const String photoPremiumSoloProductId = 'dating_pack_photos25_solo';
   static const int photoPremiumAnalysisAddOnRuns = 5;
-  static const String photoPremiumAnalysisAddOnPriceLabel = '₺349';
+  static const String photoPremiumAnalysisAddOnPriceLabel = '₺400';
   static const String photoPremiumAnalysisAddOnProductId =
       'dating_pack_photos25_analysis5';
-  static const String photoPremiumBundlePriceLabel = '₺1.348';
+  static const String photoPremiumBundlePriceLabel = '₺1.399';
 
   // FOTO PAKETLERİNİN "ESKİ FİYAT" SABİTLERİ KALDIRILDI (2026-09-18).
   // Paket içerikleri değişti (₺349 eskiden 10 fotoydu, artık 5); eski

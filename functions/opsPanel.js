@@ -32,11 +32,12 @@ const PRODUCT_PRICES_TRY = {
   // PRODUCT_CREDITS aynı başlık. Bu tablo unutulursa aynı ₺0 hatası
   // tekrarlanır (yukarıdaki not), o yüzden yeni ürün eklenirken İKİSİ
   // BİRDEN güncellenmeli.
-  dating_pack_photos5_analysis1: 448,
+  dating_pack_photos5_solo: 349,
+  dating_pack_photos5_analysis1: 499,
   dating_pack_photos10_solo: 499,
-  dating_pack_photos10_analysis3: 748,
+  dating_pack_photos10_analysis3: 799,
   dating_pack_photos25_solo: 999,
-  dating_pack_photos25_analysis5: 1348,
+  dating_pack_photos25_analysis5: 1399,
   // Eski paketler — geçmiş satışlar hâlâ bu ID'lerle kayıtlı, satıştan
   // kalksalar bile geçmiş rapor tutarlılığı için burada kalıyorlar.
   dating_pack_photo10: 349,

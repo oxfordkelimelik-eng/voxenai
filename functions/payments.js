@@ -62,15 +62,18 @@ const PRODUCT_CREDITS = {
   // İKİ FARKLI SKU satın alınması demek — Apple/Google IAP'de tek ödemede
   // dinamik fiyat yok, her fiyat noktası ayrı bir üründür.
   //
-  // Başlangıç (5 foto) zaten hediyesizdi, sade hâli hâlâ dating_pack_photos5
-  // — ona yeni bir "solo" ID gerekmedi. Standart/Premium'un sade hâli ise
-  // YENİ "_solo" ID'lerle geldi çünkü eski ID'ler hediyeli kalmaya devam
-  // ediyor (yukarıdaki not).
-  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺448
+  // ÜÇ TIER'IN DE "_solo" ID'Sİ VAR (2026-09-21, kullanıcı kararı).
+  // Başlangıç'ın sade hâli içerik olarak eski dating_pack_photos5 ile
+  // aynı (5 foto, analizsiz, ₺349) ama YİNE DE ayrı bir ID: yeni paywall
+  // eski nesil ID'lerin HİÇBİRİNE bağlanmazsa, eski üçlü (photos5/10/25)
+  // ileride tek seferde Remove From Sale edilebilir. Yeni paywall eski
+  // ID'ye bağlı kalsaydı o ürün sonsuza kadar satışta tutulmak zorundaydı.
+  dating_pack_photos5_solo: { photoBalance: 5 },                            // ₺349 (analizsiz)
+  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺499
   dating_pack_photos10_solo: { photoBalance: 10 },                          // ₺499 (analizsiz)
-  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺748
+  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺799
   dating_pack_photos25_solo: { photoBalance: 25 },                          // ₺999 (analizsiz)
-  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.348
+  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.399
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
   // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:
