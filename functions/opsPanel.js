@@ -233,6 +233,10 @@ function buildJobSummary(jobs) {
     freeTierJobs: jobs.filter((j) => j.usedFreeTier).length,
     paidJobs: jobs.filter((j) => !j.usedFreeTier && j.packUnitsCharged > 0).length,
     failedJobs: jobs.filter((j) => j.status === "failed").length,
+    // ONAY BEKLEYEN (2026-09-22): otomatik onay YOK — kullanıcı ödemesini
+    // yaptı ve biz onaylayana kadar hiçbir kare göremiyor. Bu sayaç panelde
+    // en üstte durmalı; unutulan bir iş doğrudan bekleyen bir müşteri demek.
+    pendingApprovalJobs: jobs.filter((j) => j.status === "pendingApproval").length,
   };
 }
 
@@ -389,13 +393,23 @@ exports.opsGetJobDetail = onCall(
       }
     }
 
+    // ONAY EKRANI İÇİN (2026-09-22): her kare, imzalı URL'inin YANINDA ham
+    // gs:// adresiyle birlikte dönüyor. Panel seçimi gs:// üzerinden
+    // gönderir — imzalı URL süreli ve tek kullanımlık olduğu için kimlik
+    // olarak kullanılamaz.
     const results = {};
     for (const [styleId, r] of Object.entries(job.results || {})) {
       results[styleId] = {
         status: r.status || null,
         photoUrls: await Promise.all((r.photoUrls || []).map(resolveGsUrl)),
+        photoRefs: (r.photoUrls || []).slice(),
       };
     }
+
+    // Teslim edilmiş (onaylanmış) kareler — eski işlerde bu alan YOKTUR,
+    // orada teslim listesi results.photoUrls'ün kendisidir.
+    const approvedRefs = job.approvedPhotoUrls || [];
+    const approvedPhotos = await Promise.all(approvedRefs.map(resolveGsUrl));
 
     const rejectedFrames = await Promise.all(
       (job.rejectedFrames || []).map(async (f) => ({
@@ -424,6 +438,14 @@ exports.opsGetJobDetail = onCall(
       photoMode: job.photoMode || null,
       model: job.model || null,
       usedFreeTier: !!job.usedFreeTier,
+      // Onay ekranı: kaç kare seçilebilir (photoCount), kaçı üretildi
+      // (generateCount), şu an teslim edilmiş olanlar hangileri.
+      photoCount: job.photoCount || 0,
+      generateCount: job.generateCount || 0,
+      approvedPhotos,
+      approvedRefs,
+      approvedAt: job.approvedAt ? job.approvedAt.toMillis() : null,
+      approvedBy: safeString(job.approvedBy),
       packUnitsCharged: job.packUnitsCharged || 0,
       errorMessage: safeString(job.errorMessage),
       createdAt: job.createdAt ? job.createdAt.toMillis() : null,
@@ -434,6 +456,201 @@ exports.opsGetJobDetail = onCall(
   }
 );
 
+// ============================================================
+// FOTO ONAYI (2026-09-22, kullanıcı kararı)
+// ------------------------------------------------------------
+// Üretim artık kullanıcıya doğrudan teslim etmiyor: kareler staging'e
+// yazılıyor, iş "pendingApproval"da bekliyor ve YALNIZCA buradan onaylanan
+// kareler kullanıcının klasörüne kopyalanıyor (bkz. falPhotos.js
+// stagingPhotoPath). Otomatik onay YOK — kullanıcı kararı.
+// ============================================================
+
+const STAGING_PREFIX = "dating_staging/";
+const RESULTS_PREFIX = "dating_results/";
+
+/**
+ * Onaylanan staging yolunu kullanıcının okuyabildiği sonuç yoluna çevirir.
+ * Yalnızca ön eki değiştirir; dosya adı korunur ki aynı kare iki kez
+ * onaylanırsa üzerine yazılsın, kopyası çoğalmasın.
+ */
+function resultPathForStaging(stagingPath) {
+  return RESULTS_PREFIX + stagingPath.slice(STAGING_PREFIX.length);
+}
+
+/**
+ * Seçilen gs:// adreslerini doğrular.
+ *
+ * GÜVENLİK: yol, İSTEMCİDEN gelir. Doğrulamadan kopyalamak, ops hesabı ele
+ * geçirilirse bucket'ın herhangi bir dosyasını kullanıcının klasörüne
+ * taşımaya izin verirdi. Bu yüzden her yol hem staging ön ekinde hem de
+ * TAM OLARAK bu uid/jobId altında olmak zorunda; ayrıca yalnızca işin
+ * kendi ürettiği kareler (staged kümesi) kabul edilir.
+ *
+ * SAF fonksiyon — testten doğrudan çağrılabilsin diye Firestore/Storage'a
+ * dokunmaz.
+ */
+function validateApprovalSelection({ selected, staged, uid, jobId, maxCount }) {
+  if (!Array.isArray(selected)) {
+    throw new HttpsError("invalid-argument", "selectedUrls dizi olmalı.");
+  }
+  if (selected.length > maxCount) {
+    throw new HttpsError(
+      "invalid-argument",
+      `En fazla ${maxCount} fotoğraf onaylanabilir (${selected.length} seçildi).`
+    );
+  }
+  const stagedSet = new Set(staged);
+  const expectedPrefix = `${STAGING_PREFIX}${uid}/${jobId}/`;
+  const paths = [];
+  const seen = new Set();
+  for (const url of selected) {
+    if (!stagedSet.has(url)) {
+      throw new HttpsError("invalid-argument", "Bu işe ait olmayan fotoğraf seçildi.");
+    }
+    if (seen.has(url)) {
+      throw new HttpsError("invalid-argument", "Aynı fotoğraf iki kez seçilmiş.");
+    }
+    seen.add(url);
+    const path = gsPathFromUrl(url);
+    if (!path || !path.startsWith(expectedPrefix) || path.includes("..")) {
+      throw new HttpsError("invalid-argument", "Geçersiz fotoğraf yolu.");
+    }
+    paths.push(path);
+  }
+  return paths;
+}
+
+/** İşin staging'deki TÜM karelerini (results.*.photoUrls) tek listede toplar. */
+function stagedPhotoUrls(job) {
+  const out = [];
+  for (const r of Object.values(job.results || {})) {
+    for (const u of r?.photoUrls || []) out.push(u);
+  }
+  return out;
+}
+
+exports.opsApprovePhotos = onCall(
+  { region: "europe-west1", memory: "512MiB", timeoutSeconds: 300 },
+  async (request) => {
+    await assertOps(request, "opsApprovePhotos");
+    const { uid, jobId, selectedUrls } = request.data || {};
+    if (!uid || !jobId) {
+      throw new HttpsError("invalid-argument", "uid ve jobId zorunlu.");
+    }
+    assertSafeId(uid, "uid");
+    assertSafeId(jobId, "jobId");
+
+    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+    const snap = await jobRef.get();
+    if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+    const job = snap.data();
+
+    // Üst sınır kullanıcının SATIN ALDIĞI sayıdır (fazla üretilen değil).
+    const maxCount = job.photoCount || 0;
+    if (maxCount <= 0) {
+      throw new HttpsError("failed-precondition", "İşin foto sayısı okunamadı.");
+    }
+
+    const paths = validateApprovalSelection({
+      selected: selectedUrls,
+      staged: stagedPhotoUrls(job),
+      uid, jobId, maxCount,
+    });
+
+    // Kopyalama — onaylananlar kullanıcının okuyabildiği yola taşınır.
+    // Tek tek hata yakalanıyor: bir dosya kopyalanamazsa TÜM onay çökmesin,
+    // kopyalanabilenler teslim edilsin ve eksik olan logda görünsün.
+    const approvedUrls = [];
+    for (const path of paths) {
+      const dest = resultPathForStaging(path);
+      try {
+        await bucket().file(path).copy(bucket().file(dest));
+        approvedUrls.push(`gs://${bucket().name}/${dest}`);
+      } catch (e) {
+        console.error(`ONAY: kopyalama başarısız (${path}):`, e.message || e);
+      }
+    }
+    if (approvedUrls.length === 0) {
+      throw new HttpsError("internal", "Hiçbir fotoğraf kopyalanamadı.");
+    }
+
+    // ELLE YÜKLENENLER KORUNUR: onay birden çok kez çalıştırılabilir
+    // (seçim değiştirilebilir), ama panelden yüklenmiş dış fotoğrafların
+    // silinmemesi gerekir — onlar staging'den gelmiyor.
+    const manualUrls = (job.approvedPhotoUrls || []).filter(
+      (u) => (gsPathFromUrl(u) || "").includes("/manual_")
+    );
+
+    await jobRef.set({
+      approvedPhotoUrls: [...approvedUrls, ...manualUrls],
+      status: "done",
+      approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+      approvedBy: request.auth.token.email || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    const { sendPushToUser } = require("./notifications");
+    const pushed = await sendPushToUser(uid, {
+      title: "📸 Fotoğrafların hazır!",
+      body: "AI dating fotoğrafların hesabına eklendi — Fotoğraflarım'dan bakabilirsin.",
+      data: { type: "photos_ready", jobId },
+    });
+
+    console.log(
+      `ONAY: ${approvedUrls.length} foto teslim edildi (uid=${uid}, job=${jobId}, ` +
+      `push=${pushed ? "gitti" : "gitmedi"})`
+    );
+    return { approved: approvedUrls.length, manualKept: manualUrls.length, pushed };
+  }
+);
+
+/**
+ * Panelden ELLE yüklenen fotoğrafı kullanıcının teslim listesine ekler.
+ *
+ * Yükleme, ops istemcisi tarafından doğrudan Storage'a yapılır (storage.rules
+ * yalnızca ops email'ine bu yol altında yazma izni verir); burada yalnızca
+ * yolun beklenen yerde olduğu doğrulanıp iş dokümanına işleniyor. Böylece
+ * büyük dosya callable payload'ından geçmek zorunda kalmıyor.
+ */
+exports.opsAttachUploadedPhoto = onCall(
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
+  async (request) => {
+    await assertOps(request, "opsAttachUploadedPhoto");
+    const { uid, jobId, path } = request.data || {};
+    if (!uid || !jobId || !path) {
+      throw new HttpsError("invalid-argument", "uid, jobId ve path zorunlu.");
+    }
+    assertSafeId(uid, "uid");
+    assertSafeId(jobId, "jobId");
+
+    // Yol İSTEMCİDEN geliyor — tam olarak bu kullanıcının bu işine ait,
+    // "manual_" ile başlayan bir dosya olmak zorunda.
+    const expected = `${RESULTS_PREFIX}${uid}/${jobId}/manual_`;
+    if (typeof path !== "string" || !path.startsWith(expected) || path.includes("..")) {
+      throw new HttpsError("invalid-argument", "Geçersiz yol.");
+    }
+    const file = bucket().file(path);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new HttpsError("not-found", "Yüklenen dosya bulunamadı.");
+    }
+
+    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+    const snap = await jobRef.get();
+    if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+
+    await jobRef.set({
+      approvedPhotoUrls: admin.firestore.FieldValue.arrayUnion(
+        `gs://${bucket().name}/${path}`
+      ),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    console.log(`ELLE YÜKLEME: foto eklendi (uid=${uid}, job=${jobId}, path=${path})`);
+    return { ok: true };
+  }
+);
+
 // Test-only exports — barrel dosyası (index.js) bu ismi SEÇMEDİĞİ için
 // gerçek bir Cloud Function olarak deploy edilmez, sadece
 // functions/test/opsPanel.test.js bunları require eder.
@@ -441,6 +658,9 @@ exports._testables = {
   isAuthorizedOpsEmail,
   uidFromDocPath,
   gsPathFromUrl,
+  validateApprovalSelection,
+  resultPathForStaging,
+  stagedPhotoUrls,
   extractGateCounts,
   aggregateGateCounts,
   buildPurchaseSummary,

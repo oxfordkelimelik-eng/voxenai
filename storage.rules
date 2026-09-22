@@ -7,11 +7,40 @@ service firebase.storage {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Üretim sonuçları: yalnızca Cloud Functions yazabilir (ödenmiş,
-    // sunucu tarafında üretilmiş varlıklar); sahibi okuyabilir.
+    // Üretim sonuçları: sahibi okur. Yazma yalnızca Cloud Functions'a
+    // (Admin SDK bu kuralları hiç görmez) ve TEK İSTİSNA olarak ops
+    // hesabının ELLE YÜKLEDİĞİ karelere açık (2026-09-22): panelden
+    // kullanıcıya dışarıdan fotoğraf eklenebiliyor ve büyük dosyayı
+    // callable payload'ından geçirmek yerine doğrudan buraya yüklüyoruz.
+    // İzin DAR: yalnızca "manual_" ile başlayan dosya adları. Yüklenen
+    // dosyanın teslim listesine girmesi yine sunucudan geçer
+    // (opsAttachUploadedPhoto yolu ayrıca doğrular).
+    match /dating_results/{userId}/{jobId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null
+        && request.auth.token.email == 'destek@voxenai.com.tr'
+        && request.auth.token.email_verified == true
+        && fileName.matches('manual_.*')
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Alt klasörler (varsa) için okuma kuralı — yukarıdaki kural yalnızca
+    // tek seviyeli dosya adını kapsıyor.
     match /dating_results/{userId}/{allPaths=**} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
+    }
+
+    // ÜRETİM STAGING (2026-09-22): kareler önce buraya yazılır ve
+    // ops panelinden onaylanana kadar BURADA kalır. Kullanıcı bu yolu
+    // OKUYAMAZ — elenen kareleri gizlemenin tek güvenilir yolu bu
+    // (Firestore/Storage kuralları kullanıcıya kendi dating_results'ını ve
+    // private dokümanlarını okutuyor, yani "sadece arayüzde filtrele"
+    // yaklaşımı elenen kareleri ulaşılabilir bırakırdı).
+    // Onaylananlar dating_results'a KOPYALANIR (bkz. opsApprovePhotos).
+    match /dating_staging/{userId}/{allPaths=**} {
+      allow read, write: if false;
     }
 
     // GEÇİCİ: model A/B karşılaştırma çıktıları (bkz. functions/modelBakeoff.js).

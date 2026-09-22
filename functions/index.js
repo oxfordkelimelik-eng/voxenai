@@ -28,7 +28,13 @@ for (const name of [
   exports[name] = falPhotos[name];
 }
 
-for (const name of ["opsGetOverview", "opsGetJobDetail", "opsFindJobByJobId"]) {
+for (const name of [
+  "opsGetOverview",
+  "opsGetJobDetail",
+  "opsFindJobByJobId",
+  "opsApprovePhotos",
+  "opsAttachUploadedPhoto",
+]) {
   exports[name] = opsPanel[name];
 }
 

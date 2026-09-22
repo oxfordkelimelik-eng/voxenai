@@ -103,6 +103,60 @@ async function pruneDeadTokens(ref, deadTokens, currentSingle) {
   await ref.set(update, { merge: true });
 }
 
+/**
+ * TEK KULLANICIYA olay bildirimi gönderir (ops onayı gibi anlık haberler).
+ *
+ * Kampanya akışından ayrı: burada zamanlama/gün sayacı yok, sadece "şu oldu"
+ * demek var. Kullanıcının TÜM cihazlarına gider — kampanya bildirimleri tek
+ * cihazla yetiniyor çünkü orada amaç tekrar tekrar dürtmek değil; burada ise
+ * kullanıcı hangi cihazı açarsa açsın haberi görmeli.
+ *
+ * Cloud Function DEĞİL: index.js barrel'ı yalnızca seçili isimleri dışa
+ * açtığı için bu yardımcı deploy edilmez (opsPanel.js'teki _testables ile
+ * aynı desen).
+ *
+ * FAIL-SAFE: bildirim gönderilemezse hata FIRLATMAZ, false döner. Çağıran
+ * taraf (onay akışı) bildirim yüzünden asla başarısız olmamalı — foto
+ * teslimi gerçekleşti, push yalnızca haber verme katmanı.
+ */
+async function sendPushToUser(uid, { title, body, data = {} }) {
+  try {
+    const ref = db.doc(`${CAMPAIGNS_COL}/${uid}`);
+    const snap = await ref.get();
+    const campaign = snap.data() || {};
+    const tokens = collectTokens(campaign);
+    if (tokens.length === 0) {
+      console.warn(`PUSH: token yok, bildirim atlandı (uid=${uid}, tip=${data.type || "?"})`);
+      return false;
+    }
+
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: { title, body },
+      data: Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)])
+      ),
+    });
+
+    const dead = [];
+    response.responses.forEach((r, i) => {
+      if (r.success) return;
+      const code = r.error?.code || "";
+      if (DEAD_TOKEN_CODES.has(code)) dead.push(tokens[i]);
+    });
+    await pruneDeadTokens(ref, dead, campaign.fcmToken);
+
+    console.log(
+      `PUSH: ${response.successCount}/${tokens.length} cihaza gönderildi ` +
+      `(uid=${uid}, tip=${data.type || "?"}, ölü token=${dead.length})`
+    );
+    return response.successCount > 0;
+  } catch (e) {
+    console.error(`PUSH gönderilemedi (uid=${uid}):`, e.message || e);
+    return false;
+  }
+}
+
 /** Gün 0-3 için bildirim metinleri (2026-09-10'da basitleştirildi — artık
  * "ücretsiz hakkını kullan" değil, genel bir davet: kullanıcı daha hiç
  * paket almamış, amaç ilk satın almayı tetiklemek). */
@@ -590,4 +644,8 @@ exports.sendEngagementReminders = onSchedule(
 // Saf yardımcılar — test edilebilsin diye dışa açılır. index.js'teki seçili
 // export listesine EKLENMEZ, dolayısıyla Cloud Function olarak deploy
 // edilmez (aynı desen: opsPanel.js _testables).
+// Sunucu-içi yardımcı — opsPanel.js onay akışında kullanılıyor. index.js
+// barrel'ı bu ismi SEÇMEDİĞİ için Cloud Function olarak deploy edilmez.
+exports.sendPushToUser = sendPushToUser;
+
 exports._testables = { collectTokens, DEAD_TOKEN_CODES };

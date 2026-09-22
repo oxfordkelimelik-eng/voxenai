@@ -150,6 +150,47 @@ const PHOTO_MODES = [
 // DEĞİLDİR (kullanıcı kararı). 25'lik pakette toplam süre 8-10 dakikayı
 // bulabilir — istemci loader'ında bu uyarı gösteriliyor.
 const PHOTO_PACK_SIZES = [5, 10, 25];
+
+// FAZLA ÜRETİM + ELLE ONAY (2026-09-22, kullanıcı kararı).
+//
+// Kullanıcının SATIN ALDIĞI sayıdan fazlasını üretip, teslim edilecekleri
+// ops panelinden ELLE seçiyoruz. Amaç: kalite kapılarının yakalayamadığı
+// kusurlu kareler (kafa oranı, bakış, yumuşaklık — bkz. 2026-09-22 analizi)
+// kullanıcıya hiç ulaşmasın.
+//
+// Üçünde de +5 kare üretilir; ölçülen maliyet ~$0.243/foto olduğuna göre iş
+// başına ~$1.2 ek maliyet demek (5'lik pakette maliyet iki katına çıkar,
+// 25'likte %20 artar).
+//
+// photoCount = kullanıcıya VAAT EDİLEN ve ÜCRETLENDİRİLEN sayı (bakiye,
+// iade ve onay üst sınırı hep buna bakar). generateCount = arka planda
+// üretilen sayı. İkisini ayrı tutmak şart: iade hesabı vaat edilene,
+// üretim/chunk sayısı ise üretilene bakmak zorunda.
+const PHOTO_PACK_OVERPRODUCTION = { 5: 10, 10: 15, 25: 30 };
+
+function generateCountFor(photoCount) {
+  return PHOTO_PACK_OVERPRODUCTION[photoCount] || photoCount;
+}
+
+// İş, üretim bittiğinde DOĞRUDAN "done" olmaz: önce bu duruma geçer ve
+// ops panelinden onaylanana kadar burada bekler. Kullanıcı bu aşamada
+// hiçbir kare görmez (kareler staging yolunda, bkz. stagingPhotoPath).
+const JOB_STATUS_PENDING_APPROVAL = "pendingApproval";
+
+/**
+ * Üretilen karenin YAZILDIĞI yol — kullanıcının OKUYAMADIĞI staging alanı.
+ *
+ * Neden ayrı yol (2026-09-22, kullanıcı kararı "katı gizleme"): Firestore
+ * kuralları kullanıcıya kendi `private/**` dokümanlarını, Storage kuralları
+ * da `dating_results/{uid}/**` altını okutuyor. Üretimi eski yere yazıp
+ * arayüzde filtrelemek, elenen kareleri teknik olarak ulaşılabilir
+ * bırakırdı. Onaylanan kareler onay anında `dating_results` altına
+ * KOPYALANIR (bkz. opsPanel.js opsApprovePhotos) ve kullanıcı yalnızca
+ * onları görebilir.
+ */
+function stagingPhotoPath(uid, jobId, styleId, chunkIdx, i) {
+  return `dating_staging/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
+}
 // Sonuç haritasındaki tek kova anahtarı (stil kalktı). Eski istemciler
 // results[styleId] okuduğu için o istekte anahtar styleId olarak korunur —
 // bkz. startPhotoGeneration'daki bucketId.
@@ -4847,7 +4888,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     }
 
     const textured = await addPhoneCameraTexture(deliverBuf);
-    const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_0.jpg`;
+    // STAGING — kullanıcı bu yolu okuyamaz; onaylananlar dating_results'a
+    // kopyalanır (bkz. stagingPhotoPath ve opsPanel.js opsApprovePhotos).
+    const path = stagingPhotoPath(uid, jobId, styleId, chunkIdx, 0);
     await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
   } catch (e) {
@@ -5276,11 +5319,15 @@ exports.startPhotoGeneration = onCall(
     // tekrar yalnızca YEDEK listesine düşer, yani bir chunk çok kez reddedilirse
     // ileri denemeleri aynı tabana dönebilir. Kabul edilebilir; bant başına
     // şablon eklemek bunu tamamen giderir.
+    // generateCount = fazla üretim dahil ÜRETİLECEK kare sayısı; photoCount
+    // ise vaat edilen/ücretlendirilen sayı (bkz. PHOTO_PACK_OVERPRODUCTION).
+    // Şablon ihtiyacı üretilen sayıya göre hesaplanır.
+    const generateCount = generateCountFor(photoCount);
     const pickedAll = pickTemplatesFromPool(
-      files, jobId, photoCount * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
+      files, jobId, generateCount * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
     );
-    const primaryTemplates = pickedAll.slice(0, photoCount);
-    const spareTemplates = pickedAll.slice(photoCount);
+    const primaryTemplates = pickedAll.slice(0, generateCount);
+    const spareTemplates = pickedAll.slice(generateCount);
 
     // Bakiye kontrolü + düşme + işi 'generating'e geçirme — tek transaction.
     // Bakiye artık FOTO cinsinden (bkz. photoUnitsFor başlığı).
@@ -5356,6 +5403,9 @@ exports.startPhotoGeneration = onCall(
         // photoCount YENİ ALAN; `styles` yalnızca eski istemci gönderdiyse
         // yazılır (ops paneli ve eski raporlar onu okuyabilsin diye).
         photoCount,
+        // Arka planda üretilen (fazla üretim dahil) kare sayısı. Onay üst
+        // sınırı photoCount'tur, generateCount değil.
+        generateCount,
         bucketId,
         ...(legacyStyles ? { styles: legacyStyles } : {}),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -5414,7 +5464,10 @@ exports.startPhotoGeneration = onCall(
           const picked = usedFreeTier
             ? primaryTemplates.slice(0, FREE_TIER_CHUNK_COUNT)
             : primaryTemplates;
-          const lockedCount = primaryTemplates.length - picked.length;
+          // KİLİTLİ SAYISI VAAT EDİLENE GÖRE (2026-09-22): kullanıcıya
+          // "paket alırsan şu kadarı daha açılır" derken fazla üretimi
+          // saymak yanıltıcı olurdu — o kareler ona satılmıyor.
+          const lockedCount = Math.max(0, photoCount - picked.length);
           const initialChunks = Object.fromEntries(
             picked.map((_, i) => [String(i), { photoUrls: [], status: "pending", retries: 0 }])
           );
@@ -5448,15 +5501,18 @@ exports.startPhotoGeneration = onCall(
 
           await Promise.all(picked.map(async (file, i) => {
             // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
-            // (i, photoCount+i, 2*photoCount+i, ... konumları), böylece
+            // (i, generateCount+i, 2*generateCount+i, ... konumları), böylece
             // paralel çalışan chunk'lar aynı yedeğe düşüp aynı kareyi üretmez.
+            // ADIM generateCount OLMALI (photoCount DEĞİL): yedek listesi
+            // üretilen chunk sayısına göre dilimlendi, adım küçük kalırsa
+            // farklı chunk'lar aynı yedeğe düşer.
             // Yedek sayısı (OPENAI_DIRECT_MAX_ATTEMPTS - 1 = 5) o sabitle
             // senkron — bkz. tanımının yanındaki gerekçe.
             const candidates = [
               file,
               ...Array.from(
                 { length: OPENAI_DIRECT_MAX_ATTEMPTS - 1 },
-                (_, k) => spareTemplates[k * photoCount + i]
+                (_, k) => spareTemplates[k * generateCount + i]
               ),
             ].filter(Boolean);
             // TEKİLLEŞTİRME (2026-08-12): bu chunk'ın KENDİ adayları içinde
@@ -5763,7 +5819,8 @@ exports.falInferenceWebhook = onRequest(
         const textured = await addPhoneCameraTexture(buf);
         // chunkIdx dosya adına eklenir — aksi halde farklı chunk'ların aynı
         // "i" indeksli görselleri birbirinin üstüne yazardı.
-        const path = `dating_results/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
+        // STAGING — bkz. stagingPhotoPath.
+        const path = stagingPhotoPath(uid, jobId, styleId, chunkIdx, i);
         await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
         return `gs://${bucket().name}/${path}`;
       }));
@@ -5969,21 +6026,20 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       // Artık photoBalance FOTO sayıyor: 25'lik pakette 22 foto teslim
       // edilirse eski mantık yalnızca 1 foto iade ederdi, yani kullanıcı 3
       // fotoyu kaybederdi. Doğrusu EKSİK KALAN KADAR iade etmek.
-      const missingPhotos = Object.keys(results).reduce((sum, k) => {
+      // FAZLA ÜRETİMDE İADE VAAT EDİLENE GÖRE (2026-09-22). Artık üretilen
+      // (generateCount) kullanıcıya vaat edilenden (photoCount) fazla; eski
+      // hesap "açılan chunk kadar kare gelmediyse iade et" diyordu ve 5'lik
+      // pakette 10 chunk'ın 9'u gelince — kullanıcı 5 karesini eksiksiz
+      // alacak olmasına rağmen — iade üretirdi. Ölçüt: teslim edilebilir
+      // kare sayısı vaat edilenin altına düştü mü?
+      const deliverableCount = Object.keys(results).reduce((sum, k) => {
         const r = results[k];
         if (!Array.isArray(r?.photoUrls)) return sum;
-        const expected = expectedChunkCount(k);
-        if (expected <= 0) return sum;
-        // Başarısız kova: hiç foto yok, tamamı eksik.
-        const delivered = r.status === "done" ? r.photoUrls.length : 0;
-        return sum + Math.max(0, expected - delivered);
+        return sum + (r.status === "done" ? r.photoUrls.length : 0);
       }, 0);
-      const incompleteCount = Object.keys(results).filter((k) => {
-        const r = results[k];
-        if (r?.status !== "done" || !Array.isArray(r.photoUrls)) return false;
-        const expected = expectedChunkCount(k);
-        return expected > 0 && r.photoUrls.length < expected;
-      }).length;
+      const promisedCount = j.photoCount || expectedChunkCount(styleId) || 0;
+      const missingPhotos = Math.max(0, promisedCount - deliverableCount);
+      const incompleteCount = missingPhotos > 0 ? 1 : 0;
 
       if (successCount > 0) {
         // Kısmi başarı: üretilenleri göster, TESLİM EDİLMEYEN HER FOTO için
@@ -6007,7 +6063,12 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
             );
           }
         }
-        update.status = "done";
+        // ÜRETİM BİTTİ ≠ TESLİM EDİLDİ (2026-09-22). İş burada "done" değil
+        // ONAY BEKLİYOR durumuna geçer; kareler staging'de duruyor ve
+        // kullanıcı hiçbirini göremiyor. "done"a geçiren ve kullanıcının
+        // klasörüne kopyalayan tek yer opsApprovePhotos.
+        update.status = JOB_STATUS_PENDING_APPROVAL;
+        update.pendingApprovalAt = admin.firestore.FieldValue.serverTimestamp();
       } else {
         // Hiç stil üretilmedi — tam iade.
         const walletSnap = await tx.get(walletRef);
