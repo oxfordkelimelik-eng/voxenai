@@ -146,14 +146,31 @@ test("fazla üretim tablosu: her pakette +5 kare", () => {
   }
 });
 
-test("üretim staging'e yazılır — dating_results'a doğrudan yazan kod kalmadı", () => {
-  const src = require("node:fs").readFileSync(
-    require("node:path").join(__dirname, "..", "falPhotos.js"), "utf8");
-  // Şablon literali içinde dating_results/${uid} yazan bir yol kalmamalı;
-  // teslim yoluna yalnızca onay akışı (opsPanel) kopyalar.
-  assert.doesNotMatch(
-    src,
-    /`dating_results\/\$\{uid\}/,
-    "falPhotos hâlâ doğrudan dating_results'a yazıyor — elenen kareler kullanıcıya görünür olurdu"
+const {
+  generateCountFor,
+  deliverPhotoPath,
+} = require("../falPhotos")._testables;
+
+test("sürüm kapısı: bayrak yoksa fazla üretim yok", () => {
+  assert.equal(generateCountFor(5, false), 5);
+  assert.equal(generateCountFor(10, false), 10);
+  assert.equal(generateCountFor(25, false), 25);
+  assert.equal(generateCountFor(5), 5); // varsayılan false
+});
+
+test("sürüm kapısı: bayrak varsa +5 fazla üretim", () => {
+  assert.equal(generateCountFor(5, true), 10);
+  assert.equal(generateCountFor(10, true), 15);
+  assert.equal(generateCountFor(25, true), 30);
+});
+
+test("sürüm kapısı: bayrak yoksa dating_results, varsa staging", () => {
+  assert.equal(
+    deliverPhotoPath("u", "j", "photos", 0, 0, false),
+    "dating_results/u/j/photos_0_0.jpg"
+  );
+  assert.equal(
+    deliverPhotoPath("u", "j", "photos", 0, 0, true),
+    "dating_staging/u/j/photos_0_0.jpg"
   );
 });

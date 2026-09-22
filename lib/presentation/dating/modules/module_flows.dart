@@ -394,6 +394,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         // STİL GÖNDERİLMİYOR (2026-09-18): sunucu artık yalnızca kaç foto
         // üretileceğini bilmek istiyor (bkz. falPhotos.js PHOTO_PACK_SIZES).
         'photoCount': photoCount,
+        // SÜRÜM KAPISI: bu bayrak sunucuya "onay akışını aç" der. Eski
+        // sürümler göndermez → sunucu doğrudan teslim eder (fazla üretim yok).
+        'holdForApproval': true,
         'jobId': jobId,
         'model': ?modelId,
         'mode': ?mode,

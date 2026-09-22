@@ -168,28 +168,40 @@ const PHOTO_PACK_SIZES = [5, 10, 25];
 // üretim/chunk sayısı ise üretilene bakmak zorunda.
 const PHOTO_PACK_OVERPRODUCTION = { 5: 10, 10: 15, 25: 30 };
 
-function generateCountFor(photoCount) {
+// SÜRÜM KAPISI (2026-09-22): onay akışı yalnızca yeni istemcinin
+// `holdForApproval: true` gönderdiği işlerde açılır. Bayrak yoksa eski
+// davranış — vaat edilen kadar üretim, doğrudan dating_results, status=done.
+// Böylece güncellenmemiş telefonlar hâlâ foto alır; yeni sürüm onay bekler.
+function generateCountFor(photoCount, holdForApproval = false) {
+  if (!holdForApproval) return photoCount;
   return PHOTO_PACK_OVERPRODUCTION[photoCount] || photoCount;
 }
 
 // İş, üretim bittiğinde DOĞRUDAN "done" olmaz: önce bu duruma geçer ve
 // ops panelinden onaylanana kadar burada bekler. Kullanıcı bu aşamada
-// hiçbir kare görmez (kareler staging yolunda, bkz. stagingPhotoPath).
+// hiçbir kare görmez (kareler staging yolunda, bkz. deliverPhotoPath).
+// Yalnızca holdForApproval=true işlerde kullanılır.
 const JOB_STATUS_PENDING_APPROVAL = "pendingApproval";
 
 /**
- * Üretilen karenin YAZILDIĞI yol — kullanıcının OKUYAMADIĞI staging alanı.
+ * Üretilen karenin yazılacağı Storage yolu.
  *
- * Neden ayrı yol (2026-09-22, kullanıcı kararı "katı gizleme"): Firestore
- * kuralları kullanıcıya kendi `private/**` dokümanlarını, Storage kuralları
- * da `dating_results/{uid}/**` altını okutuyor. Üretimi eski yere yazıp
- * arayüzde filtrelemek, elenen kareleri teknik olarak ulaşılabilir
- * bırakırdı. Onaylanan kareler onay anında `dating_results` altına
- * KOPYALANIR (bkz. opsPanel.js opsApprovePhotos) ve kullanıcı yalnızca
- * onları görebilir.
+ * holdForApproval=true  → dating_staging (kullanıcı okuyamaz; onay kopyalar)
+ * holdForApproval=false → dating_results (eski doğrudan teslim)
+ *
+ * Staging gerekçesi (2026-09-22): Firestore private/** + Storage
+ * dating_results/{uid}/** kullanıcıya açık; üretimi results'a yazıp UI'da
+ * filtrelemek elenen kareleri teknik olarak bırakırdı. Onaylananlar
+ * opsApprovePhotos ile dating_results'a kopyalanır.
  */
+function deliverPhotoPath(uid, jobId, styleId, chunkIdx, i, holdForApproval = false) {
+  const root = holdForApproval ? "dating_staging" : "dating_results";
+  return `${root}/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
+}
+
+/** @deprecated — deliverPhotoPath(..., true) ile aynı; test/eski çağrılar. */
 function stagingPhotoPath(uid, jobId, styleId, chunkIdx, i) {
-  return `dating_staging/${uid}/${jobId}/${styleId}_${chunkIdx}_${i}.jpg`;
+  return deliverPhotoPath(uid, jobId, styleId, chunkIdx, i, true);
 }
 // Sonuç haritasındaki tek kova anahtarı (stil kalktı). Eski istemciler
 // results[styleId] okuduğu için o istekte anahtar styleId olarak korunur —
@@ -3824,7 +3836,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false) {
   // KUYRUK HEARTBEAT (2026-09-10 gerçek olay): aynı kullanıcı üst üste iki
   // job başlattığında, her ikisinin chunk'ları AYNI process-içi
   // OPENAI_IMAGE_MAX_CONCURRENCY (=2) kuyruğunu paylaşıyor. Kuyrukta bekleyen
@@ -3840,13 +3852,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   }, 90 * 1000);
   try {
-    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine);
+    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval);
   } finally {
     clearInterval(heartbeatTimer);
   }
 }
 
-async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false) {
+async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -4888,9 +4900,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     }
 
     const textured = await addPhoneCameraTexture(deliverBuf);
-    // STAGING — kullanıcı bu yolu okuyamaz; onaylananlar dating_results'a
-    // kopyalanır (bkz. stagingPhotoPath ve opsPanel.js opsApprovePhotos).
-    const path = stagingPhotoPath(uid, jobId, styleId, chunkIdx, 0);
+    // holdForApproval → staging; aksi halde doğrudan dating_results.
+    const path = deliverPhotoPath(uid, jobId, styleId, chunkIdx, 0, holdForApproval);
     await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
   } catch (e) {
@@ -5162,11 +5173,15 @@ exports.startPhotoGeneration = onCall(
     }
     const uid = request.auth.uid;
     checkAppAttestation(request, "startPhotoGeneration");
-    const { styles, photoCount: rawPhotoCount, jobId, model, mode } = request.data || {};
+    const { styles, photoCount: rawPhotoCount, jobId, model, mode, holdForApproval: rawHold } = request.data || {};
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
     assertSafeId(jobId, "jobId");
+
+    // SÜRÜM KAPISI: yalnızca açıkça true gönderen (yeni) istemci onay
+    // akışına girer. Bayrak yok / false → eski doğrudan teslim.
+    const holdForApproval = rawHold === true;
 
     // ESKİ İSTEMCİ UYUMLULUĞU (2026-09-18) — ATLANAMAZ, GERÇEK OLAY VAR.
     //
@@ -5321,8 +5336,9 @@ exports.startPhotoGeneration = onCall(
     // şablon eklemek bunu tamamen giderir.
     // generateCount = fazla üretim dahil ÜRETİLECEK kare sayısı; photoCount
     // ise vaat edilen/ücretlendirilen sayı (bkz. PHOTO_PACK_OVERPRODUCTION).
+    // holdForApproval yoksa generateCount === photoCount (eski davranış).
     // Şablon ihtiyacı üretilen sayıya göre hesaplanır.
-    const generateCount = generateCountFor(photoCount);
+    const generateCount = generateCountFor(photoCount, holdForApproval);
     const pickedAll = pickTemplatesFromPool(
       files, jobId, generateCount * OPENAI_DIRECT_MAX_ATTEMPTS, recentNames
     );
@@ -5406,6 +5422,8 @@ exports.startPhotoGeneration = onCall(
         // Arka planda üretilen (fazla üretim dahil) kare sayısı. Onay üst
         // sınırı photoCount'tur, generateCount değil.
         generateCount,
+        // true → staging + pendingApproval; false/yok → doğrudan teslim.
+        holdForApproval,
         bucketId,
         ...(legacyStyles ? { styles: legacyStyles } : {}),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -5528,7 +5546,8 @@ exports.startPhotoGeneration = onCall(
               const urls = await Promise.all(uniqueCandidates.map(cachedSignedUrl));
               await runOpenAiDirectChunk(
                 uid, jobId, bucketId, i, urls, refUrls, identityCaption,
-                bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine
+                bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine,
+                holdForApproval
               );
             } catch (e) {
               // TEK CHUNK'IN HATASI BÜTÜN İŞİ GÖTÜRMESİN (2026-09-21, aynı
@@ -5819,8 +5838,8 @@ exports.falInferenceWebhook = onRequest(
         const textured = await addPhoneCameraTexture(buf);
         // chunkIdx dosya adına eklenir — aksi halde farklı chunk'ların aynı
         // "i" indeksli görselleri birbirinin üstüne yazardı.
-        // STAGING — bkz. stagingPhotoPath.
-        const path = stagingPhotoPath(uid, jobId, styleId, chunkIdx, i);
+        // holdForApproval → staging; aksi halde doğrudan dating_results.
+        const path = deliverPhotoPath(uid, jobId, styleId, chunkIdx, i, !!job.holdForApproval);
         await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
         return `gs://${bucket().name}/${path}`;
       }));
@@ -6063,12 +6082,14 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
             );
           }
         }
-        // ÜRETİM BİTTİ ≠ TESLİM EDİLDİ (2026-09-22). İş burada "done" değil
-        // ONAY BEKLİYOR durumuna geçer; kareler staging'de duruyor ve
-        // kullanıcı hiçbirini göremiyor. "done"a geçiren ve kullanıcının
-        // klasörüne kopyalayan tek yer opsApprovePhotos.
-        update.status = JOB_STATUS_PENDING_APPROVAL;
-        update.pendingApprovalAt = admin.firestore.FieldValue.serverTimestamp();
+        // SÜRÜM KAPISI: holdForApproval yoksa eski davranış — doğrudan done.
+        // Bayrak varsa üretim bitti ≠ teslim; opsApprovePhotos "done" yapar.
+        if (j.holdForApproval) {
+          update.status = JOB_STATUS_PENDING_APPROVAL;
+          update.pendingApprovalAt = admin.firestore.FieldValue.serverTimestamp();
+        } else {
+          update.status = "done";
+        }
       } else {
         // Hiç stil üretilmedi — tam iade.
         const walletSnap = await tx.get(walletRef);
@@ -6117,8 +6138,11 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
   const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
   await db.runTransaction(async (tx) => {
     const jobSnap = await tx.get(jobRef);
-    if (!jobSnap.exists || jobSnap.data().status === "failed" || jobSnap.data().status === "done") {
-      return; // zaten sonuçlanmış
+    if (!jobSnap.exists ||
+        jobSnap.data().status === "failed" ||
+        jobSnap.data().status === "done" ||
+        jobSnap.data().status === JOB_STATUS_PENDING_APPROVAL) {
+      return; // zaten sonuçlanmış (onay bekleyen işe dokunma)
     }
     const job = jobSnap.data();
     const walletSnap = await tx.get(walletRef);
@@ -6216,4 +6240,6 @@ exports._testables = {
   retryCorrectionPrefix,
   headWidthMeasurement,
   TEMPLATE_RETRY_LARGE_FACE_RATIO,
+  generateCountFor,
+  deliverPhotoPath,
 };
