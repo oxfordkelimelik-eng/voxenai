@@ -477,7 +477,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 // generating: loading'de kal — snapshot zaten dinleniyor.
               });
               if (status == 'done') {
-                ReviewPromptService().maybePromptAfterSuccess();
+                ReviewPromptService().maybePromptAfterSuccess(context);
               }
               return;
             }
@@ -536,7 +536,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           final wasAlreadyResult = _stage == _AiStage.result;
           _stage = _AiStage.result;
           if (!wasAlreadyResult) {
-            ReviewPromptService().maybePromptAfterSuccess();
+            ReviewPromptService().maybePromptAfterSuccess(context);
           }
         } else if (status == 'generating') {
           // Sunucuya gerçekten ulaşmıştı — job canlı, fallback'e gerek yok.
@@ -2004,7 +2004,7 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         _unlocked = unlocked;
         _stage = 2;
       });
-      ReviewPromptService().maybePromptAfterSuccess();
+      ReviewPromptService().maybePromptAfterSuccess(context);
     } catch (e) {
       if (!mounted) return;
       // SUNUCU "hakkın yok" DEDİYSE PAKETE YÖNLENDİR (2026-09-15). Yukarıdaki

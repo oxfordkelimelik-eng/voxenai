@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
+import '../../../data/sources/review_prompt_service.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/shared_widgets.dart';
 import 'module_flows.dart' show GeneratedPhotosScreen;
@@ -176,7 +177,8 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
             'Yardım merkezini görüntüle',
             onTap: () => context.push(DatingRoutes.faq)),
         _contactTile(Icons.star_outline_rounded, 'Bizi Değerlendir',
-            'App Store / Google Play'),
+            'App Store / Google Play',
+            onTap: () => ReviewPromptService().promptNow(context)),
         const SizedBox(height: 16),
         _contactTile(Icons.privacy_tip_outlined, 'Gizlilik & Şartlar',
             'Ayarlar\'dan eriş', onTap: () => context.push(DatingRoutes.settings)),
