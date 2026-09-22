@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/analysis_addon_tile.dart';
 import '../widgets/discounted_price.dart';
 import 'purchase_auth_gate.dart';
 
@@ -16,59 +17,9 @@ PaywallMode paywallModeFromQuery(String? mode) => switch (mode) {
   _ => PaywallMode.all,
 };
 
-/// Bir AI foto paketi "tier"ı: sade (solo) ürün + üstüne opsiyonel analiz
-/// eklentisi. Analiz paketleri artık TEK BAŞINA satılmıyor (2026-09-21
-/// kuralı) — yalnızca bir foto paketinin yanına eklenebiliyor.
-class _PhotoTier {
-  final String title;
-  final int photos;
-  final String soloId;
-  final String addOnId;
-  final int addOnRuns;
-  final String addOnPriceLabel;
-  final String? badge;
-  const _PhotoTier({
-    required this.title,
-    required this.photos,
-    required this.soloId,
-    required this.addOnId,
-    required this.addOnRuns,
-    required this.addOnPriceLabel,
-    this.badge,
-  });
-}
-
-// Kart başlıkları BİLEREK eski ("Başlangıç" / "Premium" / "Diamond") kalıyor
-// — DatingConfig'teki dahili adlandırma (starter/standard/premium) farklı,
-// ama kullanıcıya gösterilen bu üçlü zaten tanıdık.
-const List<_PhotoTier> _tiers = [
-  _PhotoTier(
-    title: 'Başlangıç Paketi',
-    photos: DatingConfig.photoStarterPhotos,
-    soloId: DatingConfig.photoStarterSoloProductId,
-    addOnId: DatingConfig.photoStarterAnalysisAddOnProductId,
-    addOnRuns: DatingConfig.photoStarterAnalysisAddOnRuns,
-    addOnPriceLabel: DatingConfig.photoStarterAnalysisAddOnPriceLabel,
-  ),
-  _PhotoTier(
-    title: 'Premium Paket',
-    photos: DatingConfig.photoStandardPhotos,
-    soloId: DatingConfig.photoStandardSoloProductId,
-    addOnId: DatingConfig.photoStandardAnalysisAddOnProductId,
-    addOnRuns: DatingConfig.photoStandardAnalysisAddOnRuns,
-    addOnPriceLabel: DatingConfig.photoStandardAnalysisAddOnPriceLabel,
-    badge: 'EN POPÜLER',
-  ),
-  _PhotoTier(
-    title: 'Diamond Paket',
-    photos: DatingConfig.photoPremiumPhotos,
-    soloId: DatingConfig.photoPremiumSoloProductId,
-    addOnId: DatingConfig.photoPremiumAnalysisAddOnProductId,
-    addOnRuns: DatingConfig.photoPremiumAnalysisAddOnRuns,
-    addOnPriceLabel: DatingConfig.photoPremiumAnalysisAddOnPriceLabel,
-    badge: 'EN İYİ DEĞER',
-  ),
-];
+// Paket listesi ORTAK (bkz. DatingConfig.photoPackTiers) — vitrin ekranı da
+// aynı listeyi kullanıyor, başlıklar/analiz adetleri iki yerde ayrışmasın.
+const _tiers = DatingConfig.photoPackTiers;
 
 /// Paket satın alma ekranı (abonelik YOK). Modül bağlamına göre yalnızca
 /// ilgili paketler gösterilebilir (analysis / ai_photo query param).
@@ -94,7 +45,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   // Tier başına "analiz eklentisi işaretli mi" — VARSAYILAN AÇIK (kullanıcı
   // kararı: "varsayılan işaretli, opsiyonel — kaldırılabilir").
   final Map<String, bool> _analysisAddOn = {
-    for (final t in _tiers) t.soloId: true,
+    for (final t in _tiers) t.soloProductId: true,
   };
 
   @override
@@ -104,16 +55,16 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     // yalnızca analiz açmak için geldi, eklenti zaten işaretli gelir).
     // Diğer modlarda PREMIUM (orta paket, 10 foto) — aynı öneri mantığı.
     _selectedTierId = widget.mode == PaywallMode.analysis
-        ? _tiers[0].soloId
-        : _tiers[1].soloId;
+        ? _tiers[0].soloProductId
+        : _tiers[1].soloProductId;
     _loadStorePrices();
   }
 
-  String _effectiveProductId(_PhotoTier tier) =>
-      (_analysisAddOn[tier.soloId] ?? true) ? tier.addOnId : tier.soloId;
+  String _effectiveProductId(PhotoPackTier tier) =>
+      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? true);
 
-  _PhotoTier get _selectedTier => _tiers.firstWhere(
-    (t) => t.soloId == _selectedTierId,
+  PhotoPackTier get _selectedTier => _tiers.firstWhere(
+    (t) => t.soloProductId == _selectedTierId,
     orElse: () => _tiers[1],
   );
 
@@ -153,23 +104,31 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     setState(() => _analysisAddOn[soloId] = value);
   }
 
-  Widget _tierCard(_PhotoTier tier) {
-    final addOnOn = _analysisAddOn[tier.soloId] ?? true;
+  Widget _tierCard(PhotoPackTier tier) {
+    final addOnOn = _analysisAddOn[tier.soloProductId] ?? true;
     final effectiveId = _effectiveProductId(tier);
     return _PackCard(
       icon: Icons.auto_awesome,
       title: tier.title,
       sub: '${tier.photos} fotoğraf',
+      // Kartın büyük fiyatı, eklenti işaretliyken PAKET+EKLENTİ toplamıdır —
+      // altta kırmızı duran rakam ise yalnızca eklentinin farkı. İkisi
+      // birlikte "349 + 150 = 499" hikâyesini anlatır.
       price: _price(effectiveId),
       badge: tier.badge,
-      selected: _selectedTierId == tier.soloId,
+      selected: _selectedTierId == tier.soloProductId,
       busy: _busyProductId == effectiveId,
-      onTap: _busy ? null : () => _selectTier(tier.soloId),
-      addOnRow: _AnalysisAddOnRow(
+      onTap: _busy ? null : () => _selectTier(tier.soloProductId),
+      addOnRow: AnalysisAddOnTile(
         checked: addOnOn,
         runs: tier.addOnRuns,
-        priceLabel: tier.addOnPriceLabel,
-        onChanged: _busy ? null : (value) => _toggleAddOn(tier.soloId, value),
+        // Fark, iki gerçek mağaza fiyatından hesaplanır (sabit etiket değil).
+        priceLabel: datingAddOnPriceLabel(
+          ref.read(datingPurchaseServiceProvider),
+          tier.soloProductId,
+          tier.addOnProductId,
+        ),
+        onChanged: _busy ? null : (value) => _toggleAddOn(tier.soloProductId, value),
       ),
     );
   }
@@ -389,8 +348,14 @@ class _PackCard extends StatelessWidget {
   // null bırakılır, sadece bu foto üretimi kartları için doldurulur).
   final String? oldPriceLabel;
   final String? discountPercentLabel;
-  // Başlık/alt metnin altına, fiyattan bağımsız olarak eklenen satır —
-  // AI foto paketlerindeki opsiyonel analiz eklentisi checkbox'ı için.
+  /// Kartın ALTINA, seçim dokunuşunun DIŞINA eklenen bağlı satır — opsiyonel
+  /// analiz eklentisi (bkz. AnalysisAddOnTile).
+  ///
+  /// DOKUNMA ALANININ DIŞINDA OLMASI ŞART: iç içe GestureDetector'da hangi
+  /// dinleyicinin kazandığı Flutter'ın gesture arena'sına kalır. Eklentiyi
+  /// kartın kendi onTap'inin içine koymak, kutucuğa basan kullanıcının aynı
+  /// anda paketi de seçmesine (ya da tam tersine, seçimin hiç çalışmamasına)
+  /// yol açabilirdi. Ayrı kardeş widget olunca iki dokunuş da tek anlamlı.
   final Widget? addOnRow;
   const _PackCard({
     required this.icon,
@@ -408,40 +373,40 @@ class _PackCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? AppColors.goldSurface : AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: selected ? AppColors.gold : AppColors.borderGold,
-            width: selected ? 2 : 0.8,
-          ),
+    return Container(
+      decoration: BoxDecoration(
+        color: selected ? AppColors.goldSurface : AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: selected ? AppColors.gold : AppColors.borderGold,
+          width: selected ? 2 : 0.8,
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (badge != null)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                color: AppColors.gold,
-                child: Text(
-                  badge!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.8,
-                    color: AppColors.textOnGold,
-                  ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (badge != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              color: AppColors.gold,
+              child: Text(
+                badge!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: AppColors.textOnGold,
                 ),
               ),
-            Padding(
+            ),
+          // Yalnızca PAKET SATIRI seçim için dokunulabilir; eklenti aşağıda
+          // kendi dokunma alanına sahip (bkz. addOnRow'un açıklaması).
+          GestureDetector(
+            onTap: onTap,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
@@ -484,10 +449,6 @@ class _PackCard extends StatelessWidget {
                             height: 1.3,
                           ),
                         ),
-                        if (addOnRow != null) ...[
-                          const SizedBox(height: 8),
-                          addOnRow!,
-                        ],
                       ],
                     ),
                   ),
@@ -532,64 +493,8 @@ class _PackCard extends StatelessWidget {
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// "+N foto analizi ekle (+₺xxx)" — checkbox'a VEYA metne dokununca
-/// tetiklenir; kartın kendi seçim GestureDetector'ından İÇERİDE (daha üstte)
-/// olduğu için dokunuş buraya geldiğinde dışarıdaki karta SIZMAZ (Flutter
-/// gesture arena'sı en içteki tanıyıcıyı kazandırır) — yani eklentiyi
-/// işaretlemek/kaldırmak, o an seçili olmayan bir paketin de seçilmesine yol
-/// AÇMAZ; kullanıcı hâlâ ayrı bir dokunuşla paketi seçmek zorunda.
-class _AnalysisAddOnRow extends StatelessWidget {
-  final bool checked;
-  final int runs;
-  final String priceLabel;
-  final ValueChanged<bool>? onChanged;
-  const _AnalysisAddOnRow({
-    required this.checked,
-    required this.runs,
-    required this.priceLabel,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onChanged == null ? null : () => onChanged!(!checked),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: Checkbox(
-              value: checked,
-              onChanged: onChanged == null
-                  ? null
-                  : (v) => onChanged!(v ?? true),
-              activeColor: AppColors.gold,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: VisualDensity.compact,
-              side: const BorderSide(color: AppColors.borderGold, width: 1.4),
-            ),
           ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              '+$runs foto analizi ekle (+$priceLabel)',
-              style: const TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
+          if (addOnRow != null) addOnRow!,
         ],
       ),
     );

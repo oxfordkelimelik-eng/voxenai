@@ -8,9 +8,9 @@ import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../paywall/purchase_auth_gate.dart';
 import '../providers/dating_providers.dart';
+import '../widgets/analysis_addon_tile.dart';
 import '../widgets/voxen_visuals.dart';
 import '../widgets/shared_widgets.dart';
-import '../widgets/discounted_price.dart';
 
 /// Form sonrası tek ekranlı vitrin + paket seçimi.
 /// Scroll yok: kompakt slider (otomatik kayar) + fiyat satırları + CTA.
@@ -22,15 +22,21 @@ class ModulesShowcaseScreen extends ConsumerStatefulWidget {
 }
 
 // ANALİZ PAKETLERİ TEK BAŞINA SATILMIYOR (2026-09-21 kuralı) — analysis1/5
-// buradan kaldırıldı, analiz artık yalnızca paywall'daki AI foto
-// paketlerinin altındaki opsiyonel eklenti üzerinden alınabiliyor.
-enum _PackKind { photoStarter, photoStandard, photoPremium }
+// buradan kaldırıldı; analiz artık her foto paketinin ALTINDA opsiyonel
+// eklenti olarak seçiliyor (bkz. AnalysisAddOnTile). Paket listesi paywall
+// ile ORTAK (DatingConfig.photoPackTiers), iki ekran ayrışmasın.
 
 class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   final _pageController = PageController();
   int _page = 0;
   Timer? _autoScroll;
   bool _busy = false;
+  String? _busyProductId;
+
+  // Eklenti kutucukları VARSAYILAN İŞARETLİ (paywall ile aynı kural).
+  final Map<String, bool> _analysisAddOn = {
+    for (final t in DatingConfig.photoPackTiers) t.soloProductId: true,
+  };
 
   static const _slides = [
     (
@@ -95,24 +101,32 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
     }
   }
 
-  Future<void> _buy(_PackKind kind) async {
-    // Bu ekrandaki hızlı satın alma SADE (solo) paketi verir — analiz
-    // eklentisi kararı artık paywall'daki checkbox'a taşındı (2026-09-21
-    // kuralı: analiz tek başına satılmıyor).
-    final productId = switch (kind) {
-      _PackKind.photoStarter => DatingConfig.photoStarterSoloProductId,
-      _PackKind.photoStandard => DatingConfig.photoStandardSoloProductId,
-      _PackKind.photoPremium => DatingConfig.photoPremiumSoloProductId,
-    };
+  /// Seçili eklenti durumuna göre gerçekte satın alınacak ürün.
+  String _productIdFor(PhotoPackTier tier) =>
+      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? true);
+
+  Future<void> _buy(PhotoPackTier tier) async {
+    // Spinner artık YALNIZCA satın alınan paketin satırında dönüyor (eskiden
+    // hepsi birden "meşgul" görünürdü). Bu yüzden diğer satırların dokunuşu
+    // açık kalıyor — ikinci bir mağaza akışının üstüne binmesini burada
+    // engelliyoruz.
+    if (_busy) return;
+    final productId = _productIdFor(tier);
     // Bu ekran GİRİŞSİZ gezilebiliyor; mağaza akışı başlamadan önce giriş şart
     // (bkz. purchase_auth_gate.dart — 2026-08-19 App Store 2.1(b) reddi).
     if (!await ensureSignedInForPurchase(context, ref)) return;
     if (!mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _busyProductId = productId;
+    });
     final ok =
         await ref.read(datingPurchaseServiceProvider).purchaseAndWait(productId);
     if (!mounted) return;
-    setState(() => _busy = false);
+    setState(() {
+      _busy = false;
+      _busyProductId = null;
+    });
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Satın alma başarılı! Paketin hesabına eklendi.')));
@@ -121,6 +135,70 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Satın alma tamamlanamadı. Lütfen tekrar dene.')));
     }
+  }
+
+  /// Bir paket + ona BAĞLI analiz eklentisi, tek kart gövdesinde.
+  ///
+  /// Paket satırına dokunmak doğrudan satın alma başlatır (bu ekranın kuralı);
+  /// eklenti kutucuğu AYRI bir dokunma alanıdır ve yalnızca seçimi değiştirir
+  /// — kutucuğa basan kullanıcı yanlışlıkla ödeme ekranı açmaz.
+  Widget _packBlock(PhotoPackTier tier) {
+    final addOnOn = _analysisAddOn[tier.soloProductId] ?? true;
+    final effectiveId = _productIdFor(tier);
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: addOnOn ? AppColors.borderGold : AppColors.borderSubtle,
+          width: 0.8,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (tier.badge != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              color: AppColors.gold,
+              child: Text(
+                tier.badge!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: AppColors.textOnGold,
+                ),
+              ),
+            ),
+          _PriceRow(
+            icon: Icons.auto_awesome,
+            title: tier.title,
+            sub: '${tier.photos} fotoğraf',
+            // Fiyat, eklenti işaretliyken PAKET+EKLENTİ toplamıdır; altta
+            // kırmızı duran rakam yalnızca eklentinin farkı.
+            price: _price(effectiveId),
+            busy: _busy && _busyProductId == effectiveId,
+            onTap: () => _buy(tier),
+          ),
+          AnalysisAddOnTile(
+            compact: true,
+            checked: addOnOn,
+            runs: tier.addOnRuns,
+            priceLabel: datingAddOnPriceLabel(
+              ref.read(datingPurchaseServiceProvider),
+              tier.soloProductId,
+              tier.addOnProductId,
+            ),
+            onChanged: _busy
+                ? null
+                : (v) => setState(() => _analysisAddOn[tier.soloProductId] = v),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showModuleInfo({
@@ -373,57 +451,25 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
                             letterSpacing: 1,
                             color: AppColors.textMuted)),
                     const SizedBox(height: 8),
-                    // ANALİZ SATIRLARI KALDIRILDI (2026-09-21 kuralı): tek
-                    // başına satılmıyor, yalnızca paywall'daki AI foto
-                    // paketlerinin altında opsiyonel eklenti olarak var.
-                    // Buradaki hızlı satın alma SADE (solo) fiyatı gösterir;
-                    // eklenti eklemek isteyen kullanıcı normal paywall'a
-                    // gider (mode=ai_photo — bkz. paywall_screen.dart).
                     // Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paket
                     // içerikleri değişti, eski rakamı indirim gibi göstermek
                     // yanıltıcı olur (App Store "yanıltıcı fiyat").
+                    //
+                    // KAYDIRILABİLİR (2026-09-22): her paketin altına bağlı
+                    // bir eklenti satırı geldi, blok yüksekliği iki katına
+                    // çıktı. Eskiden satırlar Expanded ile mevcut yüksekliği
+                    // paylaşıyordu; küçük ekranda bu, sabit puntolu metinleri
+                    // taşırırdı. Artık doğal yükseklikte çizilip kaydırılıyor.
                     Expanded(
-                      child: Column(
-                        children: [
-                          Expanded(
-                            child: _PriceRow(
-                              icon: Icons.auto_awesome,
-                              title: 'AI Foto Başlangıç',
-                              sub:
-                                  '${DatingConfig.photoStarterPhotos} fotoğraf',
-                              price: _price(
-                                  DatingConfig.photoStarterSoloProductId),
-                              busy: _busy,
-                              onTap: () => _buy(_PackKind.photoStarter),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _PriceRow(
-                              icon: Icons.auto_awesome,
-                              title: 'AI Foto Premium',
-                              sub:
-                                  '${DatingConfig.photoStandardPhotos} fotoğraf',
-                              price: _price(
-                                  DatingConfig.photoStandardSoloProductId),
-                              busy: _busy,
-                              onTap: () => _buy(_PackKind.photoStandard),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _PriceRow(
-                              icon: Icons.workspace_premium_rounded,
-                              title: 'AI Foto Diamond',
-                              sub:
-                                  '${DatingConfig.photoPremiumPhotos} fotoğraf',
-                              price: _price(
-                                  DatingConfig.photoPremiumSoloProductId),
-                              busy: _busy,
-                              onTap: () => _buy(_PackKind.photoPremium),
-                            ),
-                          ),
-                        ],
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            for (final tier in DatingConfig.photoPackTiers) ...[
+                              _packBlock(tier),
+                              const SizedBox(height: 10),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -518,6 +564,9 @@ class _ModuleChip extends StatelessWidget {
   }
 }
 
+/// Paketin ÜST satırı. Çerçeveyi/zemini artık _packBlock çiziyor (paket ve
+/// eklentisi tek kart gövdesinde görünmeli), bu yüzden burada kendi
+/// dekorasyonu YOK — iki çerçeve iç içe geçerdi.
 class _PriceRow extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -525,8 +574,6 @@ class _PriceRow extends StatelessWidget {
   final String price;
   final bool busy;
   final VoidCallback onTap;
-  final String? oldPriceLabel;
-  final String? discountPercentLabel;
   const _PriceRow({
     required this.icon,
     required this.title,
@@ -534,24 +581,15 @@ class _PriceRow extends StatelessWidget {
     required this.price,
     required this.busy,
     required this.onTap,
-    this.oldPriceLabel,
-    this.discountPercentLabel,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: busy ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: AppColors.borderSubtle,
-            width: 0.8,
-          ),
-        ),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
             Icon(icon, color: AppColors.gold, size: 20),
@@ -576,18 +614,19 @@ class _PriceRow extends StatelessWidget {
                 ],
               ),
             ),
-            (oldPriceLabel != null && discountPercentLabel != null)
-                ? DiscountedPrice(
-                    oldPriceLabel: oldPriceLabel!,
-                    price: price,
-                    discountPercentLabel: discountPercentLabel!,
-                    priceFontSize: 16,
-                  )
-                : Text(price,
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.gold)),
+            if (busy)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.gold),
+              )
+            else
+              Text(price,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.gold)),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right_rounded,
                 size: 18, color: AppColors.textMuted),

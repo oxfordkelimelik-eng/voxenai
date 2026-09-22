@@ -37,6 +37,37 @@ String datingStorePrice(
 ]) =>
     service.productFor(productId)?.price ?? placeholder;
 
+/// Opsiyonel analiz eklentisinin FARK fiyatı ("+₺150" gibi).
+///
+/// İKİ MAĞAZA FİYATINDAN TÜRETİLİR (bundle - solo), sabit bir etiketten
+/// DEĞİL. Gerekçe dating_constants.dart'taki uyarının aynısı: *PriceLabel
+/// sabitleri App Store Connect'teki gerçek fiyat basamağıyla uyuşmak zorunda
+/// değil; birini UI'a basmak, kullanıcıya tahsil edilenden farklı bir rakam
+/// göstermek demek (App Store "yanıltıcı fiyat" reddi riski). Fark iki gerçek
+/// fiyattan hesaplanınca tanım gereği doğru olur ve kullanıcının ülkesinin
+/// para birimiyle gelir.
+///
+/// Ürünlerden biri mağazadan henüz yüklenmediyse null döner — çağıran taraf
+/// o zaman fiyatsız (yer tutuculu) gösterir, UYDURMA RAKAM BASMAZ.
+String? datingAddOnPriceLabel(
+  DatingPurchaseService service,
+  String soloProductId,
+  String bundleProductId,
+) {
+  final solo = service.productFor(soloProductId);
+  final bundle = service.productFor(bundleProductId);
+  if (solo == null || bundle == null) return null;
+  final delta = bundle.rawPrice - solo.rawPrice;
+  if (delta <= 0) return null;
+  // Kuruşsuz fiyatlarda ".00" gösterme; kuruş varsa iki hane bırak.
+  final text = delta == delta.roundToDouble()
+      ? delta.round().toString()
+      : delta.toStringAsFixed(2);
+  final symbol =
+      bundle.currencySymbol.isNotEmpty ? bundle.currencySymbol : bundle.currencyCode;
+  return '+$symbol$text';
+}
+
 // ============================================================
 // ONBOARDING QUIZ CEVAPLARI (Bölüm 2)
 // ============================================================

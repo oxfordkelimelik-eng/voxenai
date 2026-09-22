@@ -170,6 +170,42 @@ class DatingConfig {
       'dating_pack_photos25_analysis5';
   static const String photoPremiumBundlePriceLabel = '₺1.299';
 
+  /// Paywall ve vitrinin ORTAK paket listesi (2026-09-22).
+  ///
+  /// İki ekran da aynı üçlüyü gösteriyor; ayrı ayrı tanımlanınca başlıklar,
+  /// analiz adetleri ve ürün ID eşleşmeleri birbirinden kayma riski taşıyor
+  /// (vitrinde "AI Foto Premium", paywall'da "Premium Paket" yazması gibi).
+  /// Tek kaynak burada.
+  ///
+  /// Kullanıcıya gösterilen fiyat BURADA YOK ve olmamalı — hem paket hem
+  /// eklenti fiyatı her zaman mağazadan gelir (bkz. datingStorePrice ve
+  /// datingAddOnPriceLabel).
+  static const List<PhotoPackTier> photoPackTiers = [
+    PhotoPackTier(
+      title: 'Başlangıç Paketi',
+      photos: photoStarterPhotos,
+      soloProductId: photoStarterSoloProductId,
+      addOnProductId: photoStarterAnalysisAddOnProductId,
+      addOnRuns: photoStarterAnalysisAddOnRuns,
+    ),
+    PhotoPackTier(
+      title: 'Premium Paket',
+      photos: photoStandardPhotos,
+      soloProductId: photoStandardSoloProductId,
+      addOnProductId: photoStandardAnalysisAddOnProductId,
+      addOnRuns: photoStandardAnalysisAddOnRuns,
+      badge: 'EN POPÜLER',
+    ),
+    PhotoPackTier(
+      title: 'Diamond Paket',
+      photos: photoPremiumPhotos,
+      soloProductId: photoPremiumSoloProductId,
+      addOnProductId: photoPremiumAnalysisAddOnProductId,
+      addOnRuns: photoPremiumAnalysisAddOnRuns,
+      badge: 'EN İYİ DEĞER',
+    ),
+  ];
+
   // FOTO PAKETLERİNİN "ESKİ FİYAT" SABİTLERİ KALDIRILDI (2026-09-18).
   // Paket içerikleri değişti (₺349 eskiden 10 fotoydu, artık 5); eski
   // rakamları üstü çizili "indirim" olarak göstermek yanıltıcı olurdu ve
@@ -194,6 +230,36 @@ class DatingConfig {
   static const String termsOfUseUrl = 'https://voxenai.com.tr/terms.html';
   static const String dataProcessingUrl = 'https://voxenai.com.tr/data.html';
   static const String supportEmail = 'destek@voxenai.com.tr';
+}
+
+/// Bir AI foto paketi ve ona bağlı opsiyonel analiz eklentisi.
+///
+/// Kullanıcı eklentiyi işaretli bırakırsa [addOnProductId], kaldırırsa
+/// [soloProductId] satın alınır — tek kart, iki ürün ID'si. Analiz paketi
+/// tek başına satılmadığı için eklentinin kendi başına bir ürünü YOKTUR.
+///
+/// FİYAT BİLEREK YOK: paketin fiyatı da eklentinin farkı da mağazadan gelir
+/// (bkz. datingStorePrice / datingAddOnPriceLabel). Buraya bir fiyat yazmak,
+/// App Store Connect'teki gerçek basamakla uyuşmama riski demek.
+class PhotoPackTier {
+  final String title;
+  final int photos;
+  final String soloProductId;
+  final String addOnProductId;
+  final int addOnRuns;
+  final String? badge;
+  const PhotoPackTier({
+    required this.title,
+    required this.photos,
+    required this.soloProductId,
+    required this.addOnProductId,
+    required this.addOnRuns,
+    this.badge,
+  });
+
+  /// Eklenti durumuna göre gerçekte satın alınacak ürün.
+  String productId({required bool withAnalysis}) =>
+      withAnalysis ? addOnProductId : soloProductId;
 }
 
 /// ARTIK ARAYÜZDE KULLANILMIYOR (2026-09-18): stil seçimi tamamen kaldırıldı,
