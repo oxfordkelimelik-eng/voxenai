@@ -84,7 +84,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Giriş sonrası modül merkezi
       GoRoute(
         path: DatingRoutes.hub,
-        builder: (c, s) => const ModuleHubScreen(),
+        // ?tab=photos — üretim bitince kullanıcı doğrudan "Fotoğraflarım"
+        // sekmesine bırakılıyor (bkz. module_flows.dart onay bekleme akışı).
+        builder: (c, s) => ModuleHubScreen(
+          initialTab: s.uri.queryParameters['tab'] == 'photos' ? 1 : 0,
+        ),
       ),
       // Modül ekranı — /module/:id
       GoRoute(

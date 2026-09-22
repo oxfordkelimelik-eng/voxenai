@@ -151,6 +151,39 @@ class _OverviewContent extends StatelessWidget {
         else
           ...data.dailyBreakdown.map((d) => _DailyCard(stat: d)),
         const SizedBox(height: 26),
+        // ONAY BEKLEYEN EN ÜSTTE (2026-09-22): otomatik onay yok, yani
+        // buradaki her sayı fotoğrafını bekleyen ödemiş bir kullanıcı.
+        // Unutulması doğrudan destek talebi demek, o yüzden sayfa sayfa
+        // aranmak yerine göz hizasında duruyor.
+        if (data.pendingApprovalJobs > 0) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.error, width: 1),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.hourglass_top_rounded,
+                    color: AppColors.error, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${data.pendingApprovalJobs} iş ONAY BEKLİYOR — '
+                    'kullanıcılar fotoğraflarını bekliyor.',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         _sectionTitle('ÜRETİM İŞLERİ'),
         Row(
           children: [

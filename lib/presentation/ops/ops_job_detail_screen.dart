@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../core/constants/app_colors.dart';
 import 'ops_gate.dart';
 import 'ops_models.dart';
@@ -63,22 +67,134 @@ class _JobDetailBody extends ConsumerWidget {
   }
 }
 
-class _DetailContent extends StatelessWidget {
+class _DetailContent extends ConsumerStatefulWidget {
   final OpsJobDetail data;
   const _DetailContent({required this.data});
 
   @override
+  ConsumerState<_DetailContent> createState() => _DetailContentState();
+}
+
+class _DetailContentState extends ConsumerState<_DetailContent> {
+  /// Seçili karelerin HAM gs:// adresleri (imzalı URL süreli, kimlik olamaz).
+  final Set<String> _selected = {};
+  bool _busy = false;
+
+  OpsJobDetail get data => widget.data;
+
+  /// Üretilen tüm kareler: (gösterim URL'i, gs:// adresi) çiftleri.
+  /// photoRefs ile photoUrls aynı sıradadır (sunucu öyle döndürüyor); eski
+  /// yanıtlarda photoRefs boş gelebilir, o zaman seçim yapılamaz ve kare
+  /// yalnızca görüntülenir.
+  List<({String url, String? ref})> get _staged {
+    final out = <({String url, String? ref})>[];
+    for (final r in data.results.values) {
+      for (var i = 0; i < r.photoUrls.length; i++) {
+        out.add((
+          url: r.photoUrls[i],
+          ref: i < r.photoRefs.length ? r.photoRefs[i] : null,
+        ));
+      }
+    }
+    return out;
+  }
+
+  void _toggle(String ref) {
+    setState(() {
+      if (_selected.contains(ref)) {
+        _selected.remove(ref);
+      } else if (_selected.length < data.photoCount) {
+        _selected.add(ref);
+      }
+    });
+  }
+
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: error ? AppColors.error : null,
+    ));
+  }
+
+  Future<void> _approve() async {
+    if (_selected.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final n = await opsApprovePhotos(
+        uid: data.uid,
+        jobId: data.jobId,
+        selectedRefs: _selected.toList(),
+      );
+      _snack('$n fotoğraf teslim edildi, kullanıcıya bildirim gönderildi.');
+      _selected.clear();
+      ref.invalidate(opsJobDetailProvider);
+    } catch (e) {
+      _snack('Onay başarısız: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Dışarıdan fotoğraf ekleme: dosya doğrudan Storage'a yüklenir, sonra
+  /// sunucuya teslim listesine işlenmesi söylenir. Dosya adı "manual_" ile
+  /// başlamak ZORUNDA — storage.rules yalnızca bu ön eke yazma izni veriyor.
+  Future<void> _upload() async {
+    if (_busy) return;
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 92,
+    );
+    if (picked == null) return;
+    setState(() => _busy = true);
+    try {
+      final name = 'manual_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final path = 'dating_results/${data.uid}/${data.jobId}/$name';
+      await FirebaseStorage.instance.ref(path).putFile(
+            File(picked.path),
+            SettableMetadata(contentType: 'image/jpeg'),
+          );
+      await opsAttachUploadedPhoto(
+        uid: data.uid,
+        jobId: data.jobId,
+        path: path,
+      );
+      _snack('Fotoğraf yüklendi ve kullanıcıya eklendi.');
+      ref.invalidate(opsJobDetailProvider);
+    } catch (e) {
+      _snack('Yükleme başarısız: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final delivered = data.results.values
-        .expand((r) => r.photoUrls)
-        .whereType<String>()
-        .toList();
+    // Teslim edilmiş kareler: yeni işlerde approvedPhotos, ONAY AKIŞINDAN
+    // ÖNCEKİ işlerde results.photoUrls'ün kendisi (o işlerde onay kavramı
+    // yoktu ve kareler zaten kullanıcıdaydı).
+    final delivered = data.approvedPhotos.isNotEmpty
+        ? data.approvedPhotos
+        : (data.approvedAtMillis == null && !data.awaitingApproval
+            ? data.results.values.expand((r) => r.photoUrls).toList()
+            : const <String>[]);
+    final staged = _staged;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         _infoCard(),
-        const SizedBox(height: 20),
+        if (data.awaitingApproval || staged.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          _sectionTitle(
+            'ONAY — ${_selected.length}/${data.photoCount} SEÇİLDİ '
+            '(${staged.length} üretildi)',
+          ),
+          _approvalBar(),
+          const SizedBox(height: 10),
+          _selectableGrid(staged),
+        ],
+        const SizedBox(height: 24),
         _sectionTitle('TESLİM EDİLEN FOTOĞRAFLAR (${delivered.length})'),
         if (delivered.isEmpty)
           const Padding(
@@ -99,6 +215,110 @@ class _DetailContent extends StatelessWidget {
       ],
     );
   }
+
+  Widget _approvalBar() => Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _busy || _selected.isEmpty ? null : _approve,
+              icon: _busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.textOnGold),
+                    )
+                  : const Icon(Icons.check_rounded, size: 18),
+              label: Text('Teslim Et (${_selected.length})'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.gold,
+                foregroundColor: AppColors.textOnGold,
+                disabledBackgroundColor: AppColors.surfaceElevated,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _upload,
+            icon: const Icon(Icons.upload_rounded, size: 18),
+            label: const Text('Yükle'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.gold,
+              side: const BorderSide(color: AppColors.borderGold),
+            ),
+          ),
+        ],
+      );
+
+  /// Seçilebilir kare ızgarası. Dokunmak SEÇER; büyütmek için uzun bas —
+  /// onay ekranında asıl eylem seçim olduğu için kısa dokunuş ona ayrıldı.
+  Widget _selectableGrid(List<({String url, String? ref})> items) =>
+      GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, i) {
+          final item = items[i];
+          final ref = item.ref;
+          final isSelected = ref != null && _selected.contains(ref);
+          final urls = items.map((e) => e.url).toList();
+          return GestureDetector(
+            onTap: ref == null ? null : () => _toggle(ref),
+            onLongPress: () => _openFullscreenViewer(context, urls, i),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: item.url,
+                    fit: BoxFit.cover,
+                    placeholder: (c, u) =>
+                        const ColoredBox(color: AppColors.surfaceElevated),
+                    errorWidget: (c, u, e) => const ColoredBox(
+                      color: AppColors.surfaceElevated,
+                      child: Icon(Icons.broken_image_outlined,
+                          color: AppColors.textMuted),
+                    ),
+                  ),
+                ),
+                if (isSelected)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.gold, width: 3),
+                      color: AppColors.gold.withValues(alpha: 0.18),
+                    ),
+                  ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected
+                          ? AppColors.gold
+                          : Colors.black.withValues(alpha: 0.45),
+                      border: Border.all(color: Colors.white70, width: 1),
+                    ),
+                    child: isSelected
+                        ? const Icon(Icons.check_rounded,
+                            size: 15, color: AppColors.textOnGold)
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
 
   Widget _infoCard() => Container(
         padding: const EdgeInsets.all(14),

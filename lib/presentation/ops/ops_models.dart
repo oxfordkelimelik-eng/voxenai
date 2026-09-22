@@ -24,6 +24,8 @@ String opsProductLabel(String? productId) => switch (productId) {
 /// İş/üretim durumunu panelde gösterilecek Türkçe karşılığa çevirir.
 String opsStatusLabel(String? status) => switch (status) {
       'done' => 'Tamamlandı',
+      // Üretim bitti, teslim bizim onayımızı bekliyor (2026-09-22).
+      'pendingApproval' => 'ONAY BEKLİYOR',
       'failed' => 'Başarısız',
       'generating' => 'Üretiliyor',
       'ready' => 'Hazır (bekliyor)',
@@ -204,6 +206,10 @@ class OpsOverview {
   final int freeTierJobs;
   final int paidJobs;
   final int failedJobs;
+
+  /// Üretimi bitmiş ama henüz onaylanmamış işler — her biri, fotoğrafını
+  /// bekleyen ödemiş bir kullanıcı demek. Otomatik onay YOK.
+  final int pendingApprovalJobs;
   final List<OpsPurchase> purchases;
   final List<OpsJobSummary> jobs;
   final List<OpsDailyStat> dailyBreakdown;
@@ -220,6 +226,7 @@ class OpsOverview {
     required this.totalRejected,
     required this.gateCounts,
     required this.freeTierJobs,
+    required this.pendingApprovalJobs,
     required this.paidJobs,
     required this.failedJobs,
     required this.purchases,
@@ -258,6 +265,8 @@ class OpsOverview {
       freeTierJobs: (summary['freeTierJobs'] as num?)?.toInt() ?? 0,
       paidJobs: (summary['paidJobs'] as num?)?.toInt() ?? 0,
       failedJobs: (summary['failedJobs'] as num?)?.toInt() ?? 0,
+      pendingApprovalJobs:
+          (summary['pendingApprovalJobs'] as num?)?.toInt() ?? 0,
       purchases: ((j['purchases'] as List?) ?? [])
           .map((e) => OpsPurchase.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
@@ -303,13 +312,28 @@ class OpsRejectedFrame {
 
 class OpsStyleResult {
   final String? status;
+
+  /// Görüntülemek için imzalı URL'ler (süreli).
   final List<String> photoUrls;
 
-  OpsStyleResult({required this.status, required this.photoUrls});
+  /// Aynı karelerin ham gs:// adresleri — ONAY BUNLARLA gönderilir.
+  /// İmzalı URL süreli olduğu için kare kimliği olarak kullanılamaz;
+  /// [photoUrls] ile aynı sıradadır.
+  final List<String> photoRefs;
+
+  OpsStyleResult({
+    required this.status,
+    required this.photoUrls,
+    required this.photoRefs,
+  });
 
   factory OpsStyleResult.fromJson(Map<String, dynamic> j) => OpsStyleResult(
         status: _asString(j['status']),
         photoUrls: ((j['photoUrls'] as List?) ?? [])
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList(),
+        photoRefs: ((j['photoRefs'] as List?) ?? [])
             .where((e) => e != null)
             .map((e) => e.toString())
             .toList(),
@@ -332,6 +356,17 @@ class OpsJobDetail {
   final Map<String, OpsStyleResult> results;
   final List<OpsRejectedFrame> rejectedFrames;
 
+  // ONAY AKIŞI (2026-09-22). photoCount = kullanıcının SATIN ALDIĞI (onay
+  // üst sınırı), generateCount = arka planda üretilen. approved* = şu an
+  // teslim edilmiş kareler; eski işlerde boştur (o işlerde teslim listesi
+  // results.photoUrls'ün kendisidir).
+  final int photoCount;
+  final int generateCount;
+  final List<String> approvedPhotos;
+  final List<String> approvedRefs;
+  final int? approvedAtMillis;
+  final String? approvedBy;
+
   OpsJobDetail({
     required this.uid,
     required this.email,
@@ -347,7 +382,16 @@ class OpsJobDetail {
     required this.updatedAtMillis,
     required this.results,
     required this.rejectedFrames,
+    required this.photoCount,
+    required this.generateCount,
+    required this.approvedPhotos,
+    required this.approvedRefs,
+    required this.approvedAtMillis,
+    required this.approvedBy,
   });
+
+  /// Onay bekliyor mu — üretim bitti ama hiçbir kare teslim edilmedi.
+  bool get awaitingApproval => status == 'pendingApproval';
 
   factory OpsJobDetail.fromJson(Map<String, dynamic> j) => OpsJobDetail(
         uid: _asString(j['uid']) ?? '',
@@ -374,5 +418,17 @@ class OpsJobDetail {
         rejectedFrames: ((j['rejectedFrames'] as List?) ?? [])
             .map((e) => OpsRejectedFrame.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList(),
+        photoCount: (j['photoCount'] as num?)?.toInt() ?? 0,
+        generateCount: (j['generateCount'] as num?)?.toInt() ?? 0,
+        approvedPhotos: ((j['approvedPhotos'] as List?) ?? [])
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList(),
+        approvedRefs: ((j['approvedRefs'] as List?) ?? [])
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList(),
+        approvedAtMillis: (j['approvedAt'] as num?)?.toInt(),
+        approvedBy: _asString(j['approvedBy']),
       );
 }

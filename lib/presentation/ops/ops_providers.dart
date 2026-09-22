@@ -112,3 +112,49 @@ final opsJobDetailProvider =
   });
   return OpsJobDetail.fromJson(Map<String, dynamic>.from(result.data as Map));
 });
+
+// ============================================================
+// FOTO ONAYI (2026-09-22)
+// ------------------------------------------------------------
+// Üretilen kareler kullanıcıya doğrudan gitmiyor; buradan onaylananlar
+// onun klasörüne kopyalanıyor ve kendisine bildirim gidiyor.
+// ============================================================
+
+/// Seçilen kareleri teslim eder. [selectedRefs] HAM gs:// adresleridir —
+/// imzalı URL süreli olduğu için kare kimliği olarak kullanılamaz.
+/// Döner: kaç kare teslim edildi.
+Future<int> opsApprovePhotos({
+  required String uid,
+  required String jobId,
+  required List<String> selectedRefs,
+}) async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsApprovePhotos');
+  final result = await callable.call(<String, dynamic>{
+    'uid': uid,
+    'jobId': jobId,
+    'selectedUrls': selectedRefs,
+  });
+  final data = Map<String, dynamic>.from(result.data as Map);
+  return (data['approved'] as num?)?.toInt() ?? 0;
+}
+
+/// Panelden ELLE yüklenen fotoğrafı kullanıcının teslim listesine ekler.
+///
+/// Dosya doğrudan Storage'a yüklenir (storage.rules yalnızca ops hesabına
+/// ve yalnızca "manual_" ön ekli dosyalara izin verir); burada yalnızca
+/// sunucuya "bu yolu listeye ekle" deniyor. Büyük dosyayı callable
+/// payload'ından geçirmemek için bu ikili yapı bilinçli.
+Future<void> opsAttachUploadedPhoto({
+  required String uid,
+  required String jobId,
+  required String path,
+}) async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsAttachUploadedPhoto');
+  await callable.call(<String, dynamic>{
+    'uid': uid,
+    'jobId': jobId,
+    'path': path,
+  });
+}

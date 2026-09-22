@@ -457,6 +457,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           if (!mounted || _stage != _AiStage.loading) return;
           if (data != null) {
             final status = data['status'] as String?;
+            // pendingApproval BURADA DA TANINMALI: iş uygulama kapalıyken
+            // bitmiş olabilir; tanınmazsa aşağıdaki hata ekranına düşüp
+            // kullanıcıya boş yere "üretim başarısız" derdik.
+            if (status == 'pendingApproval') {
+              setState(() => _jobData = data);
+              context.go('${DatingRoutes.hub}?tab=photos');
+              return;
+            }
             if (status == 'done' || status == 'generating') {
               setState(() {
                 _jobData = data;
@@ -504,6 +512,19 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           _stage = _AiStage.error;
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
+        } else if (status == 'pendingApproval') {
+          // ÜRETİM BİTTİ, TESLİM HENÜZ YOK (2026-09-22). Burada gösterilecek
+          // kare yok — kareler onaylanana kadar kullanıcının erişemediği
+          // staging alanında. Kullanıcıyı loading'de bekletmek yanlış
+          // olurdu (bekleme dakikalar değil, bizim onayımız kadar sürüyor),
+          // bu yüzden doğrudan "Fotoğraflarım" sekmesine bırakılıyor;
+          // oradaki bilgi kartı ne olduğunu anlatıyor.
+          _jobTimeoutTimer?.cancel();
+          _jobSub?.cancel();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.go('${DatingRoutes.hub}?tab=photos');
+          });
         } else if (status == 'done' || _resultUrls.isNotEmpty) {
           _jobTimeoutTimer?.cancel();
           // Üretim yalnızca ödenen (veya ücretsiz hakla açılan) stiller için
@@ -533,18 +554,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     }
   }
 
-  /// Firestore job dokümanındaki sonuç fotoğraflarını (gs:// URL'leri) tek
-  /// düz liste hâlinde döner.
-  List<String> get _resultUrls {
-    final results = _jobData?['results'] as Map<String, dynamic>?;
-    if (results == null) return [];
-    final urls = <String>[];
-    for (final entry in results.values) {
-      final map = entry as Map<String, dynamic>;
-      urls.addAll((map['photoUrls'] as List?)?.cast<String>() ?? []);
-    }
-    return urls;
-  }
+  /// İşin KULLANICIYA TESLİM EDİLMİŞ fotoğrafları.
+  List<String> get _resultUrls => deliveredPhotoUrls(_jobData);
 
   /// Kalite kapılarından geçemeyip elenen kareler (bkz. functions/falPhotos.js
   /// saveRejectedFrame'in Firestore yazımı) — "gerçek çıktı" sayısına dahil
@@ -1500,6 +1511,104 @@ class GeneratedPhotoTile extends StatelessWidget {
 }
 
 // ============================================================
+/// "Üretimin bitti, kareler hazırlanıyor" bilgisi.
+///
+/// METİN SÜRE VAAT ETMİYOR (2026-09-22, bilinçli): onay tamamen elle
+/// yapılıyor ve otomatik onay YOK. "Birkaç dakika" demek, gece gelen bir
+/// üretimde tutulamayacak bir söz olurdu. Bunun yerine kullanıcıya olan
+/// biten anlatılıyor ve hazır olduğunda BİLDİRİM geleceği söyleniyor —
+/// böylece ekranda beklemesi gerekmediğini de anlıyor.
+class _AwaitingApprovalNotice extends StatelessWidget {
+  const _AwaitingApprovalNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.goldSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderGold, width: 0.8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+                strokeWidth: 2.2, color: AppColors.gold),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Fotoğrafların hazırlanıyor',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Üretim tamamlandı. Ekibimiz en iyi kareleri seçiyor; '
+                  'hazır olduğunda burada görünecek ve sana bildirim '
+                  'göndereceğiz. Uygulamayı açık tutmana gerek yok.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: AppColors.textSecondary.withValues(alpha: 0.95),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bir üretim işinin KULLANICIYA TESLİM EDİLMİŞ fotoğrafları.
+///
+/// ONAY AKIŞI (2026-09-22): üretim artık doğrudan teslim etmiyor. Kareler
+/// önce kullanıcının okuyamadığı staging alanına yazılıyor; yalnızca ops
+/// panelinden onaylananlar `approvedPhotoUrls` alanına düşüyor ve
+/// kullanıcının klasörüne kopyalanıyor.
+///
+/// ESKİ İŞLER İÇİN GERİYE UYUM ŞART: onay akışından önce teslim edilmiş
+/// işlerde `approvedPhotoUrls` YOKTUR ve teslim listesi
+/// `results[*].photoUrls`ün kendisidir. Bu alan yoksa eski davranışa
+/// düşülmezse kullanıcının TÜM geçmiş fotoğrafları bir anda galeriden
+/// kaybolurdu.
+///
+/// Alanın VARLIĞI belirleyicidir, doluluğu değil: onaylanmış ama hiçbir kare
+/// seçilmemiş bir iş boş liste döndürmeli, eski işe benzeyip staging
+/// karelerini göstermemeli.
+List<String> deliveredPhotoUrls(Map<String, dynamic>? jobData) {
+  if (jobData == null) return const [];
+  final approved = jobData['approvedPhotoUrls'];
+  if (approved is List) return approved.cast<String>();
+
+  final results = jobData['results'] as Map<String, dynamic>?;
+  if (results == null) return const [];
+  final urls = <String>[];
+  for (final entry in results.values) {
+    final map = entry as Map<String, dynamic>;
+    if (map['status'] != 'done') continue;
+    urls.addAll((map['photoUrls'] as List?)?.cast<String>() ?? []);
+  }
+  return urls;
+}
+
+/// İş üretimi bitmiş ama biz henüz onaylamamış mı?
+bool isAwaitingApproval(Map<String, dynamic>? jobData) =>
+    jobData?['status'] == 'pendingApproval';
+
+// ============================================================
 // Kalıcı "Fotoğraflarım" galerisi — TÜM geçmiş üretim işlerindeki fotoğraflar
 // tek yerde. Hub'da ayrı bir sekme olarak açılır.
 // ============================================================
@@ -1516,9 +1625,11 @@ class GeneratedPhotosScreen extends ConsumerWidget {
       );
     }
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      // DURUM FİLTRESİ SORGUDAN ÇIKARILDI (2026-09-22): onay bekleyen işler
+      // de okunmak zorunda, çünkü kullanıcıya "üretimin bitti, kareler
+      // hazırlanıyor" bilgisini burada gösteriyoruz. Ayıklama aşağıda.
       stream: FirebaseFirestore.instance
           .collection('users/$uid/private/genData/genJobs')
-          .where('status', isEqualTo: 'done')
           .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snap) {
@@ -1527,30 +1638,37 @@ class GeneratedPhotosScreen extends ConsumerWidget {
             child: CircularProgressIndicator(color: AppColors.gold),
           );
         }
-        // Her işten YALNIZCA 'done' durumundaki stillerin fotoğrafları — iş
-        // kısmi başarıyla bittiyse başarısız stillerin boş sonucu atlanır.
         final urls = <String>[];
+        var awaiting = 0;
         for (final doc in snap.data?.docs ?? const []) {
-          final results = doc.data()['results'] as Map<String, dynamic>?;
-          if (results == null) continue;
-          for (final entry in results.values) {
-            final map = entry as Map<String, dynamic>;
-            if (map['status'] != 'done') continue;
-            urls.addAll((map['photoUrls'] as List?)?.cast<String>() ?? []);
-          }
+          final data = doc.data();
+          if (isAwaitingApproval(data)) awaiting++;
+          urls.addAll(deliveredPhotoUrls(data));
         }
-        if (urls.isEmpty) {
+        if (urls.isEmpty && awaiting == 0) {
           return _emptyState(context);
         }
-        return GridView.count(
+        return ListView(
           padding: const EdgeInsets.all(16),
-          crossAxisCount: 2,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 3 / 4,
           children: [
-            for (int i = 0; i < urls.length; i++)
-              GeneratedPhotoTile(gsUrl: urls[i], allGsUrls: urls, index: i),
+            if (awaiting > 0) ...[
+              const _AwaitingApprovalNotice(),
+              const SizedBox(height: 14),
+            ],
+            GridView.count(
+              // Bilgi kartıyla aynı listede olduğu için grid kendi
+              // kaydırmasını KAPATIP doğal yüksekliğine çekiliyor.
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 3 / 4,
+              children: [
+                for (int i = 0; i < urls.length; i++)
+                  GeneratedPhotoTile(gsUrl: urls[i], allGsUrls: urls, index: i),
+              ],
+            ),
           ],
         );
       },

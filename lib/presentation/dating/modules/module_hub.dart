@@ -11,13 +11,16 @@ import 'module_flows.dart' show GeneratedPhotosScreen;
 /// Giriş/abonelik sonrası ana merkez (Bölüm 6). Alt menü: Modüller / Bize
 /// Ulaşın / Ayarlar. 2 aktif modül + kredi bakiyesi.
 class ModuleHubScreen extends ConsumerStatefulWidget {
-  const ModuleHubScreen({super.key});
+  /// Hangi sekmeyle açılacağı. Üretim bitip iş onaya düştüğünde kullanıcı
+  /// doğrudan "Fotoğraflarım" (1) sekmesine bırakılıyor.
+  final int initialTab;
+  const ModuleHubScreen({super.key, this.initialTab = 0});
   @override
   ConsumerState<ModuleHubScreen> createState() => _ModuleHubScreenState();
 }
 
 class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
-  int _tab = 0;
+  late int _tab = widget.initialTab;
 
   /// Modüle her zaman girilebilir: ilk çıktı ekranda ücretsiz gösterilir,
   /// devamı için paket gerekiyorsa akış (module_flows) içinde paywall'a
