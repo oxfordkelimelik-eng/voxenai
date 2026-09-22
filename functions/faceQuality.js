@@ -2406,6 +2406,10 @@ module.exports = {
   CLOSED_EYE_MAX,
   matchesIdentity,
   assessOutputFace,
+  // Şablon netliğini çıktınınkiyle AYNI ölçekte ölçebilmek için dışa
+  // aktarıldı (2026-09-22) — assessOutputFace de netliği bununla hesaplıyor,
+  // aynı fonksiyon olmazsa iki sayı karşılaştırılabilir olmazdı.
+  assessImageQuality,
   detectMainFace,
   FACE_MATCH_THRESHOLD,
   PROFILE_UNRELIABLE_MIN,

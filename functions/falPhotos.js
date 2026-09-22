@@ -2055,6 +2055,43 @@ const VISION_HEAD_SPAN_DROP_MAX = 0.5;
 const VISION_PROPORTION_GROWTH_MIN = 1.05;
 
 /**
+ * İnce kafa/omuz ölçüm satırlarını sayıya çevirir ve oranı hesaplar.
+ *
+ * SADECE ÖLÇÜM — hiçbir kareyi ELEMEZ (gerekçe: Vision prompt'undaki
+ * "İNCE KAFA/OMUZ ÖLÇÜMÜ" notu). Eşik ancak gerçek dağılım biriktikten
+ * sonra tartışılır.
+ *
+ * oran = omuz genişliği / kafa genişliği, yani "omuza kaç kafa sığıyor".
+ * Kafa büyüdükçe DÜŞER. fark = çıktı oranı - taban oranı; NEGATİF fark,
+ * kafanın şablona göre büyüdüğü anlamına gelir.
+ *
+ * Omuz ölçülemediğinde model 0 yazar (kadraj dışı/gizli) — o tarafın oranı
+ * null bırakılır. Kanıt yokken sayı uydurmak, kalibrasyonu bozar.
+ */
+function headWidthMeasurement({ baseHeadWLine, baseShoulderWLine, outHeadWLine, outShoulderWLine } = {}) {
+  const num = (line) => {
+    if (!line) return null;
+    const m = /:\s*(\d+(?:\.\d+)?)/.exec(line);
+    const v = m ? Number(m[1]) : NaN;
+    return Number.isFinite(v) ? v : null;
+  };
+  const ratio = (shoulder, head) =>
+    shoulder != null && head != null && shoulder > 0 && head > 0 ? shoulder / head : null;
+
+  const baseHead = num(baseHeadWLine);
+  const baseShoulder = num(baseShoulderWLine);
+  const outHead = num(outHeadWLine);
+  const outShoulder = num(outShoulderWLine);
+  const baseRatio = ratio(baseShoulder, baseHead);
+  const outRatio = ratio(outShoulder, outHead);
+  return {
+    baseHead, baseShoulder, outHead, outShoulder,
+    baseRatio, outRatio,
+    diff: baseRatio != null && outRatio != null ? outRatio - baseRatio : null,
+  };
+}
+
+/**
  * Vision kalite kontrolü — İKİ AYRI ÇAĞRI (2026-08-22 yeniden yapılandırma).
  *
  * KÖK NEDEN (gerçek veri, 2026-08-21 üretimi): 8 kararsızlığın 8'i de
@@ -2268,13 +2305,44 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "are from the VIEWER'S point of view as you look at the image. Use the " +
          "bare AWAY only when you genuinely cannot tell which way the eyes " +
          "point.\n\n" +
-         "Reply on exactly fifteen lines:\n" +
+         // İNCE KAFA/OMUZ ÖLÇÜMÜ (2026-09-22) — SADECE ÖLÇÜM, KAPI DEĞİL.
+         //
+         // NEDEN: HEAD_SPAN satırları (yukarıda) kafa/omuz oranını ZATEN
+         // soruyor ama ölçeği kaba (0.5 kademe) ve pratikte tek kovaya
+         // doyuyor: 2026-09-22'de 84 karenin 77'si "2.5 / 2.5" geldi.
+         // Kullanıcının gözle "kafa çok büyük" dediği iki kare de 2.5/2.5
+         // ölçüldü — biri sayısal büyümenin o günkü rekoruna (1.20) sahipti.
+         // Yani sinyal yok değil, ÇÖZÜNÜRLÜK yok.
+         //
+         // YÖNTEM: tek bir "kaç kafa sığıyor" yargısı yerine İKİ HAM ÖLÇÜM
+         // isteniyor (kafa genişliği ve omuz genişliği, kare genişliğinin
+         // yüzdesi olarak) ve oran KODDA hesaplanıyor. Bu, dosyanın kendi
+         // kuralının bir adım ilerisi: "yargıyı elinden al, ÖLÇÜM iste".
+         // Yüzde tamsayı olarak istenir çünkü model ondalık uydurmaya
+         // meyilli; 1 birim = kare genişliğinin %1'i zaten yeterli çözünürlük.
+         //
+         // BU SATIRLAR HİÇBİR KAREYİ ELEMEZ. Yalnızca loglanır. Eşik ancak
+         // gerçek dağılım biriktikten ve kullanıcının işaretlediği kareleri
+         // işaretlemediklerinden AYIRDIĞI kanıtlandıktan sonra konulabilir.
+         "For the four width lines below: measure how WIDE the head is (temple " +
+         "to temple, ignoring hair volume) and how WIDE the shoulders are " +
+         "(outer edge to outer edge of the deltoids), each as a percentage of " +
+         "the FULL IMAGE WIDTH, as a whole number. Measure IMAGE 2 for the " +
+         "BASE_ lines and IMAGE 1 for the OUTPUT_ lines. These are raw " +
+         "measurements of two different photos — they will often differ, and " +
+         "you must never copy one into the other. If the shoulders are cropped " +
+         "out of frame or hidden, answer 0 for that shoulder line.\n\n" +
+         "Reply on exactly nineteen lines:\n" +
          "FACE_ARTIFACT: <NONE | PATCH>\n" +
          "BODY_INTEGRITY: <SOLID | TRANSPARENT_OR_GHOSTED>\n" +
          "HEAD_ORIENTATION: <FITS_SCENE | WRONG_FOR_SCENE>\n" +
          "HEAD_VS_BODY: <ALIGNED | PULLED_TO_CAMERA>\n" +
          "BASE_HEAD_SPAN: <1.5 | 2 | 2.5 | 3 | 3.5 | 4 | NO_SHOULDERS>\n" +
          "OUTPUT_HEAD_SPAN: <1.5 | 2 | 2.5 | 3 | 3.5 | 4 | NO_SHOULDERS>\n" +
+         "BASE_HEAD_W: <whole number, % of image width>\n" +
+         "BASE_SHOULDER_W: <whole number, % of image width, or 0>\n" +
+         "OUTPUT_HEAD_W: <whole number, % of image width>\n" +
+         "OUTPUT_SHOULDER_W: <whole number, % of image width, or 0>\n" +
          "BASE_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY_LEFT | AWAY_RIGHT | AWAY_UP | AWAY_DOWN | AWAY>\n" +
          "OUTPUT_GAZE: <CAMERA | LEFT | RIGHT | UP | DOWN | AWAY_LEFT | AWAY_RIGHT | AWAY_UP | AWAY_DOWN | AWAY>\n" +
          "GAZE_POINT: <SAME | DIFFERENT>\n" +
@@ -2284,9 +2352,12 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "FACE_EXPOSURE: <NORMAL | BLOWN_OUT>\n" +
          "FACE_ARM_LIGHT: <MATCHED | FACE_OVERLIT>\n" +
          "<verdict>: <SHORT reason, max 12 words>\n\n" +
-         "Decide the first fourteen lines before the verdict. The head-span and gaze lines are MEASUREMENTS, " +
+         "Decide the first eighteen lines before the verdict. The head-span, width and gaze lines are " +
+         "MEASUREMENTS, " +
          "not judgements — report what each image actually shows even when the two disagree, and never " +
-         "copy one line into the other just to look consistent. Binding rules — the verdict MUST match " +
+         "copy one line into the other just to look consistent. The four width lines never decide the " +
+         "verdict on their own; report them honestly and judge the verdict from the other lines. " +
+         "Binding rules — the verdict MUST match " +
          "whichever of these fired, however clean the rest looks: OUTPUT_HEAD_SPAN smaller than " +
          "BASE_HEAD_SPAN (fewer head-widths across the shoulders means a bigger head) -> " +
          "BAD_PROPORTION. " +
@@ -2570,6 +2641,15 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // Çözüm de aynı: yargıyı elinden al, ÖLÇÜM iste.
     const isBaseSpanLine = (l) => /^BASE_HEAD_SPAN/.test(l.toUpperCase());
     const isOutSpanLine = (l) => /^OUTPUT_HEAD_SPAN/.test(l.toUpperCase());
+    // İNCE KAFA/OMUZ ÖLÇÜMÜ (2026-09-22) — bkz. prompt'taki aynı başlıklı not.
+    // SIRA ÖNEMLİ: _HEAD_SPAN testleri bu dördünden ÖNCE tanımlı; yine de
+    // kalıplar birbirine karışmıyor çünkü _HEAD_W ile _HEAD_SPAN ayrı ekler.
+    // Bu dördü verdictLine elemesine de eklenmek ZORUNDA (aşağıda): tanınmayan
+    // bir ölçüm satırı "verdict" sanılırsa tüm ayrıştırma bozulur.
+    const isBaseHeadWLine = (l) => /^BASE_HEAD_W\b/.test(l.toUpperCase());
+    const isBaseShoulderWLine = (l) => /^BASE_SHOULDER_W\b/.test(l.toUpperCase());
+    const isOutHeadWLine = (l) => /^OUTPUT_HEAD_W\b/.test(l.toUpperCase());
+    const isOutShoulderWLine = (l) => /^OUTPUT_SHOULDER_W\b/.test(l.toUpperCase());
     const isBaseGazeLine = (l) => /^BASE_GAZE/.test(l.toUpperCase());
     const isOutGazeLine = (l) => /^OUTPUT_GAZE/.test(l.toUpperCase());
     const headsLine = lines.find(isHeadLine);
@@ -2588,13 +2668,19 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     const baseGazeLine = lines.find(isBaseGazeLine);
     const outGazeLine = lines.find(isOutGazeLine);
     const artifactLine = lines.find(isArtifactLine);
+    const baseHeadWLine = lines.find(isBaseHeadWLine);
+    const baseShoulderWLine = lines.find(isBaseShoulderWLine);
+    const outHeadWLine = lines.find(isOutHeadWLine);
+    const outShoulderWLine = lines.find(isOutShoulderWLine);
     const verdictLine = lines.find(
       (l) => !isHeadLine(l) && !isNeckLine(l) && !isSkinLine(l) && !isGazeLine(l) &&
              !isHandLine(l) && !isExposureLine(l) && !isOrientationLine(l) &&
              !isIntegrityLine(l) && !isHeadBodyLine(l) && !isFaceLightLine(l) &&
              !isGazePointLine(l) && !isArtifactLine(l) &&
              !isBaseSpanLine(l) && !isOutSpanLine(l) &&
-             !isBaseGazeLine(l) && !isOutGazeLine(l)
+             !isBaseGazeLine(l) && !isOutGazeLine(l) &&
+             !isBaseHeadWLine(l) && !isBaseShoulderWLine(l) &&
+             !isOutHeadWLine(l) && !isOutShoulderWLine(l)
     ) || "";
     if (headsLine) console.log(`VISION ÖLÇÜM (kafa/omuz): ${headsLine}`);
     if (neckLine) console.log(`VISION ÖLÇÜM (boyun bağlantısı): ${neckLine}`);
@@ -2610,6 +2696,21 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     if (gazePointLine) console.log(`VISION ÖLÇÜM (bakış noktası): ${gazePointLine}`);
     if (baseSpanLine || outSpanLine) console.log(`VISION ÖLÇÜM (kafa açıklığı): ${baseSpanLine || "—"} / ${outSpanLine || "—"}`);
     if (baseGazeLine || outGazeLine) console.log(`VISION ÖLÇÜM (bakış): ${baseGazeLine || "—"} / ${outGazeLine || "—"}`);
+    // İNCE KAFA/OMUZ ORANI — YALNIZCA ÖLÇÜM, HİÇBİR KAREYİ ELEMEZ
+    // (2026-09-22; gerekçe prompt'taki aynı başlıklı notta).
+    {
+      const m = headWidthMeasurement({
+        baseHeadWLine, baseShoulderWLine, outHeadWLine, outShoulderWLine,
+      });
+      if (m.baseHead != null || m.outHead != null) {
+        const f = (v) => (v != null ? v.toFixed(2) : "—");
+        console.log(
+          `VISION ÖLÇÜM (kafa/omuz ince): taban kafa=${m.baseHead ?? "—"} omuz=${m.baseShoulder ?? "—"} oran=${f(m.baseRatio)}` +
+          ` | çıktı kafa=${m.outHead ?? "—"} omuz=${m.outShoulder ?? "—"} oran=${f(m.outRatio)}` +
+          ` | fark=${m.diff != null ? (m.diff >= 0 ? "+" : "") + m.diff.toFixed(2) : "—"}`
+        );
+      }
+    }
 
     const verdictDetail = () =>
       verdictLine.includes(":") ? verdictLine.slice(verdictLine.indexOf(":") + 1).trim().slice(0, 120) : null;
@@ -3557,6 +3658,29 @@ const TEMPLATE_TARGET_FACE_RATIO = 0.17;
 // yok; 0.05 bu boşluğa oturur.
 const TEMPLATE_UNUSABLE_FACE_RATIO = 0.05;
 
+// YENİDEN DENEMEDE ŞABLON TIRMANMASI (2026-09-22).
+//
+// GERÇEK OLAY (iş 0150e03a, chunk 2): denemeler sırasıyla 0.224 -> 0.147 ->
+// 0.254 yüz oranlı şablonlarla yapıldı. Teslim edilen kare 3. denemeden
+// geldi ve kullanıcı "kafa çok büyük" diye işaretledi. Model hata yapmamıştı
+// — büyüme 0.96, yani şablona SADIK kalmıştı. Kusur şablon seçimindeydi:
+// yedek, ilk şablondan belirgin daha büyük kafalı bir kareydi.
+//
+// KURAL: yalnızca YENİDEN DENEMEDE ve yalnızca BÜYÜK BANDA tırmanırken
+// devreye girer — yedeğin yüz oranı hem 0.20'nin hem de ilk şablonun
+// üstündeyse o yedek atlanır, sıradaki denenir.
+//
+// İLK DENEME BİLEREK MUAF: 2026-09-22 verisinde en büyük yüz oranlı üç kare
+// (0.292 / 0.270 / 0.264) İLK denemeden geldi ve üçü de gözle sorunsuzdu.
+// Yani "büyük yüzlü şablon" tek başına kötü değil; kötü olan, bir retry'nin
+// kadrajı sessizce büyütmesi. Bu yüzden kural mutlak bir üst sınır DEĞİL.
+//
+// ATLANAN ŞABLON ÇÖPE GİTMEZ: hiç uygun aday kalmazsa atlananların EN KÜÇÜK
+// yüz oranlısı kullanılır — "her denemede yeni şablon" davranışı korunur,
+// aksi halde chunk aynı şablonda sıkışırdı (bkz. "YENİDEN DENEME = YENİ
+// ŞABLON" notu).
+const TEMPLATE_RETRY_LARGE_FACE_RATIO = 0.20;
+
 /**
  * Taban şablonunu üretime hazırlar: kişi kadrajda çok küçükse şablonu
  * YAKINLAŞTIRIR (bkz. postProcess.cropForFaceRatio gerekçesi).
@@ -3602,14 +3726,38 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
       console.warn(`ŞABLON KULLANILAMAZ: yüz çok küçük (yüzOranı=${face.ratio.toFixed(3)} < ${TEMPLATE_UNUSABLE_FACE_RATIO}, ana özne yerine arka plandaki biri olabilir) (style=${styleId}, chunk=${chunkIdx}) — yedek şablon denenecek`);
       return { input: templateUrl, restore: null, usable: false };
     }
+    // ŞABLON NETLİĞİ — YALNIZCA ÖLÇÜM (2026-09-22).
+    //
+    // NEDEN GÖRECELİ: çıktının netlik kapısı mutlak (BLUR_VARIANCE_MIN=25) ve
+    // fiilen ölü — 2026-09-22'de en bulanık kare bile 103 ölçtü. Ama kullanıcı
+    // o gün netlik=200 civarındaki iki kareyi "netlik bozuk" diye işaretledi.
+    // Mutlak eşiği yukarı çekmek TUZAK: Laplacian varyansı sahneye bağlı,
+    // yumuşak ışıklı/bokeh'li bir şablon doğal olarak düşük değer verir.
+    // Anlamlı olan, çıktının KENDİ ŞABLONUNA göre ne kadar yumuşadığı.
+    // Bu yüzden şablonun netliği de ölçülüp KALITE ÖLÇÜM satırına yazılıyor.
+    // Şimdilik hiçbir kareyi elemez; eşik ancak dağılım birikince konulabilir.
+    //
+    // ÖLÇÜM ÜRETİME GİDEN TUVALDE yapılır (kırpıldıysa kırpılmış olanda),
+    // çünkü çıktı o kadrajda üretiliyor ve karşılaştırma ancak öyle adil olur.
+    const blurOf = async (b) => {
+      try {
+        const { assessImageQuality } = require("./faceQuality");
+        return (await assessImageQuality(b)).blurScore;
+      } catch (e) {
+        console.error("Şablon netlik ölçümü başarısız (atlanıyor):", e.message || e);
+        return null;
+      }
+    };
+
     if (face.ratio >= TEMPLATE_MIN_FACE_RATIO) {
-      console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} — kırpma gerekmiyor`);
+      const blurScore = await blurOf(buf);
+      console.log(`ŞABLON OK (style=${styleId}, chunk=${chunkIdx}): yüzOranı=${face.ratio.toFixed(3)} netlik=${blurScore != null ? blurScore.toFixed(1) : "null"} — kırpma gerekmiyor`);
       // sourceBuf: kırpma YAPILMADIĞINDA `input` bir URL STRING'idir (üretim
       // API'si URL kabul ettiği için bilinçli). Ama ten rengi kapısı taban
       // görselin PİKSELLERİNE ihtiyaç duyuyor ve string'i sharp'a verince
       // "Input file is missing" ile patlıyordu (2026-08-09 canlı log). Buffer
       // burada zaten indirilmişti, atmak yerine ölçüm için taşınıyor.
-      return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf };
+      return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf, blurScore };
     }
 
     const { cropForFaceRatio, computeFaceCropGeometry } = require("./postProcess");
@@ -3617,13 +3765,17 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
       cropForFaceRatio(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
       computeFaceCropGeometry(buf, face.box, face.ratio, TEMPLATE_TARGET_FACE_RATIO),
     ]);
-    if (!cropped || !geo) return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf };
-    console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO}`);
+    if (!cropped || !geo) {
+      return { ...noCrop, faceRatio: face.ratio, sourceBuf: buf, blurScore: await blurOf(buf) };
+    }
+    const croppedBlur = await blurOf(cropped);
+    console.log(`ŞABLON KIRPILDI (style=${styleId}, chunk=${chunkIdx}): yüzOranı ${face.ratio.toFixed(3)} -> hedef ${TEMPLATE_TARGET_FACE_RATIO} netlik=${croppedBlur != null ? croppedBlur.toFixed(1) : "null"}`);
     // Kırpma sonrası ETKİN oran hedeftir — kalite kapısı kırpılmış tuvale
     // baktığı için karşılaştırma da onunla yapılmalı.
     return {
       input: cropped, restore: { originalBuf: buf, geo },
       usable: true, faceRatio: TEMPLATE_TARGET_FACE_RATIO,
+      blurScore: croppedBlur,
     };
   } catch (e) {
     console.error("Şablon hazırlama başarısız (orijinal kullanılıyor):", e.message || e);
@@ -3666,10 +3818,35 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // üretimi bloklamak, kötü kare riskinden daha kötüdür (fail-safe).
   const urls = Array.isArray(templateUrls) ? templateUrls : [templateUrls];
   let nextCandidate = 0;
-  const prepareNextUsable = async () => {
+  // İlk denemede kullanılan şablonun yüz oranı — yedeklerin buna göre
+  // "tırmanıp tırmanmadığı" ölçülür (bkz. TEMPLATE_RETRY_LARGE_FACE_RATIO).
+  let baselineTemplateFaceRatio = null;
+  const prepareNextUsable = async ({ avoidEscalation = false } = {}) => {
+    const skipped = [];
     while (nextCandidate < urls.length) {
       const p = await prepareTemplate(urls[nextCandidate++], styleId, chunkIdx);
-      if (p.usable) return p;
+      if (!p.usable) continue;
+      const tooBig = avoidEscalation &&
+        baselineTemplateFaceRatio != null &&
+        p.faceRatio != null &&
+        p.faceRatio > TEMPLATE_RETRY_LARGE_FACE_RATIO &&
+        p.faceRatio > baselineTemplateFaceRatio;
+      if (tooBig) {
+        console.log(
+          `ŞABLON ATLANDI (style=${styleId}, chunk=${chunkIdx}): yedeğin yüz oranı ` +
+          `${p.faceRatio.toFixed(3)} — hem ${TEMPLATE_RETRY_LARGE_FACE_RATIO} üstünde hem de ilk ` +
+          `şablondan (${baselineTemplateFaceRatio.toFixed(3)}) büyük, kadrajı büyütmemek için sıradaki deneniyor`
+        );
+        skipped.push(p);
+        continue;
+      }
+      return p;
+    }
+    // Hiç uygun aday kalmadı: atlananların EN KÜÇÜK yüz oranlısına dön.
+    // Boş dönmek, chunk'ı aynı şablonda sıkıştırırdı.
+    if (skipped.length) {
+      skipped.sort((a, b) => (a.faceRatio ?? 1) - (b.faceRatio ?? 1));
+      return skipped[0];
     }
     return null;
   };
@@ -3679,7 +3856,11 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     console.warn(`ŞABLON: hiçbir aday uygun değil (style=${styleId}, chunk=${chunkIdx}) — birincil ile devam ediliyor`);
     prepared = await prepareTemplate(urls[0], styleId, chunkIdx);
   }
-  let { input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = prepared;
+  let {
+    input: templateInput, restore, faceRatio: templateFaceRatio,
+    sourceBuf: templateSourceBuf, blurScore: templateBlurScore,
+  } = prepared;
+  baselineTemplateFaceRatio = templateFaceRatio ?? null;
 
   // Şablonun yaw'ı (yana dönüklüğü) — YAW KAPISI için şablon başına BİR KEZ
   // ölçülür. undefined = henüz ölçülmedi; null = ölçülemedi (kapı devre dışı).
@@ -3755,9 +3936,12 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // ikisi de arka plandaki yanlış kişiye kırpılmış aynı şablondu. Elde
     // yedek varsa artık onunla deneniyor.
     if (attempt > 1) {
-      const next = await prepareNextUsable();
+      const next = await prepareNextUsable({ avoidEscalation: true });
       if (next) {
-        ({ input: templateInput, restore, faceRatio: templateFaceRatio, sourceBuf: templateSourceBuf } = next);
+        ({
+          input: templateInput, restore, faceRatio: templateFaceRatio,
+          sourceBuf: templateSourceBuf, blurScore: templateBlurScore,
+        } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
@@ -3862,7 +4046,15 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         if (templateFaceRatio && q.faceRatio) headGrowth = q.faceRatio / templateFaceRatio;
         const gr = headGrowth != null ? headGrowth.toFixed(2) : "null";
         const pd = q.profileDegree != null ? q.profileDegree.toFixed(2) : "null";
-        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} profil=${pd} yüzOranı=${fr} büyüme=${gr} netlik=${bs} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
+        // ŞABLONA GÖRE NETLİK (2026-09-22) — yalnızca ölçüm, eleme yok.
+        // netlikOranı = çıktı netliği / şablon netliği. 1'in altı, çıktının
+        // kendi tabanından daha yumuşak geldiği anlamına gelir. Mutlak eşik
+        // neden yanlış olurdu: bkz. prepareTemplate'teki "ŞABLON NETLİĞİ" notu.
+        const tbs = templateBlurScore != null ? templateBlurScore.toFixed(1) : "null";
+        const br = (templateBlurScore && q.blurScore != null && templateBlurScore > 0)
+          ? (q.blurScore / templateBlurScore).toFixed(2)
+          : "null";
+        console.log(`KALITE ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${q.ok ? "GEÇTİ" : "RED[" + q.reason + "]"} mesafe=${d} profil=${pd} yüzOranı=${fr} büyüme=${gr} netlik=${bs} şablonNetlik=${tbs} netlikOranı=${br} eşik=${require("./faceQuality").FACE_MATCH_THRESHOLD}`);
       } catch (e) {
         console.error("OpenAI yolu: kimlik/netlik kontrolü hata verdi (bu katman atlanıyor, Vision yine çalışacak):", e);
       }
@@ -5961,4 +6153,6 @@ exports.cleanupExpiredReadyJobs = onSchedule(
 // aynı desen.
 exports._testables = {
   retryCorrectionPrefix,
+  headWidthMeasurement,
+  TEMPLATE_RETRY_LARGE_FACE_RATIO,
 };
