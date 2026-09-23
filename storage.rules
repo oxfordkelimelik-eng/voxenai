@@ -43,6 +43,21 @@ service firebase.storage {
       allow read, write: if false;
     }
 
+    // ELLE YÜKLEME STAGING'E GİDER (2026-09-23) — dating_results'a DEĞİL.
+    // Önceki sürüm manuel yüklemeyi doğrudan teslim listesine ekliyordu;
+    // admin onay ızgarasından SEÇEMİYORDU (upload = anında teslim, seçim
+    // adımı atlanıyordu). Artık üretilen karelerle AYNI havuza (staging)
+    // düşer, opsAttachUploadedPhoto onu job.results'a candidate olarak
+    // ekler, admin normal onay akışıyla (opsApprovePhotos) seçip teslim eder.
+    match /dating_staging/{userId}/{jobId}/{fileName} {
+      allow write: if request.auth != null
+        && request.auth.token.email == 'destek@voxenai.com.tr'
+        && request.auth.token.email_verified == true
+        && fileName.matches('manual_.*')
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // GEÇİCİ: model A/B karşılaştırma çıktıları (bkz. functions/modelBakeoff.js).
     // dating_results ile aynı kural: yalnızca Cloud Functions yazar, sahibi
     // okur. Karşılaştırma bitince bu blok ve ilgili kod silinmeli.

@@ -137,8 +137,14 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   }
 
   /// Dışarıdan fotoğraf ekleme: dosya doğrudan Storage'a yüklenir, sonra
-  /// sunucuya teslim listesine işlenmesi söylenir. Dosya adı "manual_" ile
-  /// başlamak ZORUNDA — storage.rules yalnızca bu ön eke yazma izni veriyor.
+  /// sunucuya ONAY HAVUZUNA (staging) eklenmesi söylenir. Dosya adı
+  /// "manual_" ile başlamak ZORUNDA — storage.rules yalnızca bu ön eke
+  /// yazma izni veriyor.
+  ///
+  /// STAGING'E YÜKLENİR, dating_results'a DEĞİL (2026-09-23) — üretilen
+  /// karelerle AYNI seçim ızgarasında görünmesi ve normal onay akışından
+  /// (Teslim Et) geçmesi için. Doğrudan teslim listesine yazmak, seçim
+  /// adımını atlayıp yüklemeyi anında kullanıcıya gösterirdi.
   Future<void> _upload() async {
     if (_busy) return;
     final picked = await ImagePicker().pickImage(
@@ -149,7 +155,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     setState(() => _busy = true);
     try {
       final name = 'manual_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final path = 'dating_results/${data.uid}/${data.jobId}/$name';
+      final path = 'dating_staging/${data.uid}/${data.jobId}/$name';
       await FirebaseStorage.instance.ref(path).putFile(
             File(picked.path),
             SettableMetadata(contentType: 'image/jpeg'),
@@ -159,7 +165,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         jobId: data.jobId,
         path: path,
       );
-      _snack('Fotoğraf yüklendi ve kullanıcıya eklendi.');
+      _snack('Fotoğraf yüklendi — onay ızgarasında seçilebilir.');
       ref.invalidate(opsJobDetailProvider);
     } catch (e) {
       _snack('Yükleme başarısız: $e', error: true);

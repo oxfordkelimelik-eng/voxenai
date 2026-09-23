@@ -605,12 +605,20 @@ exports.opsApprovePhotos = onCall(
 );
 
 /**
- * Panelden ELLE yüklenen fotoğrafı kullanıcının teslim listesine ekler.
+ * Panelden ELLE yüklenen fotoğrafı ONAY HAVUZUNA (staging) ekler.
  *
  * Yükleme, ops istemcisi tarafından doğrudan Storage'a yapılır (storage.rules
- * yalnızca ops email'ine bu yol altında yazma izni verir); burada yalnızca
- * yolun beklenen yerde olduğu doğrulanıp iş dokümanına işleniyor. Böylece
- * büyük dosya callable payload'ından geçmek zorunda kalmıyor.
+ * yalnızca ops email'ine dating_staging altında "manual_" adıyla yazma izni
+ * verir); burada yalnızca yolun beklenen yerde olduğu doğrulanıp iş
+ * dokümanına CANDIDATE olarak işleniyor. Böylece büyük dosya callable
+ * payload'ından geçmek zorunda kalmıyor.
+ *
+ * DOĞRUDAN approvedPhotoUrls'A YAZMIYOR (2026-09-23'te değişti) — önceki
+ * sürüm yüklemeyi anında teslim ediyordu, admin panelden SEÇEMİYORDU (upload
+ * = onay adımını atlıyordu). Artık üretilen karelerle AYNI job.results
+ * havuzuna eklenir; admin normal onay ızgarasından seçip opsApprovePhotos
+ * ile teslim eder (staging→dating_results kopyalama zaten o fonksiyonda var,
+ * "manual_" adı için özel bir dal gerekmiyor).
  */
 exports.opsAttachUploadedPhoto = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 60 },
@@ -623,9 +631,9 @@ exports.opsAttachUploadedPhoto = onCall(
     assertSafeId(uid, "uid");
     assertSafeId(jobId, "jobId");
 
-    // Yol İSTEMCİDEN geliyor — tam olarak bu kullanıcının bu işine ait,
-    // "manual_" ile başlayan bir dosya olmak zorunda.
-    const expected = `${RESULTS_PREFIX}${uid}/${jobId}/manual_`;
+    // Yol İSTEMCİDEN geliyor — tam olarak bu kullanıcının bu işinin staging
+    // klasöründe, "manual_" ile başlayan bir dosya olmak zorunda.
+    const expected = `${STAGING_PREFIX}${uid}/${jobId}/manual_`;
     if (typeof path !== "string" || !path.startsWith(expected) || path.includes("..")) {
       throw new HttpsError("invalid-argument", "Geçersiz yol.");
     }
@@ -639,14 +647,19 @@ exports.opsAttachUploadedPhoto = onCall(
     const snap = await jobRef.get();
     if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
 
+    // Dosya adı ("manual_<ts>.jpg") aynı zamanda results map'inin anahtarı —
+    // her yükleme benzersiz bir anahtar olduğu için arrayUnion/transaction
+    // gerekmeden ayrı bir alan olarak eklenebilir.
+    const fileName = path.slice(expected.length - "manual_".length, path.length);
+    const key = fileName.replace(/\.[a-zA-Z0-9]+$/, "");
     await jobRef.set({
-      approvedPhotoUrls: admin.firestore.FieldValue.arrayUnion(
-        `gs://${bucket().name}/${path}`
-      ),
+      results: {
+        [key]: { photoUrls: [`gs://${bucket().name}/${path}`] },
+      },
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
-    console.log(`ELLE YÜKLEME: foto eklendi (uid=${uid}, job=${jobId}, path=${path})`);
+    console.log(`ELLE YÜKLEME: onay havuzuna eklendi (uid=${uid}, job=${jobId}, path=${path})`);
     return { ok: true };
   }
 );
