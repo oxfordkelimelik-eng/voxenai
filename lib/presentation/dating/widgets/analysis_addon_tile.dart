@@ -10,7 +10,10 @@ import '../../../core/constants/app_colors.dart';
 ///  • Üst paketle aynı dil, sadece DAHA KÜÇÜK font.
 ///  • Fiyat KIRMIZI ve PARANTEZSİZ, kendi başına bir rakam olarak durur —
 ///    "(+₺150)" değil, alt modülün sağında "+₺150".
-///  • Aynı kart içinde seçilir; kutucuk varsayılan İŞARETLİ gelir.
+///  • Aynı kart içinde seçilir; varsayılan işaretli/işaretsiz durumu bu
+///    widget'ın DIŞINDA, çağıran ekran tarafından karar verilir (2026-09-23
+///    kuralı: kullanıcı seçmedikçe hiçbir tik işaretli gelmez — istisna,
+///    paywall'da zaten otomatik seçili duran orta paket).
 ///
 /// Fiyat DIŞARIDAN verilir ve her zaman iki gerçek mağaza fiyatının farkıdır
 /// (bkz. datingAddOnPriceLabel). Burada sabit bir etiket basmak App Store

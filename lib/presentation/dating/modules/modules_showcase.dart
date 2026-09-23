@@ -33,10 +33,10 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   bool _busy = false;
   String? _busyProductId;
 
-  // Eklenti kutucukları VARSAYILAN İŞARETLİ (paywall ile aynı kural).
-  final Map<String, bool> _analysisAddOn = {
-    for (final t in DatingConfig.photoPackTiers) t.soloProductId: true,
-  };
+  // Eklenti kutucukları VARSAYILAN KAPALI (2026-09-23 kuralı: kullanıcı
+  // seçmedikçe hiçbir tik işaretli gelmez — bu ekranda "otomatik seçili
+  // paket" kavramı yok, satır doğrudan satın alır, o yüzden istisna da yok).
+  final Map<String, bool> _analysisAddOn = {};
 
   static const _slides = [
     (
@@ -103,7 +103,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
 
   /// Seçili eklenti durumuna göre gerçekte satın alınacak ürün.
   String _productIdFor(PhotoPackTier tier) =>
-      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? true);
+      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? false);
 
   Future<void> _buy(PhotoPackTier tier) async {
     // Spinner artık YALNIZCA satın alınan paketin satırında dönüyor (eskiden
@@ -143,7 +143,7 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
   /// eklenti kutucuğu AYRI bir dokunma alanıdır ve yalnızca seçimi değiştirir
   /// — kutucuğa basan kullanıcı yanlışlıkla ödeme ekranı açmaz.
   Widget _packBlock(PhotoPackTier tier) {
-    final addOnOn = _analysisAddOn[tier.soloProductId] ?? true;
+    final addOnOn = _analysisAddOn[tier.soloProductId] ?? false;
     final effectiveId = _productIdFor(tier);
     return Container(
       decoration: BoxDecoration(

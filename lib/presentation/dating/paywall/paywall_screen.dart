@@ -42,11 +42,13 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   // da bundle ID'sine çözülür (bkz. _effectiveProductId / _selectedProductId).
   late String _selectedTierId;
 
-  // Tier başına "analiz eklentisi işaretli mi" — VARSAYILAN AÇIK (kullanıcı
-  // kararı: "varsayılan işaretli, opsiyonel — kaldırılabilir").
-  final Map<String, bool> _analysisAddOn = {
-    for (final t in _tiers) t.soloProductId: true,
-  };
+  // Tier başına "analiz eklentisi işaretli mi" — VARSAYILAN KAPALI (2026-09-23
+  // kuralı: kullanıcı kendi seçmedikçe hiçbir tik işaretli gelmez). Tek
+  // istisna: initState'te otomatik seçilen paket (orta paket / analiz
+  // modunda en ucuz paket) — orada paket ZATEN seçili durduğu için eklenti
+  // de birlikte işaretli açılır, aksi halde "seçili paket" ile "işaretli
+  // eklenti" birbirini yalanlardı.
+  final Map<String, bool> _analysisAddOn = {};
 
   @override
   void initState() {
@@ -57,11 +59,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     _selectedTierId = widget.mode == PaywallMode.analysis
         ? _tiers[0].soloProductId
         : _tiers[1].soloProductId;
+    _analysisAddOn[_selectedTierId] = true;
     _loadStorePrices();
   }
 
   String _effectiveProductId(PhotoPackTier tier) =>
-      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? true);
+      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? false);
 
   PhotoPackTier get _selectedTier => _tiers.firstWhere(
     (t) => t.soloProductId == _selectedTierId,
@@ -105,7 +108,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   }
 
   Widget _tierCard(PhotoPackTier tier) {
-    final addOnOn = _analysisAddOn[tier.soloProductId] ?? true;
+    final addOnOn = _analysisAddOn[tier.soloProductId] ?? false;
     final effectiveId = _effectiveProductId(tier);
     return _PackCard(
       icon: Icons.auto_awesome,
@@ -120,6 +123,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       busy: _busyProductId == effectiveId,
       onTap: _busy ? null : () => _selectTier(tier.soloProductId),
       addOnRow: AnalysisAddOnTile(
+        compact: true,
         checked: addOnOn,
         runs: tier.addOnRuns,
         // Fark, iki gerçek mağaza fiyatından hesaplanır (sabit etiket değil).
@@ -373,13 +377,17 @@ class _PackCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Vitrin ekranıyla (modules_showcase) AYNI küçük/sade satır tasarımı
+    // (2026-09-23 kullanıcı kararı) — tek fark, burada tek bir CTA butonu
+    // hangi paketin ödeneceğine bağlı olduğu için sağda bir seçim işareti
+    // (chevron yerine dolu/boş daire) var.
     return Container(
       decoration: BoxDecoration(
         color: selected ? AppColors.goldSurface : AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: selected ? AppColors.gold : AppColors.borderGold,
-          width: selected ? 2 : 0.8,
+          color: selected ? AppColors.gold : AppColors.borderSubtle,
+          width: selected ? 1.4 : 0.8,
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -388,13 +396,13 @@ class _PackCard extends StatelessWidget {
         children: [
           if (badge != null)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               color: AppColors.gold,
               child: Text(
                 badge!,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  fontSize: 10,
+                  fontSize: 9,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0.8,
                   color: AppColors.textOnGold,
@@ -407,89 +415,71 @@ class _PackCard extends StatelessWidget {
             onTap: onTap,
             behavior: HitTestBehavior.opaque,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
-                  // Seçiliyken ürün ikonu yerine TİK gösterilir: hangi paketin
-                  // ödeneceği tek bakışta anlaşılsın (çerçeve/zemin farkı
-                  // renk körlüğünde ya da parlak ekranda yeterince ayırt
-                  // edici değil).
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: selected ? AppColors.gold : AppColors.goldSurface,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      selected ? Icons.check_rounded : icon,
-                      color: selected ? AppColors.textOnGold : AppColors.gold,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
+                  Icon(icon, color: AppColors.gold, size: 20),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 16,
+                            fontSize: 13,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
                           ),
                         ),
-                        const SizedBox(height: 4),
                         Text(
                           sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             color: AppColors.textSecondary,
-                            height: 1.3,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   if (busy)
                     const SizedBox(
-                      width: 22,
-                      height: 22,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
+                        strokeWidth: 2,
                         color: AppColors.gold,
                       ),
                     )
+                  else if (oldPriceLabel != null)
+                    DiscountedPrice(
+                      oldPriceLabel: oldPriceLabel!,
+                      price: price,
+                      discountPercentLabel: discountPercentLabel ?? '',
+                    )
                   else
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        if (oldPriceLabel != null)
-                          DiscountedPrice(
-                            oldPriceLabel: oldPriceLabel!,
-                            price: price,
-                            discountPercentLabel: discountPercentLabel ?? '',
-                          )
-                        else
-                          Text(
-                            price,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.gold,
-                              height: 1.1,
-                            ),
-                          ),
-                        const SizedBox(height: 2),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppColors.textMuted,
-                          size: 22,
-                        ),
-                      ],
+                    Text(
+                      price,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.gold,
+                      ),
                     ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    size: 18,
+                    color: selected ? AppColors.gold : AppColors.textMuted,
+                  ),
                 ],
               ),
             ),
