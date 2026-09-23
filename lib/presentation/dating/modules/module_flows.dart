@@ -2018,8 +2018,13 @@ class _PhotoAnalysisFlowState extends ConsumerState<PhotoAnalysisFlow> {
         _stage = 3;
         _needsPack = needsPack;
         _errorMessage = needsPack
+            // Sunucunun mesajı zaten mevcut bakiyeyi söylüyor (bkz.
+            // aiProxy.js analyzeImage) — burada sabit metne düşmek yalnızca
+            // e.message boşsa (olmaması gereken bir durum) devreye girer.
             ? (e.message ??
-                'Foto analizi için paket hakkın yok. Devam etmek için analiz paketi al.')
+                'Kredi yetersiz. Mevcut analiz krediniz: '
+                    '${ref.read(packBalanceProvider).analysis}. Devam etmek '
+                    'için analiz paketi al.')
             : 'Analiz şu an yapılamadı. Lütfen biraz sonra tekrar dene.';
       });
     }

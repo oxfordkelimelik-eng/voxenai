@@ -68,6 +68,13 @@ class ReviewPromptService {
 
   Future<void> _openStoreReview() async {
     try {
+      // KAPANIŞ ANİMASYONU BEKLENİYOR (2026-09-23 gerçek olay: "Beğendim"
+      // seçildi ama yıldız popup'ı hiç gelmedi). SKStoreReviewController,
+      // çağrıldığı anda ekranda hâlâ bir sheet/route geçiş animasyonu
+      // sürüyorsa isteği SESSİZCE yok sayabiliyor — Apple'dan hata dönmez,
+      // uygulama başarılı sanır. Bottom sheet'in pop animasyonu bitene kadar
+      // kısa bir gecikme, popup'ın gerçekten tetiklenmesini sağlıyor.
+      await Future.delayed(const Duration(milliseconds: 500));
       if (await _inAppReview.isAvailable()) {
         await _inAppReview.requestReview();
         return;

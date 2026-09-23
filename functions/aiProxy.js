@@ -100,8 +100,15 @@ function firstText(json) {
  * data: { prompt: string, images?: [{data, mimeType}], imageBase64?, mimeType? }
  * dönüş: { text: string }  (modelin ham metin yanıtı)
  */
+// BELLEK 256MiB'DEN 1GiB'A ÇIKARILDI (2026-09-23 gerçek olay): dating foto
+// puanlaması tek çağrıda 6 fotoğrafa kadar (bkz. module_flows.dart
+// _pickAndValidate limit:6) base64 + "detail:high" gönderiyor. Loglarda 2
+// görselle bile "Memory limit of 256 MiB exceeded with 296 MiB used" OOM
+// çökmesi görüldü — fonksiyon hiç HttpsError fırlatmadan öldüğü için
+// istemci bunu kredi hatasından AYIRT EDEMİYOR, jenerik "şu an yapılamadı"
+// mesajına düşüyordu.
 exports.analyzeImage = onCall(
-  { secrets: [OPENAI_KEY], region: "europe-west1", memory: "256MiB", timeoutSeconds: 120 },
+  { secrets: [OPENAI_KEY], region: "europe-west1", memory: "1GiB", timeoutSeconds: 120 },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Giriş gerekli.");
@@ -140,10 +147,14 @@ exports.analyzeImage = onCall(
     if (isDatingScoring) {
       const walletSnap = await db.doc(`users/${request.auth.uid}/private/wallet`).get();
       const w = walletSnap.data() || {};
-      if ((w.analysisBalance || 0) <= 0) {
+      const analysisBalance = w.analysisBalance || 0;
+      if (analysisBalance <= 0) {
+        // Mesaj mevcut bakiyeyi AÇIKÇA söylüyor (2026-09-23 kullanıcı kararı)
+        // — "hakkın yok" gibi belirsiz bir ifade yerine "kredi yetersiz" +
+        // rakam, kullanıcının ne kadar eksik olduğunu net görmesini sağlar.
         throw new HttpsError(
           "failed-precondition",
-          "Foto analizi için paket hakkın yok. Devam etmek için analiz paketi al."
+          `Kredi yetersiz. Mevcut analiz krediniz: ${analysisBalance}. Devam etmek için analiz paketi al.`
         );
       }
     }
