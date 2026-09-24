@@ -103,11 +103,14 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     if (soloId == _selectedTierId) return; // zaten seçili, dokunma
     setState(() {
       _selectedTierId = soloId;
-      // PAKET DEĞİŞİNCE EKLENTİ SIFIRLANIR (2026-09-24 kullanıcı kararı):
-      // işaretli eklenti yalnızca EKRAN AÇILIRKEN otomatik seçilen pakete
-      // ait olmalı. Kullanıcı elle başka bir pakete geçtiğinde, o paketin
-      // eklentisi kendi seçimiyle açılmalı — devralınmış bir "açık" durumla
-      // karşılaşmamalı.
+      // PAKET DEĞİŞİNCE TÜM EKLENTİ TİKLERİ SIFIRLANIR (2026-09-25 düzeltme):
+      // önceki sürüm yalnızca YENİ paketin tikini false yapıyordu, ESKİ
+      // paketin (artık seçili olmayan) tiki haritada true kalıp görünmez
+      // biçimde hayatta kalıyordu. İşaretli eklenti yalnızca EKRAN AÇILIRKEN
+      // otomatik seçilen pakete ait olmalı; kullanıcı elle başka bir pakete
+      // geçtiğinde tüm tikler kapanır, hiçbir devralınmış "açık" durumla
+      // karşılaşılmaz.
+      _analysisAddOn.clear();
       _analysisAddOn[soloId] = false;
     });
   }
