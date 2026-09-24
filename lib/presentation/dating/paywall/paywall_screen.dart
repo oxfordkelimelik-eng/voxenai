@@ -100,7 +100,16 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   };
 
   void _selectTier(String soloId) {
-    setState(() => _selectedTierId = soloId);
+    if (soloId == _selectedTierId) return; // zaten seçili, dokunma
+    setState(() {
+      _selectedTierId = soloId;
+      // PAKET DEĞİŞİNCE EKLENTİ SIFIRLANIR (2026-09-24 kullanıcı kararı):
+      // işaretli eklenti yalnızca EKRAN AÇILIRKEN otomatik seçilen pakete
+      // ait olmalı. Kullanıcı elle başka bir pakete geçtiğinde, o paketin
+      // eklentisi kendi seçimiyle açılmalı — devralınmış bir "açık" durumla
+      // karşılaşmamalı.
+      _analysisAddOn[soloId] = false;
+    });
   }
 
   void _toggleAddOn(String soloId, bool value) {
@@ -114,10 +123,12 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       icon: Icons.auto_awesome,
       title: tier.title,
       sub: '${tier.photos} fotoğraf',
-      // Kartın büyük fiyatı, eklenti işaretliyken PAKET+EKLENTİ toplamıdır —
-      // altta kırmızı duran rakam ise yalnızca eklentinin farkı. İkisi
-      // birlikte "349 + 150 = 499" hikâyesini anlatır.
-      price: _price(effectiveId),
+      // KARTIN KENDİ FİYATI SABİT (2026-09-24 kullanıcı kararı): eklenti
+      // işaretlense de paketin üstündeki rakam DEĞİŞMEZ, hep solo fiyat
+      // gösterir. Toplam (paket+eklenti) yalnızca en alttaki "Satın Al"
+      // butonunda görünür (bkz. _selectedProductId / _price(_selectedProductId)).
+      // Eklentinin kendi farkı zaten altındaki kırmızı rakamda ayrıca duruyor.
+      price: _price(tier.soloProductId),
       badge: tier.badge,
       selected: _selectedTierId == tier.soloProductId,
       busy: _busyProductId == effectiveId,
