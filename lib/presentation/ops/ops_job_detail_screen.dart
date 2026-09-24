@@ -244,13 +244,23 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _upload,
-            icon: const Icon(Icons.upload_rounded, size: 18),
-            label: const Text('Yükle'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.gold,
-              side: const BorderSide(color: AppColors.borderGold),
+          // EXPANDED OLMADAN "sonsuz genişlik" isteyen tema çarpışması
+          // (2026-09-24 gerçek olay): app_theme.dart'taki hem
+          // ElevatedButtonThemeData hem OutlinedButtonThemeData
+          // `minimumSize: Size(double.infinity, 56)` veriyor (büyük tek
+          // CTA butonları için). Bu satır Expanded'sız bırakılınca Row,
+          // sonsuz genişlik isteyen bir çocukla layout hesaplayamıyor —
+          // release build'de kırmızı hata ekranı yerine SESSİZCE boş alan
+          // bırakıyor (admin panelinde "Teslim Et"/"Yükle" hiç görünmüyordu).
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _upload,
+              icon: const Icon(Icons.upload_rounded, size: 18),
+              label: const Text('Yükle'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.gold,
+                side: const BorderSide(color: AppColors.borderGold),
+              ),
             ),
           ),
         ],
