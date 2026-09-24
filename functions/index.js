@@ -32,6 +32,7 @@ for (const name of [
   "opsGetOverview",
   "opsGetJobDetail",
   "opsFindJobByJobId",
+  "opsListPendingApprovalJobs",
   "opsApprovePhotos",
   "opsAttachUploadedPhoto",
 ]) {

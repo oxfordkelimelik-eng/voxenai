@@ -158,3 +158,43 @@ Future<void> opsAttachUploadedPhoto({
     'path': path,
   });
 }
+
+/// Bir onay bekleyen işi tanımlar — özet ekranındaki "N iş ONAY BEKLİYOR"
+/// uyarısından doğrudan ilgili işe atlamak için.
+class OpsPendingApprovalJob {
+  final String uid;
+  final String jobId;
+  final String? email;
+  final int photoCount;
+  final int generateCount;
+  final int? createdAtMillis;
+  const OpsPendingApprovalJob({
+    required this.uid,
+    required this.jobId,
+    required this.email,
+    required this.photoCount,
+    required this.generateCount,
+    required this.createdAtMillis,
+  });
+  factory OpsPendingApprovalJob.fromJson(Map<String, dynamic> j) =>
+      OpsPendingApprovalJob(
+        uid: j['uid'] as String,
+        jobId: j['jobId'] as String,
+        email: j['email'] as String?,
+        photoCount: (j['photoCount'] as num?)?.toInt() ?? 0,
+        generateCount: (j['generateCount'] as num?)?.toInt() ?? 0,
+        createdAtMillis: (j['createdAt'] as num?)?.toInt(),
+      );
+}
+
+/// Seçili tarih aralığından BAĞIMSIZ — özet ekranındaki uyarı sayısı hangi
+/// aralıkta olursa olsun aynı işleri göstermeli (bkz. opsListPendingApprovalJobs).
+Future<List<OpsPendingApprovalJob>> opsListPendingApprovalJobs() async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsListPendingApprovalJobs');
+  final result = await callable.call<Map<String, dynamic>>();
+  final jobs = (result.data['jobs'] as List?) ?? const [];
+  return jobs
+      .map((j) => OpsPendingApprovalJob.fromJson(Map<String, dynamic>.from(j as Map)))
+      .toList();
+}

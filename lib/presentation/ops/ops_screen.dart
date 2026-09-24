@@ -156,30 +156,40 @@ class _OverviewContent extends StatelessWidget {
         // Unutulması doğrudan destek talebi demek, o yüzden sayfa sayfa
         // aranmak yerine göz hizasında duruyor.
         if (data.pendingApprovalJobs > 0) ...[
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.error.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.error, width: 1),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.hourglass_top_rounded,
-                    color: AppColors.error, size: 22),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '${data.pendingApprovalJobs} iş ONAY BEKLİYOR — '
-                    'kullanıcılar fotoğraflarını bekliyor.',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
+          // TIKLANABİLİR (2026-09-24 gerçek olay): önceden bu sadece bir
+          // sayıydı — admin, seçili tarih aralığında sayfalarca iş arasında
+          // ONAY BEKLİYOR etiketli olanı elle bulmak zorunda kalıyordu.
+          // Artık seçili aralıktan bağımsız olarak doğrudan işe atlıyor
+          // (bkz. opsListPendingApprovalJobs — tüm koleksiyonu tarar).
+          GestureDetector(
+            onTap: () => _onPendingApprovalTap(context),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.error, width: 1),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.hourglass_top_rounded,
+                      color: AppColors.error, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${data.pendingApprovalJobs} iş ONAY BEKLİYOR — '
+                      'kullanıcılar fotoğraflarını bekliyor.',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  const Icon(Icons.chevron_right_rounded,
+                      color: AppColors.error, size: 20),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -232,6 +242,77 @@ class _OverviewContent extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Onay bekleyen uyarısına dokununca çağrılır — seçili tarih aralığına
+/// bakmadan doğrudan ilgili işe (veya birden fazlaysa bir seçim listesine)
+/// gider.
+Future<void> _onPendingApprovalTap(BuildContext context) async {
+  List<OpsPendingApprovalJob> jobs;
+  try {
+    jobs = await opsListPendingApprovalJobs();
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Liste alınamadı: $e')),
+    );
+    return;
+  }
+  if (!context.mounted) return;
+  if (jobs.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Onay bekleyen iş bulunamadı — az önce onaylanmış olabilir, yenile.'),
+      ),
+    );
+    return;
+  }
+  if (jobs.length == 1) {
+    final j = jobs.first;
+    context.push('${DatingRoutes.opsJob}/${j.uid}/${j.jobId}');
+    return;
+  }
+  await showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (sheetContext) => SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text('ONAY BEKLEYEN İŞLER',
+                style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6)),
+          ),
+          for (final j in jobs)
+            ListTile(
+              leading: const Icon(Icons.hourglass_top_rounded,
+                  color: AppColors.error, size: 20),
+              title: Text(
+                j.email ?? j.jobId.substring(0, 8),
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+              ),
+              subtitle: Text(
+                '${j.photoCount} satın alındı · ${j.generateCount} üretildi',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                context.push('${DatingRoutes.opsJob}/${j.uid}/${j.jobId}');
+              },
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 Widget _sectionTitle(String text) => Padding(
@@ -546,9 +627,13 @@ class _JobTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ONAY BEKLİYOR artık kendi rengiyle (banner ile aynı kırmızı) ayrışıyor
+    // — önceden "generating"le AYNI sarı/warning tonundaydı, uzun iş
+    // listesinde tarama yapan admin ikisini ayırt edemiyordu.
     final statusColor = switch (job.status) {
       'done' => AppColors.success,
       'failed' => AppColors.error,
+      'pendingApproval' => AppColors.error,
       _ => AppColors.warning,
     };
     return Card(

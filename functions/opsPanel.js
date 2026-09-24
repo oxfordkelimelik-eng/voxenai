@@ -365,6 +365,54 @@ exports.opsFindJobByJobId = onCall(
   }
 );
 
+/**
+ * Onay bekleyen TÜM işleri, seçilen tarih aralığından BAĞIMSIZ döner
+ * (2026-09-24 gerçek olay: özet ekranındaki "N iş ONAY BEKLİYOR" uyarısı
+ * tıklanamıyordu, admin işi bulmak için ay boyunca uzayan iş listesinde
+ * elle aramak zorunda kalıyordu — ONAY BEKLİYOR etiketi de diğer
+ * "üretiliyor" işlerle aynı renkte olduğu için gözden kolayca kaçıyordu).
+ *
+ * opsGetOverview'daki createdAt aralık sorgusu gibi FİLTRELİ değil —
+ * bilerek tüm koleksiyonu tarıyor (indexe gerek kalmasın, iş sayısı bu
+ * panel için küçük); doğrudan uyarıdan tek dokunuşla ilgili işe atlamak
+ * için.
+ */
+exports.opsListPendingApprovalJobs = onCall(
+  { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
+  async (request) => {
+    await assertOps(request, "opsListPendingApprovalJobs");
+
+    const snap = await db.collectionGroup("genJobs").get();
+    const pending = [];
+    snap.forEach((doc) => {
+      const d = doc.data();
+      if (d.status !== "pendingApproval") return;
+      pending.push({
+        uid: uidFromDocPath(doc.ref),
+        jobId: doc.id,
+        photoCount: d.photoCount || 0,
+        generateCount: d.generateCount || 0,
+        createdAt: d.createdAt ? d.createdAt.toMillis() : null,
+      });
+    });
+
+    const uids = Array.from(new Set(pending.map((p) => p.uid).filter(Boolean)));
+    const emailByUid = new Map();
+    if (uids.length > 0) {
+      try {
+        const result = await admin.auth().getUsers(uids.map((uid) => ({ uid })));
+        for (const u of result.users) emailByUid.set(u.uid, u.email || null);
+      } catch (e) {
+        console.error("ops: kullanıcı email çözümleme hatası (atlanıyor):", e.message || e);
+      }
+    }
+    for (const p of pending) p.email = emailByUid.get(p.uid) || null;
+
+    pending.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    return { jobs: pending };
+  }
+);
+
 exports.opsGetJobDetail = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
   async (request) => {
