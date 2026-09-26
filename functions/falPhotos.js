@@ -1453,6 +1453,67 @@ function buildEditPromptShort(identityCaption, bodyProfile) {
   );
 }
 
+/**
+ * QWEN İÇİN ÖZEL — bütçe 1300 token (bkz. QWEN_PROMPT_TOKEN_LIMIT). P800'ün
+ * ÖLÇÜLEREK doğrulanmış prosedürel kısımları (P2 GAZE, P2b HEAD TURN, P4 SKIN
+ * TONE, FACE EDGE) korunur — bunlar düz yasak değil, modele kendi ölçeceği
+ * somut bir kontrol veriyor ve P800'de bu yüzden işe yaradığı ÖLÇÜLDÜ (bkz.
+ * ilgili yorumlar). VÜCUT TİPİ BİLEREK YOK (2026-09-26 kullanıcı kararı):
+ * Qwen'de henüz hiç ölçülmedi, budget'ı P800'ün ölçülmüş kısımlarına ayırmak
+ * için ilk sürümden çıkarıldı.
+ */
+function buildEditPromptQwen(identityCaption) {
+  return (
+    "TASK: the FIRST image is your only canvas. The other images are close-up SELFIES of a different " +
+    "real person (the target) — reference material only, never output one of them. If your result " +
+    "lacks the first image's background and framing, you edited the wrong image.\n\n" +
+    "The target is almost certainly looking INTO THE LENS in every selfie. Do NOT carry that over: copy " +
+    "eye shape, colour, lids and lashes from the selfies, but take the DIRECTION the eyes point only " +
+    "from the FIRST image.\n\n" +
+    "TOP PRIORITIES — check each before finishing:\n" +
+    "P1 IDENTITY — the output face is the person in the close-up selfies, feature for feature. If a " +
+    "viewer would not immediately recognise them, the edit failed.\n" +
+    "P2 GAZE — the single most common failure: eyes ending up on the lens when the base person looked " +
+    "elsewhere.\n" +
+    "  (a) Look at the FIRST image: where do that person's eyes point — lens, or left/right/up/down/away?\n" +
+    "  (b) Answer the same for your output.\n" +
+    "  (c) If they differ, move the irises to match, then check again.\n" +
+    "P2b HEAD TURN — measure, do not eyeball.\n" +
+    "  (a) In the FIRST image, find the two outer eye corners and the nose tip; say where the tip sits " +
+    "between them — midway, or pushed toward one side, and how far.\n" +
+    "  (b) Answer the same for your output.\n" +
+    "  (c) If they differ, turn the head back until the nose tip matches, then check again. Cross-check " +
+    "with how much of the far cheek and ear are visible; keep chin height and sideways lean exactly as " +
+    "the base.\n" +
+    "P3 HEAD SIZE — count head-widths across the BASE person's shoulders and reproduce that count. Never " +
+    "take head scale from the close-up selfies. If you narrow the body, shrink the head by the same " +
+    "amount.\n" +
+    "P4 SKIN TONE — ONE continuous tone from face through neck, chest, arms and hands, matching the " +
+    "rendered face. Leaving base-person tone on limbs while the face matches is a serious error.\n\n" +
+    "CHANGE ONLY THE PERSON: face, hair, skin tone, body build. Everything else — background, lighting, " +
+    "camera angle, framing, pose, every clothing item and accessory — stays identical to the first " +
+    "image.\n\n" +
+    "FACE — copy the target's structure feature by feature: nose, eyebrows, eyes, lips, jaw, chin, " +
+    "cheekbones, face outline, length-to-width ratio. Do not beautify, symmetrise, average, round, puff " +
+    "or widen. Keep their own expression; no invented smile.\n\n" +
+    "HAIR — take it from the same close-up selfies: hairline, density, length, texture, colour. If bald " +
+    "or balding, match that degree exactly.\n\n" +
+    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
+    "EYEWEAR — the output never has glasses or sunglasses unless the base person wears them; if the " +
+    "base has none, drop any from the references entirely and paint the eyes, brows and nose bridge " +
+    "underneath.\n\n" +
+    "TATTOOS — none unless visible in the target's own photos; remove the base person's.\n\n" +
+    "FACE EDGE — the boundary where your new face meets the original hair, temples, ears and jaw must " +
+    "be INVISIBLE: no block, rectangle, smear or dull patch along the hairline, temples, outer brows or " +
+    "forehead sides. Carry real texture and tone continuously outward into the hairline.\n\n" +
+    "QUALITY — the face sits under the scene's existing light, add none of your own. Result must look " +
+    "like an ordinary unedited phone photo: real texture, no airbrush, no CGI look, no relighting pass, " +
+    "no flattening of highlights. The face is the sharpest, cleanest region: crisp eyes with catchlights, " +
+    "defined lashes and brows, clean lip edges, living-tissue skin with fine pores — never pixelated, " +
+    "mushy, grainy, plasticky or softer than the surrounding clothing and background."
+  );
+}
+
 // BAKİYE ARTIK FOTO CİNSİNDEN (2026-09-18, stil mantığı kaldırıldı).
 //
 // ESKİDEN: photoBalance "stil/set" sayardı ve 1 birim = 10 foto demekti.
@@ -3784,9 +3845,12 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
 
   if (imageModel === QWEN_MODEL_ID) {
-    // Qwen yalnızca tek atım; 3 aşamalı mod bu modelde denenmedi.
+    // Qwen yalnızca tek atım; 3 aşamalı mod bu modelde denenmedi. `mode`
+    // (client'ın gönderdiği 'short') burada KULLANILMAZ — Qwen'in 1300
+    // token bütçesine göre AYRICA yazılmış buildEditPromptQwen gider
+    // (vücut tipi bilerek yok, bkz. fonksiyonunun başındaki not).
     return await generateWithQwen(
-      retryHint + build(identityCaption, bodyProfile),
+      retryHint + buildEditPromptQwen(identityCaption),
       fullSet.slice(0, QWEN_MAX_INPUT_IMAGES)
     );
   }
