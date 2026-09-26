@@ -116,7 +116,20 @@ const OPENAI_MODEL_ID = "gpt-image-2";
 // ayarlandı, model OpenAI tarafında sessizce kayarsa karşılaştırma bozulur.
 // Yalnızca ops hesabına açık (bkz. startPhotoGeneration).
 const OPENAI_MODEL_V25_ID = "gpt-image-2.5-sunburst-2026-09-08";
-const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID]);
+// QWEN TEST MODELİ (2026-09-26): "Fotoğraflarımı Oluştur Versiyon 3" butonu.
+// 2.0 ailesi seçildi çünkü prompt sınırı 1300 token (edit/plus/max: 800);
+// sınırı aşan kısım HATA VERMEDEN kesiliyor. P800 ~2500 token olduğu için
+// Qwen'e sığmıyor — istemci bu butonda "short" (~750 token) gönderir.
+// Girdi görseli en fazla 3: taban + 2 yüz açısı.
+const QWEN_MODEL_ID = "qwen-image-2.0-pro-2026-06-22";
+const QWEN_KEY = defineSecret("DASHSCOPE_API_KEY");
+const QWEN_EDIT_URL =
+  "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const QWEN_MAX_INPUT_IMAGES = 3;
+const QWEN_PROMPT_TOKEN_LIMIT = 1300;
+// Üretimi senkron bu fonksiyon içinde yapan modeller (webhook'suz yol).
+const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID, QWEN_MODEL_ID]);
+const OPS_ONLY_MODELS = new Set([OPENAI_MODEL_V25_ID, QWEN_MODEL_ID]);
 // opsPanel.js OPS_EMAIL ile EL İLE senkron (döngüsel require'dan kaçınmak için).
 const OPS_EMAIL = "destek@voxenai.com.tr";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
@@ -2035,6 +2048,135 @@ async function postOpenAiImageEdit(form, refCount) {
   }
 }
 
+// Qwen için AYRI eşzamanlılık kuyruğu: OpenAI kuyruğunu paylaşırsa test işleri
+// aynı instance'taki gerçek kullanıcıların üretimini yavaşlatırdı.
+const QWEN_MAX_CONCURRENCY = 2;
+let _qwenActive = 0;
+const _qwenWaitQueue = [];
+
+function acquireQwenSlot() {
+  if (_qwenActive < QWEN_MAX_CONCURRENCY) {
+    _qwenActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => _qwenWaitQueue.push(resolve));
+}
+
+function releaseQwenSlot() {
+  const next = _qwenWaitQueue.shift();
+  if (next) next();
+  else _qwenActive--;
+}
+
+/**
+ * Alibaba DashScope (Qwen) görsel edit çağrısı — generateWithOpenAI ile aynı
+ * sözleşme: JPEG buffer ya da (her hata durumunda) null.
+ *
+ * Dikkat edilenler:
+ * - prompt_extend AÇIK (2026-09-26 kullanıcı kararı): Qwen prompt'u kendisi
+ *   yeniden yazar. Sonuç kötüyse ilk şüpheli budur — talimatlarımız modele
+ *   bizim yazdığımız hâliyle ulaşmıyor olabilir.
+ * - Çıktı boyutu varsayılan olarak SON girdi görselinin oranını alır; bizde
+ *   son görsel bir selfie. Bu yüzden boyut tabanın (ilk görsel) oranından
+ *   açıkça hesaplanıyor.
+ * - Çıktı PNG gelir; kalite kapısı JPEG çözdüğü için JPEG'e çevriliyor
+ *   (bkz. generateWithOpenAI'deki output_format notu).
+ */
+async function generateWithQwen(prompt, imageUrls) {
+  try {
+    const sharp = require("sharp");
+    const approxTokens = Math.round(prompt.length / 4);
+    if (approxTokens > QWEN_PROMPT_TOKEN_LIMIT) {
+      console.warn(`QWEN PROMPT UZUN: ~${approxTokens} token > ${QWEN_PROMPT_TOKEN_LIMIT}, sonu kesilecek`);
+    }
+
+    const buffers = await Promise.all(imageUrls.map(async (url) => {
+      const raw = Buffer.isBuffer(url) ? url : await (async () => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`referans indirilemedi: ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      })();
+      return sharp(raw)
+        .resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 92 })
+        .toBuffer();
+    }));
+
+    // 2.0 ailesi: toplam piksel 512*512 ile 2048*2048 arasında, kenarlar 16'nın katı.
+    const meta = await sharp(buffers[0]).metadata();
+    const px = meta.width * meta.height;
+    const scale = Math.min(
+      Math.max(1, Math.sqrt((512 * 512) / px)),
+      Math.sqrt((2048 * 2048) / px)
+    );
+    // Büyütürken yukarı, küçültürken aşağı yuvarla — yoksa sınır aşılır.
+    const snap = scale > 1 ? Math.ceil : Math.floor;
+    const round16 = (v) => Math.max(16, snap(v / 16) * 16);
+    const size = `${round16(meta.width * scale)}*${round16(meta.height * scale)}`;
+
+    const body = {
+      model: QWEN_MODEL_ID,
+      input: {
+        messages: [{
+          role: "user",
+          content: [
+            ...buffers.map((b) => ({ image: `data:image/jpeg;base64,${b.toString("base64")}` })),
+            { text: prompt },
+          ],
+        }],
+      },
+      parameters: { n: 1, size, prompt_extend: true, watermark: false },
+    };
+
+    await acquireQwenSlot();
+    let json;
+    try {
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const resp = await fetch(QWEN_EDIT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${QWEN_KEY.value()}`,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(300000),
+        });
+        if (resp.status === 429 && attempt < maxAttempts) {
+          console.warn(`Qwen 429 (oran limiti), ${attempt * 5}sn beklenip tekrar denenecek (deneme ${attempt}/${maxAttempts})`);
+          await new Promise((r) => setTimeout(r, attempt * 5000));
+          continue;
+        }
+        json = await resp.json();
+        if (!resp.ok || json.code) {
+          console.error(`Qwen edit başarısız (deneme ${attempt}): ${resp.status} ${JSON.stringify(json).slice(0, 300)}`);
+          return null;
+        }
+        break;
+      }
+    } finally {
+      releaseQwenSlot();
+    }
+    if (!json) return null;
+
+    const outUrl = json?.output?.choices?.[0]?.message?.content?.find((c) => c.image)?.image;
+    if (!outUrl) {
+      console.error("Qwen edit OK ama görsel yok:", JSON.stringify(json).slice(0, 300));
+      return null;
+    }
+    console.log(
+      `MALIYET GORSEL (qwen): model=${QWEN_MODEL_ID} boyut=${size} ` +
+      `usage=${JSON.stringify(json.usage || {})} referansSayisi=${buffers.length} ~promptToken=${approxTokens}`
+    );
+    const r = await fetch(outUrl);
+    if (!r.ok) throw new Error(`Qwen çıktısı indirilemedi: ${r.status}`);
+    return await sharp(Buffer.from(await r.arrayBuffer())).jpeg({ quality: 92 }).toBuffer();
+  } catch (e) {
+    console.error("Qwen edit hata:", e.message || e);
+    return null;
+  }
+}
+
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 
 // GÜNEŞ GÖZLÜĞÜ KAPISI KALDIRILDI (2026-09-06): gpt-4o'ya sorulan bu kontrol
@@ -3628,11 +3770,26 @@ function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null) {
   return "";
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor, retryHint = "", openAiModel = OPENAI_MODEL_ID) {
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor, retryHint = "", imageModel = OPENAI_MODEL_ID) {
   const faceUrls = faceRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Taban + yüz açıları. Kafa ölçeği artık yalnızca tabandan okunuyor.
   const fullSet = [templateUrl, ...faceUrls];
+  const promptBuilders = {
+    [PHOTO_MODE_P300]: buildEditPromptP300,
+    [PHOTO_MODE_SHORT]: buildEditPromptShort,
+    [PHOTO_MODE_P800]: buildEditPromptP800,
+    [PHOTO_MODE_P1400]: buildEditPromptP1400,
+  };
+  const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
+
+  if (imageModel === QWEN_MODEL_ID) {
+    // Qwen yalnızca tek atım; 3 aşamalı mod bu modelde denenmedi.
+    return await generateWithQwen(
+      retryHint + build(identityCaption, bodyProfile),
+      fullSet.slice(0, QWEN_MAX_INPUT_IMAGES)
+    );
+  }
 
   if (mode === PHOTO_MODE_STAGED) {
     // MOD 2 — 3 AŞAMALI PIPELINE. Her aşamanın çıktısı bir sonrakinin TUVALİ.
@@ -3647,7 +3804,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     const s1 = await generateWithOpenAI(
       retryHint + buildStage1Prompt(identityCaption, bodyProfile),
       fullSet,
-      openAiModel
+      imageModel
     );
     if (!s1) {
       console.warn(`Pipeline aşama 1 başarısız (style=${styleId}, chunk=${chunkIdx})`);
@@ -3661,7 +3818,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     const s2 = await generateWithOpenAI(
       buildStage2Prompt(),
       [cur, templateUrl, bestFaceUrl],
-      openAiModel
+      imageModel
     );
     if (!s2) {
       console.warn(`Pipeline aşama 2 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
@@ -3673,7 +3830,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     const s3 = await generateWithOpenAI(
       buildStage3Prompt(),
       [cur, bestFaceUrl],
-      openAiModel
+      imageModel
     );
     if (!s3) {
       console.warn(`Pipeline aşama 3 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
@@ -3687,17 +3844,10 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
   // TEK ATIM MODLARI: hepsi AYNI görsel setini ve aynı kalite kapısını
   // kullanır — aralarındaki TEK fark prompt uzunluğudur (bkz. PHOTO_MODES
   // uzunluk merdiveni). Böylece A/B testinde tek değişken izole edilir.
-  const promptBuilders = {
-    [PHOTO_MODE_P300]: buildEditPromptP300,
-    [PHOTO_MODE_SHORT]: buildEditPromptShort,
-    [PHOTO_MODE_P800]: buildEditPromptP800,
-    [PHOTO_MODE_P1400]: buildEditPromptP1400,
-  };
-  const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
   // retryHint EN BAŞA: önceki denemenin somut hatası, genel talimatlardan
   // önce okunsun (bkz. retryCorrectionPrefix gerekçesi).
   const prompt = retryHint + build(identityCaption, bodyProfile);
-  return await generateWithOpenAI(prompt, fullSet, openAiModel);
+  return await generateWithOpenAI(prompt, fullSet, imageModel);
 }
 
 // Şablondaki kişi kadrajda bu orandan KÜÇÜKSE şablon yakınlaştırılır.
@@ -3847,7 +3997,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, openAiModel = OPENAI_MODEL_ID) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID) {
   // KUYRUK HEARTBEAT (2026-09-10 gerçek olay): aynı kullanıcı üst üste iki
   // job başlattığında, her ikisinin chunk'ları AYNI process-içi
   // OPENAI_IMAGE_MAX_CONCURRENCY (=2) kuyruğunu paylaşıyor. Kuyrukta bekleyen
@@ -3863,13 +4013,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   }, 90 * 1000);
   try {
-    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, openAiModel);
+    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel);
   } finally {
     clearInterval(heartbeatTimer);
   }
 }
 
-async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, openAiModel = OPENAI_MODEL_ID) {
+async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -4050,7 +4200,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // her denemede tekrarlanır, çünkü kusur ilk denemede de oluşuyor.
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor, retryHint, openAiModel
+      refDescriptor, retryHint, imageModel
     );
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
@@ -5173,7 +5323,7 @@ exports.startPhotoGeneration = onCall(
   // "network connection lost" görür (bkz. 2026-08-15 gerçek olay, aynı kökten
   // — client/server timeout uyumsuzluğu).
   {
-    secrets: [FAL_KEY, OPENAI_KEY],
+    secrets: [FAL_KEY, OPENAI_KEY, QWEN_KEY],
     region: "europe-west1",
     memory: "2GiB",
     timeoutSeconds: 900,
@@ -5238,7 +5388,7 @@ exports.startPhotoGeneration = onCall(
     if (model !== undefined && !MODEL_CATALOG[model] && !OPENAI_DIRECT_MODELS.has(model)) {
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
     }
-    if (model === OPENAI_MODEL_V25_ID) {
+    if (OPS_ONLY_MODELS.has(model)) {
       const email = (request.auth.token.email || "").toLowerCase().trim();
       if (email !== OPS_EMAIL || request.auth.token.email_verified === false) {
         throw new HttpsError("permission-denied", "Bu model yalnızca test hesabına açık.");
