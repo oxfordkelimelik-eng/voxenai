@@ -118,8 +118,8 @@ const OPENAI_MODEL_ID = "gpt-image-2";
 const OPENAI_MODEL_V25_ID = "gpt-image-2.5-sunburst-2026-09-08";
 // QWEN TEST MODELİ (2026-09-26): "Fotoğraflarımı Oluştur Versiyon 3" butonu.
 // 2.0 ailesi seçildi çünkü prompt sınırı 1300 token (edit/plus/max: 800);
-// sınırı aşan kısım HATA VERMEDEN kesiliyor. P800 ~2500 token olduğu için
-// Qwen'e sığmıyor — istemci bu butonda "short" (~750 token) gönderir.
+// sınırı aşan kısım HATA VERMEDEN kesiliyor. 2026-09-27'den beri Qwen de
+// kısaltılmış P800'ü alır (~1030 token; bkz. generateForMode).
 // Girdi görseli en fazla 3: taban + 2 yüz açısı.
 const QWEN_MODEL_ID = "qwen-image-2.0-pro-2026-06-22";
 const QWEN_KEY = defineSecret("DASHSCOPE_API_KEY");
@@ -1113,14 +1113,38 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
 }
 
 /**
- * ~800 KELİME — pratikte en verimli kabul edilen bandın ortası.
- * P300 ile aynı iskelet, ama her maddeye modelin en sık yaptığı hataya karşı
- * tek bir netleştirici cümle eklenmiş (tekrar değil, ayrıntı).
+ * ADI ESKİ: A/B'yi kazandığında (2026-07-29) ~706 kelimeydi. Her ölçülmüş
+ * kusur düzeltmesi bir paragraf ekledi ve 2026-09-20'de ~1850 kelimeye çıktı;
+ * o uzunluk hiçbir zaman diğer modlarla karşılaştırılmadı.
+ *
+ * KISALTMA (2026-09-27, kullanıcı kararı, ~1850 -> ~1400 kelime):
+ * - Vücut tipi kaldırıldı (shortBodyNote + "form cevaplarına göre yeniden
+ *   şekillendir"). Bedeli: model kullanıcının vücudunu hiç görmediği için
+ *   (tam boy foto 2026-08-20'den beri yok) çıktıdaki vücut artık şablonun
+ *   vücudu. Dolgun/ortalama farkı örneklerde zaten zayıftı.
+ * - TOP PRIORITIES ile numaralı adımların tekrarı ayıklandı: eski 4) HEAD
+ *   SIZE (P3 kaldı), P4 SKIN TONE (3) kaldı, prosedürü daha güçlü), eski
+ *   5)'in P2/P2b tekrarı (yalnız "gözler açık" cümlesi kaldı).
+ * - NO FLAT LIGHT PATCHES silindi: FACE EDGE aynı kusuru ölçülmüş kök
+ *   nedeniyle anlatıyor, kusur ayrıca faceRepair.js ile onarılıyor.
+ * - FACE RENDERING QUALITY yarıya indi.
+ * İKİNCİ TUR (aynı gün, ~1363 -> ~1000 kelime):
+ * - FACE EDGE silindi ve QUALITY'deki "selfie normalize edildi, yeniden
+ *   ışıklandırma yapma" cümleleri kısaldı: ikisi de sonradan çürüyen yama
+ *   teorileri için yazılmıştı (bkz. hafıza notu face-artifact-is-a-seam).
+ * - Küçük tekrarlar: CHANGE ONLY THE PERSON TASK'a katıldı; 1) FACE'teki P1
+ *   tekrarı, HAIR'deki benzetme, SKIN TONE'daki prosedür öncesi tekrar ve
+ *   P2b'deki "profilde aynı açıda kal" (a/b/c zaten kapsıyor) çıktı.
+ * SONRAKİ TURLAR (aynı gün): bakış kısaltıldı; kafa boyutu tabandaki kafaya
+ *   bağlandı; vücut maddesi P3/KALİTE'ye dağıtıldı; KALİTE tek paragraf oldu
+ *   ve "telefon fotoğrafı" yerine "BİRİNCİ görsel kadar net" dendi; öncelikler
+ *   ve numaralı adımlar tek listede birleşti; kafa dönüşündeki burun ucu /
+ *   uzak kulak ölçümü kaldırıldı. Gerekçeler ilgili satırların yanında.
+ * Etkisi ölçülmeden önceki uzunluğa dönülmek istenirse: commit geçmişi.
  *
  * A/B KAZANANI: 6 mod karşılaştırıldı, bu en tutarlı sonucu verdi ve tek buton
- * artık bunu gönderiyor (bkz. module_flows.dart Buton-5). Bu yüzden BÜTÜN
- * OLARAK korunmalı — mod değiştirmek yerine, gözlenen somut bir hataya karşı
- * tek cümle eklemek tercih edilir.
+ * artık bunu gönderiyor (bkz. module_flows.dart). Mod değiştirmek yerine,
+ * gözlenen somut bir hataya karşı tek cümle eklemek tercih edilir.
  *
  * 3. MADDEYE EKLENEN "uzuv uzuv kontrol" CÜMLESİ (2026-08-09): gerçek çıktıda
  * yüz ve boyun doğru tonda, ELLER taban kişinin tonunda kaldı. p800'ün ten
@@ -1130,7 +1154,7 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
  * Etkisi TEN ÖLÇÜM loglarından sayıyla izlenebilir: bu cümle işe yarıyorsa
  * RED[skin] oranı ve buna bağlı retry sayısı düşmeli.
  *
- * 5. MADDEYE EKLENEN "gözler açık ve canlı" CÜMLESİ (2026-08-09): kullanıcı
+ * 4. MADDEDEKİ (eski 5.) "gözler açık ve canlı" CÜMLESİ (2026-08-09): kullanıcı
  * çıktılarda gözlerin yarı kapalı/uykulu çıktığını bildirdi. p800 gözden
  * yalnızca üç yerde söz ediyordu (yapıyı kopyala, bakış yönü, gözlük kaldır);
  * göz KALİTESİ hakkında tek kelime yoktu. Tam prompt'ta ise var ("never a
@@ -1150,12 +1174,13 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
  * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
  * genişletildi.
  */
-function buildEditPromptP800(identityCaption, bodyProfile) {
+function buildEditPromptP800(identityCaption) {
   return (
     "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
     "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
     "output a reference photo — if your result lacks the first image's background and framing, you " +
-    "edited the wrong image.\n\n" +
+    "edited the wrong image. Change only the person's face, hair and skin tone; background, lighting, " +
+    "camera angle and framing stay identical.\n\n" +
     "REFERENCES: every other image is a close-up SELFIE of the target — they are the ONLY source of " +
     "truth for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
     "accessories, pose, head angle, head size or where the eyes look — the FIRST image decides all of " +
@@ -1177,182 +1202,80 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "are taken. Do NOT carry that over. Copy the eye SHAPE, colour, lids and lashes from the selfies, " +
     "but take the DIRECTION the eyes point only from the FIRST image. Treat the selfies as if the " +
     "irises in them were unusable.\n\n" +
-    "TOP PRIORITIES (check these before finishing — they fail most often):\n" +
-    "P1 IDENTITY — the output face is the person in the close-up SELFIES, feature for feature. If a " +
-    "viewer would not immediately recognise the selfie person, the edit failed.\n" +
-    // P2 YENİDEN YAZILDI (2026-09-15). Eski metin kusuru doğru tarif ediyordu
-    // ama yalnızca YASAKLIYORDU ve ölçüm gösterdi ki yasak tek başına
-    // yetmiyor: 29 ölçümün 10'u hâlâ CAMERA çıktı. Yasağın yerine PROSEDÜR
-    // konuldu — modele bitirmeden önce yapacağı somut bir kontrol veriliyor.
-    // Aynı yaklaşım bu dosyada daha önce işe yaradı: "yargı sorma, ölçüm
-    // iste" (bkz. 2026-09-06 BASE_HEAD_SPAN/OUTPUT_HEAD_SPAN notu).
-    "P2 GAZE — THE SINGLE MOST COMMON FAILURE, and it is always the same one: the eyes end up looking " +
-    "into the camera when the base person was looking somewhere else. Before you finish, run this " +
-    "check:\n" +
-    "  (a) Look at the FIRST image and say where that person's eyes point — into the lens, or to the " +
-    "left / right / up / down / off into the distance.\n" +
-    "  (b) Look at your own output and answer the same question.\n" +
-    "  (c) If the two answers differ, you have failed. Move the irises until they match, then check " +
-    "again.\n" +
-    "If the base is NOT looking at the lens, your output must NOT look at the lens — this one rule " +
-    "overrides how natural or flattering a camera-facing gaze might seem. Match the direction, the " +
-    "angle, and the position of each iris within the eye opening; a coarse match (both roughly 'left') " +
-    "is not enough if the irises sit in a different place.\n" +
-    // KAFA DÖNÜŞÜ — PROSEDÜRE ÇEVRİLDİ (2026-09-20, ölçülmüş).
-    //
-    // KULLANICI ŞİKÂYETİ: "kafanın dönüş açısı taban fotoğraf ile tamamen
-    // aynı olmalı, birkaç fotoda bunu kaçırıyoruz."
-    //
-    // ÖLÇÜLDÜ (KONUM ÖLÇÜM loglarından 362 teslim edilmiş kare, 14-20 Eylül;
-    // yaw = profileDegree, burun ucunun göz köşeleri arasındaki konumu):
-    //   |yaw farkı| p50=0.120  p75=0.240  p90=0.370  p95=0.460  maks=0.810
-    //   fark > 0.20 olan: %31.5      fark > 0.30 olan: %18.8
-    // En kötü 12 vakanın 11'inde çıktı şablondan DAHA ÇOK dönmüş — kusur
-    // rastgele değil, tek yönlü: model kafayı fazla çeviriyor.
-    //
-    // GÖZLE DOĞRULANDI: iş 9f0d9406 chunk2 (fark 0.570) — şablon neredeyse
-    // cepheden bakarken çıktı belirgin üç-çeyrek dönmüş. chunk7'de de aynı.
-    // Yani metrik gerçek ve görünür bir kusuru ölçüyor (head-grew'un aksine).
-    //
-    // NEDEN SADECE YASAK DEĞİL PROSEDÜR: eski metin ("aynı derecede tut, çevirme")
-    // zaten bir YASAKTI ve ölçüm yetmediğini gösterdi. Bu dosyada işe yarayan
-    // yaklaşım "yargı sorma, ölçüm iste" (bkz. P2 GAZE ve BASE_HEAD_SPAN notu):
-    // modele kendi ölçeceği somut bir kontrol verilir.
+    // ADIMLAR TEK LİSTE (2026-09-27, kullanıcı kararı): eski "TOP PRIORITIES"
+    // P1-P3 ile numaralı 1-4 birleştirildi. Sıra: kimlik, kafa boyutu, kafa
+    // dönüşü, bakış, yüz, ten, gözler, saç.
+    "STEPS — check each one before finishing:\n" +
+    "1) IDENTITY — the output face is unmistakably the person in the selfies, feature for feature.\n\n" +
+    // KAFA BOYUTU (2026-09-27): "omuza kaç kafa genişliği sığıyor, say"
+    // yerine tabandaki kafanın kendisiyle eşleştirme. Vücut artık yeniden
+    // şekillendirilmediği için omuzlar tabanla aynı; dolaylı oran gereksiz.
+    // Ölçü saç değil YÜZ: hedef kel, taban gür saçlıysa siluet meşru olarak
+    // farklıdır.
+    "2) HEAD SIZE — the new head replaces the base person's head at the SAME size and in the SAME " +
+    "place. The face — chin to hairline, cheek to cheek — covers the same area the base face covers, " +
+    "and the chin sits at the same point above the collar. The selfies are zoomed-in close-ups: never " +
+    "take head size from them. The head joins the neck cleanly, with no pasted-on seam, halo or lighting " +
+    "break.\n\n" +
+    // KAFA DÖNÜŞÜ — ölçüm prosedürü ve "fazla çevirme olağan hatadır"
+    // uyarısı KALDIRILDI (2026-09-27, kullanıcı kararı: ölçüm kafa
+    // karıştırıcı, yanlışları saymaya gerek yok). RİSK: 2026-09-20'de
+    // bu prosedür, düz "aynı derecede tut" yasağının yetmediği ölçülünce
+    // eklenmişti (362 kare: |yaw farkı| p90=0.370, fark > 0.20 olan %31.5;
+    // en kötü 12 vakanın 11'inde model kafayı FAZLA çevirmiş). Kötüleşirse
+    // (KONUM ÖLÇÜM yaw farkı) ilk dönülecek yer burası.
     //
     // DİKKAT — BİZİM ÖLÇÜMÜMÜZ PROMPT'A YAZILMIYOR. Ölçülen bir değeri
     // prompt'a yazmak 2026-09-17'de denendi ve reddi kendisi üretti
     // (bkz. gaze-tell-direction-upfront): ölçüm yanlışsa model itaat eder.
-    // Burada model İKİ GÖRSELİ DE KENDİSİ ölçüp karşılaştırıyor.
-    "P2b HEAD TURN — measure it, do not eyeball it. The output keeps the BASE person's head " +
-    "rotation to the same degree. Before you finish, run this check:\n" +
-    "  (a) In the FIRST image, find the two outer eye corners and the tip of the nose. Say where " +
-    "the nose tip sits between those corners: exactly midway (head square to the viewer), or " +
-    "pushed toward one side — and how far toward it.\n" +
-    "  (b) Answer the same question about your own output.\n" +
-    "  (c) If the two answers differ, you rotated the head. Turn it back until the nose tip sits " +
-    "in the same relative position, then check again.\n" +
-    "Cross-check the same turn a second way: how much of the FAR cheek and the FAR ear is visible. " +
-    "If the base shows both ears, the output shows both; if the base hides the far ear behind the " +
-    "cheek, the output hides it too. Turning the head FURTHER than the base and straightening it " +
-    "toward the viewer are equally wrong — turning it further is the one that actually happens.\n" +
-    "Keep the chin height and the sideways lean exactly as the base has them, and do not shift the " +
-    "head on the shoulders. If the base is in profile or three-quarter, the output stays at that " +
-    "exact angle.\n" +
-    "P3 HEAD SIZE — count how many head-widths fit across the BASE person's shoulders and reproduce " +
-    "that same count in the output. Never take head scale " +
-    "from close-up selfies. If you narrow the body, shrink the head by the same amount. A head that is " +
-    "bigger, pushed forward, or bobble-like against those shoulders is a failure.\n" +
-    "P4 SKIN TONE — ONE continuous tone from face through neck, chest, arms, hands, matching the FACE " +
-    "you just rendered. Leaving base-person tone on arms/hands while the face matches the target is a " +
-    "serious error.\n\n" +
-    "CHANGE ONLY THE PERSON — their face, hair, skin tone and body build, per the numbered steps " +
-    "below. Everything else stays identical to the first image: background, lighting, camera angle, " +
-    "framing, pose, and every clothing item and accessory.\n\n" +
-    "1) FACE — highest identity priority. Copy the target's structure feature by feature from the " +
-    "close-up photos: nose, eyebrows, eyes, lips, jaw, chin, cheekbones, face outline and length-to-" +
-    "width ratio. Do not beautify, symmetrise, average, round, puff, widen or stretch. Keep their own " +
-    "expression; add no smile that is not there. The output face is 100% the target's, never blended " +
-    "with the base person's.\n\n" +
-    "2) HAIR — part of who they are, so take it from the SAME close-up selfies, never from the base " +
-    "person and never invented: their hairline, density, length, texture and colour. If the target is " +
-    "bald or balding, the output is bald or balding to exactly the same degree — giving them hair " +
-    "they do not have is as wrong as giving them someone else's nose.\n\n" +
-    "3) SKIN TONE — the target's true colour on every visible area of skin. Read the tone from the " +
-    "close-up SELFIES and carry that exact tone onto neck, chest, shoulders, arms, hands and legs, so " +
-    "the whole body reads as ONE person under this scene's light. Any " +
-    "limb left in the base person's tone, or a two-tone patchwork, is a serious error. Before you " +
-    "finish, check the hands, fingers, arms, neck, chest and legs one by one: if any of them still " +
-    "carries a trace of the base person's tone, recolour it to match the face exactly. No brightening, " +
-    "whitening, glow or sheen.\n\n" +
+    "3) HEAD TURN — keep the base's head rotation exactly: wherever the base person's head is turned, " +
+    "the output's head is turned to exactly the same side at exactly the same angle. Keep the chin " +
+    "height and sideways lean too.\n\n" +
+    // BAKIŞ KISALTILDI (2026-09-27, ~130 -> ~45 kelime). 15 Eylül'deki uzun
+    // a/b/c hâli Vision'ın "OUTPUT_GAZE=CAMERA" etiketine göre yazılmıştı; o
+    // etiketin görünür bir kusura karşılık gelmediği sonradan ölçüldü (hafıza
+    // notu gaze-label-is-not-the-defect). Asıl kök neden düzeltmesi ("selfie
+    // irisleri kullanılamaz") yukarıdaki REFERENCES paragrafında duruyor.
+    "4) GAZE — the eyes point where the base person's eyes point, not into the lens unless the base " +
+    "does. Before finishing, compare the two and move the irises if they differ — direction and the " +
+    "iris position within each eye.\n\n" +
+    "5) FACE — copy the target's structure feature by feature from the close-up photos: nose, " +
+    "eyebrows, eyes, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
+    "beautify, symmetrise, average, round, puff, widen or stretch. Keep their own expression; add no " +
+    "smile that is not there.\n\n" +
     (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "4) HEAD SIZE — the most common failure; this rule OVERRIDES the body step below if they ever " +
-    "conflict. The head must stay in scale with the shoulders it sits on: narrow shoulders mean a " +
-    "SMALLER head, never a large one. Take the shoulder width in your finished image and size the head " +
-    "to that — if reshaping the body narrowed the shoulders, the head must shrink with them, because " +
-    "a head kept at its old size on narrowed shoulders reads as oversized. Measure the head-to-shoulder " +
-    "ratio in the FIRST image and reproduce THAT ratio. Never enlarge the head, puff the face, or " +
-    "push the head forward in the frame. The close-up face references are zoomed in for detail only — " +
-    "never take head scale from them.\n\n" +
-    "5) HEAD ANGLE AND GAZE: keep the head's rotation and tilt exactly as in the first image, on all " +
-    "three axes (left/right turn, up/down chin, sideways lean), and keep the eyes looking at the same " +
-    "point in the scene — if the base person looks away from the camera, the output looks away too. " +
-    "If the base shows a profile or three-quarter view, stay in it; rotating the head or the eyes " +
-    "toward the camera to make the face easier is a failure. Ignore how the target is posed or where " +
-    "they look in their own selfies. The eyes must be open, clear and alert, with " +
-    "visible pupils and natural catch-light — never half-closed, caught mid-blink, droopy or dead-eyed. " +
-    "Keep their own natural eye shape and size; do not widen or enlarge the eyes to achieve this.\n\n" +
-    "6) BODY — reshape it to the target's real build from their form answers, resizing the SAME " +
-    "clothing to fit the new shape naturally; do not swap or restyle any " +
-    "garment. Keep limbs, fingers and joints anatomically correct. Head must join the neck cleanly — " +
-    "no pasted-on seam, halo or lighting break." +
-    shortBodyNote(bodyProfile) + "\n\n" +
+    "6) SKIN TONE — the target's true colour on every visible area of skin. Read the tone from the " +
+    "close-up SELFIES and carry that exact tone onto neck, chest, shoulders, arms, hands and legs, so " +
+    "the whole body reads as ONE person under this scene's light. Before you " +
+    "finish, check the hands, fingers, arms, neck, chest and legs one by one: if any of them still " +
+    "carries a trace of the base person's tone, recolour it to match the face exactly. Do not " +
+    "lighten it.\n\n" +
+    "7) EYES — open, clear and alert, with visible pupils and natural catch-light — never " +
+    "half-closed, caught mid-blink, droopy or dead-eyed. Keep their own natural eye shape and size; " +
+    "do not widen or enlarge the eyes to achieve this.\n\n" +
+    "8) HAIR — take it from the SAME close-up selfies, never from the base person and never " +
+    "invented: their hairline, density, length, texture and colour. If the target is bald or " +
+    "balding, the output is bald or balding to exactly the same degree.\n\n" +
     "EYEWEAR — the output NEVER has glasses or sunglasses. If the base person wears them, drop them " +
     "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
     "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
     "TATTOOS: the output has none — remove the base person's.\n\n" +
-    // "STRIP THAT EXTRA LIGHT" KALDIRILDI (2026-09-16) — ölçülmüş kök neden.
-    //
-    // Eski metin modele "selfie flaşlıysa o ışığı SÖK" diyordu. Model bunu
-    // piksel düzeyinde yapamıyor: alnın/yanağın parlak kısmını düz gri bir
-    // blokla değiştiriyor. Son 12 işteki 44 artefakt reddinin tarifi bunu
-    // birebir doğruluyor ("Grey patch on forehead / on left cheek") — kusur
-    // rastgele değil, tam olarak ışık düzeltmesinin istendiği yerde.
-    //
-    // Parlama artık selfie modele GİRMEDEN ÖNCE sayısal olarak alınıyor
-    // (bkz. faceShine.normalizeSelfieLighting, uploadReferencePhotos içinde).
-    // Model düzeltecek bir şey görmediği için boyamıyor. Bu yüzden talimat
-    // "ışığı sök"ten "olduğu gibi taşı"ya çevrildi.
-    "QUALITY: the face sits under the scene's existing light; add none of your own. The selfies have " +
-    "already been normalised to even, neutral lighting — carry their skin tone across AS IT IS. Do " +
-    "not try to remove, rebalance or repaint any lighting on the face: no relighting pass, no " +
-    "flattening of highlights, no painting over bright areas. Simply place that tone under the FIRST " +
-    "image's scene light, consistent with the visible arms. The result must " +
-    "look like an ordinary unedited phone photo — real skin texture, no airbrush, beauty filter or " +
-    "CGI look. Gently clean temporary blemishes while keeping permanent features (moles, freckles, " +
-    "scars, beard). This also applies to the hands, fingers, forearms and elbows: no unexplained dark " +
-    "blotch, smudge or patchy shadow stuck on a joint or knuckle — skin there must read as evenly and " +
-    "naturally lit as the face, not mottled or dirty-looking.\n" +
-    // Bkz. buildEditPrompt'taki aynı başlık (2026-09-14): asıl üretim modu
-    // bu olduğu için açık renkli blok artefaktı yasağı burada da olmalı.
-    "NO FLAT LIGHT PATCHES EITHER: never leave a grey, white or washed-out block, a straight-edged " +
-    "rectangle, or a thin streak sitting on the forehead, brows, nose, cheeks or chin. Facial skin " +
-    "must have continuous tone and texture throughout, blending smoothly with no hard or geometric " +
-    "borders and no area that looks pasted on or painted over.\n\n" +
-    // YAMA KUSURUNUN GERÇEK KÖK NEDENİ (2026-09-17, ÖLÇÜLDÜ).
-    //
-    // 2026-09-16'daki teori ("model selfie'deki flaşı sökmeye çalışırken
-    // boyuyor") ÇÜRÜDÜ: selfie parlaması kaynakta alındı (üç selfie de
-    // normalize edildi, loglarda doğrulandı) ve yama AYNEN devam etti —
-    // iş 19a5ab23'te 7 artefakt reddi, üçü 1. denemede.
-    //
-    // ASIL KANIT yamaların KONUMU. Yedi reddedilen karede yamanın yüz
-    // kutusuna göre merkezi ölçüldü:
-    //   X = 0.05, 0.06, 0.08, 0.22, 0.93, 0.95, 0.14
-    // Yani yamalar yüzün İÇİNDE rastgele değil, neredeyse hepsi SOL ya da
-    // SAĞ KENARINDA — şakak/saç çizgisi/kaş ucu hattında. Gözle bakıldığında
-    // da öyle: kaşın üzerinde keskin kenarlı, dokusuz, dikdörtgen bir blok.
-    //
-    // Bu bir IŞIK kusuru değil, bir DİKİŞ kusuru: modelin "yüzü değiştir,
-    // gerisine dokunma" sınırında bıraktığı geçiş izi. Prompt şimdiye kadar
-    // yamayı YASAKLIYORDU ama bu sınırın NASIL ele alınacağını hiç
-    // söylemiyordu — model de sınırı sert bir kesikle çözüyordu.
-    "FACE EDGE — WHERE YOUR EDIT MEETS THE REST OF THE HEAD: you are replacing this person's face, so " +
-    "there is a boundary where your new face meets the original hair, temples, ears and jaw. That " +
-    "boundary must be INVISIBLE. Do not stop your edit at a straight line, and never leave a block, " +
-    "rectangle, smear or dull patch along the hairline, the temples, the outer brows or the sides of " +
-    "the forehead — this is exactly where the seam shows. Carry real skin texture, tone and the " +
-    "scene's lighting continuously OUTWARD from the centre of the face into the hairline and temples, " +
-    "so that no viewer can tell where the edited region ends. Individual hairs must sit ON TOP of " +
-    "continuous forehead skin, not against a flat painted edge.\n\n" +
-    "FACE RENDERING QUALITY — spend your detail budget on the face. It must be the sharpest, cleanest " +
-    "region of the frame: crisp eyes with visible catchlights and iris detail, defined lashes and brow " +
-    "hairs, clean lip edges, and skin that reads as living tissue with fine pores and natural " +
-    "subsurface warmth. \"Unedited phone photo\" and \"no airbrush\" mean do not SMOOTH or beautify — " +
-    "they do NOT mean render the face rough, noisy or low-resolution. The face must never look " +
-    "pixelated, mushy, grainy, blocky, plasticky, dull, flat or lifeless, and must never be softer or " +
-    "lower-resolution than the clothing and background around it. Do not add fake studio light, glow " +
-    "or sheen to achieve this — the liveliness comes from resolved detail and accurate colour under " +
-    "the scene's own light, not from extra brightness."
+    // KALİTE (2026-09-27): iki paragraf birleştirildi. Işık/yama teorileri
+    // ölçümle çürüdü (hafıza notu face-artifact-is-a-seam); parlama
+    // (reduceFaceSpecular), telefon dokusu (addPhoneCameraTexture) ve uzuv
+    // tonu (correctLimbChroma/correctHandToneInBoxes) üretimden sonra kodla
+    // da ele alınıyor. Bulanık yüz ayrıca "blurry" kapısında reddediliyor.
+    // "Sıradan telefon fotoğrafı" ifadesi çıkarıldı: model bunu düşük kalite
+    // diye okuyordu (eski FACE RENDERING paragrafı tam bunu düzeltmek için
+    // eklenmişti). Netlik artık BİRİNCİ görsele bağlı — kapının ölçtüğü
+    // netlikOranı (çıktı/şablon) ile aynı referans.
+    "QUALITY — a real, unretouched photo, as sharp and detailed as the FIRST image: no beauty " +
+    "filter, airbrush or CGI look. The face is lit only by the scene's own light — the same " +
+    "direction, colour and softness as the light on the visible arms. Take the skin tone from the " +
+    "selfies, never their lighting: flash, window light or a colour cast in a selfie does not carry " +
+    "over. Add no light, glow or sheen. Keep moles, freckles, scars and beard. Hands and fingers are " +
+    "anatomically correct, " +
+    "with no dark blotches or dirty-looking patches on them or on the joints."
   );
 }
 
@@ -1450,67 +1373,6 @@ function buildEditPromptShort(identityCaption, bodyProfile) {
     "brightening the skin. Gently clean temporary blemishes and spots on the face, but keep real skin " +
     "texture and permanent features (moles, freckles, scars, beard). Keep it looking like an ordinary, " +
     "unedited phone photo — natural skin texture, no plastic airbrush, no distorted hands or extra limbs."
-  );
-}
-
-/**
- * QWEN İÇİN ÖZEL — bütçe 1300 token (bkz. QWEN_PROMPT_TOKEN_LIMIT). P800'ün
- * ÖLÇÜLEREK doğrulanmış prosedürel kısımları (P2 GAZE, P2b HEAD TURN, P4 SKIN
- * TONE, FACE EDGE) korunur — bunlar düz yasak değil, modele kendi ölçeceği
- * somut bir kontrol veriyor ve P800'de bu yüzden işe yaradığı ÖLÇÜLDÜ (bkz.
- * ilgili yorumlar). VÜCUT TİPİ BİLEREK YOK (2026-09-26 kullanıcı kararı):
- * Qwen'de henüz hiç ölçülmedi, budget'ı P800'ün ölçülmüş kısımlarına ayırmak
- * için ilk sürümden çıkarıldı.
- */
-function buildEditPromptQwen(identityCaption) {
-  return (
-    "TASK: the FIRST image is your only canvas. The other images are close-up SELFIES of a different " +
-    "real person (the target) — reference material only, never output one of them. If your result " +
-    "lacks the first image's background and framing, you edited the wrong image.\n\n" +
-    "The target is almost certainly looking INTO THE LENS in every selfie. Do NOT carry that over: copy " +
-    "eye shape, colour, lids and lashes from the selfies, but take the DIRECTION the eyes point only " +
-    "from the FIRST image.\n\n" +
-    "TOP PRIORITIES — check each before finishing:\n" +
-    "P1 IDENTITY — the output face is the person in the close-up selfies, feature for feature. If a " +
-    "viewer would not immediately recognise them, the edit failed.\n" +
-    "P2 GAZE — the single most common failure: eyes ending up on the lens when the base person looked " +
-    "elsewhere.\n" +
-    "  (a) Look at the FIRST image: where do that person's eyes point — lens, or left/right/up/down/away?\n" +
-    "  (b) Answer the same for your output.\n" +
-    "  (c) If they differ, move the irises to match, then check again.\n" +
-    "P2b HEAD TURN — measure, do not eyeball.\n" +
-    "  (a) In the FIRST image, find the two outer eye corners and the nose tip; say where the tip sits " +
-    "between them — midway, or pushed toward one side, and how far.\n" +
-    "  (b) Answer the same for your output.\n" +
-    "  (c) If they differ, turn the head back until the nose tip matches, then check again. Cross-check " +
-    "with how much of the far cheek and ear are visible; keep chin height and sideways lean exactly as " +
-    "the base.\n" +
-    "P3 HEAD SIZE — count head-widths across the BASE person's shoulders and reproduce that count. Never " +
-    "take head scale from the close-up selfies. If you narrow the body, shrink the head by the same " +
-    "amount.\n" +
-    "P4 SKIN TONE — ONE continuous tone from face through neck, chest, arms and hands, matching the " +
-    "rendered face. Leaving base-person tone on limbs while the face matches is a serious error.\n\n" +
-    "CHANGE ONLY THE PERSON: face, hair, skin tone, body build. Everything else — background, lighting, " +
-    "camera angle, framing, pose, every clothing item and accessory — stays identical to the first " +
-    "image.\n\n" +
-    "FACE — copy the target's structure feature by feature: nose, eyebrows, eyes, lips, jaw, chin, " +
-    "cheekbones, face outline, length-to-width ratio. Do not beautify, symmetrise, average, round, puff " +
-    "or widen. Keep their own expression; no invented smile.\n\n" +
-    "HAIR — take it from the same close-up selfies: hairline, density, length, texture, colour. If bald " +
-    "or balding, match that degree exactly.\n\n" +
-    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "EYEWEAR — the output never has glasses or sunglasses unless the base person wears them; if the " +
-    "base has none, drop any from the references entirely and paint the eyes, brows and nose bridge " +
-    "underneath.\n\n" +
-    "TATTOOS — none unless visible in the target's own photos; remove the base person's.\n\n" +
-    "FACE EDGE — the boundary where your new face meets the original hair, temples, ears and jaw must " +
-    "be INVISIBLE: no block, rectangle, smear or dull patch along the hairline, temples, outer brows or " +
-    "forehead sides. Carry real texture and tone continuously outward into the hairline.\n\n" +
-    "QUALITY — the face sits under the scene's existing light, add none of your own. Result must look " +
-    "like an ordinary unedited phone photo: real texture, no airbrush, no CGI look, no relighting pass, " +
-    "no flattening of highlights. The face is the sharpest, cleanest region: crisp eyes with catchlights, " +
-    "defined lashes and brows, clean lip edges, living-tissue skin with fine pores — never pixelated, " +
-    "mushy, grainy, plasticky or softer than the surrounding clothing and background."
   );
 }
 
@@ -3846,11 +3708,11 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
 
   if (imageModel === QWEN_MODEL_ID) {
     // Qwen yalnızca tek atım; 3 aşamalı mod bu modelde denenmedi. `mode`
-    // (client'ın gönderdiği 'short') burada KULLANILMAZ — Qwen'in 1300
-    // token bütçesine göre AYRICA yazılmış buildEditPromptQwen gider
-    // (vücut tipi bilerek yok, bkz. fonksiyonunun başındaki not).
+    // burada KULLANILMAZ: üç buton da aynı P800'ü alır, tek fark model
+    // (2026-09-27). Kısaltılmış P800 (~1030 token) Qwen'in 1300 sınırına
+    // sığıyor; aşarsa generateWithQwen "QWEN PROMPT UZUN" uyarısı loglar.
     return await generateWithQwen(
-      retryHint + buildEditPromptQwen(identityCaption),
+      retryHint + buildEditPromptP800(identityCaption),
       fullSet.slice(0, QWEN_MAX_INPUT_IMAGES)
     );
   }

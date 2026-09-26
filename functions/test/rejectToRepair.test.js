@@ -268,17 +268,17 @@ test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
 // Gözle doğrulandı (9f0d9406 chunk2, fark 0.570): şablon cepheye yakın,
 // çıktı üç-çeyrek dönmüş — metrik gerçek kusuru ölçüyor.
 
-test("kafa dönüşü ölçülebilir bir PROSEDÜR olarak anlatılıyor", () => {
-  assert.match(FAL, /P2b HEAD TURN/);
-  // Modelin İKİ GÖRSELİ DE kendisi ölçüp karşılaştırdığı üç adım.
-  assert.match(FAL, /\(a\) In the FIRST image, find the two outer eye corners/);
-  assert.match(FAL, /\(b\) Answer the same question about your own output/);
-  assert.match(FAL, /\(c\) If the two answers differ, you rotated the head/);
-});
+// 2026-09-27: burun ucu / uzak kulak ölçüm prosedürü ve "fazla çevirme olağan
+// hatadır" uyarısı kullanıcı kararıyla kaldırıldı. Test maddenin kalan özünü
+// kilitliyor: aynı yön + aynı açı.
+function headTurnText() {
+  const m = /"\d\) HEAD TURN[\s\S]*?\\n\\n" \+/.exec(FAL);
+  assert.ok(m, "HEAD TURN maddesi bulunamadı");
+  return m[0].replace(/"\s*\+\s*"/g, "");
+}
 
-test("kafa dönüşü ikinci bir yoldan da çapraz kontrol ediliyor", () => {
-  // Tek ölçü yanılabilir; uzak yanak/kulak görünürlüğü bağımsız bir kontrol.
-  assert.match(FAL, /how much of the FAR cheek and the FAR ear is visible/);
+test("kafa dönüşü tabanla aynı yön ve aynı açı olarak anlatılıyor", () => {
+  assert.match(headTurnText(), /exactly the same side at exactly the same angle/);
 });
 
 test("eski salt-yasak metni yerinde kalmamış (iki kural çakışmasın)", () => {

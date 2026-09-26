@@ -1085,15 +1085,15 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
               ),
             ),
             const SizedBox(height: 10),
-            // Qwen'in prompt sınırı 1300 token; P800 (~2500) sığmadığı için
-            // 'short' gidiyor (bkz. functions/falPhotos.js QWEN_MODEL_ID).
+            // Üç buton da aynı P800'ü kullanır; sunucu Qwen'de `mode`u
+            // yok sayar, burada yalnızca iş kaydına doğru yazılsın diye var.
             _AltGenerateButton(
               label: 'Fotoğraflarımı Oluştur Versiyon 3',
-              hint: 'Test — Qwen Image 2.0 Pro (kısa prompt)',
+              hint: 'Test — Qwen Image 2.0 Pro',
               enabled: _refsReady && !_preparing,
               onPressed: () => _generate(
                 modelId: 'qwen-image-2.0-pro-2026-06-22',
-                mode: 'short',
+                mode: 'p800',
               ),
             ),
           ],
