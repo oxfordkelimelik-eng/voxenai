@@ -111,6 +111,14 @@ const DEFAULT_MODEL_ID = "nano-banana-pro";
 // MODEL_CATALOG girdisi SİLİNMEDİ (yukarıda) — geri dönmek istenirse
 // useOpenAiDirect `false` yapılabilir.
 const OPENAI_MODEL_ID = "gpt-image-2";
+// TEST MODELİ (2026-09-26): "Fotoğraflarımı Oluştur Versiyon 2" butonu.
+// Takma ad (gpt-image-2.5-sunburst) değil TARİHLİ sürüm: P800 ölçülerek
+// ayarlandı, model OpenAI tarafında sessizce kayarsa karşılaştırma bozulur.
+// Yalnızca ops hesabına açık (bkz. startPhotoGeneration).
+const OPENAI_MODEL_V25_ID = "gpt-image-2.5-sunburst-2026-09-08";
+const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID]);
+// opsPanel.js OPS_EMAIL ile EL İLE senkron (döngüsel require'dan kaçınmak için).
+const OPS_EMAIL = "destek@voxenai.com.tr";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_IMAGE_EDIT_URL = "https://api.openai.com/v1/images/edits";
 
@@ -1921,7 +1929,7 @@ function releaseOpenAiImageSlot() {
  * pipeline'da (mod 2) sonraki aşamaların tuvali bir önceki aşamanın
  * buffer'ıdır, Storage'a yazıp URL üretmeye gerek yok.
  */
-async function generateWithOpenAI(prompt, imageUrls) {
+async function generateWithOpenAI(prompt, imageUrls, model = OPENAI_MODEL_ID) {
   try {
     const buffers = await Promise.all(imageUrls.map(async (url) => {
       if (Buffer.isBuffer(url)) return url; // zaten ham görsel (pipeline ara çıktısı)
@@ -1931,7 +1939,7 @@ async function generateWithOpenAI(prompt, imageUrls) {
     }));
 
     const form = new FormData();
-    form.append("model", OPENAI_MODEL_ID);
+    form.append("model", model);
     form.append("prompt", prompt);
     // MALİYET (2026-07-27 kullanıcı talebi): "high" foto başına ~$0.21 idi,
     // "medium" ~4x daha ucuz (~$0.05). Kalite kapısı (assessOutputFace +
@@ -3620,7 +3628,7 @@ function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null) {
   return "";
 }
 
-async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor, retryHint = "") {
+async function generateForMode(mode, templateUrl, refUrls, identityCaption, bodyProfile, styleId, chunkIdx, refDescriptor, retryHint = "", openAiModel = OPENAI_MODEL_ID) {
   const faceUrls = faceRefUrls(refUrls);
   const bestFaceUrl = faceUrls[0];
   // Taban + yüz açıları. Kafa ölçeği artık yalnızca tabandan okunuyor.
@@ -3638,7 +3646,8 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // acceptStageIfIdentityHolds). Ölçüm yereldir, API maliyeti yoktur.
     const s1 = await generateWithOpenAI(
       retryHint + buildStage1Prompt(identityCaption, bodyProfile),
-      fullSet
+      fullSet,
+      openAiModel
     );
     if (!s1) {
       console.warn(`Pipeline aşama 1 başarısız (style=${styleId}, chunk=${chunkIdx})`);
@@ -3651,7 +3660,8 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // bakış yönü kaynağı) ve en iyi yüz (kimlik çapası) referans olarak gider.
     const s2 = await generateWithOpenAI(
       buildStage2Prompt(),
-      [cur, templateUrl, bestFaceUrl]
+      [cur, templateUrl, bestFaceUrl],
+      openAiModel
     );
     if (!s2) {
       console.warn(`Pipeline aşama 2 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
@@ -3662,7 +3672,8 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
 
     const s3 = await generateWithOpenAI(
       buildStage3Prompt(),
-      [cur, bestFaceUrl]
+      [cur, bestFaceUrl],
+      openAiModel
     );
     if (!s3) {
       console.warn(`Pipeline aşama 3 başarısız, önceki çıktıyla devam (style=${styleId}, chunk=${chunkIdx})`);
@@ -3686,7 +3697,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
   // retryHint EN BAŞA: önceki denemenin somut hatası, genel talimatlardan
   // önce okunsun (bkz. retryCorrectionPrefix gerekçesi).
   const prompt = retryHint + build(identityCaption, bodyProfile);
-  return await generateWithOpenAI(prompt, fullSet);
+  return await generateWithOpenAI(prompt, fullSet, openAiModel);
 }
 
 // Şablondaki kişi kadrajda bu orandan KÜÇÜKSE şablon yakınlaştırılır.
@@ -3836,7 +3847,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, openAiModel = OPENAI_MODEL_ID) {
   // KUYRUK HEARTBEAT (2026-09-10 gerçek olay): aynı kullanıcı üst üste iki
   // job başlattığında, her ikisinin chunk'ları AYNI process-içi
   // OPENAI_IMAGE_MAX_CONCURRENCY (=2) kuyruğunu paylaşıyor. Kuyrukta bekleyen
@@ -3852,13 +3863,13 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   }, 90 * 1000);
   try {
-    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval);
+    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, openAiModel);
   } finally {
     clearInterval(heartbeatTimer);
   }
 }
 
-async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false) {
+async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, openAiModel = OPENAI_MODEL_ID) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -4039,7 +4050,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // her denemede tekrarlanır, çünkü kusur ilk denemede de oluşuyor.
     let buf = await generateForMode(
       mode, templateInput, refUrls, identityCaption, bodyProfile, styleId, chunkIdx,
-      refDescriptor, retryHint
+      refDescriptor, retryHint, openAiModel
     );
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
@@ -5224,8 +5235,14 @@ exports.startPhotoGeneration = onCall(
     // doğrudan OpenAI'ye gider (bkz. OPENAI_MODEL_ID tanımı). MODEL_CATALOG
     // içindeki "gpt-image-2" girdisi (fal-wrapped, artık kullanılmıyor) bu
     // kontrolü zaten geçirdiği için ayrıca eklemeye gerek yok.
-    if (model !== undefined && !MODEL_CATALOG[model]) {
+    if (model !== undefined && !MODEL_CATALOG[model] && !OPENAI_DIRECT_MODELS.has(model)) {
       throw new HttpsError("invalid-argument", `Bilinmeyen model: ${model}`);
+    }
+    if (model === OPENAI_MODEL_V25_ID) {
+      const email = (request.auth.token.email || "").toLowerCase().trim();
+      if (email !== OPS_EMAIL || request.auth.token.email_verified === false) {
+        throw new HttpsError("permission-denied", "Bu model yalnızca test hesabına açık.");
+      }
     }
     const modelId = model || DEFAULT_MODEL_ID;
     // Prompt stratejisi (bkz. PHOTO_MODES). Yalnızca OpenAI doğrudan yolunda
@@ -5445,7 +5462,7 @@ exports.startPhotoGeneration = onCall(
     // kullanıyor). MODEL_CATALOG'daki "gpt-image-2" (fal-ai/gpt-image-2/edit)
     // girdisi SİLİNMEDİ, sadece kullanılmıyor — geri dönmek istenirse bu
     // satır `false` yapılabilir.
-    const useOpenAiDirect = modelId === OPENAI_MODEL_ID;
+    const useOpenAiDirect = OPENAI_DIRECT_MODELS.has(modelId);
 
     // TEKRAR FİLTRESİ İÇİN GEÇMİŞ (2026-08-02): bu işte GERÇEKTEN üretilen
     // taban görsellerin adları kaydedilir; sonraki işler bunları eleyerek
@@ -5547,7 +5564,7 @@ exports.startPhotoGeneration = onCall(
               await runOpenAiDirectChunk(
                 uid, jobId, bucketId, i, urls, refUrls, identityCaption,
                 bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine,
-                holdForApproval
+                holdForApproval, modelId
               );
             } catch (e) {
               // TEK CHUNK'IN HATASI BÜTÜN İŞİ GÖTÜRMESİN (2026-09-21, aynı

@@ -22,6 +22,7 @@ import '../../../data/sources/claude_api_service.dart' show PhotoScore;
 import '../../../data/sources/review_prompt_service.dart';
 import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
+import '../../ops/ops_gate.dart' show kOpsEmail;
 import '../../screens/analysis/guided_capture_screen.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/ai_consent_gate.dart';
@@ -1067,6 +1068,23 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 ? () => _generate(modelId: 'gpt-image-2', mode: 'p800')
                 : null,
           ),
+          // TEST (2026-09-26): gpt-image-2.5 Sunburst karşılaştırması. Yalnızca
+          // ops hesabında görünür; sunucu da aynı kısıtı ayrıca uyguluyor.
+          if ((FirebaseAuth.instance.currentUser?.email ?? '')
+                  .toLowerCase()
+                  .trim() ==
+              kOpsEmail) ...[
+            const SizedBox(height: 10),
+            _AltGenerateButton(
+              label: 'Fotoğraflarımı Oluştur Versiyon 2',
+              hint: 'Test — GPT Image 2.5 Sunburst',
+              enabled: _refsReady && !_preparing,
+              onPressed: () => _generate(
+                modelId: 'gpt-image-2.5-sunburst-2026-09-08',
+                mode: 'p800',
+              ),
+            ),
+          ],
           // const SizedBox(height: 10),
           // PrimaryButton(
           //   label:
