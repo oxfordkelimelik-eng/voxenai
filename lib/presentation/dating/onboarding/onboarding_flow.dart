@@ -6,7 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/router/dating_routes.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/dating_widgets.dart';
-import '../widgets/funnel_visuals.dart';
+import 'funnel_screens.dart';
 import '../widgets/legal_links.dart';
 import '../widgets/voxen_visuals.dart';
 
@@ -25,13 +25,11 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   int _index = 0;
   bool _blockedUnder18 = false;
 
-  // Video-öncesi funnel (2026-09-28, kullanıcı referans görselleri):
-  // karşılama → hayal kırıklığı → kuşku → yeniden çerçeveleme → veri →
-  // 0,1sn karar → foto çekiciliği → teknoloji köprüsü → AI karşılaştırma →
-  // optimize → sosyal kanıt → (sonra) video modülleri → sorular + auth…
-  // "Sizden gelenler" ve "Çıktılar" form sorularından SONRA gelir.
-  // → 23 adım (vücut tipi + boy AI foto üretiminde kullanılır).
-  static const int _totalSteps = 23;
+  // FUNNEL (2026-09-30, kullanıcının referans tasarımları): video öncesi 12
+  // ekran ve form sonrası 2 "Sizden gelenler" ekranı. Tasarım kodla çizilir
+  // (funnel_screens.dart); fotoğraflar tasarımlardan kesilmiş parçalardır.
+  // → 25 adım (vücut tipi + boy AI foto üretiminde kullanılır).
+  static const int _totalSteps = 25;
   bool _signedIn = false;
 
   void _next() {
@@ -71,30 +69,32 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     final answers = ref.watch(datingAnswersProvider);
 
     final steps = <Widget Function()>[
-      () => _welcome(), // 1
-      () => _frustration(), // 2  — "Eşleşme alamıyorsun"
-      () => _selfDoubt(), // 3  — "Kendini sorguluyorsun"
-      () => _reframe(), // 4  — "Sorun sen değilsin"
-      () => _competition(), // 5  — en iyi %10, beğenilerin %60'ı
-      () => _swipeDecision(), // 6  — 0,1 saniyede karar
-      () => _photoMatters(), // 7  — fotoğraf çekiciliği en önemli faktör
-      () => _solution(), // 8  — "3D AI Yüz Teknolojisi ile tanış" (köprü)
-      () => _aiComparison(), // 9  — ChatGPT/Gemini karşısında Voxen AI
-      () => _datingOptimize(), // 10 — dating'e özel optimizasyon
-      () => _modulePhoto(), // 11 — AI foto generator tanıtımı (video)
-      () => _moduleAnalysis(), // 12 — Foto skor analizi tanıtımı (video)
-      () => _qGender(answers), // 13
-      () => _qAge(answers), // 14
-      () => _qBodyType(answers), // 15 — AI foto beden ipucu
-      () => _qHeight(answers), // 16 — AI foto boy ipucu
-      () => _qApps(answers), // 17
-      () => _qMatches(answers), // 18
-      // Form verileri girildikten SONRA (2026-09-28 kullanıcı kararı):
-      () => _socialProof(), // 19 — "Sizden gelenler" (önce/sonra)
-      () => _outputs(), // 20 — örnek çıktılar (4 stil)
-      () => _authStep(), // 21 — Google/Apple ile giriş (formlar sonrası)
-      () => _beforeAfter(), // 22 — 7 kat fazla eşleşme
-      () => _preparing(), // 23
+      () => _funnel1(), // 1
+      () => _funnel2(), // 2
+      () => _funnel3(), // 3
+      () => _funnel4(), // 4
+      () => _funnel5(), // 5
+      () => _funnel6(), // 6
+      () => _funnel7(), // 7
+      () => _funnel8(), // 8
+      () => _funnel9(), // 9
+      () => _funnel10(), // 10
+      () => _funnel11(), // 11
+      () => _funnel12(), // 12
+      () => _modulePhoto(), // 13 — AI foto generator tanıtımı (video)
+      () => _moduleAnalysis(), // 14 — Foto skor analizi tanıtımı (video)
+      () => _qGender(answers), // 15
+      () => _qAge(answers), // 16
+      () => _qBodyType(answers), // 17 — AI foto beden ipucu
+      () => _qHeight(answers), // 18 — AI foto boy ipucu
+      () => _qApps(answers), // 19
+      () => _qMatches(answers), // 20
+      // Form verileri girildikten SONRA (kullanıcı kararı):
+      () => _funnel13(), // 21
+      () => _funnel14(), // 22
+      () => _authStep(), // 23 — Google/Apple ile giriş (formlar sonrası)
+      () => _beforeAfter(), // 24 — 7 kat fazla eşleşme
+      () => _preparing(), // 25
     ];
 
     return PopScope(
@@ -142,179 +142,229 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     );
   }
 
-  // === EKRAN 1 — Karşılama (ÖZEL: kırmızı arka plan + telefon + kalpler) ===
-  Widget _welcome() => _WelcomeScreen(onStart: _next);
-
-  // === EKRAN 2 — "Eşleşme alamıyorsun" (kırık kalp + ghostlanan mesajlar) ===
-  Widget _frustration() => _info(
-        visual: const BrokenHeartCounter(),
-        title: 'Eşleşme alamıyorsun',
-        subtitle: 'Belki 0, belki 2-3 tane uygulamalarda eşleşme alamıyorsun. '
-            '3-4 kişiye mesaj atıyorsun, onlar da seni anında ghostluyor.',
+  // === FUNNEL EKRANLARI (kullanıcının referans tasarımları, kodla) ===
+  // Bkz. funnel_screens.dart. `##..##` kırmızı vurgu, `**..**` kalın.
+  Widget _fp({
+    required List<String> headline,
+    required Widget visual,
+    required Size canvas,
+    String? sub,
+    String? subSmall,
+    String? step,
+    String cta = 'Devam Et',
+    bool arrow = false,
+    double headlineSize = 32,
+  }) =>
+      FunnelPage(
+        headline: headline,
+        sub: sub,
+        subSmall: subSmall,
+        step: step,
+        visual: visual,
+        canvas: canvas,
+        cta: cta,
+        ctaArrow: arrow,
+        headlineSize: headlineSize,
+        onNext: _next,
+        onBack: _index == 0 ? null : _back,
       );
 
-  // === EKRAN 3 — "Kendini sorguluyorsun" (kuşku balonları) ===
-  Widget _selfDoubt() => _info(
-        visual: const DoubtBubblesCloud(),
-        title: 'Kendini sorguluyorsun',
+  Widget _funnel1() => _fp(
+        headline: const [
+          'Voxen\'e hoş geldin.',
+          '##Milisaniyeler içerisinde##',
+          '##sola kaydırılmaya SON.##',
+        ],
+        sub: '3D yüz taramasıyla yüzün aynı kalır ve sadece **3 dakika\'da** '
+            'model kalitesinde fotolar üretilir.',
+        visual: const WelcomeVisual(),
+        canvas: WelcomeVisual.size,
+        cta: 'Hemen Başla',
+        headlineSize: 28,
       );
 
-  // === EKRAN 4 — "Sorun sen değilsin" (1 kadına 3 erkek oranı) ===
-  Widget _reframe() => _info(
-        visual: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            GenderRatioComparison(),
-            SizedBox(height: 10),
-            RepresentativeNote(),
+  Widget _funnel2() => _fp(
+        headline: const ['Eşleşme', '##alamıyorsun.##'],
+        sub: 'Belki **0**, belki 2-3 ama uygulamalarda eşleşme alamıyorsun.\n'
+            '**3–4** kişiye mesaj atıyorsun, onlar da seni anında ghostluyor.',
+        visual: const NoMatchVisual(),
+        canvas: NoMatchVisual.size,
+        headlineSize: 40,
+      );
+
+  Widget _funnel3() => _fp(
+        headline: const ['Kendini', '##sorguluyorsun.##'],
+        sub: 'Acaba çirkin miyim?\nFakir mi duruyorum yoksa?\nEzik miyim ben?',
+        visual: const SelfDoubtVisual(),
+        canvas: SelfDoubtVisual.size,
+        headlineSize: 40,
+      );
+
+  Widget _funnel4() => _fp(
+        headline: const [
+          'Sorun sen değilsin.',
+          '##Sorun uygulamaya##',
+          '##adapte olamaman.##',
+        ],
+        sub: '1 kadına ortalama 3 erkek düşüyor\nve kadınlar erkeklere göre\n'
+            'çok daha seçici davranıyor.',
+        visual: const NotYouVisual(),
+        canvas: NotYouVisual.size,
+        arrow: true,
+        headlineSize: 30,
+      );
+
+  Widget _funnel5() => _fp(
+        headline: const [
+          'En İyi %10,',
+          '##Beğenilerin %60\'ını##',
+          '##Alıyor.##',
+        ],
+        sub: 'En iyi %10 geri kalanlardan ortalama\n'
+            '**13 kat** daha fazla beğeni topluyor.',
+        visual: const TopTenVisual(),
+        canvas: TopTenVisual.size,
+      );
+
+  Widget _funnel6() => _fp(
+        headline: const [
+          'Ve sağa kaydırma',
+          '##kararı sadece##',
+          '##0,1 saniyede veriliyor.##',
+        ],
+        sub: 'Sağ ya da Sol. Fotoğrafına baktığı ilk **0,1 saniyede** karar '
+            'veriyor. Daha uzun baksa da fikri değişmiyor, sadece daha emin '
+            'oluyor.',
+        visual: const SwipeSecondVisual(),
+        canvas: SwipeSecondVisual.size,
+        headlineSize: 30,
+      );
+
+  Widget _funnel7() => _fp(
+        headline: const [
+          'Ve bu kararı etkileyen',
+          '##en önemli şey##',
+          '##fotoğrafın çekiciliği.##',
+        ],
+        sub: 'En iyi **%10** profiller, averaj profillerin aksine çekici '
+            'ortamlarda düzgün ışıklandırma, pozlama ve stil içeriyor.',
+        visual: const AttractivenessVisual(),
+        canvas: AttractivenessVisual.size,
+        headlineSize: 28,
+      );
+
+  Widget _funnel8() => _fp(
+        headline: const [
+          'Voxen Teknolojisi.',
+          '##3D AI Yüz Teknolojisi##',
+          '##ile tanışın.##',
+        ],
+        sub: 'Özel 3D Yüz Taramasıyla\nsadece 3 dakika\'da eşleşme sayınızı\n'
+            'katlayacak fotoğraflar ürettirin.',
+        visual: const WelcomeVisual(),
+        canvas: WelcomeVisual.size,
+        cta: 'Hemen Başla',
+        headlineSize: 30,
+      );
+
+  Widget _funnel9() => _fp(
+        headline: const ['Diğerlerinden', '##Üstün Teknoloji##'],
+        sub: 'ChatGPT, Gemini aksine yüzünüzü\nhiperrealistik olarak üretir.\n'
+            'Gerçekten ayırt edilmesi çok zordur.',
+        visual: const CompareVisual(prefix: '09', rows: [
+          ['Yapay durur', 'Detaylar eksiktir', 'Gerçekçi değildir'],
+          [
+            'Doğallıktan uzaktır',
+            'Yüz detayları tutarsızdır',
+            'Kolayca ayırt edilir'
           ],
-        ),
-        title: 'Sorun sen değilsin',
-        subtitle: 'Sorun uygulamaya adapte olamaman. 1 kadına ortalama 3 '
-            'erkek düşüyor ve kadınlar erkeklere göre çok daha seçici '
-            'davranıyor.',
-      );
-
-  // === EKRAN 5 — En iyi %10, beğenilerin %60'ını alıyor (bar grafiği) ===
-  Widget _competition() => _info(
-        visual: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            VerticalBarChart(
-              caption: 'Haftalık ort. beğeni sayısı',
-              data: [
-                BarDatum2('%10', 3, '3'),
-                BarDatum2('%20', 5, '5'),
-                BarDatum2('%30', 6, '6'),
-                BarDatum2('%40', 8, '8'),
-                BarDatum2('%50', 10, '10'),
-                BarDatum2('%60', 13, '13'),
-                BarDatum2('%70', 17, '17'),
-                BarDatum2('%80', 20, '20'),
-                BarDatum2('En iyi\n%10', 39, '39', highlight: true),
-              ],
-            ),
-            SizedBox(height: 10),
-            RepresentativeNote(),
+          [
+            'Hiperrealist sonuçlar',
+            'Gerçek cilt dokusu',
+            'Kolayca ayırt edilemez'
           ],
-        ),
-        title: 'En iyi %10, beğenilerin %60\'ını alıyor',
-        subtitle:
-            'En iyi %10 profil, geri kalanlara göre ortalama 13 kat daha '
-            'fazla beğeni topluyor.',
+        ]),
+        canvas: CompareVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 36,
       );
 
-  // === EKRAN 6 — Sağa kaydırma kararı 0,1 saniyede veriliyor ===
-  Widget _swipeDecision() => _info(
-        visual: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SwipeDecisionDemo(),
-            SizedBox(height: 10),
-            RepresentativeNote(),
+  Widget _funnel10() => _fp(
+        headline: const ['Dating App', '##Optimize.##'],
+        sub: 'Kadınların zevkine uygun ve optimize\n'
+            '##100\'den fazla şablondan## seçilerek\nsize özel üretim yapılır.',
+        subSmall: 'Diğer çözümlerde ve yapay zeka modellerinde bu optimizasyon '
+            'bulunmamaktadır.',
+        visual: const CompareVisual(prefix: '10', rows: [
+          [
+            'Dating odaklı değil',
+            'Kadın zevkine uygun değil',
+            'Optimize edilmemiş',
+            'Standart ve sıradan sonuçlar'
           ],
-        ),
-        title: 'Kaydırma kararı sadece 0,1 saniyede veriliyor',
-        subtitle: 'Sağ ya da sol, fotoğrafına baktığı ilk 0,1 saniyede karar '
-            'veriyor. Daha uzun bakıyorsa bile fikri değişmiyor, sadece '
-            'daha emin oluyor.',
-      );
-
-  // === EKRAN 7 — Bu kararı etkileyen en önemli şey: fotoğrafın çekiciliği ===
-  Widget _photoMatters() => _info(
-        visual: const ProfileAttractivenessCompare(),
-        title: 'En önemli şey fotoğrafının çekiciliği',
-        subtitle:
-            'En iyi %10 profil, ortalama profilin aksine güzel ortamda, iyi '
-            'ışıkla, doğru poz ve stille çekiliyor.',
-      );
-
-  // === EKRAN 8 — Köprü: "3D AI Yüz Teknolojisi ile tanış" ===
-  Widget _solution() => _info(
-        visual: const ItsAMatchBackdropLogo(logoSize: 130),
-        title: '3D AI Yüz Teknolojisi ile tanış',
-        subtitle: 'Özel 3D yüz taramasıyla sadece 3 dakikada eşleşme '
-            'sayını katlayacak fotoğraflar üretiyoruz.',
-      );
-
-  // === EKRAN 9 — ChatGPT / Gemini karşısında Voxen AI (hiperrealizm) ===
-  Widget _aiComparison() => _info(
-        visual: const AiComparisonTable(
-          columns: [
-            ComparisonColumn('ChatGPT', [
-              ComparisonRow('Yapay durur'),
-              ComparisonRow('Detaylar eksik'),
-              ComparisonRow('Gerçekçi değil'),
-            ]),
-            ComparisonColumn('Gemini', [
-              ComparisonRow('Gerçeklikten uzak'),
-              ComparisonRow('Yüz detayları tutarsız'),
-              ComparisonRow('Kolayca ayırt edilir'),
-            ]),
-            ComparisonColumn(
-              'Voxen AI',
-              [
-                ComparisonRow('Hiperrealist sonuçlar', positive: true),
-                ComparisonRow('Gerçek cilt dokusu', positive: true),
-                ComparisonRow('Kolayca ayırt edilemez', positive: true),
-              ],
-              highlight: true,
-            ),
+          [
+            'Dating odaklı değil',
+            'Kadın zevkine uygun değil',
+            'Optimize edilmemiş',
+            'Standart ve sıradan sonuçlar'
           ],
-        ),
-        title: 'Diğerlerinden üstün teknoloji',
-        subtitle: 'ChatGPT ve Gemini\'nin aksine yüzünü hiperrealistik '
-            'üretiyoruz. Gerçekten ayırt edilmesi çok zor.',
-      );
-
-  // === EKRAN 10 — Dating app'e özel optimizasyon ===
-  Widget _datingOptimize() => _info(
-        visual: const AiComparisonTable(
-          columns: [
-            ComparisonColumn('ChatGPT', [
-              ComparisonRow('Dating odaklı değil'),
-              ComparisonRow('Kadın zevkine uygun değil'),
-              ComparisonRow('Optimize edilmemiş'),
-            ]),
-            ComparisonColumn('Gemini', [
-              ComparisonRow('Dating odaklı değil'),
-              ComparisonRow('Kadın zevkine uygun değil'),
-              ComparisonRow('Optimize edilmemiş'),
-            ]),
-            ComparisonColumn(
-              'Voxen AI',
-              [
-                ComparisonRow('Dating\'e özel optimize', positive: true),
-                ComparisonRow('Kadın zevkine uygun', positive: true),
-                ComparisonRow('Sana özel, kaliteli sonuç', positive: true),
-              ],
-              highlight: true,
-            ),
+          [
+            'Dating odaklı optimize',
+            'Kadın zevkine uygun',
+            '100+ özel şablon',
+            'Size özel, kaliteli sonuçlar'
           ],
-        ),
-        title: 'Dating app\'e göre optimize',
-        subtitle:
-            'Kadınların zevkine uygun, 100\'den fazla şablondan seçilerek '
-            'sana özel üretim yapılır.',
+        ]),
+        canvas: CompareVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 40,
       );
 
-  // === EKRAN 19 — Sosyal kanıt: önce/sonra (form sonrası) ===
-  Widget _socialProof() => _info(
-        visual: const MatchesBeforeAfterPhone(),
-        title: 'Sizden gelenler',
-        subtitle: 'Voxen AI ile kullanıcılarımız çok daha fazla eşleşme '
-            'alıyor.',
+  Widget _funnel11() => _fp(
+        step: 'Adım - 1',
+        headline: const ['Selfie ile', '##Yüz Taraması##', 'Yaptırın.'],
+        visual: const FaceScanVisual(),
+        canvas: FaceScanVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 36,
       );
 
-  // === EKRAN 20 — Örnek çıktılar: 4 stil (form sonrası) ===
-  Widget _outputs() => _info(
-        visual: const StyleOutputsGallery(),
-        title: 'Seni bekleyen fotoğraflar',
-        subtitle: 'Elegance, Date Night, Traveller ve Old Money — '
-            'istediğin stilde, yüzün aynı kalarak üretilir.',
+  Widget _funnel12() => _fp(
+        step: 'Adım - 3',
+        headline: const ['Sonuç:', '##Dating App Optimize##'],
+        sub: 'Kadınların zevkine uygun ve optimize\nfotoğraflar elde edersiniz.',
+        subSmall: 'HD bir şekilde indirip kullanmaya başlayabilirsiniz.',
+        visual: const ResultVisual(),
+        canvas: ResultVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 34,
       );
 
-  // === EKRAN 11 — AI foto generator tanıtımı (demo video + açıklama) ===
+  Widget _funnel13() => _fp(
+        headline: const ['Sizden ##Gelenler##'],
+        sub: 'Voxen AI ile binlerce kişi daha fazla eşleşme alıyor.',
+        visual: const TestimonialVisual(),
+        canvas: TestimonialVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 40,
+      );
+
+  Widget _funnel14() => _fp(
+        headline: const ['Sizden ##Gelenler##'],
+        sub: 'Voxen AI ile binlerce kişi daha fazla eşleşme alıyor.',
+        visual: const TestimonialListVisual(),
+        canvas: TestimonialListVisual.size,
+        cta: 'Hemen Başla',
+        arrow: true,
+        headlineSize: 40,
+      );
+
+  // === EKRAN 13 — AI foto generator tanıtımı (demo video + açıklama) ===
   Widget _modulePhoto() => _info(
         visual: const DemoVideoPhone(
           asset: 'assets/videos/ai_photo_demo.mp4',
@@ -328,7 +378,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             'profilleri oluşturuyoruz.',
       );
 
-  // === EKRAN 12 — Foto skor analizi modülü tanıtımı (demo video + açıklama) ===
+  // === EKRAN 14 — Foto skor analizi modülü tanıtımı (demo video + açıklama) ===
   Widget _moduleAnalysis() => _info(
         visual: const DemoVideoPhone(
           asset: 'assets/videos/analysis_demo.mp4',
@@ -342,7 +392,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             'eşleşme aldıracak öneriler sunuyoruz.',
       );
 
-  // === EKRAN 13 — Soru: Cinsiyet ===
+  // === EKRAN 15 — Soru: Cinsiyet ===
   Widget _qGender(DatingAnswers a) => _quiz(
         canContinue: a.gender != null,
         child: _QuizBlock(
@@ -362,7 +412,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
         ),
       );
 
-  // === EKRAN 14 — Soru: Yaş (Under 18 → durdur) ===
+  // === EKRAN 16 — Soru: Yaş (Under 18 → durdur) ===
   Widget _qAge(DatingAnswers a) {
     const ranges = [
       ['under18', '18 yaş altı'],
@@ -475,7 +525,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     );
   }
 
-  // === EKRAN 18 — Soru: Günlük eşleşme ===
+  // === EKRAN 20 — Soru: Günlük eşleşme ===
   Widget _qMatches(DatingAnswers a) {
     const opts = [
       ['none', 'Hiç yok / 1 tane bile değil'],
@@ -498,7 +548,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     );
   }
 
-  // === EKRAN 21 — Formlar sonrası Google/Apple ile giriş (ZORUNLU) ===
+  // === EKRAN 23 — Formlar sonrası Google/Apple ile giriş (ZORUNLU) ===
   Widget _authStep() => _AuthOnboardingScreen(
         signedIn: _signedIn,
         onSignedIn: () {
@@ -507,7 +557,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
         },
       );
 
-  // === EKRAN 22 — 7.4x (dikey bar grafiği: beğeni oranı %) ===
+  // === EKRAN 24 — 7.4x (dikey bar grafiği: beğeni oranı %) ===
   Widget _beforeAfter() => _info(
         visual: const VerticalBarChart(
           caption: 'Beğeni / eşleşme oranı',
@@ -520,7 +570,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
         subtitle: 'Farkı hisset — veya iade al.',
       );
 
-  // === EKRAN 23 — Hazırlanıyor (loading) → modül vitrini ===
+  // === EKRAN 25 — Hazırlanıyor (loading) → modül vitrini ===
   Widget _preparing() => _PreparingScreen(onDone: _finish);
 
   Widget _opt(String label, bool selected, VoidCallback onTap) =>
@@ -528,7 +578,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 }
 
 // ============================================================
-// EKRAN 21 — Formlar sonrası Google/Apple ile giriş — ZORUNLU.
+// EKRAN 23 — Formlar sonrası Google/Apple ile giriş — ZORUNLU.
 // Giriş yapmadan sisteme (hub/modüller) girilemez. Önce KVKK/GDPR açık
 // rıza onayı alınır, ardından giriş butonları etkinleşir.
 // ============================================================
@@ -716,94 +766,6 @@ class _AuthButton extends StatelessWidget {
           elevation: 0,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================
-// EKRAN 1 — KARŞILAMA (özel kırmızı tasarım)
-// EN ÜSTTE: VOXEN AI logosu · ORTADA: telefon içinde kayan eşleşmeler +
-// arkada kalpler · ALTTA: büyük "Voxen'e hoş geldin." + açıklama +
-// en altta büyük buton.
-// ============================================================
-class _WelcomeScreen extends StatelessWidget {
-  final VoidCallback onStart;
-  const _WelcomeScreen({required this.onStart});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-            gradient: AppColors.brandRedBackground),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // EN ÜSTTE: logo
-              const Padding(
-                padding: EdgeInsets.only(top: 12, bottom: 4),
-                child: VoxenWordmark(fontSize: 24, onRed: true),
-              ),
-              // ORTADA: Tinder tarzı blurlu eşleşme duvarı + kalpler
-              Expanded(
-                child: FloatingHeartsBackground(
-                  child: const Padding(
-                    padding: EdgeInsets.fromLTRB(14, 4, 14, 4),
-                    child: BlurredMatchesWall(),
-                  ),
-                ),
-              ),
-              // ALTTA: büyük karşılama + açıklama
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 8, 24, 4),
-                child: Text(
-                  'Voxen\'e hoş geldin.\nMilisaniyeler içerisinde sola '
-                  'kaydırılmaya SON.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      height: 1.15),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(28, 0, 28, 16),
-                child: Text(
-                  '3D yüz taramasıyla yüzün aynı kalır ve sadece 3 dakikada '
-                  'model kalitesinde fotoğraflar üretilir.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 14, color: Colors.white70, height: 1.4),
-                ),
-              ),
-              // EN ALTTA: büyük buton (kırmızı zemin üstünde beyaz buton, güçlü CTA)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 22),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 60,
-                  child: ElevatedButton(
-                    onPressed: onStart,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.goldDark,
-                      elevation: 10,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18)),
-                    ),
-                    child: const Text('Hemen Başla',
-                        style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.5)),
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

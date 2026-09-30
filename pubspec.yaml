@@ -114,6 +114,7 @@ flutter:
     - assets/dating/styles/
     - assets/dating/modules/
     - assets/dating/showcase/
+    - assets/dating/funnel/parts/
     - assets/videos/
 
   fonts:
