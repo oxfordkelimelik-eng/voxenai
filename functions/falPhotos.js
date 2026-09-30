@@ -1506,16 +1506,58 @@ const HEIGHT_RANGE_TO_BAND = {
   "190+": "tall",
 };
 
+// STİLLER (2026-09-28, yeniden eklendi — kullanıcı kararı). İstemci
+// `style` alanıyla gönderir; lib/core/constants/dating_constants.dart
+// PhotoStyle.coreStyles ile EL İLE senkron tutulmalı.
+//
+// Klasör yapısı: dating_templates/{stil}/{short|middle|tall}/*.jpg
+// Klasörler elle oluşturulduğu için yazım farklarına tolerans var: stil
+// klasörü için aşağıdaki adlar, boy bandı için "middle" yerine "mid" de
+// kabul edilir. Stil klasörü BOŞSA eski boy-bandı havuzuna düşülür —
+// klasörler doldurulana kadar üretim durmaz.
+const PHOTO_STYLE_IDS = ["elegance", "datenight", "traveller", "oldmoney"];
+const STYLE_FOLDER_ALIASES = {
+  elegance: ["elegance"],
+  datenight: ["datenight", "date-night", "date_night", "date night"],
+  traveller: ["traveller", "traveler"],
+  oldmoney: ["oldmoney", "old-money", "old_money", "old money"],
+};
+const BAND_FOLDER_ALIASES = {
+  short: ["short"],
+  middle: ["middle", "mid"],
+  tall: ["tall"],
+};
+
 // Havuzdaki taban görselleri döner.
 //
-// heightRange verilirse önce o boya karşılık gelen alt klasör denenir
-// (dating_templates/{band}/). O klasör BOŞSA sessizce tüm havuza düşülür —
-// böylece kullanıcı henüz bantlara ayırmamışsa üretim durmaz (fail-safe:
-// yanlış boy bandı, hiç üretim yapamamaktan iyidir).
-// Döner: { files: Storage File[], band: string|null }
-async function listTemplateFiles(heightRange) {
+// styleId verilirse önce dating_templates/{stil}/{band}/, sonra stilin
+// tamamı denenir. heightRange verilirse o boya karşılık gelen alt klasör
+// denenir (dating_templates/{band}/). O klasör BOŞSA sessizce tüm havuza
+// düşülür — böylece kullanıcı henüz bantlara ayırmamışsa üretim durmaz
+// (fail-safe: yanlış boy bandı, hiç üretim yapamamaktan iyidir).
+// Döner: { files: Storage File[], band: string|null, style: string|null }
+async function listTemplateFiles(heightRange, styleId = null) {
   const band = HEIGHT_RANGE_TO_BAND[heightRange] || null;
   const isImage = (f) => !f.name.endsWith("/") && /\.(jpe?g|png|webp)$/i.test(f.name);
+
+  if (styleId && STYLE_FOLDER_ALIASES[styleId]) {
+    for (const folder of STYLE_FOLDER_ALIASES[styleId]) {
+      if (band) {
+        for (const b of BAND_FOLDER_ALIASES[band]) {
+          const [inBand] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/${folder}/${b}/` });
+          const banded = inBand.filter(isImage);
+          if (banded.length > 0) return { files: banded, band, style: styleId };
+        }
+      }
+      const [inStyle] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/${folder}/` });
+      const styled = inStyle.filter(isImage);
+      if (styled.length > 0) {
+        console.warn(`STİL BANDI BOŞ: ${TEMPLATE_ROOT}/${folder}/${band || "?"}/ — stilin tüm klasörü kullanılıyor`);
+        return { files: styled, band: null, style: styleId };
+      }
+    }
+    console.warn(`STİL KLASÖRÜ BOŞ: ${styleId} — boy-bandı havuzuna düşülüyor`);
+  }
 
   if (band) {
     const [inBand] = await bucket().getFiles({ prefix: `${TEMPLATE_ROOT}/${band}/` });
@@ -5260,11 +5302,17 @@ exports.startPhotoGeneration = onCall(
     }
     const uid = request.auth.uid;
     checkAppAttestation(request, "startPhotoGeneration");
-    const { styles, photoCount: rawPhotoCount, jobId, model, mode, holdForApproval: rawHold } = request.data || {};
+    const { styles, photoCount: rawPhotoCount, jobId, model, mode, holdForApproval: rawHold, style: rawStyle } = request.data || {};
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
     assertSafeId(jobId, "jobId");
+    // STİL (2026-09-28): yeni istemci gönderir; göndermeyen eski istemci
+    // stilsiz (boy-bandı havuzu) davranışında kalır.
+    if (rawStyle !== undefined && rawStyle !== null && !PHOTO_STYLE_IDS.includes(rawStyle)) {
+      throw new HttpsError("invalid-argument", `Bilinmeyen stil: ${rawStyle}`);
+    }
+    const photoStyle = rawStyle || null;
 
     // SÜRÜM KAPISI: yalnızca açıkça true gönderen (yeni) istemci onay
     // akışına girer. Bayrak yok / false → eski doğrudan teslim.
@@ -5389,7 +5437,8 @@ exports.startPhotoGeneration = onCall(
     // vererek seçilir — bkz. pickTemplatesFromPool / recentTemplateNames.
     // BOY BANDI (2026-08-02): kullanıcının seçtiği boya uygun alt klasör
     // varsa yalnızca oradan seçilir — bkz. listTemplateFiles / HEIGHT_RANGE_TO_BAND.
-    const { files, band: templateBand } = await listTemplateFiles(bodyProfile.heightRange);
+    const { files, band: templateBand, style: templateStyle } =
+      await listTemplateFiles(bodyProfile.heightRange, photoStyle);
     if (files.length === 0) {
       await failJobAndRethrow(new HttpsError(
         "failed-precondition",
@@ -5400,6 +5449,7 @@ exports.startPhotoGeneration = onCall(
     }
     console.log(
       `ŞABLON HAVUZU: ${files.length} görsel` +
+      ` (istenenStil=${photoStyle || "yok"}, kullanılanStil=${templateStyle || "yok"})` +
       (templateBand ? ` (boy bandı=${templateBand}, boy=${bodyProfile.heightRange})`
                     : ` (bant yok — tüm havuz, boy=${bodyProfile.heightRange || "belirtilmemiş"})`)
     );
@@ -5528,6 +5578,8 @@ exports.startPhotoGeneration = onCall(
         usedFreeTier,
         model: modelId, // hangi model kullanıldı — izleme/karşılaştırma için
         photoMode, // hangi prompt stratejisi — A/B karşılaştırması için
+        photoStyle, // kullanıcının seçtiği stil (null = eski istemci)
+        templateStyle: templateStyle || null, // gerçekten kullanılan stil klasörü
       }, { merge: true });
     }).catch(failJobAndRethrow);
 

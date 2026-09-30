@@ -18,13 +18,14 @@ class DatingFaqScreen extends StatelessWidget {
       ),
       _FaqItem(
         'Paketler neler?',
-        'AI Foto Üretimi: Başlangıç ${DatingConfig.photoStarterPhotos} '
-            'fotoğraf, Premium ${DatingConfig.photoStandardPhotos} fotoğraf '
-            '+ ${DatingConfig.photoStandardGiftAnalyses} analiz hediye, '
+        'Başlangıç ${DatingConfig.photoStarterPhotos} fotoğraf '
+            '+ ${DatingConfig.photoStarterAnalysisAddOnRuns} analiz hediye, '
+            'Premium ${DatingConfig.photoStandardPhotos} fotoğraf '
+            '+ ${DatingConfig.photoStandardAnalysisAddOnRuns} analiz hediye, '
             'Diamond ${DatingConfig.photoPremiumPhotos} fotoğraf '
-            '+ ${DatingConfig.photoPremiumGiftAnalyses} analiz hediye.\n\n'
-            'Fotoğraf Analizi: Tekli ${DatingConfig.analysisSingleRuns} '
-            'analiz, Standart ${DatingConfig.analysisStandardRuns} analiz.\n\n'
+            '+ ${DatingConfig.photoPremiumAnalysisAddOnRuns} analiz hediye.\n\n'
+            'Fotoğraf analizi ayrıca satılmaz; her AI foto paketinde hediye '
+            'olarak gelir.\n\n'
             'Güncel fiyatlar "Paket Al" ekranında, kendi ülkenin para '
             'biriminde gösterilir.',
       ),
@@ -52,9 +53,10 @@ class DatingFaqScreen extends StatelessWidget {
       ),
       _FaqItem(
         'Fotoğraflarım nasıl çeşitleniyor?',
-        'Stil seçmene gerek yok. Her fotoğraf farklı bir mekân, kadraj ve '
-            'ışıkta üretilir; kullanılacak taban görseller boyuna göre '
-            'otomatik seçilir.',
+        'Üretimden önce 4 stilden birini seçersin: Elegance, Date Night, '
+            'Traveller veya Old Money. Her fotoğraf o stilde farklı bir mekân, '
+            'kadraj ve ışıkta üretilir; taban görseller boyuna göre otomatik '
+            'seçilir.',
       ),
       _FaqItem(
         'Üretim ne kadar sürer?',
@@ -79,7 +81,7 @@ class DatingFaqScreen extends StatelessWidget {
         'Fotoğraf analizi nasıl çalışır?',
         'Yüklediğin fotoğrafları çekicilik, ışık, kadraj gibi kriterlere göre '
             'puanlar ve dating profilin için en iyi fotoğrafları önerir. Analiz '
-            'için analiz paketi gerekir.',
+            'hakları AI foto paketlerinde hediye olarak gelir.',
       ),
       _FaqItem(
         'Analiz sonuçları kesin bir ölçüm mü?',

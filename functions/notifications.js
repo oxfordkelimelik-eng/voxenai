@@ -45,12 +45,19 @@ const SALES_CHANNEL_ID = "voxen_sales";
 const PRODUCT_PRICES_TRY = {
   dating_pack_photo10: 349, dating_pack_photo50: 999,
   dating_pack_analysis1: 99, dating_pack_analysis5: 249,
+  // 2026-09-28 fiyatlandırması (analiz hediyeli paketler).
+  dating_pack_photos5_analysis1: 799,
+  dating_pack_photos10_analysis3: 999,
+  dating_pack_photos25_analysis5: 1799,
 };
 const PRODUCT_LABELS = {
   dating_pack_photo10: "AI Foto Standart (10 foto)",
   dating_pack_photo50: "AI Foto Premium (50 foto)",
   dating_pack_analysis1: "Analiz Tekli",
   dating_pack_analysis5: "Analiz Standart (5)",
+  dating_pack_photos5_analysis1: "Başlangıç (5 foto + 1 analiz)",
+  dating_pack_photos10_analysis3: "Premium (10 foto + 3 analiz)",
+  dating_pack_photos25_analysis5: "Diamond (25 foto + 5 analiz)",
 };
 
 // FCM tek çağrıda en fazla 500 token kabul eder — hem gönderim hem batch

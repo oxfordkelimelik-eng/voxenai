@@ -137,6 +137,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // Sunucu artık `photoCount` bekliyor (bkz. functions/falPhotos.js
   // PHOTO_PACK_SIZES); stil adı hiçbir yere gönderilmiyor.
   _AiStage _stage = _AiStage.package;
+  // STİL (2026-09-28, yeniden eklendi): sunucuya `style` olarak gider,
+  // şablonlar dating_templates/{style}/{boy bandı}/ klasöründen seçilir.
+  String _selectedStyle = PhotoStyle.defaultId;
   /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
   String? _errorMessage;
@@ -392,9 +395,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           )
           .call({
-        // STİL GÖNDERİLMİYOR (2026-09-18): sunucu artık yalnızca kaç foto
-        // üretileceğini bilmek istiyor (bkz. falPhotos.js PHOTO_PACK_SIZES).
         'photoCount': photoCount,
+        // Seçilen stil (bkz. falPhotos.js PHOTO_STYLE_IDS).
+        'style': _selectedStyle,
         // SÜRÜM KAPISI: bu bayrak sunucuya "onay akışını aç" der. Eski
         // sürümler göndermez → sunucu doğrudan teslim eder (fazla üretim yok).
         'holdForApproval': true,
@@ -813,10 +816,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   }
 
   Widget _teaserStep() {
-    // Blurlu vitrin: stil kavramı kalktığı için örnekler artık tek bir
-    // temsilî setten geliyor (bkz. DatingAssetPaths.styleSample — varlık
-    // yolları korunuyor, yalnızca seçim sabit).
-    const sampleStyleId = 'elegance';
+    // Blurlu vitrin: seçilen stilin örnek görselleri.
+    final sampleStyleId = PhotoStyle.byId(_selectedStyle).sampleKey;
     final previews = <String>[];
     for (int i = 1; i <= 3; i++) {
       previews.add(DatingAssetPaths.styleSample(sampleStyleId, i));
@@ -950,6 +951,34 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ),
           const SizedBox(height: 16),
+          const Text('Stil seç',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          const Text('Fotoğrafların bu stildeki mekân ve kıyafetlerle üretilir.',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 10),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.35,
+            children: [
+              for (final s in PhotoStyle.coreStyles)
+                _StyleTile(
+                  style: s,
+                  selected: _selectedStyle == s.id,
+                  onTap: _preparing
+                      ? null
+                      : () => setState(() => _selectedStyle = s.id),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
           const Text(
               'Yüz — canlı çekim (ön / sağ / sol)',
               style: TextStyle(
@@ -2409,6 +2438,92 @@ class _AltGenerateButton extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Stil seçim kartı: örnek görsel + koyu degrade + ikon/etiket; seçiliyse
+/// kırmızı çerçeve ve tik.
+class _StyleTile extends StatelessWidget {
+  final PhotoStyle style;
+  final bool selected;
+  final VoidCallback? onTap;
+  const _StyleTile(
+      {required this.style, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.gold : AppColors.borderSubtle,
+            width: selected ? 2 : 1,
+          ),
+          boxShadow: selected
+              ? const [BoxShadow(color: AppColors.goldGlow, blurRadius: 14)]
+              : null,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              DatingModuleImage(
+                assetPath: style.sampleAsset,
+                fallbackIcon: style.icon,
+                borderRadius: BorderRadius.zero,
+                alignment: Alignment.topCenter,
+              ),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.transparent, Colors.black87],
+                    begin: Alignment.center,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 10,
+                right: 10,
+                bottom: 8,
+                child: Row(
+                  children: [
+                    Icon(style.icon, color: AppColors.gold, size: 15),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(style.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900)),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: const BoxDecoration(
+                        shape: BoxShape.circle, color: AppColors.gold),
+                    child: const Icon(Icons.check_rounded,
+                        color: Colors.white, size: 15),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

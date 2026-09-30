@@ -18,11 +18,13 @@ class DatingConfig {
   // canAffordPhotos) — foto üretiminde artık baştan paket gerekiyor.
   // Yenilenen abonelik yoktur; paket biter, kullanıcı yeniden alır.
   //
-  // PAKETLER (2026-09-21 hedef yapısı — geçiş sürüyor):
-  //   AI Foto + OPSİYONEL analiz (varsayılan işaretli, kaldırılabilir):
-  //     Başlangıç  5 foto  ₺349  (+1 analiz ₺150 → ₺499)
-  //     Standart  10 foto  ₺499  (+3 analiz ₺300 → ₺799)
-  //     Premium   25 foto  ₺999  (+5 analiz ₺300 → ₺1.299)
+  // PAKETLER (2026-09-28 — analiz HEDİYE, ayrıca seçilmiyor):
+  //     Başlangıç  5 foto + 1 analiz hediye   ₺799
+  //     Premium   10 foto + 3 analiz hediye   ₺999
+  //     Diamond   25 foto + 5 analiz hediye   ₺1.799
+  //   Satılan ürünler *_analysisN ID'leri (içerikleri zaten 5+1 / 10+3 /
+  //   25+5). Fiyatlar App Store Connect + Play Console'da güncellenmeli.
+  //   *_solo ID'leri artık arayüzde satılmıyor (sunucu hâlâ tanıyor).
   //   Analiz paketleri TEK BAŞINA SATILMAZ (yeni kural). Analiz bakiyesi
   //   biten kullanıcı yukarıdaki foto+analiz seçeneklerine yönlendirilir.
   //
@@ -154,21 +156,21 @@ class DatingConfig {
   static const String photoStarterAnalysisAddOnPriceLabel = '₺150';
   static const String photoStarterAnalysisAddOnProductId =
       'dating_pack_photos5_analysis1';
-  static const String photoStarterBundlePriceLabel = '₺499';
+  static const String photoStarterBundlePriceLabel = '₺799';
 
   static const String photoStandardSoloProductId = 'dating_pack_photos10_solo';
   static const int photoStandardAnalysisAddOnRuns = 3;
   static const String photoStandardAnalysisAddOnPriceLabel = '₺300';
   static const String photoStandardAnalysisAddOnProductId =
       'dating_pack_photos10_analysis3';
-  static const String photoStandardBundlePriceLabel = '₺799';
+  static const String photoStandardBundlePriceLabel = '₺999';
 
   static const String photoPremiumSoloProductId = 'dating_pack_photos25_solo';
   static const int photoPremiumAnalysisAddOnRuns = 5;
   static const String photoPremiumAnalysisAddOnPriceLabel = '₺300';
   static const String photoPremiumAnalysisAddOnProductId =
       'dating_pack_photos25_analysis5';
-  static const String photoPremiumBundlePriceLabel = '₺1.299';
+  static const String photoPremiumBundlePriceLabel = '₺1.799';
 
   /// Paywall ve vitrinin ORTAK paket listesi (2026-09-22).
   ///
@@ -262,49 +264,44 @@ class PhotoPackTier {
       withAnalysis ? addOnProductId : soloProductId;
 }
 
-/// ARTIK ARAYÜZDE KULLANILMIYOR (2026-09-18): stil seçimi tamamen kaldırıldı,
-/// kullanıcı yalnızca paket (foto sayısı) seçiyor ve şablonlar boy bandına
-/// göre geliyor. Bu sınıf SİLİNMEDİ çünkü sunucudaki sahne havuzu
-/// (functions/falPhotos.js STYLE_SCENES) sahneleri hâlâ bu kategori adları
-/// altında gruplu tutuyor — okunabilirlik için. Buraya yeni bir şey eklemek
-/// artık arayüzde hiçbir şey değiştirmez.
+/// AI foto STİLLERİ (2026-09-28, yeniden eklendi — kullanıcı kararı).
 ///
-/// NOT: Eskiden 7 stildi. "Old Money" ayrı bir seçenek olmaktan çıkarıldı —
-/// o estetiğin taban fotoğrafları artık "elegance" ile aynı Storage
-/// klasörüne yükleniyordu. "Beach Body" tamamen kaldırıldı.
+/// Seçilen stil sunucuya `style` alanıyla gider; şablonlar Storage'da
+/// `dating_templates/{id}/{short|middle|tall}/` klasöründen seçilir (sunucu
+/// `mid` ve tireli/boşluklu klasör adlarını da kabul eder, bkz.
+/// functions/falPhotos.js STYLE_FOLDER_ALIASES). Stil klasörü boşsa sunucu
+/// eski boy-bandı havuzuna düşer, üretim durmaz.
+///
+/// [sampleKey]: assets/dating/styles/{sampleKey}_1..3.jpg örnek görselleri.
+/// functions/falPhotos.js PHOTO_STYLE_IDS ile EL İLE senkron tutulmalı.
 class PhotoStyle {
   final String id;
   final String label;
   final String description;
   final IconData icon;
-  const PhotoStyle(this.id, this.label, this.description, this.icon);
+  final String sampleKey;
+  const PhotoStyle(
+      this.id, this.label, this.description, this.icon, this.sampleKey);
+
+  String get sampleAsset => DatingAssetPaths.styleSample(sampleKey, 1);
+
+  static const String defaultId = 'elegance';
 
   static const List<PhotoStyle> coreStyles = [
-    PhotoStyle(
-      'elegance',
-      'Elegance / Karizma',
-      'Şık, karizmatik, bakımlı',
-      Icons.diamond_outlined,
-    ),
-    PhotoStyle(
-      'athletic',
-      'Athletic',
-      'Atletik, dinamik, formda',
-      Icons.fitness_center,
-    ),
-    PhotoStyle(
-      'traveller',
-      'World Traveller',
-      'Dünya gezgini, maceracı',
-      Icons.travel_explore,
-    ),
-    PhotoStyle('nightout', 'Night Out', 'Gece çıkışı, sosyal', Icons.nightlife),
-    PhotoStyle('car', 'Car', 'Arabayla, prestij', Icons.directions_car_filled),
-    // Kaldırılanlar (Storage klasörleri artık yok, kod referansı da silindi):
-    // PhotoStyle('oldmoney', 'Old Money', 'Klasik varlık estetiği',
-    //     Icons.account_balance_outlined), // -> elegance'a birleşti
-    // PhotoStyle('beach', 'Beach Body', 'Plaj, fit vücut', Icons.beach_access),
+    PhotoStyle('elegance', 'Elegance', 'Şık, karizmatik, bakımlı',
+        Icons.diamond_rounded, 'elegance'),
+    PhotoStyle('datenight', 'Date Night', 'Akşam yemeği, gece şehir ışıkları',
+        Icons.wine_bar_rounded, 'nightout'),
+    PhotoStyle('traveller', 'Traveller', 'Gezgin, doğa ve seyahat',
+        Icons.flight_takeoff_rounded, 'traveller'),
+    PhotoStyle('oldmoney', 'Old Money', 'Klasik, zamansız varlık estetiği',
+        Icons.account_balance_rounded, 'oldmoney'),
   ];
+
+  static PhotoStyle byId(String id) => coreStyles.firstWhere(
+        (s) => s.id == id,
+        orElse: () => coreStyles.first,
+      );
 }
 
 /// Uygulama modülleri (Bölüm 4 — 6 modül)

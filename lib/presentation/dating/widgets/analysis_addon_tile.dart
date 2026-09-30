@@ -125,6 +125,61 @@ class AnalysisAddOnTile extends StatelessWidget {
   }
 }
 
+/// Paketin altında, dokunulamaz "+N Foto Analizi HEDİYE" satırı (2026-09-28
+/// fiyatlandırması: analiz artık her pakette dahil, ayrıca seçilmiyor).
+class GiftAnalysisRow extends StatelessWidget {
+  final int runs;
+  final bool compact;
+  const GiftAnalysisRow({super.key, required this.runs, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(compact ? 10 : 14, compact ? 7 : 10,
+          compact ? 10 : 14, compact ? 7 : 10),
+      decoration: const BoxDecoration(
+        color: AppColors.goldSurface,
+        border: Border(
+          top: BorderSide(color: AppColors.borderSubtle, width: 0.8),
+        ),
+      ),
+      child: Row(
+        children: [
+          SizedBox(width: compact ? 6 : 10),
+          Icon(Icons.card_giftcard_rounded,
+              size: compact ? 14 : 16, color: AppColors.gold),
+          SizedBox(width: compact ? 8 : 10),
+          Expanded(
+            child: Text(
+              '+$runs Foto Analizi hediye',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: compact ? 11.5 : 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.gold,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text('HEDİYE',
+                style: TextStyle(
+                    fontSize: compact ? 8.5 : 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.6,
+                    color: AppColors.textOnGold)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Kutucuk — Material [Checkbox] yerine elle çizildi: Checkbox kendi dokunma
 /// alanını ve minimum boyutunu dayatıyor, bu satır ise dar ve tek dokunuşla
 /// (tüm satırdan) seçilebilir olmak zorunda.

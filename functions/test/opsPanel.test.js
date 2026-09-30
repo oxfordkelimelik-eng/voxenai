@@ -264,24 +264,19 @@ test("PRODUCT_PRICES_TRY: güncel üç foto paketi anahtar olarak mevcut", () =>
   }
 });
 
-// --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21) ---
-test("priceForProduct: opsiyonel analizli yeni paketler tabloda", () => {
-  assert.equal(priceForProduct("dating_pack_photos5_solo"), 349);
-  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 499);
-  assert.equal(priceForProduct("dating_pack_photos10_solo"), 499);
-  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 799);
-  assert.equal(priceForProduct("dating_pack_photos25_solo"), 999);
-  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1299);
+// --- ANALİZ HEDİYELİ PAKETLER (2026-09-28 fiyatlandırması) ---
+// Paywall artık yalnızca *_analysisN ID'lerini satıyor (analiz pakete dahil);
+// ek ücret farkı gösterilmediği için eski "bundle - sade" testi kaldırıldı.
+test("priceForProduct: analiz hediyeli paketler yeni fiyatta", () => {
+  assert.equal(priceForProduct("dating_pack_photos5_analysis1"), 799);
+  assert.equal(priceForProduct("dating_pack_photos10_analysis3"), 999);
+  assert.equal(priceForProduct("dating_pack_photos25_analysis5"), 1799);
 });
 
-test("ek analiz ücreti = bundle - sade (paywall'da gösterilecek fark)", () => {
-  // Paywall'daki "+₺150 / +₺300 / +₺400" etiketleri bu farktan türüyor
-  // (dating_constants.dart photo*AnalysisAddOnPriceLabel). Biri elle
-  // değiştirilip diğeri unutulursa kullanıcıya yanlış ek ücret gösterilir.
-  const fark = (bundle, solo) => priceForProduct(bundle) - priceForProduct(solo);
-  assert.equal(fark("dating_pack_photos5_analysis1", "dating_pack_photos5_solo"), 150);
-  assert.equal(fark("dating_pack_photos10_analysis3", "dating_pack_photos10_solo"), 300);
-  assert.equal(fark("dating_pack_photos25_analysis5", "dating_pack_photos25_solo"), 300);
+test("priceForProduct: _solo ID'ler geçmiş rapor için tabloda kalıyor", () => {
+  assert.equal(priceForProduct("dating_pack_photos5_solo"), 349);
+  assert.equal(priceForProduct("dating_pack_photos10_solo"), 499);
+  assert.equal(priceForProduct("dating_pack_photos25_solo"), 999);
 });
 
 test("sade (_solo) paketler hediyeli eskileriyle AYNI fiyatta", () => {

@@ -34,37 +34,25 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   bool _busy = false;
   String? _busyProductId;
 
-  // SEÇİLİ TIER (2026-09-21 yapısı: analiz artık tek başına satılmıyor,
-  // her AI foto paketinin yanına opsiyonel — varsayılan işaretli, kullanıcı
-  // kaldırabilir — bir analiz eklentisi geliyor). _selectedTierId, seçili
-  // paketin SOLO ürün ID'sini tutar (tier'ı tekil tanımlayan anahtar);
-  // gerçekte satın alınacak ürün, o tier'ın eklenti anahtarına göre solo ya
-  // da bundle ID'sine çözülür (bkz. _effectiveProductId / _selectedProductId).
+  // SEÇİLİ TIER. _selectedTierId, seçili paketin SOLO ürün ID'sini tutar
+  // (tier'ı tekil tanımlayan anahtar). Satın alınan ürün her zaman analiz
+  // HEDİYELİ bundle ID'sidir (2026-09-28 fiyatlandırması: 5+1 ₺799,
+  // 10+3 ₺999, 25+5 ₺1.799 — analiz artık seçilmiyor, pakete dahil).
   late String _selectedTierId;
-
-  // Tier başına "analiz eklentisi işaretli mi" — VARSAYILAN KAPALI (2026-09-23
-  // kuralı: kullanıcı kendi seçmedikçe hiçbir tik işaretli gelmez). Tek
-  // istisna: initState'te otomatik seçilen paket (orta paket / analiz
-  // modunda en ucuz paket) — orada paket ZATEN seçili durduğu için eklenti
-  // de birlikte işaretli açılır, aksi halde "seçili paket" ile "işaretli
-  // eklenti" birbirini yalanlardı.
-  final Map<String, bool> _analysisAddOn = {};
 
   @override
   void initState() {
     super.initState();
-    // Varsayılan seçim: analiz modunda en UCUZ paket (kullanıcı buraya
-    // yalnızca analiz açmak için geldi, eklenti zaten işaretli gelir).
-    // Diğer modlarda PREMIUM (orta paket, 10 foto) — aynı öneri mantığı.
+    // Varsayılan seçim: analiz modunda en UCUZ paket, diğer modlarda orta
+    // paket (10 foto).
     _selectedTierId = widget.mode == PaywallMode.analysis
         ? _tiers[0].soloProductId
         : _tiers[1].soloProductId;
-    _analysisAddOn[_selectedTierId] = true;
     _loadStorePrices();
   }
 
   String _effectiveProductId(PhotoPackTier tier) =>
-      tier.productId(withAnalysis: _analysisAddOn[tier.soloProductId] ?? false);
+      tier.productId(withAnalysis: true);
 
   PhotoPackTier get _selectedTier => _tiers.firstWhere(
     (t) => t.soloProductId == _selectedTierId,
@@ -91,8 +79,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     // Analiz artık tek başına satılmıyor (2026-09-21 kuralı) — bir AI
     // foto paketinin yanına eklenti olarak geliyor, varsayılan işaretli.
     PaywallMode.analysis =>
-      'Analiz artık AI foto paketleriyle birlikte geliyor. Bir paket seç, '
-          'altındaki analiz eklentisini işaretli bırak.',
+      'Foto analizi artık her AI foto paketinde HEDİYE olarak geliyor. '
+          'Bir paket seç, analiz hakların otomatik eklenir.',
     PaywallMode.aiPhoto =>
       'Kalan AI fotoğraflarını açmak için tek seferlik paket al.',
     PaywallMode.all =>
@@ -101,53 +89,22 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
   void _selectTier(String soloId) {
     if (soloId == _selectedTierId) return; // zaten seçili, dokunma
-    setState(() {
-      _selectedTierId = soloId;
-      // PAKET DEĞİŞİNCE TÜM EKLENTİ TİKLERİ SIFIRLANIR (2026-09-25 düzeltme):
-      // önceki sürüm yalnızca YENİ paketin tikini false yapıyordu, ESKİ
-      // paketin (artık seçili olmayan) tiki haritada true kalıp görünmez
-      // biçimde hayatta kalıyordu. İşaretli eklenti yalnızca EKRAN AÇILIRKEN
-      // otomatik seçilen pakete ait olmalı; kullanıcı elle başka bir pakete
-      // geçtiğinde tüm tikler kapanır, hiçbir devralınmış "açık" durumla
-      // karşılaşılmaz.
-      _analysisAddOn.clear();
-      _analysisAddOn[soloId] = false;
-    });
-  }
-
-  void _toggleAddOn(String soloId, bool value) {
-    setState(() => _analysisAddOn[soloId] = value);
+    setState(() => _selectedTierId = soloId);
   }
 
   Widget _tierCard(PhotoPackTier tier) {
-    final addOnOn = _analysisAddOn[tier.soloProductId] ?? false;
     final effectiveId = _effectiveProductId(tier);
     return _PackCard(
       icon: Icons.auto_awesome,
       title: tier.title,
-      sub: '${tier.photos} fotoğraf',
-      // KARTIN KENDİ FİYATI SABİT (2026-09-24 kullanıcı kararı): eklenti
-      // işaretlense de paketin üstündeki rakam DEĞİŞMEZ, hep solo fiyat
-      // gösterir. Toplam (paket+eklenti) yalnızca en alttaki "Satın Al"
-      // butonunda görünür (bkz. _selectedProductId / _price(_selectedProductId)).
-      // Eklentinin kendi farkı zaten altındaki kırmızı rakamda ayrıca duruyor.
-      price: _price(tier.soloProductId),
+      sub: '${tier.photos} fotoğraf + ${tier.addOnRuns} analiz',
+      // Fiyat analiz hediyeli paketin KENDİ mağaza fiyatı.
+      price: _price(effectiveId),
       badge: tier.badge,
       selected: _selectedTierId == tier.soloProductId,
       busy: _busyProductId == effectiveId,
       onTap: _busy ? null : () => _selectTier(tier.soloProductId),
-      addOnRow: AnalysisAddOnTile(
-        compact: true,
-        checked: addOnOn,
-        runs: tier.addOnRuns,
-        // Fark, iki gerçek mağaza fiyatından hesaplanır (sabit etiket değil).
-        priceLabel: datingAddOnPriceLabel(
-          ref.read(datingPurchaseServiceProvider),
-          tier.soloProductId,
-          tier.addOnProductId,
-        ),
-        onChanged: _busy ? null : (value) => _toggleAddOn(tier.soloProductId, value),
-      ),
+      addOnRow: GiftAnalysisRow(compact: true, runs: tier.addOnRuns),
     );
   }
 
@@ -233,10 +190,8 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                       ),
                     ),
                     const SizedBox(height: 28),
-                    // ANALİZ ARTIK TEK BAŞINA SATILMIYOR (2026-09-21 kuralı).
-                    // Tek bölüm: her AI foto paketinin altında opsiyonel,
-                    // varsayılan işaretli bir analiz eklentisi checkbox'ı var.
-                    // Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paketlerin
+                    // ANALİZ ARTIK TEK BAŞINA SATILMIYOR; her AI foto
+                    // paketinde hediye olarak geliyor (2026-09-28). Üstü çizili "eski fiyat" GÖSTERİLMİYOR: paketlerin
                     // içeriği zaman içinde değişti, eski rakamı indirim gibi
                     // göstermek yanıltıcı olur (App Store "yanıltıcı fiyat").
                     const _SectionLabel('AI DATING FOTOĞRAFI'),

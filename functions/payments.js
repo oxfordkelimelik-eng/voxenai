@@ -69,11 +69,11 @@ const PRODUCT_CREDITS = {
   // ileride tek seferde Remove From Sale edilebilir. Yeni paywall eski
   // ID'ye bağlı kalsaydı o ürün sonsuza kadar satışta tutulmak zorundaydı.
   dating_pack_photos5_solo: { photoBalance: 5 },                            // ₺349 (analizsiz)
-  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺499
+  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺799 (2026-09-28, analiz hediye)
   dating_pack_photos10_solo: { photoBalance: 10 },                          // ₺499 (analizsiz)
-  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺799
+  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺999 (2026-09-28, analiz hediye)
   dating_pack_photos25_solo: { photoBalance: 25 },                          // ₺999 (analizsiz)
-  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.299
+  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.799 (2026-09-28, analiz hediye)
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
   // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:

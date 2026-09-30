@@ -32,12 +32,15 @@ const PRODUCT_PRICES_TRY = {
   // PRODUCT_CREDITS aynı başlık. Bu tablo unutulursa aynı ₺0 hatası
   // tekrarlanır (yukarıdaki not), o yüzden yeni ürün eklenirken İKİSİ
   // BİRDEN güncellenmeli.
+  // 2026-09-28: analiz hediyeli paketler yeni fiyata geçti (499/799/1299 ->
+  // 799/999/1799). Bu tarihten önceki bu ID'li satışlar panelde yeni
+  // fiyatla sayılır — küçük geçmiş sapması bilerek kabul edildi.
   dating_pack_photos5_solo: 349,
-  dating_pack_photos5_analysis1: 499,
+  dating_pack_photos5_analysis1: 799,
   dating_pack_photos10_solo: 499,
-  dating_pack_photos10_analysis3: 799,
+  dating_pack_photos10_analysis3: 999,
   dating_pack_photos25_solo: 999,
-  dating_pack_photos25_analysis5: 1299,
+  dating_pack_photos25_analysis5: 1799,
   // Eski paketler — geçmiş satışlar hâlâ bu ID'lerle kayıtlı, satıştan
   // kalksalar bile geçmiş rapor tutarlılığı için burada kalıyorlar.
   dating_pack_photo10: 349,

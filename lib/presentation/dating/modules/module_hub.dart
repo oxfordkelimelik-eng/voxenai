@@ -278,21 +278,24 @@ class _FeatureCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Üst: kapak görseli — kalan alanı doldurur, BoxFit.contain ile
-            // TAMAMI kırpılmadan görünür (bunlar kenarında yazı/tasarım olan
-            // infografiklerdir; cover ile kesilirlerdi). Boşluklar için nötr
-            // arka plan.
+            // Üst: kapak görseli (2026-09-28): eski kırmızı/pembe zeminli
+            // infografikler koyu temayla çakışıyordu; yerine gerçek stil
+            // fotoğraflarından kurulan, temaya uyumlu yerel görseller.
             Expanded(
-              child: Container(
-                color: AppColors.surfaceElevated,
-                child: DatingModuleImage(
-                  assetPath: _ModuleMeta.imageFor(module.id),
-                  fallbackIcon: module.icon,
-                  borderRadius: BorderRadius.zero,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                ),
-              ),
+              child: switch (module.id) {
+                'ai_photo' => const _AiPhotoHubVisual(),
+                'photo_analysis' => const _AnalysisHubVisual(),
+                _ => Container(
+                    color: AppColors.surfaceElevated,
+                    child: DatingModuleImage(
+                      assetPath: _ModuleMeta.imageFor(module.id),
+                      fallbackIcon: module.icon,
+                      borderRadius: BorderRadius.zero,
+                      fit: BoxFit.contain,
+                      alignment: Alignment.center,
+                    ),
+                  ),
+              },
             ),
             // Alt: rozet + başlık + açıklama + CTA (sabit yükseklik).
             Padding(
@@ -370,6 +373,301 @@ class _FeatureCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Kart kapaklarının ortak zemini: koyu yüzey + sağ üstte hafif kırmızı ışıma.
+BoxDecoration _hubVisualBackground() => const BoxDecoration(
+      gradient: RadialGradient(
+        center: Alignment(0.7, -0.6),
+        radius: 1.2,
+        colors: [Color(0x33FF2D55), AppColors.surfaceElevated],
+      ),
+    );
+
+Widget _hubPhoto(String asset, {double radius = 12}) => ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Image.asset(
+        asset,
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+        errorBuilder: (_, _, _) => Container(color: AppColors.surface),
+      ),
+    );
+
+/// AI Foto kartı: solda "selfie" kartı → sağda yelpaze gibi açılmış, hafifçe
+/// süzülen 3 stil çıktısı.
+class _AiPhotoHubVisual extends StatefulWidget {
+  const _AiPhotoHubVisual();
+  @override
+  State<_AiPhotoHubVisual> createState() => _AiPhotoHubVisualState();
+}
+
+class _AiPhotoHubVisualState extends State<_AiPhotoHubVisual>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 2800))
+    ..repeat(reverse: true);
+
+  static const _outputs = [
+    'assets/dating/styles/oldmoney_1.jpg',
+    'assets/dating/styles/traveller_2.jpg',
+    'assets/dating/styles/elegance_1.jpg',
+  ];
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _hubVisualBackground(),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: LayoutBuilder(builder: (context, c) {
+        // Birim hem yükseklikle hem genişlikle sınırlı: uzun ekranlarda
+        // kart yüksek olunca yatayda taşmasın.
+        final unit = c.maxHeight < c.maxWidth / 1.8
+            ? c.maxHeight
+            : c.maxWidth / 1.8;
+        final cardH = unit * 0.92;
+        final cardW = cardH * 0.72;
+        final selfieW = cardW * 0.78;
+        return Row(
+          children: [
+            // Selfie kartı
+            SizedBox(
+              width: selfieW,
+              height: cardH * 0.82,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.borderSubtle),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(11),
+                      child: ColorFiltered(
+                        colorFilter: const ColorFilter.matrix([
+                          0.33, 0.33, 0.33, 0, -10, //
+                          0.33, 0.33, 0.33, 0, -10, //
+                          0.33, 0.33, 0.33, 0, -10, //
+                          0, 0, 0, 1, 0,
+                        ]),
+                        child: _hubPhoto(
+                            'assets/dating/styles/nightout_1.jpg',
+                            radius: 0),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 6,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text('Selfie',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.auto_awesome, color: AppColors.gold, size: 18),
+                  SizedBox(height: 2),
+                  Icon(Icons.arrow_forward_rounded,
+                      color: AppColors.gold, size: 22),
+                ],
+              ),
+            ),
+            // Yelpaze çıktılar
+            SizedBox(
+              width: cardW * 1.55,
+              height: cardH,
+              child: AnimatedBuilder(
+                animation: _c,
+                builder: (_, _) {
+                  final t = Curves.easeInOut.transform(_c.value);
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      for (var i = 0; i < _outputs.length; i++)
+                        Transform.translate(
+                          offset: Offset(
+                              (i - 1) * cardW * 0.34 * (0.9 + 0.1 * t),
+                              i == 1 ? -4 * t : 2 * t),
+                          child: Transform.rotate(
+                            angle: (i - 1) * 0.12,
+                            child: Container(
+                              width: cardW * 0.82,
+                              height: cardH * 0.9,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: i == 1
+                                        ? AppColors.gold
+                                        : Colors.white24,
+                                    width: i == 1 ? 1.5 : 1),
+                                boxShadow: const [
+                                  BoxShadow(
+                                      color: Colors.black54, blurRadius: 10),
+                                ],
+                              ),
+                              child: _hubPhoto(_outputs[i], radius: 11),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+}
+
+/// Analiz kartı: solda fotoğraf, sağda animasyonla dolan puan halkası +
+/// kısa kriter çubukları.
+class _AnalysisHubVisual extends StatelessWidget {
+  const _AnalysisHubVisual();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _hubVisualBackground(),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: LayoutBuilder(builder: (context, c) {
+        final h = c.maxHeight;
+        final photoW =
+            (h * 0.72) < c.maxWidth * 0.36 ? h * 0.72 : c.maxWidth * 0.36;
+        final ringMax = c.maxWidth * 0.26;
+        final upper = ringMax < 48 ? 48.0 : (ringMax < 110 ? ringMax : 110.0);
+        final ring = (h * 0.62).clamp(48.0, upper);
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 1400),
+          curve: Curves.easeOutCubic,
+          builder: (_, v, _) => Row(
+            children: [
+              Container(
+                width: photoW,
+                height: h,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.borderSubtle),
+                ),
+                child: _hubPhoto('assets/dating/styles/traveller_1.jpg',
+                    radius: 11),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: ring,
+                      height: ring,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CircularProgressIndicator(
+                            value: 0.87 * v,
+                            strokeWidth: 7,
+                            strokeCap: StrokeCap.round,
+                            backgroundColor: AppColors.surface,
+                            valueColor: const AlwaysStoppedAnimation(
+                                AppColors.gold),
+                          ),
+                          Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('${(87 * v).round()}',
+                                    style: TextStyle(
+                                        color: AppColors.textPrimary,
+                                        fontSize: ring * 0.3,
+                                        fontWeight: FontWeight.w900,
+                                        height: 1)),
+                                Text('Puan',
+                                    style: TextStyle(
+                                        color: AppColors.textSecondary,
+                                        fontSize: ring * 0.12,
+                                        fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _metric('Işık', 0.9 * v),
+                          _metric('Kadraj', 0.78 * v),
+                          _metric('İfade', 0.84 * v),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _metric(String label, double value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 3),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: value,
+              minHeight: 5,
+              backgroundColor: AppColors.surface,
+              valueColor: const AlwaysStoppedAnimation(AppColors.gold),
+            ),
+          ),
+        ],
       ),
     );
   }
