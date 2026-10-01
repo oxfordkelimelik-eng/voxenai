@@ -57,7 +57,8 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
     return Container(
       decoration: const BoxDecoration(
         border: Border(
-            top: BorderSide(color: AppColors.borderSubtle, width: 0.5)),
+          top: BorderSide(color: AppColors.borderSubtle, width: 0.5),
+        ),
       ),
       child: BottomNavigationBar(
         currentIndex: _tab,
@@ -77,14 +78,21 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
         },
         items: const [
           BottomNavigationBarItem(
-              icon: Icon(Icons.grid_view_rounded), label: 'Modüller'),
+            icon: Icon(Icons.grid_view_rounded),
+            label: 'Modüller',
+          ),
           BottomNavigationBarItem(
-              icon: Icon(Icons.photo_library_rounded),
-              label: 'Fotoğraflarım'),
+            icon: Icon(Icons.photo_library_rounded),
+            label: 'Fotoğraflarım',
+          ),
           BottomNavigationBarItem(
-              icon: Icon(Icons.support_agent_rounded), label: 'Bize Ulaşın'),
+            icon: Icon(Icons.support_agent_rounded),
+            label: 'Bize Ulaşın',
+          ),
           BottomNavigationBarItem(
-              icon: Icon(Icons.settings_rounded), label: 'Ayarlar'),
+            icon: Icon(Icons.settings_rounded),
+            label: 'Ayarlar',
+          ),
         ],
       ),
     );
@@ -102,31 +110,43 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
               Row(
                 children: [
                   const Expanded(
-                    child: Text('Merhaba 👋',
-                        style: TextStyle(
-                            fontSize: 14, color: AppColors.textSecondary)),
+                    child: Text(
+                      'Merhaba 👋',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ),
-                  Builder(builder: (_) {
-                    final pack = ref.watch(packBalanceProvider);
-                    return _PlanBadge(
-                        hasPack: pack.photo > 0 || pack.analysis > 0);
-                  }),
+                  Builder(
+                    builder: (_) {
+                      final pack = ref.watch(packBalanceProvider);
+                      return _PlanBadge(
+                        hasPack: pack.photo > 0 || pack.analysis > 0,
+                      );
+                    },
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
-              const Text('Profilini bir üst lige taşı',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      height: 1.15,
-                      color: AppColors.textPrimary)),
+              const Text(
+                'Profilini bir üst lige taşı',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  height: 1.15,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 4),
               const Text(
-                  'AI fotoğraf üret veya fotoğraflarını analiz et.',
-                  style: TextStyle(
-                      fontSize: 13,
-                      height: 1.35,
-                      color: AppColors.textSecondary)),
+                'AI fotoğraf üret veya fotoğraflarını analiz et.',
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: AppColors.textSecondary,
+                ),
+              ),
               const SizedBox(height: 14),
               // İki modül kartı tek ekrana sığar (scroll yok): kalan dikey
               // alanı eşit bölüşürler.
@@ -162,32 +182,51 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
       padding: const EdgeInsets.all(20),
       children: [
         const SizedBox(height: 8),
-        const Text('Bize Ulaşın',
-            style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: AppColors.textPrimary)),
+        const Text(
+          'Bize Ulaşın',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: AppColors.textPrimary,
+          ),
+        ),
         const SizedBox(height: 4),
-        const Text('Sorularını ve önerilerini bekliyoruz.',
-            style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+        const Text(
+          'Sorularını ve önerilerini bekliyoruz.',
+          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+        ),
         const SizedBox(height: 20),
         _contactTile(Icons.email_outlined, 'E-posta', 'destek@voxenai.com.tr'),
         _contactTile(Icons.camera_alt_outlined, 'Instagram', '@voxenapp'),
-        _contactTile(Icons.help_outline_rounded, 'Sık Sorulan Sorular',
-            'Yardım merkezini görüntüle',
-            onTap: () => context.push(DatingRoutes.faq)),
-        _contactTile(Icons.star_outline_rounded, 'Bizi Değerlendir',
-            'App Store / Google Play',
-            onTap: () => ReviewPromptService().promptNow(context)),
+        _contactTile(
+          Icons.help_outline_rounded,
+          'Sık Sorulan Sorular',
+          'Yardım merkezini görüntüle',
+          onTap: () => context.push(DatingRoutes.faq),
+        ),
+        _contactTile(
+          Icons.star_outline_rounded,
+          'Bizi Değerlendir',
+          'App Store / Google Play',
+          onTap: () => ReviewPromptService().promptNow(context),
+        ),
         const SizedBox(height: 16),
-        _contactTile(Icons.privacy_tip_outlined, 'Gizlilik & Şartlar',
-            'Ayarlar\'dan eriş', onTap: () => context.push(DatingRoutes.settings)),
+        _contactTile(
+          Icons.privacy_tip_outlined,
+          'Gizlilik & Şartlar',
+          'Ayarlar\'dan eriş',
+          onTap: () => context.push(DatingRoutes.settings),
+        ),
       ],
     );
   }
 
-  Widget _contactTile(IconData icon, String title, String sub,
-      {VoidCallback? onTap}) {
+  Widget _contactTile(
+    IconData icon,
+    String title,
+    String sub, {
+    VoidCallback? onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -206,20 +245,26 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(sub,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary)),
+                  Text(
+                    sub,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded,
-                color: AppColors.textMuted),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
           ],
         ),
       ),
@@ -248,10 +293,10 @@ class _ModuleMeta {
   };
 
   static String imageFor(String moduleId) => switch (moduleId) {
-        'ai_photo' => DatingAssetPaths.hubAiPhoto,
-        'photo_analysis' => DatingAssetPaths.hubAnalysis,
-        _ => DatingAssetPaths.moduleAiPhotoHero,
-      };
+    'ai_photo' => DatingAssetPaths.hubAiPhoto,
+    'photo_analysis' => DatingAssetPaths.hubAnalysis,
+    _ => DatingAssetPaths.moduleAiPhotoHero,
+  };
 }
 
 /// Ana ekrandaki iki modüle özel kart: üstte yatay görsel, altta açıklama.
@@ -259,13 +304,16 @@ class _FeatureCard extends StatelessWidget {
   final DatingModule module;
   final bool hasPack;
   final VoidCallback onTap;
-  const _FeatureCard(
-      {required this.module, required this.hasPack, required this.onTap});
+  const _FeatureCard({
+    required this.module,
+    required this.hasPack,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final meta = _ModuleMeta.byId[module.id] ??
-        const _ModuleMeta('', '', <String>[]);
+    final meta =
+        _ModuleMeta.byId[module.id] ?? const _ModuleMeta('', '', <String>[]);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -278,23 +326,22 @@ class _FeatureCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Üst: kapak görseli (2026-09-28): eski kırmızı/pembe zeminli
-            // infografikler koyu temayla çakışıyordu; yerine gerçek stil
-            // fotoğraflarından kurulan, temaya uyumlu yerel görseller.
+            // Üst: kapak görseli (2026-10-01): kenardan kenara, "gerçek
+            // kamera" işleminden geçmiş doğal fotoğraflar.
             Expanded(
               child: switch (module.id) {
                 'ai_photo' => const _AiPhotoHubVisual(),
                 'photo_analysis' => const _AnalysisHubVisual(),
                 _ => Container(
-                    color: AppColors.surfaceElevated,
-                    child: DatingModuleImage(
-                      assetPath: _ModuleMeta.imageFor(module.id),
-                      fallbackIcon: module.icon,
-                      borderRadius: BorderRadius.zero,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center,
-                    ),
+                  color: AppColors.surfaceElevated,
+                  child: DatingModuleImage(
+                    assetPath: _ModuleMeta.imageFor(module.id),
+                    fallbackIcon: module.icon,
+                    borderRadius: BorderRadius.zero,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
                   ),
+                ),
               },
             ),
             // Alt: rozet + başlık + açıklama + CTA (sabit yükseklik).
@@ -308,29 +355,37 @@ class _FeatureCard extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(module.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.textPrimary)),
+                        child: Text(
+                          module.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
                       ),
                       if (meta.badge.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppColors.goldSurface,
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: Text(meta.badge,
-                              style: const TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 0.5,
-                                  color: AppColors.gold)),
+                          child: Text(
+                            meta.badge,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                              color: AppColors.gold,
+                            ),
+                          ),
                         ),
                       ],
                     ],
@@ -355,16 +410,21 @@ class _FeatureCard extends StatelessWidget {
                       const SizedBox(width: 10),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.gold,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Text('Başla',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.textOnGold)),
+                        child: const Text(
+                          'Başla',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.textOnGold,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -378,27 +438,19 @@ class _FeatureCard extends StatelessWidget {
   }
 }
 
-/// Kart kapaklarının ortak zemini: koyu yüzey + sağ üstte hafif kırmızı ışıma.
-BoxDecoration _hubVisualBackground() => const BoxDecoration(
-      gradient: RadialGradient(
-        center: Alignment(0.7, -0.6),
-        radius: 1.2,
-        colors: [Color(0x33FF2D55), AppColors.surfaceElevated],
-      ),
-    );
-
 Widget _hubPhoto(String asset, {double radius = 12}) => ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: Image.asset(
-        asset,
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-        errorBuilder: (_, _, _) => Container(color: AppColors.surface),
-      ),
-    );
+  borderRadius: BorderRadius.circular(radius),
+  child: Image.asset(
+    asset,
+    fit: BoxFit.cover,
+    alignment: Alignment.topCenter,
+    errorBuilder: (_, _, _) => Container(color: AppColors.surface),
+  ),
+);
 
-/// AI Foto kartı: solda "selfie" kartı → sağda yelpaze gibi açılmış, hafifçe
-/// süzülen 3 stil çıktısı.
+/// AI Foto kartı (2026-10-01): kenardan kenara 3 sütunlu editoryal foto
+/// şeridi. Fotoğraflar "gerçek kamera" işleminden geçmiş (gren, yumuşak ton,
+/// vinyet) — parlak AI görünümü yerine doğal kareler. Yavaş Ken Burns.
 class _AiPhotoHubVisual extends StatefulWidget {
   const _AiPhotoHubVisual();
   @override
@@ -408,13 +460,14 @@ class _AiPhotoHubVisual extends StatefulWidget {
 class _AiPhotoHubVisualState extends State<_AiPhotoHubVisual>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2800))
-    ..repeat(reverse: true);
+    vsync: this,
+    duration: const Duration(seconds: 9),
+  )..repeat(reverse: true);
 
-  static const _outputs = [
-    'assets/dating/styles/oldmoney_1.jpg',
-    'assets/dating/styles/traveller_2.jpg',
-    'assets/dating/styles/elegance_1.jpg',
+  static const _photos = [
+    ('assets/dating/modules/hub_ai_1.jpg', 'Elegance'),
+    ('assets/dating/modules/hub_ai_2.jpg', 'Date Night'),
+    ('assets/dating/modules/hub_ai_3.jpg', 'Old Money'),
   ];
 
   @override
@@ -425,246 +478,199 @@ class _AiPhotoHubVisualState extends State<_AiPhotoHubVisual>
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: _hubVisualBackground(),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: LayoutBuilder(builder: (context, c) {
-        // Birim hem yükseklikle hem genişlikle sınırlı: uzun ekranlarda
-        // kart yüksek olunca yatayda taşmasın.
-        final unit = c.maxHeight < c.maxWidth / 1.8
-            ? c.maxHeight
-            : c.maxWidth / 1.8;
-        final cardH = unit * 0.92;
-        final cardW = cardH * 0.72;
-        final selfieW = cardW * 0.78;
-        return Row(
-          children: [
-            // Selfie kartı
-            SizedBox(
-              width: selfieW,
-              height: cardH * 0.82,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.borderSubtle),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(11),
-                      child: ColorFiltered(
-                        colorFilter: const ColorFilter.matrix([
-                          0.33, 0.33, 0.33, 0, -10, //
-                          0.33, 0.33, 0.33, 0, -10, //
-                          0.33, 0.33, 0.33, 0, -10, //
-                          0, 0, 0, 1, 0,
-                        ]),
-                        child: _hubPhoto(
-                            'assets/dating/styles/nightout_1.jpg',
-                            radius: 0),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 6,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text('Selfie',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.auto_awesome, color: AppColors.gold, size: 18),
-                  SizedBox(height: 2),
-                  Icon(Icons.arrow_forward_rounded,
-                      color: AppColors.gold, size: 22),
-                ],
-              ),
-            ),
-            // Yelpaze çıktılar
-            SizedBox(
-              width: cardW * 1.55,
-              height: cardH,
-              child: AnimatedBuilder(
-                animation: _c,
-                builder: (_, _) {
-                  final t = Curves.easeInOut.transform(_c.value);
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.center,
-                    children: [
-                      for (var i = 0; i < _outputs.length; i++)
-                        Transform.translate(
-                          offset: Offset(
-                              (i - 1) * cardW * 0.34 * (0.9 + 0.1 * t),
-                              i == 1 ? -4 * t : 2 * t),
-                          child: Transform.rotate(
-                            angle: (i - 1) * 0.12,
-                            child: Container(
-                              width: cardW * 0.82,
-                              height: cardH * 0.9,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: i == 1
-                                        ? AppColors.gold
-                                        : Colors.white24,
-                                    width: i == 1 ? 1.5 : 1),
-                                boxShadow: const [
-                                  BoxShadow(
-                                      color: Colors.black54, blurRadius: 10),
-                                ],
-                              ),
-                              child: _hubPhoto(_outputs[i], radius: 11),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      }),
-    );
-  }
-}
-
-/// Analiz kartı: solda fotoğraf, sağda animasyonla dolan puan halkası +
-/// kısa kriter çubukları.
-class _AnalysisHubVisual extends StatelessWidget {
-  const _AnalysisHubVisual();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: _hubVisualBackground(),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      child: LayoutBuilder(builder: (context, c) {
-        final h = c.maxHeight;
-        final photoW =
-            (h * 0.72) < c.maxWidth * 0.36 ? h * 0.72 : c.maxWidth * 0.36;
-        final ringMax = c.maxWidth * 0.26;
-        final upper = ringMax < 48 ? 48.0 : (ringMax < 110 ? ringMax : 110.0);
-        final ring = (h * 0.62).clamp(48.0, upper);
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0, end: 1),
-          duration: const Duration(milliseconds: 1400),
-          curve: Curves.easeOutCubic,
-          builder: (_, v, _) => Row(
-            children: [
-              Container(
-                width: photoW,
-                height: h,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.borderSubtle),
-                ),
-                child: _hubPhoto('assets/dating/styles/traveller_1.jpg',
-                    radius: 11),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: ring,
-                      height: ring,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(color: Colors.black),
+        AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) {
+            final t = Curves.easeInOut.transform(_c.value);
+            return Row(
+              children: [
+                for (var i = 0; i < _photos.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 2),
+                  Expanded(
+                    child: ClipRect(
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          CircularProgressIndicator(
-                            value: 0.87 * v,
-                            strokeWidth: 7,
-                            strokeCap: StrokeCap.round,
-                            backgroundColor: AppColors.surface,
-                            valueColor: const AlwaysStoppedAnimation(
-                                AppColors.gold),
+                          Transform.scale(
+                            // Sütunlar sırayla zıt yönde yakınlaşır.
+                            scale: 1.02 + 0.06 * (i.isEven ? t : 1 - t),
+                            child: _hubPhoto(_photos[i].$1, radius: 0),
                           ),
-                          Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('${(87 * v).round()}',
-                                    style: TextStyle(
-                                        color: AppColors.textPrimary,
-                                        fontSize: ring * 0.3,
-                                        fontWeight: FontWeight.w900,
-                                        height: 1)),
-                                Text('Puan',
-                                    style: TextStyle(
-                                        color: AppColors.textSecondary,
-                                        fontSize: ring * 0.12,
-                                        fontWeight: FontWeight.w700)),
-                              ],
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: [0.55, 1],
+                                colors: [Colors.transparent, Color(0xCC000000)],
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: 8,
+                            bottom: 8,
+                            child: Text(
+                              _photos[i].$2.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9.5,
+                                letterSpacing: 1.2,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+        Positioned(
+          left: 10,
+          top: 10,
+          child: _glassChip(Icons.auto_awesome, '4 stil · gerçek yüzün'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Analiz kartı (2026-10-01): kenardan kenara gerçekçi tek fotoğraf; solda
+/// koyu geçiş üstünde animasyonla dolan puan ve kriter çubukları.
+class _AnalysisHubVisual extends StatelessWidget {
+  const _AnalysisHubVisual();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(
+          'assets/dating/modules/hub_analysis_photo.jpg',
+          fit: BoxFit.cover,
+          alignment: const Alignment(0.35, -0.2),
+          errorBuilder: (_, _, _) => Container(color: AppColors.surface),
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              stops: [0, 0.42, 0.75],
+              colors: [
+                Color(0xF2000000),
+                Color(0x99000000),
+                Colors.transparent,
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          right: 10,
+          top: 10,
+          child: _glassChip(Icons.center_focus_strong_rounded, 'Yüz analizi'),
+        ),
+        LayoutBuilder(
+          builder: (context, c) {
+            final panelW = (c.maxWidth * 0.46).clamp(120.0, 190.0);
+            return TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 1400),
+              curve: Curves.easeOutCubic,
+              builder: (_, v, _) => Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 0, 10),
+                child: SizedBox(
+                  width: panelW,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: 150,
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          const Text(
+                            'ÇEKİCİLİK SKORU',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 9,
+                              letterSpacing: 1.2,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                '${(87 * v).round()}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 40,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.05,
+                                ),
+                              ),
+                              const Text(
+                                ' /100',
+                                style: TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
                           _metric('Işık', 0.9 * v),
                           _metric('Kadraj', 0.78 * v),
                           _metric('İfade', 0.84 * v),
                         ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ],
-          ),
-        );
-      }),
+            );
+          },
+        ),
+      ],
     );
   }
 
   Widget _metric(String label, double value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Row(
         children: [
-          Text(label,
+          SizedBox(
+            width: 44,
+            child: Text(
+              label,
               style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 3),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: value,
-              minHeight: 5,
-              backgroundColor: AppColors.surface,
-              valueColor: const AlwaysStoppedAnimation(AppColors.gold),
+                color: Colors.white70,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: value,
+                minHeight: 5,
+                backgroundColor: Colors.white12,
+                valueColor: const AlwaysStoppedAnimation(AppColors.gold),
+              ),
             ),
           ),
         ],
@@ -672,6 +678,31 @@ class _AnalysisHubVisual extends StatelessWidget {
     );
   }
 }
+
+/// Fotoğraf üstü yarı saydam etiket.
+Widget _glassChip(IconData icon, String text) => Container(
+  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  decoration: BoxDecoration(
+    color: Colors.black.withValues(alpha: 0.5),
+    borderRadius: BorderRadius.circular(20),
+    border: Border.all(color: Colors.white24, width: 0.6),
+  ),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, color: AppColors.gold, size: 12),
+      const SizedBox(width: 4),
+      Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ],
+  ),
+);
 
 /// Üst bardaki durum rozeti: paket bakiyesi varsa "Paket aktif", yoksa "Ücretsiz".
 class _PlanBadge extends StatelessWidget {
@@ -691,19 +722,21 @@ class _PlanBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-              hasPack
-                  ? Icons.workspace_premium_rounded
-                  : Icons.lock_open_rounded,
-              color: AppColors.gold,
-              size: 15),
+            hasPack ? Icons.workspace_premium_rounded : Icons.lock_open_rounded,
+            color: AppColors.gold,
+            size: 15,
+          ),
           const SizedBox(width: 5),
           // "Ücretsiz" -> "Paket yok" (2026-09-15): ücretsiz hak kapatıldı,
           // paketi olmayan kullanıcıya ücretsiz kullanım vaat edilmemeli.
-          Text(hasPack ? 'Paket aktif' : 'Paket yok',
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.gold)),
+          Text(
+            hasPack ? 'Paket aktif' : 'Paket yok',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: AppColors.gold,
+            ),
+          ),
         ],
       ),
     );
@@ -717,22 +750,25 @@ class _HowItWorksStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget step(IconData i, String t) => Expanded(
-          child: Row(
-            children: [
-              Icon(i, color: AppColors.gold, size: 16),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(t,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary)),
+      child: Row(
+        children: [
+          Icon(i, color: AppColors.gold, size: 16),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              t,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
               ),
-            ],
+            ),
           ),
-        );
+        ],
+      ),
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(

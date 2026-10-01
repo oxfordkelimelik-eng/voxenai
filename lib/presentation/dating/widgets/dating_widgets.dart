@@ -13,6 +13,7 @@ class OnboardingScaffold extends StatelessWidget {
   final double progress; // 0.0 - 1.0
   final Widget? visual; // ortadaki görsel/grafik
   final Widget? child; // (quiz) etkileşimli içerik — visual yerine
+  final String? eyebrow; // başlığın üstünde küçük, büyük harfli etiket
   final String? title; // büyük font başlık (butonun üstünde)
   final String? subtitle; // küçük font açıklama
   final String buttonLabel;
@@ -24,6 +25,7 @@ class OnboardingScaffold extends StatelessWidget {
     required this.progress,
     this.visual,
     this.child,
+    this.eyebrow,
     this.title,
     this.subtitle,
     this.buttonLabel = 'Devam Et',
@@ -53,9 +55,10 @@ class OnboardingScaffold extends StatelessWidget {
                           child: GestureDetector(
                             onTap: onBack,
                             child: const Icon(
-                                Icons.arrow_back_ios_new_rounded,
-                                size: 18,
-                                color: AppColors.textSecondary),
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 18,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                         ),
                     ],
@@ -71,8 +74,9 @@ class OnboardingScaffold extends StatelessWidget {
                         value: value,
                         minHeight: 6,
                         backgroundColor: AppColors.surfaceElevated,
-                        valueColor:
-                            const AlwaysStoppedAnimation(AppColors.gold),
+                        valueColor: const AlwaysStoppedAnimation(
+                          AppColors.gold,
+                        ),
                       ),
                     ),
                   ),
@@ -92,7 +96,8 @@ class OnboardingScaffold extends StatelessWidget {
                         child: ConstrainedBox(
                           constraints: BoxConstraints(minHeight: c.maxHeight),
                           child: Center(
-                              child: visual ?? const SizedBox.shrink()),
+                            child: visual ?? const SizedBox.shrink(),
+                          ),
                         ),
                       ),
                     ),
@@ -103,21 +108,40 @@ class OnboardingScaffold extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
                 child: Column(
                   children: [
-                    Text(title!,
+                    if (eyebrow != null) ...[
+                      Text(
+                        eyebrow!,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            fontSize: 27,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textPrimary,
-                            height: 1.15)),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2.2,
+                          color: AppColors.gold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    Text(
+                      title!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.textPrimary,
+                        height: 1.15,
+                      ),
+                    ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 8),
-                      Text(subtitle!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 14,
-                              color: AppColors.textSecondary,
-                              height: 1.4)),
+                      Text(
+                        subtitle!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: AppColors.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -139,8 +163,12 @@ class PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
   final bool loading;
-  const PrimaryButton(
-      {super.key, required this.label, this.onPressed, this.loading = false});
+  const PrimaryButton({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.loading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -156,21 +184,27 @@ class PrimaryButton extends StatelessWidget {
           disabledBackgroundColor: AppColors.surfaceElevated,
           disabledForegroundColor: AppColors.textMuted,
           elevation: enabled ? 8 : 0,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         child: loading
             ? const SizedBox(
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.5, color: AppColors.textOnGold),
+                  strokeWidth: 2.5,
+                  color: AppColors.textOnGold,
+                ),
               )
-            : Text(label,
+            : Text(
+                label,
                 style: const TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5)),
+                  fontSize: 19,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
       ),
     );
   }
@@ -181,11 +215,12 @@ class OnboardingHeadline extends StatelessWidget {
   final String title;
   final String? subtitle;
   final TextAlign align;
-  const OnboardingHeadline(
-      {super.key,
-      required this.title,
-      this.subtitle,
-      this.align = TextAlign.center});
+  const OnboardingHeadline({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.align = TextAlign.center,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -194,21 +229,27 @@ class OnboardingHeadline extends StatelessWidget {
           ? CrossAxisAlignment.center
           : CrossAxisAlignment.start,
       children: [
-        Text(title,
-            textAlign: align,
-            style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-                color: AppColors.textPrimary,
-                height: 1.2)),
+        Text(
+          title,
+          textAlign: align,
+          style: const TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            color: AppColors.textPrimary,
+            height: 1.2,
+          ),
+        ),
         if (subtitle != null) ...[
           const SizedBox(height: 12),
-          Text(subtitle!,
-              textAlign: align,
-              style: const TextStyle(
-                  fontSize: 15,
-                  color: AppColors.textSecondary,
-                  height: 1.45)),
+          Text(
+            subtitle!,
+            textAlign: align,
+            style: const TextStyle(
+              fontSize: 15,
+              color: AppColors.textSecondary,
+              height: 1.45,
+            ),
+          ),
         ],
       ],
     );
@@ -238,8 +279,9 @@ class AnimatedBarChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxVal =
-        data.map((d) => d.value).fold<double>(0, (a, b) => a > b ? a : b);
+    final maxVal = data
+        .map((d) => d.value)
+        .fold<double>(0, (a, b) => a > b ? a : b);
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -251,11 +293,14 @@ class AnimatedBarChart extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (caption != null) ...[
-            Text(caption!,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+            Text(
+              caption!,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
             const SizedBox(height: 16),
           ],
           ...data.map((d) => _bar(d, maxVal)),
@@ -280,20 +325,25 @@ class AnimatedBarChart extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Flexible(
-                child: Text(d.label,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                            d.highlight ? FontWeight.w800 : FontWeight.w500,
-                        color: d.highlight
-                            ? AppColors.gold
-                            : AppColors.textSecondary)),
-              ),
-              Text('%${d.value.toInt()}',
+                child: Text(
+                  d.label,
                   style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: color)),
+                    fontSize: 13,
+                    fontWeight: d.highlight ? FontWeight.w800 : FontWeight.w500,
+                    color: d.highlight
+                        ? AppColors.gold
+                        : AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              Text(
+                '%${d.value.toInt()}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -313,10 +363,12 @@ class AnimatedBarChart extends StatelessWidget {
                       decoration: BoxDecoration(
                         gradient: d.highlight
                             ? AppColors.goldGradient
-                            : LinearGradient(colors: [
-                                color.withValues(alpha: 0.6),
-                                color.withValues(alpha: 0.4)
-                              ]),
+                            : LinearGradient(
+                                colors: [
+                                  color.withValues(alpha: 0.6),
+                                  color.withValues(alpha: 0.4),
+                                ],
+                              ),
                       ),
                     ),
                   ),
@@ -335,11 +387,14 @@ class RepresentativeNote extends StatelessWidget {
   const RepresentativeNote({super.key});
   @override
   Widget build(BuildContext context) {
-    return Text(DatingConfig.representativeNote,
-        style: const TextStyle(
-            fontSize: 11,
-            fontStyle: FontStyle.italic,
-            color: AppColors.textMuted));
+    return Text(
+      DatingConfig.representativeNote,
+      style: const TextStyle(
+        fontSize: 11,
+        fontStyle: FontStyle.italic,
+        color: AppColors.textMuted,
+      ),
+    );
   }
 }
 
@@ -369,29 +424,30 @@ class ChoiceOption extends StatelessWidget {
           color: selected ? AppColors.goldSurface : AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-              color: selected ? AppColors.gold : AppColors.borderSubtle,
-              width: selected ? 1.5 : 1),
+            color: selected ? AppColors.gold : AppColors.borderSubtle,
+            width: selected ? 1.5 : 1,
+          ),
         ),
         child: Row(
           children: [
             Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected
-                          ? AppColors.gold
-                          : AppColors.textPrimary)),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? AppColors.gold : AppColors.textPrimary,
+                ),
+              ),
             ),
             Icon(
               multi
                   ? (selected
-                      ? Icons.check_box_rounded
-                      : Icons.check_box_outline_blank_rounded)
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded)
                   : (selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked),
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked),
               color: selected ? AppColors.gold : AppColors.textMuted,
               size: 22,
             ),
