@@ -25,12 +25,12 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   int _index = 0;
   bool _blockedUnder18 = false;
 
-  // FUNNEL (2026-10-01, kullanıcının referans tasarımları): video öncesi 11
+  // FUNNEL (2026-10-01, kullanıcının referans tasarımları): video öncesi 10
   // ekran, form → giriş → 2 "Sizden gelenler" ekranı. Tasarım kodla çizilir
-  // (funnel_screens.dart). "Voxen Teknolojisi", "Sonuç" ve "7 kat eşleşme"
-  // ekranları kullanıcı isteğiyle kaldırıldı.
-  // → 23 adım (vücut tipi + boy AI foto üretiminde kullanılır).
-  static const int _totalSteps = 23;
+  // (funnel_screens.dart). "Voxen Teknolojisi", "Üstün Teknoloji", "Sonuç" ve
+  // "7 kat eşleşme" ekranları kullanıcı isteğiyle kaldırıldı.
+  // → 22 adım (vücut tipi + boy AI foto üretiminde kullanılır).
+  static const int _totalSteps = 22;
   bool _signedIn = false;
 
   void _next() {
@@ -84,23 +84,22 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       () => _funnel6(), // 6
       () => _funnel7(), // 7
       () => _funnelSwipeChoice(), // 8 — "Sen olsan hangisini sağa kaydırırdın?"
-      () => _funnel9(), // 9
-      () => _funnel10(), // 10
-      () => _funnel11(), // 11
-      () => _modulePhoto(), // 12 — AI foto generator tanıtımı (video)
-      () => _moduleAnalysis(), // 13 — Foto skor analizi tanıtımı (video)
-      () => _qGender(answers), // 14
-      () => _qAge(answers), // 15
-      () => _qBodyType(answers), // 16 — AI foto beden ipucu
-      () => _qHeight(answers), // 17 — AI foto boy ipucu
-      () => _qApps(answers), // 18
-      () => _qMatches(answers), // 19
+      () => _funnel10(), // 9
+      () => _funnel11(), // 10
+      () => _modulePhoto(), // 11 — AI foto generator tanıtımı (video)
+      () => _moduleAnalysis(), // 12 — Foto skor analizi tanıtımı (video)
+      () => _qGender(answers), // 13
+      () => _qAge(answers), // 14
+      () => _qBodyType(answers), // 15 — AI foto beden ipucu
+      () => _qHeight(answers), // 16 — AI foto boy ipucu
+      () => _qApps(answers), // 17
+      () => _qMatches(answers), // 18
       // Form biter bitmez giriş, girişten sonra "Sizden gelenler" (kullanıcı
       // kararı 2026-10-01):
-      () => _authStep(), // 20 — Google/Apple ile giriş
-      () => _funnel13(), // 21
-      () => _funnel14(), // 22
-      () => _preparing(), // 23
+      () => _authStep(), // 19 — Google/Apple ile giriş
+      () => _funnel13(), // 20
+      () => _funnel14(), // 21
+      () => _preparing(), // 22
     ];
 
     return PopScope(
@@ -271,32 +270,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     visual: const AttractivenessVisual(),
     canvas: AttractivenessVisual.size,
     headlineSize: 34,
-  );
-
-  Widget _funnel9() => _fp(
-    headline: const ['Diğerlerinden', '##Üstün Teknoloji##'],
-    sub:
-        'ChatGPT, Gemini aksine yüzünüzü\nhiperrealistik olarak üretir.\n'
-        'Gerçekten ayırt edilmesi çok zordur.',
-    visual: const CompareVisual(
-      prefix: '09',
-      rows: [
-        ['Yapay durur', 'Detaylar eksiktir', 'Gerçekçi değildir'],
-        [
-          'Doğallıktan uzaktır',
-          'Yüz detayları tutarsızdır',
-          'Kolayca ayırt edilir',
-        ],
-        [
-          'Hiperrealist sonuçlar',
-          'Gerçek cilt dokusu',
-          'Kolayca ayırt edilemez',
-        ],
-      ],
-    ),
-    canvas: CompareVisual.size,
-    arrow: true,
-    headlineSize: 36,
   );
 
   Widget _funnel10() => _fp(

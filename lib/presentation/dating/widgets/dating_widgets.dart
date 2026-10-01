@@ -13,7 +13,8 @@ class OnboardingScaffold extends StatelessWidget {
   final double progress; // 0.0 - 1.0
   final Widget? visual; // ortadaki görsel/grafik
   final Widget? child; // (quiz) etkileşimli içerik — visual yerine
-  final String? eyebrow; // başlığın üstünde küçük, büyük harfli etiket
+  final String?
+  eyebrow; // görselin (video telefonunun) üstünde büyük harfli etiket
   final String? title; // büyük font başlık (butonun üstünde)
   final String? subtitle; // küçük font açıklama
   final String buttonLabel;
@@ -96,7 +97,25 @@ class OnboardingScaffold extends StatelessWidget {
                         child: ConstrainedBox(
                           constraints: BoxConstraints(minHeight: c.maxHeight),
                           child: Center(
-                            child: visual ?? const SizedBox.shrink(),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (eyebrow != null) ...[
+                                  Text(
+                                    eyebrow!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 2.4,
+                                      color: AppColors.gold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                visual ?? const SizedBox.shrink(),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -108,19 +127,6 @@ class OnboardingScaffold extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
                 child: Column(
                   children: [
-                    if (eyebrow != null) ...[
-                      Text(
-                        eyebrow!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 2.2,
-                          color: AppColors.gold,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                    ],
                     Text(
                       title!,
                       textAlign: TextAlign.center,

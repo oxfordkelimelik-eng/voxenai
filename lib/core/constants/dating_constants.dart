@@ -272,7 +272,8 @@ class PhotoPackTier {
 /// functions/falPhotos.js STYLE_FOLDER_ALIASES). Stil klasörü boşsa sunucu
 /// eski boy-bandı havuzuna düşer, üretim durmaz.
 ///
-/// [sampleKey]: assets/dating/styles/{sampleKey}_1..3.jpg örnek görselleri.
+/// [sampleKey]: assets/dating/styles/{sampleKey}_1..3.jpg örnek görselleri
+/// (_1 kapak — stil seçim adımında yalnızca kapak gösterilir).
 /// functions/falPhotos.js PHOTO_STYLE_IDS ile EL İLE senkron tutulmalı.
 class PhotoStyle {
   final String id;
@@ -284,6 +285,9 @@ class PhotoStyle {
       this.id, this.label, this.description, this.icon, this.sampleKey);
 
   String get sampleAsset => DatingAssetPaths.styleSample(sampleKey, 1);
+
+  /// Ödeme öncesi bulanık vitrin (teaser) için kullanılan örnek sayısı.
+  static const int sampleCount = 3;
 
   static const String defaultId = 'elegance';
 

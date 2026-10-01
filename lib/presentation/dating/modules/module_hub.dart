@@ -438,271 +438,46 @@ class _FeatureCard extends StatelessWidget {
   }
 }
 
-Widget _hubPhoto(String asset, {double radius = 12}) => ClipRRect(
-  borderRadius: BorderRadius.circular(radius),
-  child: Image.asset(
-    asset,
-    fit: BoxFit.cover,
-    alignment: Alignment.topCenter,
-    errorBuilder: (_, _, _) => Container(color: AppColors.surface),
-  ),
-);
-
-/// AI Foto kartı (2026-10-01): kenardan kenara 3 sütunlu editoryal foto
-/// şeridi. Fotoğraflar "gerçek kamera" işleminden geçmiş (gren, yumuşak ton,
-/// vinyet) — parlak AI görünümü yerine doğal kareler. Yavaş Ken Burns.
-class _AiPhotoHubVisual extends StatefulWidget {
+/// AI Foto kartı (2026-10-01): kullanıcının hazırladığı "Girdi → Sonuçlar"
+/// kapak görseli. Kırpılmadan sığdırılır; kalan boşluk görselin kenar
+/// renkleriyle dolar.
+class _AiPhotoHubVisual extends StatelessWidget {
   const _AiPhotoHubVisual();
-  @override
-  State<_AiPhotoHubVisual> createState() => _AiPhotoHubVisualState();
-}
-
-class _AiPhotoHubVisualState extends State<_AiPhotoHubVisual>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 9),
-  )..repeat(reverse: true);
-
-  static const _photos = [
-    ('assets/dating/modules/hub_ai_1.jpg', 'Elegance'),
-    ('assets/dating/modules/hub_ai_2.jpg', 'Date Night'),
-    ('assets/dating/modules/hub_ai_3.jpg', 'Old Money'),
-  ];
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Container(color: Colors.black),
-        AnimatedBuilder(
-          animation: _c,
-          builder: (_, _) {
-            final t = Curves.easeInOut.transform(_c.value);
-            return Row(
-              children: [
-                for (var i = 0; i < _photos.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 2),
-                  Expanded(
-                    child: ClipRect(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Transform.scale(
-                            // Sütunlar sırayla zıt yönde yakınlaşır.
-                            scale: 1.02 + 0.06 * (i.isEven ? t : 1 - t),
-                            child: _hubPhoto(_photos[i].$1, radius: 0),
-                          ),
-                          const DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                stops: [0.55, 1],
-                                colors: [Colors.transparent, Color(0xCC000000)],
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 8,
-                            bottom: 8,
-                            child: Text(
-                              _photos[i].$2.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9.5,
-                                letterSpacing: 1.2,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            );
-          },
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF511224), Color(0xFF42332C)],
         ),
-        Positioned(
-          left: 10,
-          top: 10,
-          child: _glassChip(Icons.auto_awesome, '4 stil · gerçek yüzün'),
-        ),
-      ],
+      ),
+      child: Image.asset(
+        'assets/dating/modules/hub_ai_cover.jpg',
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      ),
     );
   }
 }
 
-/// Analiz kartı (2026-10-01): kenardan kenara gerçekçi tek fotoğraf; solda
-/// koyu geçiş üstünde animasyonla dolan puan ve kriter çubukları.
+/// Analiz kartı (2026-10-01): kullanıcının hazırladığı "Fotoğraf Analizi"
+/// kapak görseli; kırpılmadan sığdırılır, boşluk görselin zemin rengiyle dolar.
 class _AnalysisHubVisual extends StatelessWidget {
   const _AnalysisHubVisual();
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.asset(
-          'assets/dating/modules/hub_analysis_photo.jpg',
-          fit: BoxFit.cover,
-          alignment: const Alignment(0.35, -0.2),
-          errorBuilder: (_, _, _) => Container(color: AppColors.surface),
-        ),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              stops: [0, 0.42, 0.75],
-              colors: [
-                Color(0xF2000000),
-                Color(0x99000000),
-                Colors.transparent,
-              ],
-            ),
-          ),
-        ),
-        Positioned(
-          right: 10,
-          top: 10,
-          child: _glassChip(Icons.center_focus_strong_rounded, 'Yüz analizi'),
-        ),
-        LayoutBuilder(
-          builder: (context, c) {
-            final panelW = (c.maxWidth * 0.46).clamp(120.0, 190.0);
-            return TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 1400),
-              curve: Curves.easeOutCubic,
-              builder: (_, v, _) => Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 0, 10),
-                child: SizedBox(
-                  width: panelW,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: SizedBox(
-                      width: 150,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'ÇEKİCİLİK SKORU',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 9,
-                              letterSpacing: 1.2,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              Text(
-                                '${(87 * v).round()}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 40,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1.05,
-                                ),
-                              ),
-                              const Text(
-                                ' /100',
-                                style: TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          _metric('Işık', 0.9 * v),
-                          _metric('Kadraj', 0.78 * v),
-                          _metric('İfade', 0.84 * v),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _metric(String label, double value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.5),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 44,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: value,
-                minHeight: 5,
-                backgroundColor: Colors.white12,
-                valueColor: const AlwaysStoppedAnimation(AppColors.gold),
-              ),
-            ),
-          ),
-        ],
+    return ColoredBox(
+      color: const Color(0xFF4E1725),
+      child: Image.asset(
+        'assets/dating/modules/hub_analysis_cover.jpg',
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
       ),
     );
   }
 }
-
-/// Fotoğraf üstü yarı saydam etiket.
-Widget _glassChip(IconData icon, String text) => Container(
-  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-  decoration: BoxDecoration(
-    color: Colors.black.withValues(alpha: 0.5),
-    borderRadius: BorderRadius.circular(20),
-    border: Border.all(color: Colors.white24, width: 0.6),
-  ),
-  child: Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, color: AppColors.gold, size: 12),
-      const SizedBox(width: 4),
-      Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ],
-  ),
-);
 
 /// Üst bardaki durum rozeti: paket bakiyesi varsa "Paket aktif", yoksa "Ücretsiz".
 class _PlanBadge extends StatelessWidget {

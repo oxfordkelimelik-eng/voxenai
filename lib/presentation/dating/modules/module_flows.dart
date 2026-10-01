@@ -130,15 +130,17 @@ class AiPhotoFlow extends ConsumerStatefulWidget {
   ConsumerState<AiPhotoFlow> createState() => _AiPhotoFlowState();
 }
 
-enum _AiStage { package, loading, result, error, teaser }
+enum _AiStage { style, package, loading, result, error, teaser }
 
 class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // STİL MANTIĞI TAMAMEN KALDIRILDI (2026-09-18, kullanıcı kararı).
   // Sunucu artık `photoCount` bekliyor (bkz. functions/falPhotos.js
   // PHOTO_PACK_SIZES); stil adı hiçbir yere gönderilmiyor.
-  _AiStage _stage = _AiStage.package;
   // STİL (2026-09-28, yeniden eklendi): sunucuya `style` olarak gider,
   // şablonlar dating_templates/{style}/{boy bandı}/ klasöründen seçilir.
+  // 2026-10-01: stil seçimi selfie/paket adımından ÖNCE kendi adımında
+  // (kullanıcı kararı) — akış stil → selfie + paket → üretim.
+  _AiStage _stage = _AiStage.style;
   String _selectedStyle = PhotoStyle.defaultId;
   /// Canlı ön / sağ / sol (sıra sabit).
   final List<File> _facePhotos = [];
@@ -575,8 +577,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     _jobSub?.cancel();
     _jobTimeoutTimer?.cancel();
     setState(() {
-      // Stil kavramı kaldırıldı — başlangıç adımı doğrudan selfie/paket adımı.
-      _stage = _AiStage.package;
+      // Yeni üretim yine stil seçimiyle başlar (seçili stil korunur).
+      _stage = _AiStage.style;
       _facePhotos.clear();
       _activePhotoCount = null;
       _jobData = null;
@@ -755,6 +757,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     return ModuleScaffold(
       title: 'AI Dating Fotoğrafı',
       body: switch (_stage) {
+        _AiStage.style => _styleStep(),
         _AiStage.package => _packageStep(),
         // 25'LİK PAKET DAHA UZUN SÜRER (2026-09-18, kullanıcı kararı):
         // ipucu metni ve ilerleme süresi foto sayısına göre değişiyor, aksi
@@ -819,10 +822,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     // Blurlu vitrin: seçilen stilin örnek görselleri.
     final sampleStyleId = PhotoStyle.byId(_selectedStyle).sampleKey;
     final previews = <String>[];
-    for (int i = 1; i <= 3; i++) {
+    for (int i = 1; i <= PhotoStyle.sampleCount; i++) {
       previews.add(DatingAssetPaths.styleSample(sampleStyleId, i));
     }
-    // Grid'i doldurmak için en az 6 kare (3 örnek → döngüyle tekrar).
+    // Grid'i doldurmak için en az 6 kare (örnekler döngüyle tekrar).
     final base = List<String>.from(previews);
     for (int k = 0; previews.length < 6 && base.isNotEmpty; k++) {
       previews.add(base[k % base.length]);
@@ -912,6 +915,48 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   }
 
 
+  // Adım 1: stil seçimi — 4 stil alt alta, her birinde kapak fotoğrafı.
+  Widget _styleStep() {
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            children: [
+              const Text('Stilini seç',
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              const Text(
+                  'Fotoğrafların seçtiğin stildeki mekân ve kıyafetlerle '
+                  'üretilir.',
+                  style:
+                      TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 14),
+              for (final st in PhotoStyle.coreStyles) ...[
+                _StyleCard(
+                  style: st,
+                  selected: _selectedStyle == st.id,
+                  onTap: () => setState(() => _selectedStyle = st.id),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+          child: PrimaryButton(
+            label: 'Devam Et',
+            onPressed: () => setState(() => _stage = _AiStage.package),
+          ),
+        ),
+      ],
+    );
+  }
+
   // Adım 2: paket + foto yükle + üret
   Widget _packageStep() {
     return SingleChildScrollView(
@@ -951,32 +996,11 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Stil seç',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          const Text('Fotoğrafların bu stildeki mekân ve kıyafetlerle üretilir.',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 10),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.35,
-            children: [
-              for (final s in PhotoStyle.coreStyles)
-                _StyleTile(
-                  style: s,
-                  selected: _selectedStyle == s.id,
-                  onTap: _preparing
-                      ? null
-                      : () => setState(() => _selectedStyle = s.id),
-                ),
-            ],
+          _SelectedStyleBar(
+            style: PhotoStyle.byId(_selectedStyle),
+            onChange: _preparing
+                ? null
+                : () => setState(() => _stage = _AiStage.style),
           ),
           const SizedBox(height: 20),
           const Text(
@@ -2442,13 +2466,13 @@ class _AltGenerateButton extends StatelessWidget {
   }
 }
 
-/// Stil seçim kartı: örnek görsel + koyu degrade + ikon/etiket; seçiliyse
-/// kırmızı çerçeve ve tik.
-class _StyleTile extends StatelessWidget {
+/// Stil seçim kartı: solda stilin kapak fotoğrafı (3:4), sağda ad,
+/// açıklama ve seçim işareti. Seçiliyse kırmızı çerçeve.
+class _StyleCard extends StatelessWidget {
   final PhotoStyle style;
   final bool selected;
-  final VoidCallback? onTap;
-  const _StyleTile(
+  final VoidCallback onTap;
+  const _StyleCard(
       {required this.style, required this.selected, required this.onTap});
 
   @override
@@ -2457,8 +2481,10 @@ class _StyleTile extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
+          color: selected ? AppColors.goldSurface : AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: selected ? AppColors.gold : AppColors.borderSubtle,
             width: selected ? 2 : 1,
@@ -2467,62 +2493,119 @@ class _StyleTile extends StatelessWidget {
               ? const [BoxShadow(color: AppColors.goldGlow, blurRadius: 14)]
               : null,
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              DatingModuleImage(
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: 108,
+                height: 144,
+                child: DatingModuleImage(
+                  assetPath: style.sampleAsset,
+                  fallbackIcon: style.icon,
+                  borderRadius: BorderRadius.zero,
+                  alignment: Alignment.topCenter,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(style.icon, color: AppColors.gold, size: 22),
+                  const SizedBox(height: 6),
+                  Text(style.label,
+                      style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 2),
+                  Text(style.description,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 13,
+                          height: 1.3)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? AppColors.gold : Colors.transparent,
+                border: Border.all(
+                    color: selected ? AppColors.gold : AppColors.textSecondary,
+                    width: 1.5),
+              ),
+              child: selected
+                  ? const Icon(Icons.check_rounded,
+                      color: Colors.white, size: 17)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Paket adımında seçili stilin özeti; "Değiştir" stil adımına döner.
+class _SelectedStyleBar extends StatelessWidget {
+  final PhotoStyle style;
+  final VoidCallback? onChange;
+  const _SelectedStyleBar({required this.style, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 42,
+              height: 54,
+              child: DatingModuleImage(
                 assetPath: style.sampleAsset,
                 fallbackIcon: style.icon,
                 borderRadius: BorderRadius.zero,
                 alignment: Alignment.topCenter,
               ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.transparent, Colors.black87],
-                    begin: Alignment.center,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 8,
-                child: Row(
-                  children: [
-                    Icon(style.icon, color: AppColors.gold, size: 15),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(style.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w900)),
-                    ),
-                  ],
-                ),
-              ),
-              if (selected)
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: const BoxDecoration(
-                        shape: BoxShape.circle, color: AppColors.gold),
-                    child: const Icon(Icons.check_rounded,
-                        color: Colors.white, size: 15),
-                  ),
-                ),
-            ],
+            ),
           ),
-        ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Seçilen stil',
+                    style: TextStyle(
+                        color: AppColors.textSecondary, fontSize: 11)),
+                Text(style.label,
+                    style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900)),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onChange,
+            child: const Text('Değiştir',
+                style: TextStyle(
+                    color: AppColors.gold, fontWeight: FontWeight.w800)),
+          ),
+        ],
       ),
     );
   }
