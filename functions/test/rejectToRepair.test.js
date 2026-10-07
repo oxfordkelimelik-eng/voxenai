@@ -268,17 +268,16 @@ test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
 // Gözle doğrulandı (9f0d9406 chunk2, fark 0.570): şablon cepheye yakın,
 // çıktı üç-çeyrek dönmüş — metrik gerçek kusuru ölçüyor.
 
-// 2026-09-27: burun ucu / uzak kulak ölçüm prosedürü ve "fazla çevirme olağan
-// hatadır" uyarısı kullanıcı kararıyla kaldırıldı. Test maddenin kalan özünü
-// kilitliyor: aynı yön + aynı açı.
-function headTurnText() {
-  const m = /"\d\) HEAD TURN[\s\S]*?\\n\\n" \+/.exec(FAL);
-  assert.ok(m, "HEAD TURN maddesi bulunamadı");
-  return m[0].replace(/"\s*\+\s*"/g, "");
-}
-
-test("kafa dönüşü tabanla aynı yön ve aynı açı olarak anlatılıyor", () => {
-  assert.match(headTurnText(), /exactly the same side at exactly the same angle/);
+// 2026-10-07: P800 — kimlik, kafa boyutu, kafa dönüşü, bakış sırası.
+test("kafa geometrisi ve bakış tabandan korunuyor", () => {
+  const m = /function buildEditPromptP800[\s\S]*?\n}\r?\n/.exec(FAL);
+  assert.ok(m, "buildEditPromptP800 bulunamadı");
+  const joined = m[0].replace(/"\s*\+\s*"/g, "");
+  assert.match(joined, /Use the selfies only for/);
+  assert.match(joined, /1\) IDENTITY[\s\S]*2\) HEAD SIZE[\s\S]*3\) HEAD TURN AND TILT[\s\S]*4\) GAZE[\s\S]*5\) HAIR/);
+  assert.match(joined, /Never turn it further and never straighten it toward the camera/);
+  assert.match(joined, /the eyes must point exactly where the BASE person's eyes point/);
+  assert.match(joined, /not a face swap/);
 });
 
 test("eski salt-yasak metni yerinde kalmamış (iki kural çakışmasın)", () => {

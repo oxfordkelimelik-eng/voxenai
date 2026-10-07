@@ -168,6 +168,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   Timer? _jobTimeoutTimer;
   // Callable kopsa bile sonucu kaçırmamak için üretim süresine yakın tavan.
   static const _jobListenFallback = Duration(minutes: 20);
+  // Loader bitip "Fotoğraflarım"a yönlendiren bilgi popup'ı bir kez açılsın.
+  bool _generationHandoffDone = false;
   // Sonuç ekranındaki "Fotoğraflar" / "Elenen Kareler" geçişi — yalnızca
   // _rejectedFrames doluyken görünür (bkz. _resultStep).
   bool _showRejected = false;
@@ -469,22 +471,17 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             // pendingApproval BURADA DA TANINMALI: iş uygulama kapalıyken
             // bitmiş olabilir; tanınmazsa aşağıdaki hata ekranına düşüp
             // kullanıcıya boş yere "üretim başarısız" derdik.
-            if (status == 'pendingApproval') {
+            if (status == 'pendingApproval' || status == 'generating') {
               setState(() => _jobData = data);
-              context.go('${DatingRoutes.hub}?tab=photos');
+              await _handoffToPhotosGallery();
               return;
             }
-            if (status == 'done' || status == 'generating') {
+            if (status == 'done') {
               setState(() {
                 _jobData = data;
-                if (status == 'done') {
-                  _stage = _AiStage.result;
-                }
-                // generating: loading'de kal — snapshot zaten dinleniyor.
+                _stage = _AiStage.result;
               });
-              if (status == 'done') {
-                ReviewPromptService().maybePromptAfterSuccess(context);
-              }
+              ReviewPromptService().maybePromptAfterSuccess(context);
               return;
             }
             if (status == 'failed') {
@@ -521,19 +518,16 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           _stage = _AiStage.error;
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
-        } else if (status == 'pendingApproval') {
-          // ÜRETİM BİTTİ, TESLİM HENÜZ YOK (2026-09-22). Burada gösterilecek
-          // kare yok — kareler onaylanana kadar kullanıcının erişemediği
-          // staging alanında. Kullanıcıyı loading'de bekletmek yanlış
-          // olurdu (bekleme dakikalar değil, bizim onayımız kadar sürüyor),
-          // bu yüzden doğrudan "Fotoğraflarım" sekmesine bırakılıyor;
-          // oradaki bilgi kartı ne olduğunu anlatıyor.
+        } else if (status == 'pendingApproval' || status == 'generating') {
+          // Üretim başladı / onay bekliyor: loading'de tutma. Bilgi popup'ı
+          // sonrası Fotoğraflarım'a bırak (bildirim hazır olunca gelir).
           _jobTimeoutTimer?.cancel();
-          _jobSub?.cancel();
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            context.go('${DatingRoutes.hub}?tab=photos');
-          });
+          if (_stage == _AiStage.loading && !_generationHandoffDone) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _handoffToPhotosGallery();
+            });
+          }
         } else if (status == 'done' || _resultUrls.isNotEmpty) {
           _jobTimeoutTimer?.cancel();
           // Üretim yalnızca ödenen (veya ücretsiz hakla açılan) stiller için
@@ -544,9 +538,6 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           if (!wasAlreadyResult) {
             ReviewPromptService().maybePromptAfterSuccess(context);
           }
-        } else if (status == 'generating') {
-          // Sunucuya gerçekten ulaşmıştı — job canlı, fallback'e gerek yok.
-          _jobTimeoutTimer?.cancel();
         }
       });
     });
@@ -583,10 +574,55 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _activePhotoCount = null;
       _jobData = null;
       _showRejected = false;
+      _generationHandoffDone = false;
       _errorMessage = null;
       _preparing = false;
       _prepareError = null;
     });
+  }
+
+  /// Loader bitti: bilgi popup'ı → Tamam → Fotoğraflarım sekmesi.
+  ///
+  /// Üretim arka planda sürer (veya onay bekler); kullanıcıyı loading'de
+  /// dakikalarca tutmak yerine galeriye bırakıyoruz. Bildirim hazır olunca gelir.
+  Future<void> _handoffToPhotosGallery() async {
+    if (!mounted || _generationHandoffDone) return;
+    _generationHandoffDone = true;
+    _jobTimeoutTimer?.cancel();
+    _jobSub?.cancel();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceElevated,
+        title: const Text(
+          'Fotoğrafların oluşturuluyor',
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: const Text(
+          'Fotoğrafların oluşturuluyor. Fotoğraflarım sekmesinden kontrol '
+          'edebilirsin. Hazır olunca sana bildirim gelecek.',
+          style: TextStyle(color: AppColors.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'Tamam',
+              style: TextStyle(
+                color: AppColors.gold,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    context.go('${DatingRoutes.hub}?tab=photos');
   }
 
   /// Eski hesaplarda onboarding'de boy/tip yoksa üretim öncesi bir kez sor.
@@ -1121,8 +1157,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 ? () => _generate(modelId: 'gpt-image-2', mode: 'p800')
                 : null,
           ),
-          // TEST (2026-09-26): gpt-image-2.5 Sunburst karşılaştırması. Yalnızca
-          // ops hesabında görünür; sunucu da aynı kısıtı ayrıca uyguluyor.
+          // TEST (2026-10-07): GPT 2.5 kaldırıldı. Versiyon 2 = Buton 1 ile aynı
+          // model (gpt-image-2), yalnızca prompt kısa ('compact'). Yalnızca ops
+          // hesabında görünür.
           if ((FirebaseAuth.instance.currentUser?.email ?? '')
                   .toLowerCase()
                   .trim() ==
@@ -1130,22 +1167,22 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             const SizedBox(height: 10),
             _AltGenerateButton(
               label: 'Fotoğraflarımı Oluştur Versiyon 2',
-              hint: 'Test — GPT Image 2.5 Sunburst',
+              hint: 'Test — GPT Image 2, kısa prompt',
               enabled: _refsReady && !_preparing,
               onPressed: () => _generate(
-                modelId: 'gpt-image-2.5-sunburst-2026-09-08',
-                mode: 'p800',
+                modelId: 'gpt-image-2',
+                mode: 'compact',
               ),
             ),
             const SizedBox(height: 10),
-            // Üç buton da aynı P800'ü kullanır; sunucu Qwen'de `mode`u
+            // Qwen, Buton 1 ile aynı P800'ü kullanır; sunucu Qwen'de `mode`u
             // yok sayar, burada yalnızca iş kaydına doğru yazılsın diye var.
             _AltGenerateButton(
               label: 'Fotoğraflarımı Oluştur Versiyon 3',
-              hint: 'Test — Qwen Image 2.0 Pro',
+              hint: 'Test — Qwen Image 2.1 Pro',
               enabled: _refsReady && !_preparing,
               onPressed: () => _generate(
-                modelId: 'qwen-image-2.0-pro-2026-06-22',
+                modelId: 'qwen-image-2.1-pro',
                 mode: 'p800',
               ),
             ),
@@ -1597,15 +1634,16 @@ class GeneratedPhotoTile extends StatelessWidget {
 }
 
 // ============================================================
-/// "Üretimin bitti, kareler hazırlanıyor" bilgisi.
+/// "Üretimin sürüyor / onay bekliyor" bilgisi — Fotoğraflarım sekmesinde.
 ///
 /// METİN SÜRE VAAT ETMİYOR (2026-09-22, bilinçli): onay tamamen elle
-/// yapılıyor ve otomatik onay YOK. "Birkaç dakika" demek, gece gelen bir
-/// üretimde tutulamayacak bir söz olurdu. Bunun yerine kullanıcıya olan
-/// biten anlatılıyor ve hazır olduğunda BİLDİRİM geleceği söyleniyor —
-/// böylece ekranda beklemesi gerekmediğini de anlıyor.
+/// yapılıyor ve otomatik onay YOK. Kullanıcıya ne olduğu anlatılıyor ve
+/// hazır olduğunda BİLDİRİM geleceği söyleniyor.
 class _AwaitingApprovalNotice extends StatelessWidget {
-  const _AwaitingApprovalNotice();
+  const _AwaitingApprovalNotice({this.generating = false});
+
+  /// true: hâlâ üretiliyor; false: üretim bitti, onay bekleniyor.
+  final bool generating;
 
   @override
   Widget build(BuildContext context) {
@@ -1630,9 +1668,11 @@ class _AwaitingApprovalNotice extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Fotoğrafların hazırlanıyor',
-                  style: TextStyle(
+                Text(
+                  generating
+                      ? 'Fotoğrafların oluşturuluyor'
+                      : 'Fotoğrafların hazırlanıyor',
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w900,
                     color: AppColors.textPrimary,
@@ -1640,9 +1680,13 @@ class _AwaitingApprovalNotice extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Üretim tamamlandı. Ekibimiz en iyi kareleri seçiyor; '
-                  'hazır olduğunda burada görünecek ve sana bildirim '
-                  'göndereceğiz. Uygulamayı açık tutmana gerek yok.',
+                  generating
+                      ? 'Üretim arka planda sürüyor. Hazır olunca burada '
+                          'görünecek ve sana bildirim göndereceğiz. '
+                          'Uygulamayı açık tutmana gerek yok.'
+                      : 'Üretim tamamlandı. Ekibimiz en iyi kareleri seçiyor; '
+                          'hazır olduğunda burada görünecek ve sana bildirim '
+                          'göndereceğiz. Uygulamayı açık tutmana gerek yok.',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.35,
@@ -1694,6 +1738,10 @@ List<String> deliveredPhotoUrls(Map<String, dynamic>? jobData) {
 bool isAwaitingApproval(Map<String, dynamic>? jobData) =>
     jobData?['status'] == 'pendingApproval';
 
+/// İş hâlâ üretiliyor mu?
+bool isGeneratingPhotos(Map<String, dynamic>? jobData) =>
+    jobData?['status'] == 'generating';
+
 // ============================================================
 // Kalıcı "Fotoğraflarım" galerisi — TÜM geçmiş üretim işlerindeki fotoğraflar
 // tek yerde. Hub'da ayrı bir sekme olarak açılır.
@@ -1726,18 +1774,23 @@ class GeneratedPhotosScreen extends ConsumerWidget {
         }
         final urls = <String>[];
         var awaiting = 0;
+        var generating = 0;
         for (final doc in snap.data?.docs ?? const []) {
           final data = doc.data();
           if (isAwaitingApproval(data)) awaiting++;
+          if (isGeneratingPhotos(data)) generating++;
           urls.addAll(deliveredPhotoUrls(data));
         }
-        if (urls.isEmpty && awaiting == 0) {
+        if (urls.isEmpty && awaiting == 0 && generating == 0) {
           return _emptyState(context);
         }
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (awaiting > 0) ...[
+            if (generating > 0) ...[
+              const _AwaitingApprovalNotice(generating: true),
+              const SizedBox(height: 14),
+            ] else if (awaiting > 0) ...[
               const _AwaitingApprovalNotice(),
               const SizedBox(height: 14),
             ],

@@ -120,12 +120,19 @@ const OPENAI_MODEL_V25_ID = "gpt-image-2.5-sunburst-2026-09-08";
 // 2.0 ailesi seçildi çünkü prompt sınırı 1300 token (edit/plus/max: 800);
 // sınırı aşan kısım HATA VERMEDEN kesiliyor. 2026-09-27'den beri Qwen de
 // kısaltılmış P800'ü alır (~1030 token; bkz. generateForMode).
-// Girdi görseli en fazla 3: taban + 2 yüz açısı.
-const QWEN_MODEL_ID = "qwen-image-2.0-pro-2026-06-22";
+// 2026-10-07: 2.0 Pro hesapta artık yok (403 AccessDenied.Unpurchased), 2.1
+// Pro'ya geçildi. 2.1 Pro yalnızca workspace'e özel adresten çağrılıyor
+// (anahtar "sk-ws-" workspace anahtarı) ve 10'a kadar referans alıyor; Qwen
+// artık GPT ile aynı seti alır (taban + tüm yüz açıları). Prompt sınırı
+// belgede yazmıyor; 1300 eşiği yalnızca uyarı loglar.
+const QWEN_MODEL_ID = "qwen-image-2.1-pro";
+// Yüklü eski uygulama Versiyon 3 butonunda hâlâ bunu gönderiyor; sunucu yeni
+// modele çevirir (bkz. startPhotoGeneration).
+const QWEN_LEGACY_MODEL_ID = "qwen-image-2.0-pro-2026-06-22";
 const QWEN_KEY = defineSecret("DASHSCOPE_API_KEY");
 const QWEN_EDIT_URL =
-  "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
-const QWEN_MAX_INPUT_IMAGES = 3;
+  "https://ws-0vb4se84ze2fnhm8.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const QWEN_MAX_INPUT_IMAGES = 10;
 const QWEN_PROMPT_TOKEN_LIMIT = 1300;
 // Üretimi senkron bu fonksiyon içinde yapan modeller (webhook'suz yol).
 const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID, QWEN_MODEL_ID]);
@@ -157,9 +164,12 @@ const PHOTO_MODE_SHORT = "short";
 const PHOTO_MODE_P300 = "p300";
 const PHOTO_MODE_P800 = "p800";
 const PHOTO_MODE_P1400 = "p1400";
+// 2026-10-07: "Versiyon 2" butonu — gpt-image-2 + kısa prompt (~300 kelime,
+// bkz. buildEditPromptCompact). Buton 1 (p800) ile tek fark prompt.
+const PHOTO_MODE_COMPACT = "compact";
 const PHOTO_MODES = [
   PHOTO_MODE_FULL, PHOTO_MODE_STAGED, PHOTO_MODE_SHORT,
-  PHOTO_MODE_P300, PHOTO_MODE_P800, PHOTO_MODE_P1400,
+  PHOTO_MODE_P300, PHOTO_MODE_P800, PHOTO_MODE_P1400, PHOTO_MODE_COMPACT,
 ];
 // Stil başına üretilecek foto. Her biri FARKLI bir sahne varyantıdır (bkz.
 // STYLE_SCENES) — aynı sahnenin kopyası değil, ayrı gerçek ortamlar.
@@ -1174,108 +1184,74 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
  * yüze uygulanıyordu; aynı yasak burada ellere/parmaklara/kollara/dirseğe de
  * genişletildi.
  */
-function buildEditPromptP800(identityCaption) {
+function buildEditPromptP800(identityCaption, bodyProfile) {
+  // 2026-10-07: kullanıcının verdiği metin, birebir. Vücut maddesi YOK
+  // (bodyProfile kullanılmaz). identityCaption da girmez: caption üretimi
+  // 2026-08-20'de silindi, değer hep boş. Ölçülen değer prompt'a YAZILMAZ
+  // (bkz. gaze-tell-direction-upfront). GPT, GPT 2.5 ve Qwen aynı metni alır.
   return (
-    "TASK: the FIRST image is your only canvas. The other images are reference photos of a different " +
-    "real person (the target). Edit the FIRST image so the person in it becomes the target. Never " +
-    "output a reference photo — if your result lacks the first image's background and framing, you " +
-    "edited the wrong image. Change only the person's face, hair and skin tone; background, lighting, " +
-    "camera angle and framing stay identical.\n\n" +
-    "REFERENCES: every other image is a close-up SELFIE of the target — they are the ONLY source of " +
-    "truth for facial identity, hair, eye shape and skin colour. References never dictate clothing, " +
-    "accessories, pose, head angle, head size or where the eyes look — the FIRST image decides all of " +
-    "those.\n" +
-    // KAMERAYA BAKMA KUSURUNUN KÖK NEDENİ (2026-09-15, ölçülmüş).
-    //
-    // 29 gerçek ölçümün 10'unda (%34) kusur TEK VE AYNI: taban yana bakarken
-    // OUTPUT_GAZE CAMERA çıkıyor. Diğer hiçbir yön hatası yok — RIGHT/RIGHT,
-    // LEFT/LEFT, DOWN/DOWN eşleşmeleri temiz geçiyor. Yani model yönü
-    // "şaşırmıyor", sistematik olarak merceğe çeviriyor.
-    //
-    // SEBEP metinsel bir eksiklik DEĞİL: P2 bunu zaten açıkça yasaklıyor.
-    // Sebep GÖRSEL — referansların hepsi kameraya bakan yakın çekim
-    // selfie'ler. Model kimliği o karelerden kopyalarken gözbebeği konumunu
-    // da beraberinde kopyalıyor. Yasağı tekrar etmek çare olmadı (P2 zaten
-    // "THE MOST COMMON FAILURE" diyor); bu yüzden selfie'lerin GÖZLERİNİN
-    // kullanılmayacağı burada, referansların tanımlandığı yerde söyleniyor.
-    "The target is almost certainly looking INTO THE LENS in every selfie, because that is how selfies " +
-    "are taken. Do NOT carry that over. Copy the eye SHAPE, colour, lids and lashes from the selfies, " +
-    "but take the DIRECTION the eyes point only from the FIRST image. Treat the selfies as if the " +
-    "irises in them were unusable.\n\n" +
-    // ADIMLAR TEK LİSTE (2026-09-27, kullanıcı kararı): eski "TOP PRIORITIES"
-    // P1-P3 ile numaralı 1-4 birleştirildi. Sıra: kimlik, kafa boyutu, kafa
-    // dönüşü, bakış, yüz, ten, gözler, saç.
-    "STEPS — check each one before finishing:\n" +
-    "1) IDENTITY — the output face is unmistakably the person in the selfies, feature for feature.\n\n" +
-    // KAFA BOYUTU (2026-09-27): "omuza kaç kafa genişliği sığıyor, say"
-    // yerine tabandaki kafanın kendisiyle eşleştirme. Vücut artık yeniden
-    // şekillendirilmediği için omuzlar tabanla aynı; dolaylı oran gereksiz.
-    // Ölçü saç değil YÜZ: hedef kel, taban gür saçlıysa siluet meşru olarak
-    // farklıdır.
-    "2) HEAD SIZE — the new head replaces the base person's head at the SAME size and in the SAME " +
-    "place. The face — chin to hairline, cheek to cheek — covers the same area the base face covers, " +
-    "and the chin sits at the same point above the collar. The selfies are zoomed-in close-ups: never " +
-    "take head size from them. The head joins the neck cleanly, with no pasted-on seam, halo or lighting " +
-    "break.\n\n" +
-    // KAFA DÖNÜŞÜ — ölçüm prosedürü ve "fazla çevirme olağan hatadır"
-    // uyarısı KALDIRILDI (2026-09-27, kullanıcı kararı: ölçüm kafa
-    // karıştırıcı, yanlışları saymaya gerek yok). RİSK: 2026-09-20'de
-    // bu prosedür, düz "aynı derecede tut" yasağının yetmediği ölçülünce
-    // eklenmişti (362 kare: |yaw farkı| p90=0.370, fark > 0.20 olan %31.5;
-    // en kötü 12 vakanın 11'inde model kafayı FAZLA çevirmiş). Kötüleşirse
-    // (KONUM ÖLÇÜM yaw farkı) ilk dönülecek yer burası.
-    //
-    // DİKKAT — BİZİM ÖLÇÜMÜMÜZ PROMPT'A YAZILMIYOR. Ölçülen bir değeri
-    // prompt'a yazmak 2026-09-17'de denendi ve reddi kendisi üretti
-    // (bkz. gaze-tell-direction-upfront): ölçüm yanlışsa model itaat eder.
-    "3) HEAD TURN — keep the base's head rotation exactly: wherever the base person's head is turned, " +
-    "the output's head is turned to exactly the same side at exactly the same angle. Keep the chin " +
-    "height and sideways lean too.\n\n" +
-    // BAKIŞ KISALTILDI (2026-09-27, ~130 -> ~45 kelime). 15 Eylül'deki uzun
-    // a/b/c hâli Vision'ın "OUTPUT_GAZE=CAMERA" etiketine göre yazılmıştı; o
-    // etiketin görünür bir kusura karşılık gelmediği sonradan ölçüldü (hafıza
-    // notu gaze-label-is-not-the-defect). Asıl kök neden düzeltmesi ("selfie
-    // irisleri kullanılamaz") yukarıdaki REFERENCES paragrafında duruyor.
-    "4) GAZE — the eyes point where the base person's eyes point, not into the lens unless the base " +
-    "does. Before finishing, compare the two and move the irises if they differ — direction and the " +
-    "iris position within each eye.\n\n" +
-    "5) FACE — copy the target's structure feature by feature from the close-up photos: nose, " +
-    "eyebrows, eyes, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
-    "beautify, symmetrise, average, round, puff, widen or stretch. Keep their own expression; add no " +
-    "smile that is not there.\n\n" +
-    (identityCaption ? `The target person: ${identityCaption}\n\n` : "") +
-    "6) SKIN TONE — the target's true colour on every visible area of skin. Read the tone from the " +
-    "close-up SELFIES and carry that exact tone onto neck, chest, shoulders, arms, hands and legs, so " +
-    "the whole body reads as ONE person under this scene's light. Before you " +
-    "finish, check the hands, fingers, arms, neck, chest and legs one by one: if any of them still " +
-    "carries a trace of the base person's tone, recolour it to match the face exactly. Do not " +
-    "lighten it.\n\n" +
-    "7) EYES — open, clear and alert, with visible pupils and natural catch-light — never " +
-    "half-closed, caught mid-blink, droopy or dead-eyed. Keep their own natural eye shape and size; " +
-    "do not widen or enlarge the eyes to achieve this.\n\n" +
-    "8) HAIR — take it from the SAME close-up selfies, never from the base person and never " +
-    "invented: their hairline, density, length, texture and colour. If the target is bald or " +
-    "balding, the output is bald or balding to exactly the same degree.\n\n" +
-    "EYEWEAR — the output NEVER has glasses or sunglasses. If the base person wears them, drop them " +
-    "entirely and paint the target's own eyes, brows and nose bridge in that area — no lens, frame, " +
-    "tint, rim, shadow or leftover trace of them anywhere.\n\n" +
-    "TATTOOS: the output has none — remove the base person's.\n\n" +
-    // KALİTE (2026-09-27): iki paragraf birleştirildi. Işık/yama teorileri
-    // ölçümle çürüdü (hafıza notu face-artifact-is-a-seam); parlama
-    // (reduceFaceSpecular), telefon dokusu (addPhoneCameraTexture) ve uzuv
-    // tonu (correctLimbChroma/correctHandToneInBoxes) üretimden sonra kodla
-    // da ele alınıyor. Bulanık yüz ayrıca "blurry" kapısında reddediliyor.
-    // "Sıradan telefon fotoğrafı" ifadesi çıkarıldı: model bunu düşük kalite
-    // diye okuyordu (eski FACE RENDERING paragrafı tam bunu düzeltmek için
-    // eklenmişti). Netlik artık BİRİNCİ görsele bağlı — kapının ölçtüğü
-    // netlikOranı (çıktı/şablon) ile aynı referans.
-    "QUALITY — a real, unretouched photo, as sharp and detailed as the FIRST image: no beauty " +
-    "filter, airbrush or CGI look. The face is lit only by the scene's own light — the same " +
-    "direction, colour and softness as the light on the visible arms. Take the skin tone from the " +
-    "selfies, never their lighting: flash, window light or a colour cast in a selfie does not carry " +
-    "over. Add no light, glow or sheen. Keep moles, freckles, scars and beard. Hands and fingers are " +
-    "anatomically correct, " +
-    "with no dark blotches or dirty-looking patches on them or on the joints."
+    "TASK: The FIRST image is the BASE and your only canvas. Every other image is a close-up SELFIE " +
+    "of the TARGET person. Replace the person in the BASE with the TARGET and keep everything else in " +
+    "the BASE unchanged: background, lighting, camera angle, framing, pose, clothing and accessories.\n" +
+    "Use the selfies only for the TARGET's facial identity, hair, eye shape and colour, and skin tone. " +
+    "Never take clothing, accessories, pose, head angle, head size, expression, gaze direction, " +
+    "lighting or colour cast from them.\n\n" +
+    "1) IDENTITY (highest priority): Copy the selfie person feature by feature: eyes, eyebrows, nose, " +
+    "lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not beautify, symmetrise, " +
+    "average, round, puff, widen or stretch. Keep the BASE expression and add no smile that is not " +
+    "there. Keep permanent features such as moles, freckles, scars and facial hair. Gently clean " +
+    "temporary blemishes.\n\n" +
+    "2) HEAD SIZE: Keep the BASE head-to-shoulder size ratio against the FINAL shoulders. If the body " +
+    "narrows, the head shrinks with it. Never take head scale from the zoomed-in selfies. Never " +
+    "enlarge the head, puff the face or push the head forward.\n\n" +
+    "3) HEAD TURN AND TILT: Keep the BASE head's rotation, tilt, chin height and position exactly. " +
+    "Never turn it further and never straighten it toward the camera. A profile or three-quarter view " +
+    "stays at that angle.\n\n" +
+    "4) GAZE: The selfies look into the lens because they are selfies. Do not carry that over. Copy " +
+    "eye shape, colour, lids and lashes from the selfies, but the eyes must point exactly where the " +
+    "BASE person's eyes point. If the BASE is not looking at the lens, the output must not look at the " +
+    "lens either. Eyes are open, clear and alert. They are never half-closed and never enlarged.\n\n" +
+    "5) HAIR: Take hairline, density, length, texture and colour from the selfies, never from the " +
+    "BASE person, and never invent any. If the TARGET is bald or balding, the output is bald or " +
+    "balding to the same degree.\n\n" +
+    "6) SKIN TONE: Use ONE continuous TARGET tone from face through neck, chest, shoulders, arms, " +
+    "hands and legs, under the BASE scene's light. The selfies are already normalised to neutral " +
+    "light, so carry their tone across as it is. Do not relight the face, flatten highlights or " +
+    "brighten.\n\n" +
+    "REMOVE: Remove all glasses and sunglasses completely. Remove all tattoos.\n\n" +
+    "SEAMLESS EDGE: The new face must blend into the hairline, temples, ears, jaw and neck with no " +
+    "visible boundary. Never leave a straight-edged block, patch or washed-out streak on the face or " +
+    "along the hairline. No dark smudges on knuckles or joints.\n\n" +
+    "QUALITY: The result must look like the BASE photograph was naturally taken with the TARGET in " +
+    "it: an ordinary, unedited phone photo, not a face swap or a generated image. Add no light, glow, " +
+    "sheen, airbrush, beauty filter or CGI look. The face is the sharpest region of the frame: crisp " +
+    "irises and catchlights, defined lashes and brow hairs, clean lip edges, skin with fine pores. It " +
+    "must never be softer, noisier or lower-resolution than the clothing and background around it."
+  );
+}
+
+/**
+ * "Versiyon 2" butonunun prompt'u (2026-10-07, kullanıcının verdiği metin
+ * birebir). P800'ün kısaltılmışı: aynı kurallar, adım numaraları ve
+ * SEAMLESS EDGE / QUALITY yok. Model gpt-image-2 (Buton 1 ile aynı).
+ */
+function buildEditPromptCompact() {
+  return (
+    "TASK: The FIRST image is the BASE and your only canvas. The other images are selfies of the " +
+    "TARGET. Replace the BASE person with the TARGET and keep everything else unchanged: background, " +
+    "lighting, framing, pose, clothing and accessories. Use the selfies only for the face, hair, eyes " +
+    "and skin tone, never for clothing, pose, head angle, head size, expression, gaze or lighting.\n\n" +
+    "IDENTITY (highest priority): The output must be unmistakably the same person as in the selfies. " +
+    "Copy every facial feature exactly: eyes, brows, nose, lips, jaw, chin, cheekbones and face shape " +
+    "and proportions. Do not beautify, symmetrise, average or reshape. Keep moles, freckles, scars and " +
+    "facial hair. Take hairline, length, texture and colour from the selfies; if the TARGET is bald or " +
+    "balding, the output is too. Use one continuous TARGET skin tone across all visible skin under the " +
+    "BASE light. Keep the BASE expression.\n\n" +
+    "HEAD SIZE, ANGLE AND GAZE: Keep the BASE head size relative to the shoulders exactly, and never " +
+    "take scale from the zoomed-in selfies or enlarge the head. Keep the BASE head rotation, tilt and " +
+    "chin height exactly; do not turn it toward the camera. The eyes must look exactly where the BASE " +
+    "person's eyes look, not into the lens like the selfies. Eyes are open, clear and natural-sized.\n\n" +
+    "REMOVE: Remove all glasses, sunglasses and tattoos."
   );
 }
 
@@ -2015,7 +1991,16 @@ async function postOpenAiImageEdit(form, refCount) {
 
 // Qwen için AYRI eşzamanlılık kuyruğu: OpenAI kuyruğunu paylaşırsa test işleri
 // aynı instance'taki gerçek kullanıcıların üretimini yavaşlatırdı.
-const QWEN_MAX_CONCURRENCY = 2;
+// 2026-10-07: 2 -> 1. Görsel modellerinin dakikalık istek sınırı düşük; iki
+// eşzamanlı istek 10 parçalık bir işte sürekli 429 RateQuota veriyordu.
+const QWEN_MAX_CONCURRENCY = 1;
+// Hesabın modele erişimi yoksa (403 AccessDenied.*, ör. "Unpurchased": kota
+// bitti / faturalandırma kapalı) aynı instance'taki sonraki Qwen çağrıları
+// istek atmadan düşer — her parça aynı hatayı tek tek almasın. Süre dolunca
+// tekrar denenir; hesap düzelince kendiliğinden açılır.
+const QWEN_ACCESS_DENIED_PAUSE_MS = 10 * 60 * 1000;
+let _qwenAccessDeniedUntil = 0;
+let _qwenAccessDeniedCode = "";
 let _qwenActive = 0;
 const _qwenWaitQueue = [];
 
@@ -2048,6 +2033,10 @@ function releaseQwenSlot() {
  *   (bkz. generateWithOpenAI'deki output_format notu).
  */
 async function generateWithQwen(prompt, imageUrls) {
+  if (Date.now() < _qwenAccessDeniedUntil) {
+    console.error(`QWEN ERİŞİM YOK (${_qwenAccessDeniedCode}): istek atlanıyor — Alibaba Model Studio'da model erişimi/faturalandırma açılmalı`);
+    return null;
+  }
   try {
     const sharp = require("sharp");
     const approxTokens = Math.round(prompt.length / 4);
@@ -2115,6 +2104,10 @@ async function generateWithQwen(prompt, imageUrls) {
         json = await resp.json();
         if (!resp.ok || json.code) {
           console.error(`Qwen edit başarısız (deneme ${attempt}): ${resp.status} ${JSON.stringify(json).slice(0, 300)}`);
+          if (resp.status === 403 && /^AccessDenied/.test(String(json.code || ""))) {
+            _qwenAccessDeniedUntil = Date.now() + QWEN_ACCESS_DENIED_PAUSE_MS;
+            _qwenAccessDeniedCode = String(json.code);
+          }
           return null;
         }
         break;
@@ -3745,6 +3738,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_SHORT]: buildEditPromptShort,
     [PHOTO_MODE_P800]: buildEditPromptP800,
     [PHOTO_MODE_P1400]: buildEditPromptP1400,
+    [PHOTO_MODE_COMPACT]: buildEditPromptCompact,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
 
@@ -3754,7 +3748,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     // (2026-09-27). Kısaltılmış P800 (~1030 token) Qwen'in 1300 sınırına
     // sığıyor; aşarsa generateWithQwen "QWEN PROMPT UZUN" uyarısı loglar.
     return await generateWithQwen(
-      retryHint + buildEditPromptP800(identityCaption),
+      retryHint + buildEditPromptP800(identityCaption, bodyProfile),
       fullSet.slice(0, QWEN_MAX_INPUT_IMAGES)
     );
   }
@@ -4175,7 +4169,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // OpenAI 429'unu iki denemesinde de tüketip TAMAMEN sessizce
       // kayboluyordu — loglarda o chunk'ın var olduğu bile görünmüyordu,
       // sebep ancak diğer tüm chunk'lar tek tek elenerek bulunabiliyordu.
-      console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak)`);
+      console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (${imageModel === QWEN_MODEL_ID ? 'Qwen hatası — yukarıdaki "Qwen edit başarısız" / "QWEN ERİŞİM YOK" satırına bak' : 'muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak'})`);
       // lastRejectGate BİLEREK sıfırlanmıyor: burada üretim hiç olmadı, bu bir
       // kalite reddi değil. Varsa önceki kalite reddinin uyarısı hâlâ en
       // güncel bilgidir ve sonraki denemeye taşınmalı.
@@ -5302,7 +5296,14 @@ exports.startPhotoGeneration = onCall(
     }
     const uid = request.auth.uid;
     checkAppAttestation(request, "startPhotoGeneration");
-    const { styles, photoCount: rawPhotoCount, jobId, model, mode, holdForApproval: rawHold, style: rawStyle } = request.data || {};
+    const { styles, photoCount: rawPhotoCount, jobId, model: rawModel, mode: rawMode, holdForApproval: rawHold, style: rawStyle } = request.data || {};
+    // GPT 2.5 KALDIRILDI (2026-10-07): "Versiyon 2" butonu artık gpt-image-2 +
+    // kısa prompt. Yüklü eski uygulama hâlâ 2.5 modelini gönderiyor; yeni
+    // build yayına girene kadar o istek buraya çevrilir.
+    const legacyV25 = rawModel === OPENAI_MODEL_V25_ID;
+    const model = legacyV25 ? OPENAI_MODEL_ID
+      : rawModel === QWEN_LEGACY_MODEL_ID ? QWEN_MODEL_ID : rawModel;
+    const mode = legacyV25 ? PHOTO_MODE_COMPACT : rawMode;
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
