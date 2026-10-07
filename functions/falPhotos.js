@@ -1185,10 +1185,13 @@ function buildEditPromptP300(identityCaption, bodyProfile) {
  * genişletildi.
  */
 function buildEditPromptP800(identityCaption, bodyProfile) {
-  // 2026-10-07: kullanıcının verdiği metin, birebir. Vücut maddesi YOK
-  // (bodyProfile kullanılmaz). identityCaption da girmez: caption üretimi
-  // 2026-08-20'de silindi, değer hep boş. Ölçülen değer prompt'a YAZILMAZ
-  // (bkz. gaze-tell-direction-upfront). GPT, GPT 2.5 ve Qwen aynı metni alır.
+  // 2026-10-07 (öğleden sonra): kafa oturması ve bakış çıktılarda en çok
+  // bozulan iki şey olduğu için "CHECK THESE TWO FIRST" bloğuna, görevin hemen
+  // arkasına alındı. Kafa boyutu + dönüşü tek maddede birleşti ve boyun
+  // bağlantısı eklendi; bakışa nesneye bakma örnekleri eklendi. Kimlik yine
+  // "highest priority". Vücut maddesi YOK, identityCaption girmez (hep boş).
+  // Ölçülen değer prompt'a YAZILMAZ (bkz. gaze-tell-direction-upfront).
+  // GPT (Buton 1) ve Qwen aynı metni alır.
   return (
     "TASK: The FIRST image is the BASE and your only canvas. Every other image is a close-up SELFIE " +
     "of the TARGET person. Replace the person in the BASE with the TARGET and keep everything else in " +
@@ -1196,25 +1199,28 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "Use the selfies only for the TARGET's facial identity, hair, eye shape and colour, and skin tone. " +
     "Never take clothing, accessories, pose, head angle, head size, expression, gaze direction, " +
     "lighting or colour cast from them.\n\n" +
+    "CHECK THESE TWO FIRST — they fail most often:\n\n" +
+    "A) HEAD ON THE BODY: The new head sits on the BASE neck exactly where the BASE head sat: same " +
+    "size against the shoulders, same rotation, tilt and chin height, same lean. The neck keeps the " +
+    "BASE width, length and angle and flows into the jaw with no step, kink, seam or colour break. " +
+    "The head must look like it grows from this body, never pasted on, floating, oversized or pushed " +
+    "forward. Never take head scale or angle from the zoomed-in selfies. A profile or three-quarter " +
+    "view stays at that angle; never turn the head further or toward the camera.\n\n" +
+    "B) GAZE: The selfies look into the lens because they are selfies — ignore where their eyes " +
+    "point. The output's eyes look at exactly the same point as the BASE person's eyes: if the BASE " +
+    "looks to the side, down at an object (a cup, a phone, a dog), or into the distance, the output " +
+    "looks there too, with the irises in the same position inside each eye. Only if the BASE looks " +
+    "into the lens may the output look into the lens. Eyes are open, clear and alert, never " +
+    "half-closed or enlarged.\n\n" +
     "1) IDENTITY (highest priority): Copy the selfie person feature by feature: eyes, eyebrows, nose, " +
     "lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not beautify, symmetrise, " +
     "average, round, puff, widen or stretch. Keep the BASE expression and add no smile that is not " +
     "there. Keep permanent features such as moles, freckles, scars and facial hair. Gently clean " +
     "temporary blemishes.\n\n" +
-    "2) HEAD SIZE: Keep the BASE head-to-shoulder size ratio against the FINAL shoulders. If the body " +
-    "narrows, the head shrinks with it. Never take head scale from the zoomed-in selfies. Never " +
-    "enlarge the head, puff the face or push the head forward.\n\n" +
-    "3) HEAD TURN AND TILT: Keep the BASE head's rotation, tilt, chin height and position exactly. " +
-    "Never turn it further and never straighten it toward the camera. A profile or three-quarter view " +
-    "stays at that angle.\n\n" +
-    "4) GAZE: The selfies look into the lens because they are selfies. Do not carry that over. Copy " +
-    "eye shape, colour, lids and lashes from the selfies, but the eyes must point exactly where the " +
-    "BASE person's eyes point. If the BASE is not looking at the lens, the output must not look at the " +
-    "lens either. Eyes are open, clear and alert. They are never half-closed and never enlarged.\n\n" +
-    "5) HAIR: Take hairline, density, length, texture and colour from the selfies, never from the " +
+    "2) HAIR: Take hairline, density, length, texture and colour from the selfies, never from the " +
     "BASE person, and never invent any. If the TARGET is bald or balding, the output is bald or " +
     "balding to the same degree.\n\n" +
-    "6) SKIN TONE: Use ONE continuous TARGET tone from face through neck, chest, shoulders, arms, " +
+    "3) SKIN TONE: Use ONE continuous TARGET tone from face through neck, chest, shoulders, arms, " +
     "hands and legs, under the BASE scene's light. The selfies are already normalised to neutral " +
     "light, so carry their tone across as it is. Do not relight the face, flatten highlights or " +
     "brighten.\n\n" +
