@@ -471,9 +471,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
             // pendingApproval BURADA DA TANINMALI: iş uygulama kapalıyken
             // bitmiş olabilir; tanınmazsa aşağıdaki hata ekranına düşüp
             // kullanıcıya boş yere "üretim başarısız" derdik.
-            if (status == 'pendingApproval' || status == 'generating') {
+            if (status == 'pendingApproval') {
               setState(() => _jobData = data);
               await _handoffToPhotosGallery();
+              return;
+            }
+            // Hâlâ üretiliyor: loader'da kalır; bitince dinleyici devralır.
+            if (status == 'generating') {
+              setState(() => _jobData = data);
               return;
             }
             if (status == 'done') {
@@ -518,9 +523,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           _stage = _AiStage.error;
           _errorMessage =
               data['errorMessage'] as String? ?? 'Üretim başarısız oldu.';
-        } else if (status == 'pendingApproval' || status == 'generating') {
-          // Üretim başladı / onay bekliyor: loading'de tutma. Bilgi popup'ı
-          // sonrası Fotoğraflarım'a bırak (bildirim hazır olunca gelir).
+        } else if (status == 'generating') {
+          // Üretim sürüyor (3-5 dk): kullanıcı loader'da bekler.
+          _jobTimeoutTimer?.cancel();
+        } else if (status == 'pendingApproval') {
+          // Üretim bitti, kareler admin onayında: bilgi popup'ı sonrası
+          // Fotoğraflarım'a bırak (onaylanınca bildirim gelir).
           _jobTimeoutTimer?.cancel();
           if (_stage == _AiStage.loading && !_generationHandoffDone) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -581,10 +589,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     });
   }
 
-  /// Loader bitti: bilgi popup'ı → Tamam → Fotoğraflarım sekmesi.
-  ///
-  /// Üretim arka planda sürer (veya onay bekler); kullanıcıyı loading'de
-  /// dakikalarca tutmak yerine galeriye bırakıyoruz. Bildirim hazır olunca gelir.
+  /// Loader bitti (üretim tamam, kareler admin onayında): bilgi popup'ı →
+  /// Tamam → Fotoğraflarım sekmesi. Onaylanınca bildirim gelir.
   Future<void> _handoffToPhotosGallery() async {
     if (!mounted || _generationHandoffDone) return;
     _generationHandoffDone = true;
