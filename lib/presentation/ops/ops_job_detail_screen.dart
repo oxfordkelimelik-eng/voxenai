@@ -86,15 +86,24 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   /// photoRefs ile photoUrls aynı sıradadır (sunucu öyle döndürüyor); eski
   /// yanıtlarda photoRefs boş gelebilir, o zaman seçim yapılamaz ve kare
   /// yalnızca görüntülenir.
-  List<({String url, String? ref})> get _staged {
-    final out = <({String url, String? ref})>[];
+  ///
+  /// Reddedilen kareler de sona eklenir (2026-10-07): kalite kapısı
+  /// yanılabildiği için admin onları da teslim edebilir. `gate` doluysa kare
+  /// reddedilmiştir ve üzerinde kapı adı gösterilir.
+  List<({String url, String? ref, String? gate})> get _staged {
+    final out = <({String url, String? ref, String? gate})>[];
     for (final r in data.results.values) {
       for (var i = 0; i < r.photoUrls.length; i++) {
         out.add((
           url: r.photoUrls[i],
           ref: i < r.photoRefs.length ? r.photoRefs[i] : null,
+          gate: null,
         ));
       }
+    }
+    for (final f in data.rejectedFrames) {
+      if (f.url == null) continue;
+      out.add((url: f.url!, ref: f.ref, gate: f.gate ?? 'reddedildi'));
     }
     return out;
   }
@@ -194,7 +203,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           const SizedBox(height: 20),
           _sectionTitle(
             'ONAY — ${_selected.length}/${data.photoCount} SEÇİLDİ '
-            '(${staged.length} üretildi)',
+            '(${staged.length - data.rejectedFrames.length} üretildi'
+            '${data.rejectedFrames.isEmpty ? '' : ' + ${data.rejectedFrames.length} reddedilen'})',
           ),
           _approvalBar(),
           const SizedBox(height: 10),
@@ -268,7 +278,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
   /// Seçilebilir kare ızgarası. Dokunmak SEÇER; büyütmek için uzun bas —
   /// onay ekranında asıl eylem seçim olduğu için kısa dokunuş ona ayrıldı.
-  Widget _selectableGrid(List<({String url, String? ref})> items) =>
+  Widget _selectableGrid(List<({String url, String? ref, String? gate})> items) =>
       GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -303,6 +313,29 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     ),
                   ),
                 ),
+                if (item.gate != null)
+                  Positioned(
+                    left: 4,
+                    right: 30,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.error.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'RED · ${item.gate}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
                 if (isSelected)
                   DecoratedBox(
                     decoration: BoxDecoration(

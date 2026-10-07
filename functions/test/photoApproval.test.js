@@ -4,6 +4,7 @@ const {
   validateApprovalSelection,
   resultPathForStaging,
   stagedPhotoUrls,
+  rejectedPhotoUrls,
 } = require("../opsPanel")._testables;
 
 // FOTO ONAYI (2026-09-22).
@@ -129,6 +130,48 @@ test("stagedPhotoUrls tüm kovaların karelerini toplar", () => {
 test("results yoksa boş liste döner, patlamaz", () => {
   assert.deepEqual(stagedPhotoUrls({}), []);
   assert.deepEqual(stagedPhotoUrls({ results: { x: {} } }), []);
+});
+
+// REDDEDİLEN KARELER DE ONAYLANABİLİR (2026-10-07). Örnek: 10 üretildi,
+// 2 reddedildi -> 12 kareden photoCount kadarı seçilebilir.
+const rejected = [
+  `gs://b/dating_rejected/${UID}/${JOB}/photos_c6_att1__mode-p800__gate-vision-gaze.jpg`,
+];
+
+test("reddedilen kare, üretilenlerle birlikte seçilebilir", () => {
+  const paths = validateApprovalSelection({
+    selected: [staged[0], rejected[0]],
+    staged: [...staged, ...rejected], uid: UID, jobId: JOB, maxCount: 5,
+  });
+  assert.deepEqual(paths, [
+    `dating_staging/${UID}/${JOB}/elegance_0_0.jpg`,
+    `dating_rejected/${UID}/${JOB}/photos_c6_att1__mode-p800__gate-vision-gaze.jpg`,
+  ]);
+});
+
+test("BAŞKA kullanıcının reddedilen karesi onaylanamaz", () => {
+  const foreign = `gs://b/dating_rejected/BASKA_UID/${JOB}/x.jpg`;
+  assert.throws(
+    () => validateApprovalSelection({
+      selected: [foreign], staged: [...staged, foreign], uid: UID, jobId: JOB, maxCount: 5,
+    }),
+    /Geçersiz fotoğraf yolu/
+  );
+});
+
+test("reddedilen kare teslim yoluna rejected_ ön ekiyle kopyalanır", () => {
+  assert.equal(
+    resultPathForStaging(`dating_rejected/${UID}/${JOB}/photos_c6_att1.jpg`),
+    `dating_results/${UID}/${JOB}/rejected_photos_c6_att1.jpg`
+  );
+});
+
+test("rejectedPhotoUrls elenen karelerin gs:// adreslerini toplar", () => {
+  assert.deepEqual(
+    rejectedPhotoUrls({ rejectedFrames: [{ gsUrl: rejected[0] }, { gsUrl: null }, {}] }),
+    [rejected[0]]
+  );
+  assert.deepEqual(rejectedPhotoUrls({}), []);
 });
 
 // FAZLA ÜRETİM — üretim sayısı ile ücretlendirilen sayı ayrı olmalı.

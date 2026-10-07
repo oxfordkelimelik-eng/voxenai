@@ -471,6 +471,8 @@ exports.opsGetJobDetail = onCall(
         detail: safeString(f.detail),
         rejectedAt: safeString(f.rejectedAt),
         url: await resolveGsUrl(f.gsUrl),
+        // Onay ızgarasında seçilebilsin diye ham gs:// adresi (2026-10-07).
+        ref: safeString(f.gsUrl),
       }))
     );
 
@@ -518,13 +520,24 @@ exports.opsGetJobDetail = onCall(
 
 const STAGING_PREFIX = "dating_staging/";
 const RESULTS_PREFIX = "dating_results/";
+// REDDEDİLEN KARELER DE ONAYLANABİLİR (2026-10-07, kullanıcı kararı): kalite
+// kapısı yanılabiliyor (ör. bakış etiketi görünür kusura karşılık
+// gelmiyor); admin elenen bir kareyi de teslim edebilmeli. Üst sınır yine
+// photoCount.
+const REJECTED_PREFIX = "dating_rejected/";
 
 /**
- * Onaylanan staging yolunu kullanıcının okuyabildiği sonuç yoluna çevirir.
- * Yalnızca ön eki değiştirir; dosya adı korunur ki aynı kare iki kez
- * onaylanırsa üzerine yazılsın, kopyası çoğalmasın.
+ * Onaylanan staging (veya reddedilen) yolunu kullanıcının okuyabildiği sonuç
+ * yoluna çevirir. Yalnızca ön eki değiştirir; dosya adı korunur ki aynı kare
+ * iki kez onaylanırsa üzerine yazılsın, kopyası çoğalmasın. Reddedilen
+ * karelere "rejected_" ön eki eklenir: adları staging adlarıyla çakışmasın.
  */
 function resultPathForStaging(stagingPath) {
+  if (stagingPath.startsWith(REJECTED_PREFIX)) {
+    const rest = stagingPath.slice(REJECTED_PREFIX.length);
+    const slash = rest.lastIndexOf("/");
+    return RESULTS_PREFIX + rest.slice(0, slash + 1) + "rejected_" + rest.slice(slash + 1);
+  }
   return RESULTS_PREFIX + stagingPath.slice(STAGING_PREFIX.length);
 }
 
@@ -551,7 +564,10 @@ function validateApprovalSelection({ selected, staged, uid, jobId, maxCount }) {
     );
   }
   const stagedSet = new Set(staged);
-  const expectedPrefix = `${STAGING_PREFIX}${uid}/${jobId}/`;
+  const allowedPrefixes = [
+    `${STAGING_PREFIX}${uid}/${jobId}/`,
+    `${REJECTED_PREFIX}${uid}/${jobId}/`,
+  ];
   const paths = [];
   const seen = new Set();
   for (const url of selected) {
@@ -563,7 +579,7 @@ function validateApprovalSelection({ selected, staged, uid, jobId, maxCount }) {
     }
     seen.add(url);
     const path = gsPathFromUrl(url);
-    if (!path || !path.startsWith(expectedPrefix) || path.includes("..")) {
+    if (!path || !allowedPrefixes.some((p) => path.startsWith(p)) || path.includes("..")) {
       throw new HttpsError("invalid-argument", "Geçersiz fotoğraf yolu.");
     }
     paths.push(path);
@@ -578,6 +594,11 @@ function stagedPhotoUrls(job) {
     for (const u of r?.photoUrls || []) out.push(u);
   }
   return out;
+}
+
+/** İşin kalite kapısında elenen karelerinin gs:// adresleri. */
+function rejectedPhotoUrls(job) {
+  return (job.rejectedFrames || []).map((f) => f && f.gsUrl).filter(Boolean);
 }
 
 exports.opsApprovePhotos = onCall(
@@ -604,7 +625,7 @@ exports.opsApprovePhotos = onCall(
 
     const paths = validateApprovalSelection({
       selected: selectedUrls,
-      staged: stagedPhotoUrls(job),
+      staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)],
       uid, jobId, maxCount,
     });
 
@@ -725,6 +746,7 @@ exports._testables = {
   validateApprovalSelection,
   resultPathForStaging,
   stagedPhotoUrls,
+  rejectedPhotoUrls,
   extractGateCounts,
   aggregateGateCounts,
   buildPurchaseSummary,

@@ -289,6 +289,9 @@ class OpsRejectedFrame {
   final String? rejectedAt;
   final String? url;
 
+  /// Ham gs:// adresi — onay ızgarasında seçim kimliği (2026-10-07).
+  final String? ref;
+
   OpsRejectedFrame({
     required this.gate,
     required this.chunkIdx,
@@ -297,6 +300,7 @@ class OpsRejectedFrame {
     required this.detail,
     required this.rejectedAt,
     required this.url,
+    this.ref,
   });
 
   factory OpsRejectedFrame.fromJson(Map<String, dynamic> j) => OpsRejectedFrame(
@@ -307,6 +311,7 @@ class OpsRejectedFrame {
         detail: _asString(j['detail']),
         rejectedAt: _asString(j['rejectedAt']),
         url: _asString(j['url']),
+        ref: _asString(j['ref']),
       );
 }
 
