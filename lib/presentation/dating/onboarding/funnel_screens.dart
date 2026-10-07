@@ -2739,6 +2739,221 @@ class _CornersPainter extends CustomPainter {
 }
 
 // ============================================================
+// FORM SONRASI — PROFİL ANALİZİ SONUCU (zayıf görünürlük + %86)
+// ============================================================
+
+class DiagnosisVisual extends StatelessWidget {
+  const DiagnosisVisual({super.key});
+  static const size = Size(340, 440);
+  static const _amber = Color(0xFFFFB020);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _Appear(delay: 150, child: _gauge()),
+        const SizedBox(height: 16),
+        _Appear(
+          delay: 650,
+          child: GlassCard(
+            radius: 18,
+            border: _amber.withValues(alpha: 0.45),
+            padding: const EdgeInsets.fromLTRB(14, 14, 16, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _amber.withValues(alpha: 0.15),
+                    border: Border.all(color: _amber.withValues(alpha: 0.6)),
+                  ),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: _amber,
+                    size: 19,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Verdiğiniz yanıtlara dayanarak, dating profilinizin öne '
+                    'çıkmadığına dair güçlü işaretler bulunuyor.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14.5,
+                      height: 1.35,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        _Appear(
+          delay: 1150,
+          child: GlassCard(
+            neon: true,
+            radius: 18,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: 86),
+                      duration: const Duration(milliseconds: 2200),
+                      curve: const Interval(
+                        0.55,
+                        1,
+                        curve: Curves.easeOutCubic,
+                      ),
+                      builder: (_, v, _) => ShaderMask(
+                        shaderCallback: (r) => const LinearGradient(
+                          colors: [_redLight, _red],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ).createShader(r),
+                        child: Text(
+                          '%${v.round()}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 52,
+                            height: 1,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    const Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: 'Voxen kullanıcılarının '),
+                            TextSpan(
+                              text: '%86\'sı',
+                              style: TextStyle(
+                                color: _redLight,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            TextSpan(
+                              text:
+                                  ', dating profili önerilerini uyguladıktan '
+                                  'sonra eşleşme sayılarında belirgin bir artış '
+                                  'gördüklerini belirtiyor.',
+                            ),
+                          ],
+                        ),
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      '*Temsili veriler',
+                      style: TextStyle(
+                        color: Colors.white30,
+                        fontSize: 8,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// "Profil görünürlüğü" halkası: düşük seviyeye dolar, uyarı ikonu nabız atar.
+  Widget _gauge() {
+    return SizedBox(
+      width: 168,
+      height: 168,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 1600),
+        curve: Curves.easeOutCubic,
+        builder: (_, v, _) => Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: _red.withValues(alpha: 0.35 * v),
+                    blurRadius: 40,
+                  ),
+                ],
+              ),
+            ),
+            SizedBox.expand(
+              child: CircularProgressIndicator(
+                value: 0.28 * v,
+                strokeWidth: 11,
+                strokeCap: StrokeCap.round,
+                backgroundColor: Colors.white10,
+                valueColor: const AlwaysStoppedAnimation(_red),
+              ),
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Pulse(
+                  amount: 0.12,
+                  periodMs: 900,
+                  child: Icon(
+                    Icons.trending_down_rounded,
+                    color: _redLight.withValues(alpha: 0.4 + 0.6 * v),
+                    size: 34,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'DÜŞÜK',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Text(
+                  'Profil görünürlüğü',
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
 // 13 — SİZDEN GELENLER (önce / sonra Hinge + yorum)
 // ============================================================
 

@@ -29,8 +29,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   // ekran, form → giriş → 2 "Sizden gelenler" ekranı. Tasarım kodla çizilir
   // (funnel_screens.dart). "Voxen Teknolojisi", "Üstün Teknoloji", "Sonuç" ve
   // "7 kat eşleşme" ekranları kullanıcı isteğiyle kaldırıldı.
-  // → 22 adım (vücut tipi + boy AI foto üretiminde kullanılır).
-  static const int _totalSteps = 22;
+  // → 23 adım (vücut tipi + boy AI foto üretiminde kullanılır).
+  static const int _totalSteps = 23;
   bool _signedIn = false;
 
   void _next() {
@@ -94,12 +94,13 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       () => _qHeight(answers), // 16 — AI foto boy ipucu
       () => _qApps(answers), // 17
       () => _qMatches(answers), // 18
-      // Form biter bitmez giriş, girişten sonra "Sizden gelenler" (kullanıcı
-      // kararı 2026-10-01):
-      () => _authStep(), // 19 — Google/Apple ile giriş
-      () => _funnel13(), // 20
-      () => _funnel14(), // 21
-      () => _preparing(), // 22
+      // Form biter bitmez analiz sonucu (2026-10-02), ardından giriş, girişten
+      // sonra "Sizden gelenler" (kullanıcı kararı 2026-10-01):
+      () => _diagnosis(), // 19 — "Analiz tamamlandı" (%86)
+      () => _authStep(), // 20 — Google/Apple ile giriş
+      () => _funnel13(), // 21
+      () => _funnel14(), // 22
+      () => _preparing(), // 23
     ];
 
     return PopScope(
@@ -318,6 +319,14 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     canvas: FaceScanVisual.size,
     arrow: true,
     headlineSize: 36,
+  );
+
+  Widget _diagnosis() => _fp(
+    headline: const ['Analiz', '##tamamlandı.##'],
+    visual: const DiagnosisVisual(),
+    canvas: DiagnosisVisual.size,
+    arrow: true,
+    headlineSize: 40,
   );
 
   Widget _funnel13() => _fp(
