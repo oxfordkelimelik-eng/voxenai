@@ -476,6 +476,28 @@ exports.opsGetJobDetail = onCall(
       }))
     );
 
+    // ŞABLONLAR (2026-10-07): her kare adresi -> { url, exact }. Aynı şablon
+    // birden fazla karede geçebilir; imzalı URL bir kez üretilir.
+    const allRefs = [
+      ...Object.values(results).flatMap((r) => r.photoRefs),
+      ...rejectedFrames.map((f) => f.ref).filter(Boolean),
+      ...approvedRefs,
+    ];
+    const signedByName = new Map();
+    const templates = {};
+    for (const r of allRefs) {
+      const t = templateNameForRef(r, job);
+      if (!t) continue;
+      if (!signedByName.has(t.name)) {
+        signedByName.set(t.name, signedDownloadUrl(bucket().file(t.name)).catch((e) => {
+          console.error("ops: şablon URL'i üretilemedi (atlanıyor):", e.message || e);
+          return null;
+        }));
+      }
+      const url = await signedByName.get(t.name);
+      if (url) templates[r] = { url, exact: t.exact, name: t.name.slice(t.name.lastIndexOf("/") + 1) };
+    }
+
     let email = null;
     try {
       const userRecord = await admin.auth().getUser(uid);
@@ -505,6 +527,7 @@ exports.opsGetJobDetail = onCall(
       updatedAt: job.updatedAt ? job.updatedAt.toMillis() : null,
       results,
       rejectedFrames,
+      templates,
     };
   }
 );
@@ -525,6 +548,38 @@ const RESULTS_PREFIX = "dating_results/";
 // gelmiyor); admin elenen bir kareyi de teslim edebilmeli. Üst sınır yine
 // photoCount.
 const REJECTED_PREFIX = "dating_rejected/";
+
+/**
+ * Bir karenin (gs:// adresi) hangi şablondan üretildiğini bulur (2026-10-07).
+ *
+ *  • Onay havuzundaki kare  `.../<stil>_<chunk>_<i>.jpg`  → chunkTemplates[chunk]
+ *    (teslim adımında yazılan GERÇEK şablon). Eski işlerde bu alan yok; o
+ *    zaman templateNames[chunk] (ilk seçilen şablon) döner ama exact=false —
+ *    chunk yedek şablona geçmişse yanlış olabilir.
+ *  • Reddedilen kare → rejectedFrames kaydındaki `template` (deneme anındaki
+ *    şablon; denemeler arasında şablon değişebildiği için chunk'tan bulunmaz).
+ *  • Teslim edilmiş kare `dating_results/.../rejected_<ad>` → aynı adlı
+ *    reddedilen kare; `dating_results/.../<stil>_<chunk>_<i>.jpg` → chunk.
+ *
+ * Döner: { name, exact } | null
+ */
+function templateNameForRef(ref, job) {
+  if (typeof ref !== "string" || !job) return null;
+  const base = ref.slice(ref.lastIndexOf("/") + 1);
+  const fromRejected = (name) => {
+    const f = (job.rejectedFrames || []).find((r) => typeof r.gsUrl === "string" && r.gsUrl.endsWith("/" + name));
+    return f && f.template ? { name: f.template, exact: true } : null;
+  };
+  if (ref.includes("/" + REJECTED_PREFIX) || ref.startsWith(REJECTED_PREFIX)) return fromRejected(base);
+  if (base.startsWith("rejected_")) return fromRejected(base.slice("rejected_".length));
+  const m = /^[^/]+_(\d+)_\d+\.jpg$/.exec(base);
+  if (!m) return null; // manuel yükleme vb.
+  const c = m[1];
+  const exact = job.chunkTemplates && job.chunkTemplates[c];
+  if (exact) return { name: exact, exact: true };
+  const names = Array.isArray(job.templateNames) ? job.templateNames : [];
+  return names[Number(c)] ? { name: names[Number(c)], exact: false } : null;
+}
 
 /**
  * Onaylanan staging (veya reddedilen) yolunu kullanıcının okuyabildiği sonuç
@@ -740,6 +795,7 @@ exports.opsAttachUploadedPhoto = onCall(
 // gerçek bir Cloud Function olarak deploy edilmez, sadece
 // functions/test/opsPanel.test.js bunları require eder.
 exports._testables = {
+  templateNameForRef,
   isAuthorizedOpsEmail,
   uidFromDocPath,
   gsPathFromUrl,

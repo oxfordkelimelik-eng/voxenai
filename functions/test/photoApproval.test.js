@@ -217,3 +217,34 @@ test("sürüm kapısı: bayrak yoksa dating_results, varsa staging", () => {
     "dating_staging/u/j/photos_0_0.jpg"
   );
 });
+
+// KULLANILAN ŞABLON (2026-10-07): panel her karenin yanında şablonunu gösterir.
+test("şablon: onay havuzundaki kare chunkTemplates'ten (kesin) gelir", () => {
+  const { templateNameForRef } = require("../opsPanel")._testables;
+  const job = { templateNames: ["t/a.jpg", "t/b.jpg"], chunkTemplates: { 1: "t/yedek.jpg" } };
+  assert.deepEqual(templateNameForRef("gs://x/dating_staging/u/j/photos_1_0.jpg", job), { name: "t/yedek.jpg", exact: true });
+});
+
+test("şablon: eski işte templateNames'e düşer ve tahmini işaretlenir", () => {
+  const { templateNameForRef } = require("../opsPanel")._testables;
+  const job = { templateNames: ["t/a.jpg", "t/b.jpg"] };
+  assert.deepEqual(templateNameForRef("gs://x/dating_staging/u/j/photos_0_0.jpg", job), { name: "t/a.jpg", exact: false });
+});
+
+test("şablon: reddedilen kare ve onu teslim eden sonuç kendi deneme şablonunu kullanır", () => {
+  const { templateNameForRef } = require("../opsPanel")._testables;
+  const name = "photos_c2_att3__mode-p800__gate-gaze.jpg";
+  const job = {
+    templateNames: ["t/a.jpg", "t/b.jpg", "t/c.jpg"],
+    chunkTemplates: { 2: "t/teslim.jpg" },
+    rejectedFrames: [{ gsUrl: `gs://x/dating_rejected/u/j/${name}`, template: "t/deneme3.jpg" }],
+  };
+  const want = { name: "t/deneme3.jpg", exact: true };
+  assert.deepEqual(templateNameForRef(`gs://x/dating_rejected/u/j/${name}`, job), want);
+  assert.deepEqual(templateNameForRef(`gs://x/dating_results/u/j/rejected_${name}`, job), want);
+});
+
+test("şablon: manuel yüklemenin şablonu yoktur", () => {
+  const { templateNameForRef } = require("../opsPanel")._testables;
+  assert.equal(templateNameForRef("gs://x/dating_staging/u/j/manual_1.jpg", { templateNames: ["t/a.jpg"] }), null);
+});

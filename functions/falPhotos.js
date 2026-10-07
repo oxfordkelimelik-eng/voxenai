@@ -3226,6 +3226,16 @@ function humanRejectionReason(gate) {
  * yazımı (kullanıcının göreceği kayıt) AYRI bir fail-safe katman — o
  * başarısız olsa bile kare zaten Storage'da durur, sadece panelde görünmez.
  */
+// KULLANILAN ŞABLON KAYDI (2026-10-07). Bir chunk denemeler arasında yedek
+// şablona geçebildiği için "bu kare hangi şablondan üretildi" bilgisi deneme
+// anında tutulur: anahtar `${jobId}/${styleId}/${chunkIdx}`, değer Storage'daki
+// şablon dosya adı. saveRejectedFrame buradan okur (her çağrı yerine ayrı
+// parametre eklemek yerine), teslim adımı chunkTemplates'e yazar.
+// Eskiden yalnızca İLK seçilen şablonlar templateNames'e yazılıyordu; yedeğe
+// geçilen kare (ör. 9496348c chunk 1) kendi şablonuyla incelenemiyordu.
+const CHUNK_TEMPLATE = new Map();
+const chunkTemplateKey = (jobId, styleId, chunkIdx) => `${jobId}/${styleId}/${chunkIdx}`;
+
 async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, meta) {
   if (!SAVE_REJECTED_FRAMES) return;
   let path;
@@ -3251,6 +3261,7 @@ async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, me
       rejectedFrames: admin.firestore.FieldValue.arrayUnion({
         path, gsUrl: `gs://${bucket().name}/${path}`,
         styleId, chunkIdx, attempt, gate: meta.gate || "?",
+        template: CHUNK_TEMPLATE.get(chunkTemplateKey(jobId, styleId, chunkIdx)) || null,
         reason: humanRejectionReason(meta.gate),
         detail: meta.detail || null,
         rejectedAt: admin.firestore.Timestamp.now(),
@@ -3965,7 +3976,7 @@ async function prepareTemplate(templateUrl, styleId, chunkIdx) {
   }
 }
 
-async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID) {
+async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID, templateNames = null) {
   // KUYRUK HEARTBEAT (2026-09-10 gerçek olay): aynı kullanıcı üst üste iki
   // job başlattığında, her ikisinin chunk'ları AYNI process-içi
   // OPENAI_IMAGE_MAX_CONCURRENCY (=2) kuyruğunu paylaşıyor. Kuyrukta bekleyen
@@ -3981,13 +3992,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
   }, 90 * 1000);
   try {
-    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel);
+    return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel, templateNames);
   } finally {
     clearInterval(heartbeatTimer);
+    CHUNK_TEMPLATE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
   }
 }
 
-async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID) {
+async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID, templateNames = null) {
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -4006,7 +4018,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   const prepareNextUsable = async ({ avoidEscalation = false } = {}) => {
     const skipped = [];
     while (nextCandidate < urls.length) {
-      const p = await prepareTemplate(urls[nextCandidate++], styleId, chunkIdx);
+      const p = await prepareTemplate(urls[nextCandidate], styleId, chunkIdx);
+      p.idx = nextCandidate++;
       if (!p.usable) continue;
       const tooBig = avoidEscalation &&
         baselineTemplateFaceRatio != null &&
@@ -4037,7 +4050,15 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   if (!prepared) {
     console.warn(`ŞABLON: hiçbir aday uygun değil (style=${styleId}, chunk=${chunkIdx}) — birincil ile devam ediliyor`);
     prepared = await prepareTemplate(urls[0], styleId, chunkIdx);
+    prepared.idx = 0;
   }
+  // Kullanılan şablonun Storage adı (templateNames urls ile aynı sırada).
+  const noteTemplate = (idx) => {
+    const name = Array.isArray(templateNames) ? templateNames[idx] : null;
+    if (name) CHUNK_TEMPLATE.set(chunkTemplateKey(jobId, styleId, chunkIdx), name);
+    else CHUNK_TEMPLATE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
+  };
+  noteTemplate(prepared.idx);
   let {
     input: templateInput, restore, faceRatio: templateFaceRatio,
     sourceBuf: templateSourceBuf, blurScore: templateBlurScore,
@@ -4125,6 +4146,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           sourceBuf: templateSourceBuf, blurScore: templateBlurScore,
         } = next);
         templateYaw = undefined; // yeni şablon -> yaw yeniden ölçülmeli
+        noteTemplate(next.idx);
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
       }
     }
@@ -5028,10 +5050,67 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       console.error("OpenAI yolu: kafa yerleşimi ölçümü hata verdi (atlanıyor):", e);
     }
 
+    // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
+    // çöz). Saç dahil kafa/omuz oranı şablondakinden belirgin büyükse kafa
+    // boyun tabanına sabit yumuşak bir sıkıştırmayla küçültülür (bkz.
+    // headScale.js). Şablon eşi KONUM ÖLÇÜM ile aynı kurala göre seçilir:
+    // iki görüntü aynı kadraj uzayında olmalı. Emin olunamayan her durumda
+    // (omuz kadraj dışı, kafa başka bir şeye değiyor, sahne yeniden
+    // kadrajlanmış) dokunulmaz.
+    try {
+      let tplForScale = null;
+      if (recompositedOk) tplForScale = restore.originalBuf;
+      else if (restore) tplForScale = Buffer.isBuffer(templateInput) ? templateInput : null;
+      else tplForScale = templateSourceBuf;
+      if (!tplForScale) {
+        console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
+      } else {
+        const { correctHeadScale } = require("./headScale");
+        const hs = await correctHeadScale(deliverBuf, tplForScale);
+        const n = (v) => (v != null ? v.toFixed(3) : "null");
+        if (hs.applied && hs.buf) {
+          deliverBuf = hs.buf;
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI s=${n(hs.s)} (ham=${n(hs.rawS)}) sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)} taşınanPx=${hs.movedPx}`);
+        } else {
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] s=${n(hs.s)} sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)}`);
+        }
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
+    }
+
+    // TEN TONU ALANI (2026-10-07, kullanıcı kararı: elemek yerine çöz).
+    // Vücut derisini segmentasyon modeliyle bulur ve kolları/elleri/boynu
+    // yüz tonuna çeker; kolun bir yerinin koyu bir yerinin açık kalmasını
+    // (iki tonlu kol) giderir (bkz. skinTone.js). Kutuyla sınırlı EL TONU
+    // katmanından SONRA, tam kadrajda çalışır — o katmanın kutu dışında
+    // bıraktığı kol parçası da burada düzelir. Kıyafet/aksesuar boyanmaz.
+    try {
+      const { correctSkinToneField } = require("./skinTone");
+      const st = await correctSkinToneField(deliverBuf);
+      const n = (v) => (v != null ? v.toFixed(1) : "null");
+      const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"}`;
+      if (st.applied && st.buf) {
+        deliverBuf = st.buf;
+        console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
+      } else {
+        console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${st.reason}] ${ölçü}`);
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
+    }
+
     const textured = await addPhoneCameraTexture(deliverBuf);
     // holdForApproval → staging; aksi halde doğrudan dating_results.
     const path = deliverPhotoPath(uid, jobId, styleId, chunkIdx, 0, holdForApproval);
     await bucket().file(path).save(textured, { metadata: { contentType: "image/jpeg" } });
+    // Teslim edilen karenin GERÇEK şablonu (yedeğe geçildiyse yedek) — admin
+    // paneli çıktıyı yanında gösteriyor. Hata üretimi etkilemez.
+    const usedTemplate = CHUNK_TEMPLATE.get(chunkTemplateKey(jobId, styleId, chunkIdx));
+    if (usedTemplate) {
+      await jobRef.set({ chunkTemplates: { [String(chunkIdx)]: usedTemplate } }, { merge: true })
+        .catch((e) => console.error("Şablon kaydı yazılamadı (panelde görünmeyecek):", e.message || e));
+    }
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
   } catch (e) {
     console.error("OpenAI yolu: sonuç kaydetme hatası:", e);
@@ -5699,7 +5778,7 @@ exports.startPhotoGeneration = onCall(
               await runOpenAiDirectChunk(
                 uid, jobId, bucketId, i, urls, refUrls, identityCaption,
                 bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine,
-                holdForApproval, modelId
+                holdForApproval, modelId, uniqueCandidates.map((f) => f.name)
               );
             } catch (e) {
               // TEK CHUNK'IN HATASI BÜTÜN İŞİ GÖTÜRMESİN (2026-09-21, aynı

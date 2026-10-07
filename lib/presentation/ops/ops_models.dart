@@ -315,6 +315,29 @@ class OpsRejectedFrame {
       );
 }
 
+/// Bir karenin üretildiği şablon (2026-10-07).
+///
+/// [exact] false ise kesin değil: eski işlerde yalnızca İLK seçilen şablon
+/// kayıtlıydı, chunk yedek şablona geçtiyse gösterilen yanlış olabilir.
+class OpsTemplate {
+  final String url;
+  final bool exact;
+  final String? name;
+
+  OpsTemplate({required this.url, required this.exact, this.name});
+
+  static OpsTemplate? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final url = _asString(j['url']);
+    if (url == null) return null;
+    return OpsTemplate(
+      url: url,
+      exact: j['exact'] as bool? ?? false,
+      name: _asString(j['name']),
+    );
+  }
+}
+
 class OpsStyleResult {
   final String? status;
 
@@ -372,6 +395,9 @@ class OpsJobDetail {
   final int? approvedAtMillis;
   final String? approvedBy;
 
+  /// Kare adresi (gs://) -> üretildiği şablon. Bilinmiyorsa anahtar yoktur.
+  final Map<String, OpsTemplate> templates;
+
   OpsJobDetail({
     required this.uid,
     required this.email,
@@ -393,7 +419,10 @@ class OpsJobDetail {
     required this.approvedRefs,
     required this.approvedAtMillis,
     required this.approvedBy,
+    this.templates = const {},
   });
+
+  OpsTemplate? templateFor(String? ref) => ref == null ? null : templates[ref];
 
   /// Onay bekliyor mu — üretim bitti ama hiçbir kare teslim edilmedi.
   bool get awaitingApproval => status == 'pendingApproval';
@@ -435,5 +464,10 @@ class OpsJobDetail {
             .toList(),
         approvedAtMillis: (j['approvedAt'] as num?)?.toInt(),
         approvedBy: _asString(j['approvedBy']),
+        templates: {
+          for (final e in ((j['templates'] as Map?) ?? {}).entries)
+            if (OpsTemplate.fromJson(e.value) != null)
+              e.key.toString(): OpsTemplate.fromJson(e.value)!,
+        },
       );
 }

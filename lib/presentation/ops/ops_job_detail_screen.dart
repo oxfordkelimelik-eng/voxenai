@@ -11,6 +11,10 @@ import 'ops_gate.dart';
 import 'ops_models.dart';
 import 'ops_providers.dart';
 
+/// Onay ızgarasındaki bir kare: gösterim URL'i, gs:// kimliği, ret kapısı
+/// (reddedildiyse) ve üretildiği şablon (biliniyorsa).
+typedef _Frame = ({String url, String? ref, String? gate, OpsTemplate? template});
+
 class OpsJobDetailScreen extends StatelessWidget {
   final String uid;
   final String jobId;
@@ -90,20 +94,25 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   /// Reddedilen kareler de sona eklenir (2026-10-07): kalite kapısı
   /// yanılabildiği için admin onları da teslim edebilir. `gate` doluysa kare
   /// reddedilmiştir ve üzerinde kapı adı gösterilir.
-  List<({String url, String? ref, String? gate})> get _staged {
-    final out = <({String url, String? ref, String? gate})>[];
+  ///
+  /// Her karenin üretildiği şablon da taşınır (2026-10-07) — köşede küçük
+  /// önizleme, tam ekranda çıktı/şablon geçişi.
+  List<_Frame> get _staged {
+    final out = <_Frame>[];
     for (final r in data.results.values) {
       for (var i = 0; i < r.photoUrls.length; i++) {
-        out.add((
-          url: r.photoUrls[i],
-          ref: i < r.photoRefs.length ? r.photoRefs[i] : null,
-          gate: null,
-        ));
+        final ref = i < r.photoRefs.length ? r.photoRefs[i] : null;
+        out.add((url: r.photoUrls[i], ref: ref, gate: null, template: data.templateFor(ref)));
       }
     }
     for (final f in data.rejectedFrames) {
       if (f.url == null) continue;
-      out.add((url: f.url!, ref: f.ref, gate: f.gate ?? 'reddedildi'));
+      out.add((
+        url: f.url!,
+        ref: f.ref,
+        gate: f.gate ?? 'reddedildi',
+        template: data.templateFor(f.ref),
+      ));
     }
     return out;
   }
@@ -193,6 +202,15 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         : (data.approvedAtMillis == null && !data.awaitingApproval
             ? data.results.values.expand((r) => r.photoUrls).toList()
             : const <String>[]);
+    // Teslim edilenlerin şablonları — aynı sırayla (approvedRefs ya da eski
+    // işlerde photoRefs).
+    final deliveredRefs = data.approvedPhotos.isNotEmpty
+        ? data.approvedRefs
+        : data.results.values.expand((r) => r.photoRefs).toList();
+    final deliveredTemplates = [
+      for (var i = 0; i < delivered.length; i++)
+        data.templateFor(i < deliveredRefs.length ? deliveredRefs[i] : null),
+    ];
     final staged = _staged;
 
     return ListView(
@@ -218,7 +236,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
             child: Text('Yok', style: TextStyle(color: AppColors.textMuted)),
           )
         else
-          _photoGrid(delivered),
+          _photoGrid(delivered, deliveredTemplates),
         const SizedBox(height: 24),
         _sectionTitle('REDDEDİLEN KARELER (${data.rejectedFrames.length})'),
         if (data.rejectedFrames.isEmpty)
@@ -278,7 +296,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
   /// Seçilebilir kare ızgarası. Dokunmak SEÇER; büyütmek için uzun bas —
   /// onay ekranında asıl eylem seçim olduğu için kısa dokunuş ona ayrıldı.
-  Widget _selectableGrid(List<({String url, String? ref, String? gate})> items) =>
+  Widget _selectableGrid(List<_Frame> items) =>
       GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -293,9 +311,11 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           final ref = item.ref;
           final isSelected = ref != null && _selected.contains(ref);
           final urls = items.map((e) => e.url).toList();
+          final templates = items.map((e) => e.template).toList();
           return GestureDetector(
             onTap: ref == null ? null : () => _toggle(ref),
-            onLongPress: () => _openFullscreenViewer(context, urls, i),
+            onLongPress: () =>
+                _openFullscreenViewer(context, urls, i, templates: templates),
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -313,6 +333,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     ),
                   ),
                 ),
+                if (item.template != null)
+                  Positioned(top: 4, left: 4, child: _templateThumb(item.template!)),
                 if (item.gate != null)
                   Positioned(
                     left: 4,
@@ -421,7 +443,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 letterSpacing: 0.6)),
       );
 
-  Widget _photoGrid(List<String> urls) => GridView.builder(
+  Widget _photoGrid(List<String> urls, List<OpsTemplate?> templates) =>
+      GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -431,29 +454,83 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         ),
         itemCount: urls.length,
         itemBuilder: (context, i) => GestureDetector(
-          onTap: () => _openFullscreenViewer(context, urls, i),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: CachedNetworkImage(
-              imageUrl: urls[i],
-              fit: BoxFit.cover,
-              placeholder: (c, u) =>
-                  const ColoredBox(color: AppColors.surfaceElevated),
-              errorWidget: (c, u, e) => const ColoredBox(
-                color: AppColors.surfaceElevated,
-                child: Icon(Icons.broken_image_outlined,
-                    color: AppColors.textMuted),
+          onTap: () =>
+              _openFullscreenViewer(context, urls, i, templates: templates),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CachedNetworkImage(
+                  imageUrl: urls[i],
+                  fit: BoxFit.cover,
+                  placeholder: (c, u) =>
+                      const ColoredBox(color: AppColors.surfaceElevated),
+                  errorWidget: (c, u, e) => const ColoredBox(
+                    color: AppColors.surfaceElevated,
+                    child: Icon(Icons.broken_image_outlined,
+                        color: AppColors.textMuted),
+                  ),
+                ),
               ),
-            ),
+              if (i < templates.length && templates[i] != null)
+                Positioned(top: 4, left: 4, child: _templateThumb(templates[i]!)),
+            ],
+          ),
+        ),
+      );
+
+  /// Karenin köşesindeki küçük şablon önizlemesi. Kesin değilse (eski iş,
+  /// yalnızca ilk seçilen şablon biliniyor) kenarlığı soluk ve üstünde "?"
+  /// var.
+  Widget _templateThumb(OpsTemplate t) => Container(
+        width: 30,
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: t.exact ? Colors.white : Colors.white38,
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: t.url,
+                fit: BoxFit.cover,
+                placeholder: (c, u) =>
+                    const ColoredBox(color: AppColors.surfaceElevated),
+                errorWidget: (c, u, e) =>
+                    const ColoredBox(color: AppColors.surfaceElevated),
+              ),
+              if (!t.exact)
+                const Center(
+                  child: Text('?',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                          shadows: [Shadow(blurRadius: 3)])),
+                ),
+            ],
           ),
         ),
       );
 
   /// Tam ekran, pinch-to-zoom destekli fotoğraf görüntüleyici — birden fazla
-  /// fotoğraf arasında kaydırarak geçilebilir (PageView).
-  void _openFullscreenViewer(BuildContext context, List<String> urls, int initialIndex) {
+  /// fotoğraf arasında kaydırarak geçilebilir (PageView). [templates] aynı
+  /// sırada verilirse her sayfada çıktı/şablon geçişi açılır.
+  void _openFullscreenViewer(BuildContext context, List<String> urls, int initialIndex,
+      {List<OpsTemplate?> templates = const []}) {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (context) => _FullscreenPhotoViewer(urls: urls, initialIndex: initialIndex),
+      builder: (context) => _FullscreenPhotoViewer(
+        urls: urls,
+        initialIndex: initialIndex,
+        templates: templates,
+      ),
       fullscreenDialog: true,
     ));
   }
@@ -508,6 +585,32 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         },
       );
 
+  Widget _labeledImage(String url, String label) => Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: CachedNetworkImage(
+              imageUrl: url,
+              height: 220,
+              fit: BoxFit.contain,
+              errorWidget: (c, u, e) => const SizedBox(
+                height: 120,
+                child: Center(
+                  child: Icon(Icons.broken_image_outlined,
+                      color: AppColors.textMuted),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700)),
+        ],
+      );
+
   void _showRejectedFrameDetail(BuildContext context, OpsRejectedFrame f) {
     showModalBottomSheet(
       context: context,
@@ -523,21 +626,23 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           children: [
             if (f.url != null)
               GestureDetector(
-                onTap: () => _openFullscreenViewer(context, [f.url!], 0),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: CachedNetworkImage(
-                    imageUrl: f.url!,
-                    height: 220,
-                    fit: BoxFit.contain,
-                    errorWidget: (c, u, e) => const SizedBox(
-                      height: 120,
-                      child: Center(
-                        child: Icon(Icons.broken_image_outlined,
-                            color: AppColors.textMuted),
+                onTap: () => _openFullscreenViewer(context, [f.url!], 0,
+                    templates: [data.templateFor(f.ref)]),
+                child: Row(
+                  children: [
+                    Expanded(child: _labeledImage(f.url!, 'Çıktı')),
+                    if (data.templateFor(f.ref) != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _labeledImage(
+                          data.templateFor(f.ref)!.url,
+                          data.templateFor(f.ref)!.exact
+                              ? 'Şablon'
+                              : 'Şablon (tahmini)',
+                        ),
                       ),
-                    ),
-                  ),
+                    ],
+                  ],
                 ),
               ),
             const SizedBox(height: 14),
@@ -555,10 +660,20 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
 /// Tam ekran fotoğraf görüntüleyici — InteractiveViewer ile pinch-to-zoom,
 /// PageView ile fotoğraflar arası kaydırma. Ekstra paket gerektirmez.
+///
+/// ŞABLON GEÇİŞİ (2026-10-07): kare bir şablondan üretildiyse app bar'daki
+/// düğme o sayfayı çıktı ile şablon arasında çevirir. Yan yana değil üst
+/// üste çevirmek bilinçli: kafa boyutu/konumu farkı ancak aynı yerde gidip
+/// gelerek göze çarpar.
 class _FullscreenPhotoViewer extends StatefulWidget {
   final List<String> urls;
   final int initialIndex;
-  const _FullscreenPhotoViewer({required this.urls, required this.initialIndex});
+  final List<OpsTemplate?> templates;
+  const _FullscreenPhotoViewer({
+    required this.urls,
+    required this.initialIndex,
+    this.templates = const [],
+  });
 
   @override
   State<_FullscreenPhotoViewer> createState() => _FullscreenPhotoViewerState();
@@ -568,6 +683,10 @@ class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
   late final PageController _controller =
       PageController(initialPage: widget.initialIndex);
   late int _currentIndex = widget.initialIndex;
+  bool _showTemplate = false;
+
+  OpsTemplate? _templateAt(int i) =>
+      i < widget.templates.length ? widget.templates[i] : null;
 
   @override
   void dispose() {
@@ -586,21 +705,46 @@ class _FullscreenPhotoViewerState extends State<_FullscreenPhotoViewer> {
           icon: const Icon(Icons.close_rounded, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: widget.urls.length > 1
-            ? Text('${_currentIndex + 1} / ${widget.urls.length}',
-                style: const TextStyle(color: Colors.white, fontSize: 14))
-            : null,
+        title: Text(
+          [
+            if (widget.urls.length > 1)
+              '${_currentIndex + 1} / ${widget.urls.length}',
+            if (_showTemplate && _templateAt(_currentIndex) != null)
+              _templateAt(_currentIndex)!.exact ? 'ŞABLON' : 'ŞABLON (tahmini)',
+          ].join('  ·  '),
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
+        actions: [
+          if (_templateAt(_currentIndex) != null)
+            TextButton.icon(
+              onPressed: () => setState(() => _showTemplate = !_showTemplate),
+              icon: Icon(
+                _showTemplate ? Icons.photo_rounded : Icons.compare_rounded,
+                color: AppColors.gold,
+                size: 18,
+              ),
+              label: Text(
+                _showTemplate ? 'Çıktı' : 'Şablon',
+                style: const TextStyle(color: AppColors.gold),
+              ),
+            ),
+        ],
       ),
       body: PageView.builder(
         controller: _controller,
         itemCount: widget.urls.length,
-        onPageChanged: (i) => setState(() => _currentIndex = i),
+        onPageChanged: (i) => setState(() {
+          _currentIndex = i;
+          _showTemplate = false;
+        }),
         itemBuilder: (context, i) => InteractiveViewer(
           minScale: 1,
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl: widget.urls[i],
+              imageUrl: _showTemplate && i == _currentIndex && _templateAt(i) != null
+                  ? _templateAt(i)!.url
+                  : widget.urls[i],
               fit: BoxFit.contain,
               placeholder: (c, u) => const Center(
                 child: CircularProgressIndicator(color: AppColors.gold),
