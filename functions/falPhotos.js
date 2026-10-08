@@ -3234,6 +3234,20 @@ function humanRejectionReason(gate) {
 // Eskiden yalnızca İLK seçilen şablonlar templateNames'e yazılıyordu; yedeğe
 // geçilen kare (ör. 9496348c chunk 1) kendi şablonuyla incelenemiyordu.
 const CHUNK_TEMPLATE = new Map();
+
+// AĞIR SON KATMAN KİLİDİ (2026-10-08 gerçek olay, iş 6f9e524e). Kafa ölçeği
+// (headScale.js) ve ten alanı (skinTone.js) kareyi tam çözünürlükte birkaç
+// kez açıyor ve segmentasyon modelleri çalıştırıyor. 10 chunk paralel
+// koştuğu için 3 chunk aynı anda bu adıma gelince süreç 2GiB'ı aştı ve
+// öldü ("Memory limit of 2048 MiB exceeded") — o 3 kare kayboldu, iş zaman
+// aşımına düştü. Bu katmanlar kare başına ~1-2 sn sürdüğü için sıraya almak
+// toplam süreyi neredeyse etkilemez, tepe belleği ise tek kareye indirir.
+let _postLayerTail = Promise.resolve();
+function withPostLayerLock(fn) {
+  const run = _postLayerTail.then(fn, fn);
+  _postLayerTail = run.catch(() => {});
+  return run;
+}
 const chunkTemplateKey = (jobId, styleId, chunkIdx) => `${jobId}/${styleId}/${chunkIdx}`;
 
 async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, meta) {
@@ -5050,55 +5064,61 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       console.error("OpenAI yolu: kafa yerleşimi ölçümü hata verdi (atlanıyor):", e);
     }
 
-    // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
-    // çöz). Saç dahil kafa/omuz oranı şablondakinden belirgin büyükse kafa
-    // boyun tabanına sabit yumuşak bir sıkıştırmayla küçültülür (bkz.
-    // headScale.js). Şablon eşi KONUM ÖLÇÜM ile aynı kurala göre seçilir:
-    // iki görüntü aynı kadraj uzayında olmalı. Emin olunamayan her durumda
-    // (omuz kadraj dışı, kafa başka bir şeye değiyor, sahne yeniden
-    // kadrajlanmış) dokunulmaz.
-    try {
-      let tplForScale = null;
-      if (recompositedOk) tplForScale = restore.originalBuf;
-      else if (restore) tplForScale = Buffer.isBuffer(templateInput) ? templateInput : null;
-      else tplForScale = templateSourceBuf;
-      if (!tplForScale) {
-        console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
-      } else {
-        const { correctHeadScale } = require("./headScale");
-        const hs = await correctHeadScale(deliverBuf, tplForScale);
-        const n = (v) => (v != null ? v.toFixed(3) : "null");
-        if (hs.applied && hs.buf) {
-          deliverBuf = hs.buf;
-          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI s=${n(hs.s)} (ham=${n(hs.rawS)}) sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)} taşınanPx=${hs.movedPx}`);
+    // AĞIR SON KATMANLAR SIRAYLA (2026-10-08, bellek aşımı olayı — bkz.
+    // POST_LAYER_LOCK): kafa ölçeği ve ten alanı tam çözünürlüklü kopyalar
+    // ve segmentasyon modelleri kullanır; paralel chunk'lar aynı anda
+    // girince süreç 2GiB'ı aştı.
+    await withPostLayerLock(async () => {
+      // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
+      // çöz). Saç dahil kafa/omuz oranı şablondakinden belirgin büyükse kafa
+      // boyun tabanına sabit yumuşak bir sıkıştırmayla küçültülür (bkz.
+      // headScale.js). Şablon eşi KONUM ÖLÇÜM ile aynı kurala göre seçilir:
+      // iki görüntü aynı kadraj uzayında olmalı. Emin olunamayan her durumda
+      // (omuz kadraj dışı, kafa başka bir şeye değiyor, sahne yeniden
+      // kadrajlanmış) dokunulmaz.
+      try {
+        let tplForScale = null;
+        if (recompositedOk) tplForScale = restore.originalBuf;
+        else if (restore) tplForScale = Buffer.isBuffer(templateInput) ? templateInput : null;
+        else tplForScale = templateSourceBuf;
+        if (!tplForScale) {
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
         } else {
-          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] s=${n(hs.s)} sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)}`);
+          const { correctHeadScale } = require("./headScale");
+          const hs = await correctHeadScale(deliverBuf, tplForScale);
+          const n = (v) => (v != null ? v.toFixed(3) : "null");
+          if (hs.applied && hs.buf) {
+            deliverBuf = hs.buf;
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI s=${n(hs.s)} (ham=${n(hs.rawS)}) sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)} taşınanPx=${hs.movedPx}`);
+          } else {
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] s=${n(hs.s)} sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)}`);
+          }
         }
+      } catch (e) {
+        console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
       }
-    } catch (e) {
-      console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
-    }
 
-    // TEN TONU ALANI (2026-10-07, kullanıcı kararı: elemek yerine çöz).
-    // Vücut derisini segmentasyon modeliyle bulur ve kolları/elleri/boynu
-    // yüz tonuna çeker; kolun bir yerinin koyu bir yerinin açık kalmasını
-    // (iki tonlu kol) giderir (bkz. skinTone.js). Kutuyla sınırlı EL TONU
-    // katmanından SONRA, tam kadrajda çalışır — o katmanın kutu dışında
-    // bıraktığı kol parçası da burada düzelir. Kıyafet/aksesuar boyanmaz.
-    try {
-      const { correctSkinToneField } = require("./skinTone");
-      const st = await correctSkinToneField(deliverBuf);
-      const n = (v) => (v != null ? v.toFixed(1) : "null");
-      const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"}`;
-      if (st.applied && st.buf) {
-        deliverBuf = st.buf;
-        console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
-      } else {
-        console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${st.reason}] ${ölçü}`);
+      // TEN TONU ALANI (2026-10-07, kullanıcı kararı: elemek yerine çöz).
+      // Vücut derisini segmentasyon modeliyle bulur ve kolları/elleri/boynu
+      // yüz tonuna çeker; kolun bir yerinin koyu bir yerinin açık kalmasını
+      // (iki tonlu kol) giderir (bkz. skinTone.js). Kutuyla sınırlı EL TONU
+      // katmanından SONRA, tam kadrajda çalışır — o katmanın kutu dışında
+      // bıraktığı kol parçası da burada düzelir. Kıyafet/aksesuar boyanmaz.
+      try {
+        const { correctSkinToneField } = require("./skinTone");
+        const st = await correctSkinToneField(deliverBuf);
+        const n = (v) => (v != null ? v.toFixed(1) : "null");
+        const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"}`;
+        if (st.applied && st.buf) {
+          deliverBuf = st.buf;
+          console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
+        } else {
+          console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${st.reason}] ${ölçü}`);
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
       }
-    } catch (e) {
-      console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
-    }
+    });
 
     const textured = await addPhoneCameraTexture(deliverBuf);
     // holdForApproval → staging; aksi halde doğrudan dating_results.
@@ -5372,7 +5392,12 @@ exports.startPhotoGeneration = onCall(
   {
     secrets: [FAL_KEY, OPENAI_KEY, QWEN_KEY],
     region: "europe-west1",
-    memory: "2GiB",
+    // 2GiB -> 4GiB (2026-10-08 gerçek olay, iş 6f9e524e): kafa ölçeği ve ten
+    // alanı katmanları eklendikten sonraki ilk üretimde süreç "Memory limit
+    // of 2048 MiB exceeded with 2060 MiB used" ile öldü; o an son adımdaki 3
+    // kare kayboldu ve iş "Zaman aşımı" ile düştü. Katmanlar ayrıca
+    // POST_LAYER_LOCK ile sıraya alındı; bu artış güvenlik payı.
+    memory: "4GiB",
     timeoutSeconds: 900,
   },
   async (request) => {

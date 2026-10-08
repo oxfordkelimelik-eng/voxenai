@@ -69,6 +69,12 @@ async function ensureModel() {
           weights.set(op.in[1], tf.keep(tf.transpose(tensorOf(op.in[1]), [1, 2, 0, 3])));
         }
       }
+      // Düzene çevrilmiş ağırlıkların ham kopyası artık gereksiz — wasm
+      // belleği büyüdükten sonra küçülmediği için hemen bırakılır (2026-10-08
+      // bellek aşımı olayı, bkz. falPhotos.js POST_LAYER_LOCK).
+      for (const id of weights.keys()) {
+        if (prepared.has(id)) { prepared.get(id).dispose(); prepared.delete(id); }
+      }
       return { tf, graph, consts, tensorOf, weights };
     })().catch((e) => {
       _modelPromise = null;
