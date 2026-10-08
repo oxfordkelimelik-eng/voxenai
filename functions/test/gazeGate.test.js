@@ -191,3 +191,28 @@ test("uç değerler makul yön verir (ölçüm bozulursa yakalanır)", () => {
   assert.equal(dirFromIrisX(0.0), "their RIGHT");
   assert.equal(dirFromIrisX(1.0), "their LEFT");
 });
+
+// POZA GÖRE REFERANS SIRASI (2026-10-08).
+const { poseMatchedOrder } = require("../gazeGate");
+
+test("poz: şablona belirgin yakın selfie öne alınır, çapa ikinci sıraya iner", () => {
+  const p = poseMatchedOrder([0.45, 0.08, 0.30], 0.07);
+  assert.equal(p.swapped, true);
+  assert.deepEqual(p.order, [1, 0, 2]);
+});
+
+test("poz: kazanç küçükse kimlik çapası yerinde kalır", () => {
+  const p = poseMatchedOrder([0.15, 0.06, 0.40], 0.07);
+  assert.equal(p.swapped, false);
+  assert.deepEqual(p.order, [0, 1, 2]);
+});
+
+test("poz: şablon ya da çapa ölçülemediyse sıra değişmez", () => {
+  assert.equal(poseMatchedOrder([0.5, 0.1], null).swapped, false);
+  assert.equal(poseMatchedOrder([null, 0.1], 0.1).swapped, false);
+});
+
+test("poz: ölçülemeyen selfie atlanır", () => {
+  const p = poseMatchedOrder([0.6, null, 0.1], 0.05);
+  assert.deepEqual(p.order, [2, 0, 1]);
+});

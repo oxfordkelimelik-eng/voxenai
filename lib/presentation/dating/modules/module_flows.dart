@@ -781,7 +781,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     final files = await Navigator.of(context).push<List<File>>(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => const GuidedCaptureScreen(kind: CaptureKind.face),
+        builder: (_) => const GuidedCaptureScreen(
+          kind: CaptureKind.face,
+          angles: kAiFaceAngles,
+        ),
       ),
     );
     if (files == null || files.length != DatingConfig.faceCaptureCount) return;

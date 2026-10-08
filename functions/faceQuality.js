@@ -440,7 +440,7 @@ function profileDegreeFromLandmarks(landmarks) {
  * kaldırılması, dosyanın başındaki not). Kimlik vektörü bu karelerden
  * ortalanır; bestIndex/bestBox de bunlar arasından seçilir.
  */
-async function analyzeReferences(buffers) {
+async function analyzeReferences(buffers, { dedup = true } = {}) {
   const unclearIndices = [];
   // Gözü APAÇIK kapalı (kırpma anı) yüz kareleri — kullanıcıdan değiştirmesi
   // istenir. Gözü kısık olanlar buraya GİRMEZ (bkz. CLOSED_EYE_MAX).
@@ -557,7 +557,7 @@ async function analyzeReferences(buffers) {
   // işaretle (kullanıcı onu farklı bir açıyla değiştirsin). Muhafazakâr eşik
   // — bkz. DEDUP_MIN_DISTANCE.
   const duplicateIndices = [];
-  for (let a = 0; a < faceDescriptors.length; a++) {
+  for (let a = 0; dedup && a < faceDescriptors.length; a++) {
     for (let b = a + 1; b < faceDescriptors.length; b++) {
       const dist = euclideanDistanceLocal(faceDescriptors[a].d, faceDescriptors[b].d);
       if (dist < DEDUP_MIN_DISTANCE && !duplicateIndices.includes(faceDescriptors[b].idx)) {
@@ -909,6 +909,34 @@ async function detectMainFace(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
         x: b.x / scale, y: b.y / scale,
         width: b.width / scale, height: b.height / scale,
       },
+    };
+  } finally {
+    tensor.dispose();
+  }
+}
+
+/**
+ * Ana yüzün 68 noktası, ORİJİNAL görsel koordinatlarında (kafa ölçeği ve
+ * bakış hizalaması için). En büyük yüz seçilir. Döner: { box, pts } | null.
+ */
+async function faceLandmarks(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
+  const faceapi = await ensureModelsLoaded();
+  const { tensor, scale } = await bufferToTensorScaled(buf);
+  try {
+    const all = await faceapi
+      .detectAllFaces(tensor, new faceapi.SsdMobilenetv1Options({ minConfidence }))
+      .withFaceLandmarks();
+    if (!all.length) return null;
+    let best = all[0];
+    for (const f of all) {
+      const b = f.detection.box;
+      if (b.width * b.height > best.detection.box.width * best.detection.box.height) best = f;
+    }
+    const b = best.detection.box;
+    return {
+      box: { x: b.x / scale, y: b.y / scale, width: b.width / scale, height: b.height / scale },
+      pts: best.landmarks.positions.map((p) => ({ x: p.x / scale, y: p.y / scale })),
+      score: best.detection.score,
     };
   } finally {
     tensor.dispose();
@@ -1972,15 +2000,13 @@ function pitchRatioFromLandmarks(landmarks) {
 }
 
 /** Yüz kutusunu NORMALİZE koordinatlarda (0-1) + açı vekilleriyle döner. */
-async function detectPlacement(buf) {
+async function detectPlacement(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
   const faceapi = await ensureModelsLoaded();
   const { tensor } = await bufferToTensorScaled(buf);
   try {
     const [h, w] = tensor.shape;
     const result = await faceapi
-      .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
-        minConfidence: MIN_DETECTION_CONFIDENCE,
-      }))
+      .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({ minConfidence }))
       .withFaceLandmarks();
     if (!result) return null;
     const b = result.detection.box;
@@ -2000,10 +2026,10 @@ async function detectPlacement(buf) {
  * Yalnızca yaw (kafanın yana dönüklüğü) ölçer: 0 = tam önden, 1 = tam profil.
  * Ölçülemezse null (fail-safe — çağıran kapı sessizce devre dışı kalır).
  */
-async function headYawOf(buf) {
+async function headYawOf(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
   try {
     if (!buf) return null;
-    const p = await detectPlacement(buf);
+    const p = await detectPlacement(buf, minConfidence);
     return p ? p.yaw : null;
   } catch (e) {
     console.error("Yaw ölçümü hata verdi (atlanıyor):", e.message || e);
@@ -2409,6 +2435,7 @@ module.exports = {
   // aynı fonksiyon olmazsa iki sayı karşılaştırılabilir olmazdı.
   assessImageQuality,
   detectMainFace,
+  faceLandmarks,
   FACE_MATCH_THRESHOLD,
   PROFILE_UNRELIABLE_MIN,
 };

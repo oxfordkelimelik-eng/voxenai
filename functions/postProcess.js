@@ -256,11 +256,50 @@ function computeFaceCrop(buf, box, currentRatio, targetRatio, imgW, imgH) {
   return { left, top, cropW, cropH, imgW, imgH };
 }
 
-async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
+// Kişiyi kadraja sığdırmak için kırpma en fazla bu yüz oranına kadar
+// genişletilir (TEMPLATE_MIN_FACE_RATIO 0.13'ün biraz altı).
+const PERSON_FIT_MIN_FACE_RATIO = 0.10;
+
+/**
+ * KIRPMA KİŞİYİ KESMESİN (2026-10-08, 272e656a c1). Kırpma dikdörtgeni
+ * kolun içinden geçiyordu: geri yerleştirmede kenarın içinde modelin çizdiği
+ * (birkaç piksel kaymış) kol, dışında şablonun kolu kaldı; yumuşak kenar
+ * ikisini üst üste bindirip kolu silikleştirdi. Kırpma, yüz oranı
+ * PERSON_FIT_MIN_FACE_RATIO'nun altına düşmeyecek kadar genişletilip kişinin
+ * kutusunu (personBox: {x0,y0,x1,y1}) içine alacak şekilde kaydırılır.
+ * En-boy oranı korunur. Sığmıyorsa sığabildiği kadar. SAF fonksiyon.
+ */
+function fitCropToPerson(geo, personBox, currentRatio) {
+  if (!geo || !personBox) return geo;
+  const { imgW, imgH } = geo;
+  const m = Math.round(0.03 * Math.max(imgW, imgH));
+  const px0 = Math.max(0, personBox.x0 - m);
+  const px1 = Math.min(imgW, personBox.x1 + m);
+  const py0 = Math.max(0, personBox.y0 - m);
+  const py1 = Math.min(imgH, personBox.y1 + m);
+  const inside = px0 >= geo.left && px1 <= geo.left + geo.cropW && py0 >= geo.top && py1 <= geo.top + geo.cropH;
+  if (inside) return geo;
+  const aspect = geo.cropW / geo.cropH;
+  const maxW = Math.min(imgW, Math.floor((currentRatio / PERSON_FIT_MIN_FACE_RATIO) * imgW), Math.floor(imgH * aspect));
+  const cropW = Math.min(Math.max(px1 - px0, Math.ceil((py1 - py0) * aspect)), maxW);
+  if (cropW <= geo.cropW) return geo;
+  const cropH = Math.round(cropW / aspect);
+  // Kişi kutusu sığıyorsa onu ortala, sığmıyorsa eski kırpmanın merkezinde
+  // kal (yüz kadrajda kalsın).
+  const place = (lo, hi, size, oldLo, oldSize, max) => {
+    const c = hi - lo <= size ? (lo + hi) / 2 : oldLo + oldSize / 2;
+    return Math.max(0, Math.min(Math.round(c - size / 2), max - size));
+  };
+  const left = place(px0, px1, cropW, geo.left, geo.cropW, imgW);
+  const top = place(py0, py1, cropH, geo.top, geo.cropH, imgH);
+  return { left, top, cropW, cropH, imgW, imgH, fitted: true };
+}
+
+async function cropForFaceRatio(buf, box, currentRatio, targetRatio, personBox = null) {
   try {
     if (!box || !(currentRatio > 0) || !(targetRatio > 0)) return null;
     const meta = await sharp(buf).metadata();
-    const geo = computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height);
+    const geo = fitCropToPerson(computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height), personBox, currentRatio);
     if (!geo) return null;
 
     // NOT (2026-07-29): boyutları 16'nın katına hizalamayı denedim, sonra geri
@@ -291,11 +330,11 @@ async function cropForFaceRatio(buf, box, currentRatio, targetRatio) {
  * nesnesi döner — recompositeIntoOriginal bunu ihtiyaç duyar (bkz. orada).
  * Döner: { left, top, cropW, cropH, imgW, imgH } | null.
  */
-async function computeFaceCropGeometry(buf, box, currentRatio, targetRatio) {
+async function computeFaceCropGeometry(buf, box, currentRatio, targetRatio, personBox = null) {
   try {
     if (!box || !(currentRatio > 0) || !(targetRatio > 0)) return null;
     const meta = await sharp(buf).metadata();
-    return computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height);
+    return fitCropToPerson(computeFaceCrop(buf, box, currentRatio, targetRatio, meta.width, meta.height), personBox, currentRatio);
   } catch (e) {
     console.error("Kırpma geometrisi hesaplanamadı:", e);
     return null;
@@ -392,4 +431,5 @@ module.exports = {
   cropForFaceRatio,
   computeFaceCropGeometry,
   recompositeIntoOriginal,
+  fitCropToPerson,
 };

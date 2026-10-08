@@ -268,17 +268,22 @@ test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
 // Gözle doğrulandı (9f0d9406 chunk2, fark 0.570): şablon cepheye yakın,
 // çıktı üç-çeyrek dönmüş — metrik gerçek kusuru ölçüyor.
 
-// 2026-10-07: P800 — kafa/boyun ve bakış en üstte ("CHECK THESE TWO FIRST"),
-// ardından kimlik (hâlâ en yüksek öncelik), saç, ten.
-test("kafa geometrisi ve bakış tabandan korunuyor", () => {
+// 2026-10-08: P800 — kafa yönü + bakış EN ÜSTTE ve "en önemli kural"
+// (kullanıcı: "bakış açısı tamamen aynı olmalı"), ardından kafa/boyun,
+// yüz ışığı, kimlik, saç, ten.
+test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   const m = /function buildEditPromptP800[\s\S]*?\n}\r?\n/.exec(FAL);
   assert.ok(m, "buildEditPromptP800 bulunamadı");
   const joined = m[0].replace(/"\s*\+\s*"/g, "");
   assert.match(joined, /Use the selfies only for/);
-  assert.match(joined, /CHECK THESE TWO FIRST[\s\S]*A\) HEAD ON THE BODY[\s\S]*B\) GAZE[\s\S]*1\) IDENTITY \(highest priority\)/);
-  assert.match(joined, /never turn the head further or toward the camera/);
+  assert.match(joined, /CHECK THESE THREE FIRST[\s\S]*A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
+  assert.match(joined, /never turn the head\s*toward the camera, never turn it further away/);
   assert.match(joined, /look at exactly the same point as the BASE person's eyes/);
+  assert.match(joined, /black and\s*white, the whole output, including the face, is black and white/);
   assert.match(joined, /not a face swap/);
+  // Eski "yüzü yeniden aydınlatma" talimatı sahne ışığını yüze vermeyi
+  // yasaklıyordu (9d9507f0 c9 gün batımı) — geri gelmemeli.
+  assert.doesNotMatch(joined, /Do not relight the face/);
 });
 
 test("eski salt-yasak metni yerinde kalmamış (iki kural çakışmasın)", () => {

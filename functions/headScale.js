@@ -1,40 +1,60 @@
-// KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: "elemek yerine çöz").
+// KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: "elemek yerine çöz";
+// 2026-10-08: "kafa büyümesi/küçülmesi tamamen omuz oranına göre").
 //
-// SORUN: çıktılarda kafa, şablondaki gövdeye göre büyük kalıyordu. Mevcut iki
-// ölçüm bunu göremiyordu:
-//   - sayısal "büyüme" yalnızca YÜZ kutusunu ölçer; saç ve kafatası dahil
-//     değil. Hedefin saçı şablondakinden hacimliyse yüz aynı boyda kalır ama
-//     kafa silueti büyür (9496348c c9: yüz ölçeği 0.98, siluet ~%10 büyük).
-//   - Vision'ın kafa/omuz sayıları ölçüm değil tahmin: 103 satırın neredeyse
-//     hepsi "kafa 20 omuz 50 oran 2.5", taban ve çıktı için aynı.
+// Çıktının kafası şablondaki kafayla aynı büyüklüğe getirilir. Gövde
+// şablonla aynı kadrajdaysa (kişi maskeleri örtüşüyor) omuzlar da aynıdır,
+// yani "kafa/omuz oranı şablonla aynı" = "kafa şablon kafasıyla aynı boyda".
 //
-// ÇÖZÜM: kişi segmentasyonu (MediaPipe selfie_segmentation, tfjs, yerel, ~50 ms)
-// ile şablonda ve çıktıda saç dahil kafa siluetini ve omuz genişliğini ölç.
-// Çıktının kafa/omuz oranı şablonunkinden belirgin büyükse kafayı (saçıyla)
-// boyun tabanına sabitlenmiş bir dönüşümle küçült; açılan halkayı ŞABLONUN
-// aynı noktasındaki arka planla doldur. Şablon zaten doğru cevabı taşıyor:
-// çıktı onun düzenlenmiş hâli, arka plan aynı yerde.
+// ÖLÇÜ GEÇMİŞİ: Vision'ın kafa/omuz sayıları tahmindi; yüz kutusu çeneyi ve
+// sakalı kaçırdı; saç dahil silüet şablonun hacimli saçıyla kör oldu. Şimdiki
+// ölçü yüz noktaları (bkz. landmarkSizeRatio). Silüet yalnızca dönüşümün
+// geometrisi (kafa tepesi/genişliği) için kullanılır.
 //
-// Yüz yeniden çizilmez, yalnızca ölçeklenir — kimlik korunur. Her adım
-// emin olamadığında (omuz kadraj dışı, kafa başka bir şeye değiyor, maske
-// belirsiz) HİÇBİR ŞEY yapmaz ve sebebini döner.
+// Yüz yeniden çizilmez, yalnızca ölçeklenir — kimlik korunur. Emin
+// olunamayan her durumda (yüz yok, gövde örtüşmüyor) HİÇBİR ŞEY yapmaz ve
+// sebebini döner.
 
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
 
 const SEG_SIZE = 256;
-// Uygulama eşiği: çıktı kafası şablona göre bu kadar küçültülmesi
-// gerekiyorsa düzeltilir (0.95 = %5'ten fazla büyük). Altı modelin doğal
-// sapması; dokunulmaz. Kalibrasyon: HEAD SCALE logları biriktikçe gözden geçir.
-const APPLY_BELOW = 0.95;
-// Tek seferde en fazla bu kadar küçült. Daha büyük sapma ölçüm hatası ya da
-// kadraj değişimi (model tüm sahneyi yakınlaştırmış) olabilir.
-const MIN_SCALE = 0.82;
-// Silüet oranı eşleşmesinin ötesinde ek küçültme çarpanı. 0.94 → şablonun %6
-// altını hedefle; profilden/perspektiften kaynaklanan görsel büyüklük algısını
-// dengelemek için (kullanıcı doğrulaması: 0.924→0.87 doğal görünüyor).
-const CORRECTION_OVERSHOOT = 0.94;
+// ÖLÇÜ (2026-10-08, iş bb2cc441): kafa boyu artık YÜZ NOKTALARIYLA ölçülür
+// (göz-çene, kaş-çene, burun-çene, elmacık genişliği; dördünün medyanı).
+// Yüz kutusu ve silüet gözle görülen büyüklüğü yakalayamadı: c4'te çıktının
+// çenesi belirgin aşağıdaydı, kutu %1 fark dedi; noktalar %12-14 dedi.
+// Saç (afro/hacimli şablon saçı) ve gözlük bu ölçüye girmez.
+//
+// HEDEF = ŞABLON (kullanıcı kararı: "tamamen omuz oranına göre"). Fazladan
+// küçültme çarpanı YOK — 0.94 aşımı c1'i şablondan küçük bıraktı. Düzeltme
+// iki yönlüdür: büyük kafa küçülür, küçük kafa büyür.
+//
+// Bu kadar sapma ölçü gürültüsü; dokunulmaz (|1-s| < APPLY_MIN_DELTA).
+const APPLY_MIN_DELTA = 0.04;
+// Tek seferde en fazla. Daha büyük sapma ölçü hatası ya da yeniden kadraj.
+const MIN_SCALE = 0.8;
+const MAX_SCALE = 1.05;
+// Gövdeler bu kadar örtüşüyorsa çıktı şablonla aynı kadrajda ve aynı
+// omuzlara sahiptir; gövde ölçeği 1 alınır. Silüet omuz ölçümü tek başına
+// gürültülüydü (bb2cc441 c3 1.12, c9 2.36 — ikisi de aynı gövde).
+const BODY_ALIGNED_IOU = 0.8;
+// İkinci kanıt: yüz merkezi şablondakinden en fazla bu kadar (şablon yüz
+// genişliği cinsinden) kaymışsa sahne yeniden kadrajlanmamıştır. Karanlık
+// kıyafette kişi maskesi gövdeyi göremiyor (bb2cc441 c9: IoU 0.28, poz aynı).
+const FACE_ALIGNED_SHIFT = 0.35;
+// ALGILANAN KAFA = YÜZ × TOPLAM KAFA HACMİ (2026-10-08, iş 9d9507f0 c8).
+// Kullanıcı geri bildirimi iki yöne de geldi: afro şablonda yüz büyükken
+// "kafa büyük" (272e656a c2/c5: yüz 1.13, hacim 1.04), gür saç+sakal+
+// kulaklıklı şablonda yüz eşitken "kafa çok küçük" (9d9507f0 c8: yüz 1.01,
+// hacim 0.95). İkisinin geometrik ortalaması bütün şikâyetlerle örtüştü.
+// Hacim (saç ∪ yüz derisi, selfie_multiclass) karanlık sahnede çöküyor
+// (bb2cc441 c9 siyah-beyaz: yüz 1.14, hacim 0.86) — yüzden bu kadar
+// saparsa hacim yok sayılır.
+const VOLUME_TRUST_MAX_DIFF = 0.2;
+// Küçültme toplam kafa hacmini şablonun bu oranının altına indiremez
+// (c8: 0.886 küçültme hacmi 0.95'e indirdi, "çok küçültmüşsün").
+const VOLUME_FLOOR = 0.97;
+const VOLUME_CEIL = 1.03;
 
 let _segPromise = null;
 
@@ -201,25 +221,93 @@ function approxSilFromFaceBox(box) {
   return { ok: true, top, chin, cx, headW, headH: chin - top, shoulderW: Math.round(box.width * 2.5) };
 }
 
+const median = (a) => {
+  const v = a.filter((x) => Number.isFinite(x)).sort((x, y) => x - y);
+  if (!v.length) return null;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+
 /**
- * Şablon ve çıktı ölçümlerinden küçültme oranı. SAF fonksiyon.
- * s = (şablon kafa/omuz) / (çıktı kafa/omuz); genişlik ve yükseklik
- * oranlarının ortalaması. s < 1 → çıktı kafası büyük.
+ * Yüz noktalarından yüz büyüklüğü oranı (çıktı / şablon). SAF fonksiyon.
+ * pts: face-api 68 nokta, iki görüntü AYNI tuvalde. Dört ölçünün medyanı;
+ * üçü sakaldan ve saçtan bağımsız (kaş-burun ucu, göz-burun ucu, burun
+ * boyu). Elmacık genişliği yaw'dan, göz-çene sakaldan etkilendiği için
+ * tek başına belirleyici değil (9d9507f0 c8: gür sakallı şablonda göz-çene
+ * yüzü %13 büyük gösterdi, burun ölçüleri ~%0).
  */
-function planHeadScale(tpl, out) {
-  if (!tpl || !tpl.ok) return { apply: false, reason: `template:${tpl ? tpl.reason : "none"}` };
-  if (!out || !out.ok) return { apply: false, reason: `output:${out ? out.reason : "none"}` };
-  const sW = (tpl.headW / tpl.shoulderW) / (out.headW / out.shoulderW);
-  const sH = (tpl.headH / tpl.shoulderW) / (out.headH / out.shoulderW);
-  const s = (sW + sH) / 2;
-  // Omuzlar çıktıda şablona göre çok farklıysa model sahneyi yeniden
-  // kadrajlamış (ör. 9496348c c2): oran karşılaştırması anlamını yitirir.
-  const shoulderRatio = out.shoulderW / tpl.shoulderW;
-  if (shoulderRatio < 0.8 || shoulderRatio > 1.25) {
-    return { apply: false, reason: "reframed", s, sW, sH, shoulderRatio };
+function landmarkSizeRatio(ptsO, ptsT) {
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mean = (ps) => ({ x: ps.reduce((q, p) => q + p.x, 0) / ps.length, y: ps.reduce((q, p) => q + p.y, 0) / ps.length });
+  const m = (P) => {
+    const eyes = mean(P.slice(36, 48));
+    const brows = mean(P.slice(17, 27));
+    return {
+      eyeChin: d(eyes, P[8]),
+      browNose: d(brows, P[33]),
+      eyeNose: d(eyes, P[33]),
+      noseLen: d(P[27], P[33]),
+    };
+  };
+  const o = m(ptsO);
+  const t = m(ptsT);
+  const parts = {};
+  for (const k of Object.keys(o)) parts[k] = t[k] > 0 ? o[k] / t[k] : NaN;
+  return { ratio: median(Object.values(parts)), parts };
+}
+
+/**
+ * Algılanan kafa oranı: yüz ile toplam kafa hacminin geometrik ortalaması.
+ * Hacim yoksa ya da yüzden çok sapıyorsa (karanlık sahne) yalnızca yüz. SAF.
+ */
+function perceivedHeadRatio(faceRatio, volRatio) {
+  if (!(faceRatio > 0)) return { ratio: null, volUsed: false };
+  if (!(volRatio > 0) || Math.abs(volRatio - faceRatio) > VOLUME_TRUST_MAX_DIFF) return { ratio: faceRatio, volUsed: false };
+  return { ratio: Math.sqrt(faceRatio * volRatio), volUsed: true };
+}
+
+/**
+ * Ölçekleme kararı. SAF. s = gövdeÖlçeği / kafaOranı; s<1 küçült, s>1 büyüt.
+ */
+function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRatio = null } = {}) {
+  if (!(faceRatio > 0)) return { apply: false, reason: "no-measure" };
+  const aligned = bodyIou >= BODY_ALIGNED_IOU || faceShift <= FACE_ALIGNED_SHIFT;
+  const ph = perceivedHeadRatio(faceRatio, volRatio);
+  if (!aligned) return { apply: false, reason: "reframed", rawS: 1 / ph.ratio, volUsed: ph.volUsed };
+  let rawS = 1 / ph.ratio;
+  // Hacim tabanı/tavanı: düzeltme toplam kafa hacmini şablondan belirgin
+  // küçük/büyük bırakmasın.
+  if (ph.volUsed) {
+    if (rawS < 1) rawS = Math.max(rawS, VOLUME_FLOOR / volRatio);
+    else rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
   }
-  if (s >= APPLY_BELOW) return { apply: false, reason: "within-tolerance", s, sW, sH, shoulderRatio };
-  return { apply: true, reason: null, s: Math.max(MIN_SCALE, s * CORRECTION_OVERSHOOT), rawS: s, sW, sH, shoulderRatio };
+  if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed };
+  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, rawS)), volUsed: ph.volUsed };
+}
+
+/**
+ * Toplam kafa hacmi oranı (çıktı / şablon): saç ∪ yüz derisi alanının
+ * karekökü, yüz kutusunun çevresinde (gövde ve arka plandaki insanlar
+ * hariç). Hata/ölçüsüzlükte null.
+ */
+async function headVolumeRatio(oRgb, tRgb, W, H, boxO, boxT) {
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const area = async (rgb, box) => {
+    const P = await classProbs(rgb, W, H);
+    const x0 = Math.max(0, Math.round(box.x - 1.2 * box.width)), x1 = Math.min(W, Math.round(box.x + 2.2 * box.width));
+    const y0 = Math.max(0, Math.round(box.y - 1.4 * box.height)), y1 = Math.min(H, Math.round(box.y + 1.6 * box.height));
+    let n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = y * W + x;
+        if (P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] > 0.5) n++;
+      }
+    }
+    return n;
+  };
+  const ao = await area(oRgb, boxO);
+  const at = await area(tRgb, boxT);
+  return ao > 0 && at > 0 ? Math.sqrt(ao / at) : null;
 }
 
 function bilinear(src, W, H, x, y, c) {
@@ -237,8 +325,8 @@ function bilinear(src, W, H, x, y, c) {
 }
 
 /**
- * Kafayı yumuşak bir "liquify" sıkıştırmasıyla küçültür. O: RGB raw buffer.
- * sil: çıktının siluet ölçümü, faceH: yüz kutusu yüksekliği, s: ölçek (<1).
+ * Kafayı yumuşak bir "liquify" dönüşümüyle ölçekler. O: RGB raw buffer.
+ * sil: çıktının siluet ölçümü, faceH: yüz yüksekliği, s: ölçek (<1 küçült, >1 büyüt).
  *
  * NEDEN DELİK AÇIP DOLDURMUYOR: ilk sürüm kafayı küçültüp açılan halkayı
  * şablonun arka planıyla dolduruyordu. Model arka planı şablondan birebir
@@ -261,24 +349,23 @@ function pinchHead(O, W, H, sil, faceH, s) {
   const rb = sil.headH / 2;
   const R = 2.2; // etkinin sıfıra indiği elips yarıçapı (kafa yarıçapı cinsinden)
   const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
-  // Kafa tepesinin 0.4 yarıçap üstünde etki tamamen sıfırlanır; arka plan bozulmaz.
-  const TOP_FADE = 0.4;
-  const topLimit = sil.top - TOP_FADE * rb;
+  // ÜST SÖNDÜRME YOK (2026-10-08): kafa tepesinin üstünde etkiyi kesmek
+  // eşlemeyi katladı — saçın tepesi yerinde kalıp kafadan kopuk bir halka
+  // oldu (272e656a c1/c5). Kafanın çevresinde bükülen arka plan artık
+  // sceneRestore ile şablondan geri konuyor (şablondaki kişinin kapladığı
+  // alan hariç — orada esnetilmiş çıktı kalır).
   const effect = (x, y) => {
     if (y >= neck) return 0;
-    if (y < topLimit) return 0;
     const r = Math.hypot((x - hx) / ra, (y - hy) / rb);
     const radial = 1 - smooth((r - 1) / (R - 1));
     const vert = y <= chin ? 1 : 1 - (y - chin) / (neck - chin);
-    const topFade = y >= sil.top ? 1 : smooth((y - topLimit) / (TOP_FADE * rb));
-    return radial * vert * topFade;
+    return radial * vert;
   };
   const kOf = (x, y) => 1 - (1 - s) * effect(x, y);
 
   const x0 = Math.max(0, Math.floor(hx - R * ra - 2));
   const x1 = Math.min(W - 1, Math.ceil(hx + R * ra + 2));
-  // y0: kafa tepesinin TOP_FADE yarıçap üstünden başla; radyal sınır daha yüksekse onu al.
-  const y0 = Math.max(0, Math.floor(Math.max(topLimit, hy - R * rb) - 2));
+  const y0 = Math.max(0, Math.floor(hy - R * rb - 2));
   let moved = 0;
   for (let y = y0; y < neck; y++) {
     for (let x = x0; x <= x1; x++) {
@@ -315,72 +402,73 @@ async function rawRgb(buf, W = null, H = null) {
  * @returns {{buf: Buffer|null, applied: boolean, reason: string|null, ...}}
  */
 async function correctHeadScale(outputBuf, templateBuf) {
-  const { detectMainFace } = require("./faceQuality");
+  const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
-  let [fo, ft] = await Promise.all([detectMainFace(outputBuf), detectMainFace(
-    await sharp(t.data, { raw: { width: o.W, height: o.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer()
-  )]);
-  // Karanlık görüntülerde (düşük kontrast / profil açı) 0.35 eşiği yüzü ıskalayabilir.
-  // Sadece kafa ölçümü için 0.1'e düşer; kalite kapılarında bu yol kullanılmaz.
-  if (!fo) fo = await detectMainFace(outputBuf, 0.1);
-  if (!ft) ft = await detectMainFace(
-    await sharp(t.data, { raw: { width: o.W, height: o.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer(), 0.1
-  );
-  if (!fo || !ft) return { buf: null, applied: false, reason: !fo ? "no-face-output" : "no-face-template" };
+  const tJpeg = await sharp(t.data, { raw: { width: o.W, height: o.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  // Karanlık/profil karelerde 0.35 eşiği yüzü ıskalayabilir; yalnızca ölçü
+  // için 0.1'e düşülür (kalite kapılarında bu yol kullanılmaz).
+  const lo = (await faceLandmarks(outputBuf)) || (await faceLandmarks(outputBuf, 0.1));
+  const lt = (await faceLandmarks(tJpeg)) || (await faceLandmarks(tJpeg, 0.1));
+  if (!lo || !lt) return { buf: null, applied: false, reason: !lo ? "no-face-output" : "no-face-template" };
+
   const [Mo, Mt] = await Promise.all([personMask(o.data, o.W, o.H), personMask(t.data, o.W, o.H)]);
-  const so = measureSilhouette(Mo, o.W, o.H, fo.box);
-  const st = measureSilhouette(Mt, o.W, o.H, ft.box);
-  const plan = planHeadScale(st, so);
-  const info = {
-    s: plan.s ?? null, sW: plan.sW ?? null, sH: plan.sH ?? null,
-    shoulderRatio: plan.shoulderRatio ?? null,
-  };
-  if (!plan.apply) {
-    // Yüz kutusu fallback: YALNIZCA silüet tamamen başarısız olduğunda (so.ok===false).
-    // Silüet ölçüm yaptı ama "within-tolerance" dediyse ona güvenilir — face-box
-    // onu ezmemeli. Farklı kadraj veya poz nedeniyle yüz kutusu oranı 1.05+ çıkabilir,
-    // bu gerçek kafa büyümesi demek değildir.
-    // "shoulders-touch-other" / "head-touches-other": kişi silüeti ölçüldü
-    // ama sahne karmaşıklığı nedeniyle güvenilmez. Bu ölçüm başarısızlığı
-    // değil, sahne yorumu — face-box onu ezmemeli.
-    const silFailed = !so.ok && so.reason !== "shoulders-touch-other" && so.reason !== "head-touches-other";
-    if (fo && ft && silFailed) {
-      const faceRatio = fo.box.width / ft.box.width; // çıktı / şablon
-      if (faceRatio > 1 / APPLY_BELOW) {            // %5+ büyük
-        const faceScale = Math.max(MIN_SCALE, (1 / faceRatio) * CORRECTION_OVERSHOOT);
-        const sil = so.ok ? so : approxSilFromFaceBox(fo.box);
-        const r = pinchHead(o.data, o.W, o.H, sil, fo.box.height, faceScale);
-        const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
-          .jpeg({ quality: 95 })
-          .toBuffer();
-        return {
-          buf, applied: true, reason: null,
-          s: faceScale, rawS: faceRatio, faceRatio, faceFallback: true,
-          sW: null, sH: null, shoulderRatio: plan.shoulderRatio ?? null,
-          movedPx: r.moved,
-        };
-      }
-    }
-    return { buf: null, applied: false, reason: plan.reason, ...info };
+  let inter = 0;
+  let uni = 0;
+  for (let i = 0; i < Mo.length; i++) {
+    const a = Mo[i] >= 0.5;
+    const b = Mt[i] >= 0.5;
+    if (a && b) inter++;
+    if (a || b) uni++;
   }
-  const r = pinchHead(o.data, o.W, o.H, so, fo.box.height, plan.s);
+  const bodyIou = uni ? inter / uni : 0;
+  const lr = landmarkSizeRatio(lo.pts, lt.pts);
+  const centre = (P) => ({ x: P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17, y: P.slice(0, 17).reduce((q, p) => q + p.y, 0) / 17 });
+  const co = centre(lo.pts);
+  const ct = centre(lt.pts);
+  const tplFaceW = Math.hypot(lt.pts[0].x - lt.pts[16].x, lt.pts[0].y - lt.pts[16].y);
+  const faceShift = tplFaceW > 0 ? Math.hypot(co.x - ct.x, co.y - ct.y) / tplFaceW : Infinity;
+  let volRatio = null;
+  try {
+    volRatio = await headVolumeRatio(o.data, t.data, o.W, o.H, lo.box, lt.box);
+  } catch (e) {
+    console.error("Kafa hacmi ölçülemedi (yalnızca yüz ölçüsü):", e.message || e);
+  }
+  const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio });
+  const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, bodyIou, faceShift };
+  if (!plan.apply) return { buf: null, applied: false, reason: plan.reason, ...info };
+
+  // Dönüşüm geometrisi: silüetten kafa tepesi/genişliği; çene ve merkez
+  // yüz noktalarından (kutu çeneyi sakalın üstünde bitiriyordu).
+  const so = measureSilhouette(Mo, o.W, o.H, lo.box);
+  const base = so.ok ? so : approxSilFromFaceBox(lo.box);
+  const P = lo.pts;
+  const chin = Math.round(P[8].y);
+  const cx = Math.round(P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17);
+  const sil = { ...base, cx, chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
+  const faceH = Math.max(lo.box.height, chin - lo.box.y);
+  const r = pinchHead(o.data, o.W, o.H, sil, faceH, plan.s);
   const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
     .jpeg({ quality: 95 })
     .toBuffer();
-  return {
-    buf, applied: true, reason: null, ...info, s: plan.s, rawS: plan.rawS,
-    movedPx: r.moved,
-  };
+  const head = { cx: sil.cx, cy: (sil.top + sil.chin) / 2, rx: sil.headW / 2, ry: sil.headH / 2, chin: sil.chin, neck: r.neck };
+  return { buf, applied: true, reason: null, ...info, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
 module.exports = {
   correctHeadScale,
   personMask,
   measureSilhouette,
-  planHeadScale,
   approxSilFromFaceBox,
-  APPLY_BELOW,
+  landmarkSizeRatio,
+  perceivedHeadRatio,
+  planLandmarkScale,
+  APPLY_MIN_DELTA,
   MIN_SCALE,
+  MAX_SCALE,
+  BODY_ALIGNED_IOU,
+  FACE_ALIGNED_SHIFT,
+  VOLUME_FLOOR,
+  VOLUME_CEIL,
   _pinchHead: pinchHead,
 };

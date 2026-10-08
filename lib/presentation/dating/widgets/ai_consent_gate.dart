@@ -89,7 +89,7 @@ class _AiConsentSheet extends StatelessWidget {
   String get _whatIsSent => switch (kind) {
         AiFlowKind.photoGeneration =>
           'Çektiğin ${DatingConfig.faceCaptureCount} yüz fotoğrafı '
-              '(ön / sağ / sol); yüz analizi, sahne kompozisyonu, ön işleme ve '
+              '(ön / hafif sağ / hafif sol / tam sağ / tam sol); yüz analizi, sahne kompozisyonu, ön işleme ve '
               'kalite kontrolden geçirildikten sonra işlenmek üzere OpenAI '
               'altyapısına iletilir.',
         AiFlowKind.photoAnalysis =>

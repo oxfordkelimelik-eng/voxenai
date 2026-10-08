@@ -10,26 +10,47 @@ import '../../../core/constants/app_colors.dart';
 /// Rehberli çekim türü: yüz mü, vücut mu?
 enum CaptureKind { face, body }
 
-/// Çekilecek açılar (ön / sağ / sol) — sırayla istenir.
-enum CaptureAngle { front, right, left }
+/// Çekilecek açılar — sırayla istenir. [right]/[left] analiz akışının
+/// 3 açısı; hafif/tam açılar AI foto üretiminin 5 açısı (2026-10-08: model
+/// kafa yönünü selfie'den alıyor, şablon açısına yakın selfie gerekiyor).
+enum CaptureAngle { front, right, left, slightRight, slightLeft, fullRight, fullLeft }
+
+/// AI foto üretimi için 5 yüz açısı (functions/falPhotos.js FACE_PHOTO_COUNT).
+const kAiFaceAngles = [
+  CaptureAngle.front,
+  CaptureAngle.slightRight,
+  CaptureAngle.slightLeft,
+  CaptureAngle.fullRight,
+  CaptureAngle.fullLeft,
+];
 
 extension on CaptureAngle {
   String get label => switch (this) {
         CaptureAngle.front => 'ÖN',
         CaptureAngle.right => 'SAĞ',
         CaptureAngle.left => 'SOL',
+        CaptureAngle.slightRight => 'HAFİF SAĞ',
+        CaptureAngle.slightLeft => 'HAFİF SOL',
+        CaptureAngle.fullRight => 'TAM SAĞ',
+        CaptureAngle.fullLeft => 'TAM SOL',
       };
 
   String faceHint() => switch (this) {
         CaptureAngle.front => 'Yüzünü ovalin içine ortala, dümdüz kameraya bak',
         CaptureAngle.right => 'Başını hafifçe SAĞA çevir (sağ profilin görünsün)',
         CaptureAngle.left => 'Başını hafifçe SOLA çevir (sol profilin görünsün)',
+        CaptureAngle.slightRight => 'Başını AZICIK SAĞA çevir, gözlerin kameraya baksın',
+        CaptureAngle.slightLeft => 'Başını AZICIK SOLA çevir, gözlerin kameraya baksın',
+        CaptureAngle.fullRight => 'Başını iyice SAĞA çevir (sağ yanağın tam görünsün)',
+        CaptureAngle.fullLeft => 'Başını iyice SOLA çevir (sol yanağın tam görünsün)',
       };
 
   String bodyHint() => switch (this) {
         CaptureAngle.front => 'Tüm vücudun silüetin içinde, önden dur',
-        CaptureAngle.right => 'Sağ yan profilini ver, tüm vücut görünsün',
-        CaptureAngle.left => 'Sol yan profilini ver, tüm vücut görünsün',
+        CaptureAngle.right || CaptureAngle.slightRight || CaptureAngle.fullRight =>
+          'Sağ yan profilini ver, tüm vücut görünsün',
+        CaptureAngle.left || CaptureAngle.slightLeft || CaptureAngle.fullLeft =>
+          'Sol yan profilini ver, tüm vücut görünsün',
       };
 }
 
@@ -260,6 +281,20 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       case CaptureAngle.left:
         if (yaw > -25) return (false, 'Başını daha SOLA çevir');
         if (yaw < -55) return (false, 'Biraz geri dön (fazla döndün)');
+      // 5 açılı AI çekimi: hafif ve tam dönüş aralıkları birbirine
+      // değmiyor (22°–38° boşluğu) ki iki kare aynı açıya düşmesin.
+      case CaptureAngle.slightRight:
+        if (yaw < 10) return (false, 'Başını azıcık SAĞA çevir');
+        if (yaw > 22) return (false, 'Biraz geri dön (az çevirmen yeterli)');
+      case CaptureAngle.slightLeft:
+        if (yaw > -10) return (false, 'Başını azıcık SOLA çevir');
+        if (yaw < -22) return (false, 'Biraz geri dön (az çevirmen yeterli)');
+      case CaptureAngle.fullRight:
+        if (yaw < 38) return (false, 'Başını daha SAĞA çevir');
+        if (yaw > 60) return (false, 'Biraz geri dön (fazla döndün)');
+      case CaptureAngle.fullLeft:
+        if (yaw > -38) return (false, 'Başını daha SOLA çevir');
+        if (yaw < -60) return (false, 'Biraz geri dön (fazla döndün)');
     }
 
     // Canlı/uyanık bir kare için gözler açık olmalı — kapalı/kısık gözle
@@ -321,6 +356,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
         if (ratio < 0.16) return (false, 'Önden dur, omuzlar açık');
       case CaptureAngle.right:
       case CaptureAngle.left:
+      case CaptureAngle.slightRight:
+      case CaptureAngle.slightLeft:
+      case CaptureAngle.fullRight:
+      case CaptureAngle.fullLeft:
         if (ratio > 0.16) return (false, 'Yana dön (yan profil)');
         // Yön ayrımı: burun hangi tarafa bakıyor
         if (nose != null) {

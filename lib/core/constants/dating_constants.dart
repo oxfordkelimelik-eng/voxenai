@@ -74,9 +74,12 @@ class DatingConfig {
   // GÖĞÜS-ÜSTÜ 2 KARE DE KALDIRILDI (2026-09-06, kullanıcı kararı): o kareleri
   // okuyan tek yer üretim prompt'uydu, çıktıyı eleyen hiçbir kapı onlara
   // bakmıyordu (gerekçe: functions/faceQuality.js başındaki not).
-  // functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
-  static const int faceCaptureCount = 3;
-  static const int referencePhotoCount = faceCaptureCount; // 3
+  // 5 AÇI (2026-10-08, kullanıcı kararı): ön, hafif sağ, hafif sol, tam
+  // sağ, tam sol — model kafa yönünü selfie'den alıyor, şablon açısına yakın
+  // bir selfie olunca bakış doğru çıkıyor. Sunucu eski sürümler için 3'ü de
+  // kabul ediyor. functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
+  static const int faceCaptureCount = 5;
+  static const int referencePhotoCount = faceCaptureCount; // 5
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç

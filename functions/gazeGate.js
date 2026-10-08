@@ -175,7 +175,39 @@ function isIrisGazeMismatch(base, out) {
   return dx >= IRIS_MISMATCH_X || dy >= IRIS_MISMATCH_Y;
 }
 
+// POZA GÖRE REFERANS SIRASI (2026-10-08, kullanıcı kararı: "elemeden doğru
+// yere baksın"). Model kafa yönünü büyük ölçüde selfie'lerden alıyor ve
+// kafayı onlara doğru çekiyor (bkz. falPhotos.js OUTPUT_YAW_DRIFT_MAX:
+// "regression to the mean"). Kafa yönü şablona en yakın selfie öne alınırsa
+// model doğru açıyı kendiliğinden kurar — eleme ve ek üretim gerekmez.
+//
+// KİMLİK ÇAPASI KORUNUR: ilk sıradaki selfie en net yüz (analyzeReferences
+// bestIndex) ve kimlik sadakatinde en ağır basan kare. Yer değiştirmek
+// ancak yön kazancı belirginse (POSE_SWAP_MIN_GAIN) yapılır; çapa ikinci
+// sıraya iner, atılmaz.
+const POSE_SWAP_MIN_GAIN = 0.15;
+
+/**
+ * SAF. refYaws[i]: i. selfie'nin yaw'ı (0 önden, 1 profil; null = ölçülemedi).
+ * Döner: yeni sıra (indeks dizisi) ve gerekçe.
+ */
+function poseMatchedOrder(refYaws, templateYaw, minGain = POSE_SWAP_MIN_GAIN) {
+  const n = Array.isArray(refYaws) ? refYaws.length : 0;
+  const keep = { order: [...Array(n).keys()], swapped: false };
+  if (n < 2 || templateYaw == null || refYaws[0] == null) return { ...keep, reason: "unmeasured" };
+  let best = 0;
+  for (let i = 1; i < n; i++) {
+    if (refYaws[i] == null) continue;
+    if (Math.abs(refYaws[i] - templateYaw) < Math.abs(refYaws[best] - templateYaw)) best = i;
+  }
+  const gain = Math.abs(refYaws[0] - templateYaw) - Math.abs(refYaws[best] - templateYaw);
+  if (best === 0 || gain < minGain) return { ...keep, reason: "anchor-closest", gain };
+  return { order: [best, ...keep.order.filter((i) => i !== best)], swapped: true, reason: null, gain };
+}
+
 module.exports = {
+  poseMatchedOrder,
+  POSE_SWAP_MIN_GAIN,
   parseGazeToken,
   gazeDirection,
   isGazeMismatch,
