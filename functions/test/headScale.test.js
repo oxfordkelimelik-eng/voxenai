@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { measureSilhouette, planHeadScale, APPLY_BELOW, MIN_SCALE } = require("../headScale");
+const { measureSilhouette, planHeadScale, approxSilFromFaceBox, APPLY_BELOW, MIN_SCALE } = require("../headScale");
 
 // KAFA ÖLÇEĞİ (2026-10-07). Sentetik kişi maskesi: elips kafa + dikdörtgen
 // gövde. Yüz kutusu kafanın alt 3/4'ü (ssd_mobilenetv1 kaş-çene arası verir).
@@ -83,4 +83,15 @@ test("ölçüm yoksa plan uygulanmaz ve sebep taşır", () => {
   const p = planHeadScale({ ok: false, reason: "no-head-top" }, { ok: true });
   assert.equal(p.apply, false);
   assert.match(p.reason, /template:no-head-top/);
+});
+
+test("approxSilFromFaceBox: çene, merkez ve kafa genişliği doğru hesaplanır", () => {
+  const box = { x: 100, y: 120, width: 80, height: 100 };
+  const s = approxSilFromFaceBox(box);
+  assert.equal(s.ok, true);
+  assert.equal(s.cx, 140);                            // x + width/2
+  assert.equal(s.chin, 220);                          // y + height
+  assert.ok(s.top < 120, `top=${s.top}`);             // saç dahil üst kafa tepesi
+  assert.ok(s.headW > 80, `headW=${s.headW}`);        // yüzden geniş
+  assert.ok(s.headH > 0);
 });

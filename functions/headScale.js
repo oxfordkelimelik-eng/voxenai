@@ -31,6 +31,10 @@ const APPLY_BELOW = 0.95;
 // Tek seferde en fazla bu kadar küçült. Daha büyük sapma ölçüm hatası ya da
 // kadraj değişimi (model tüm sahneyi yakınlaştırmış) olabilir.
 const MIN_SCALE = 0.82;
+// Silüet oranı eşleşmesinin ötesinde ek küçültme çarpanı. 0.94 → şablonun %6
+// altını hedefle; profilden/perspektiften kaynaklanan görsel büyüklük algısını
+// dengelemek için (kullanıcı doğrulaması: 0.924→0.87 doğal görünüyor).
+const CORRECTION_OVERSHOOT = 0.94;
 
 let _segPromise = null;
 
@@ -185,6 +189,19 @@ function measureSilhouette(mask, W, H, box, thr = 0.5) {
 }
 
 /**
+ * Yüz kutusu tabanlı yaklaşık siluet (karanlık görüntü fallback).
+ * Segmentasyon başarısız olduğunda veya omuzu yanlış ölçtüğünde kullanılır.
+ * pinchHead'in ihtiyaç duyduğu top/chin/cx/headW/headH alanlarını verir.
+ */
+function approxSilFromFaceBox(box) {
+  const cx = Math.round(box.x + box.width / 2);
+  const chin = Math.round(box.y + box.height);
+  const top = Math.max(0, Math.round(box.y - 0.65 * box.height)); // saç dahil kafa tepesi
+  const headW = Math.round(box.width * 1.35);
+  return { ok: true, top, chin, cx, headW, headH: chin - top, shoulderW: Math.round(box.width * 2.5) };
+}
+
+/**
  * Şablon ve çıktı ölçümlerinden küçültme oranı. SAF fonksiyon.
  * s = (şablon kafa/omuz) / (çıktı kafa/omuz); genişlik ve yükseklik
  * oranlarının ortalaması. s < 1 → çıktı kafası büyük.
@@ -202,7 +219,7 @@ function planHeadScale(tpl, out) {
     return { apply: false, reason: "reframed", s, sW, sH, shoulderRatio };
   }
   if (s >= APPLY_BELOW) return { apply: false, reason: "within-tolerance", s, sW, sH, shoulderRatio };
-  return { apply: true, reason: null, s: Math.max(MIN_SCALE, s), rawS: s, sW, sH, shoulderRatio };
+  return { apply: true, reason: null, s: Math.max(MIN_SCALE, s * CORRECTION_OVERSHOOT), rawS: s, sW, sH, shoulderRatio };
 }
 
 function bilinear(src, W, H, x, y, c) {
@@ -244,18 +261,24 @@ function pinchHead(O, W, H, sil, faceH, s) {
   const rb = sil.headH / 2;
   const R = 2.2; // etkinin sıfıra indiği elips yarıçapı (kafa yarıçapı cinsinden)
   const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  // Kafa tepesinin 0.4 yarıçap üstünde etki tamamen sıfırlanır; arka plan bozulmaz.
+  const TOP_FADE = 0.4;
+  const topLimit = sil.top - TOP_FADE * rb;
   const effect = (x, y) => {
     if (y >= neck) return 0;
+    if (y < topLimit) return 0;
     const r = Math.hypot((x - hx) / ra, (y - hy) / rb);
     const radial = 1 - smooth((r - 1) / (R - 1));
     const vert = y <= chin ? 1 : 1 - (y - chin) / (neck - chin);
-    return radial * vert;
+    const topFade = y >= sil.top ? 1 : smooth((y - topLimit) / (TOP_FADE * rb));
+    return radial * vert * topFade;
   };
   const kOf = (x, y) => 1 - (1 - s) * effect(x, y);
 
   const x0 = Math.max(0, Math.floor(hx - R * ra - 2));
   const x1 = Math.min(W - 1, Math.ceil(hx + R * ra + 2));
-  const y0 = Math.max(0, Math.floor(hy - R * rb - 2));
+  // y0: kafa tepesinin TOP_FADE yarıçap üstünden başla; radyal sınır daha yüksekse onu al.
+  const y0 = Math.max(0, Math.floor(Math.max(topLimit, hy - R * rb) - 2));
   let moved = 0;
   for (let y = y0; y < neck; y++) {
     for (let x = x0; x <= x1; x++) {
@@ -295,9 +318,15 @@ async function correctHeadScale(outputBuf, templateBuf) {
   const { detectMainFace } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
-  const [fo, ft] = await Promise.all([detectMainFace(outputBuf), detectMainFace(
+  let [fo, ft] = await Promise.all([detectMainFace(outputBuf), detectMainFace(
     await sharp(t.data, { raw: { width: o.W, height: o.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer()
   )]);
+  // Karanlık görüntülerde (düşük kontrast / profil açı) 0.35 eşiği yüzü ıskalayabilir.
+  // Sadece kafa ölçümü için 0.1'e düşer; kalite kapılarında bu yol kullanılmaz.
+  if (!fo) fo = await detectMainFace(outputBuf, 0.1);
+  if (!ft) ft = await detectMainFace(
+    await sharp(t.data, { raw: { width: o.W, height: o.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer(), 0.1
+  );
   if (!fo || !ft) return { buf: null, applied: false, reason: !fo ? "no-face-output" : "no-face-template" };
   const [Mo, Mt] = await Promise.all([personMask(o.data, o.W, o.H), personMask(t.data, o.W, o.H)]);
   const so = measureSilhouette(Mo, o.W, o.H, fo.box);
@@ -307,7 +336,34 @@ async function correctHeadScale(outputBuf, templateBuf) {
     s: plan.s ?? null, sW: plan.sW ?? null, sH: plan.sH ?? null,
     shoulderRatio: plan.shoulderRatio ?? null,
   };
-  if (!plan.apply) return { buf: null, applied: false, reason: plan.reason, ...info };
+  if (!plan.apply) {
+    // Yüz kutusu fallback: YALNIZCA silüet tamamen başarısız olduğunda (so.ok===false).
+    // Silüet ölçüm yaptı ama "within-tolerance" dediyse ona güvenilir — face-box
+    // onu ezmemeli. Farklı kadraj veya poz nedeniyle yüz kutusu oranı 1.05+ çıkabilir,
+    // bu gerçek kafa büyümesi demek değildir.
+    // "shoulders-touch-other" / "head-touches-other": kişi silüeti ölçüldü
+    // ama sahne karmaşıklığı nedeniyle güvenilmez. Bu ölçüm başarısızlığı
+    // değil, sahne yorumu — face-box onu ezmemeli.
+    const silFailed = !so.ok && so.reason !== "shoulders-touch-other" && so.reason !== "head-touches-other";
+    if (fo && ft && silFailed) {
+      const faceRatio = fo.box.width / ft.box.width; // çıktı / şablon
+      if (faceRatio > 1 / APPLY_BELOW) {            // %5+ büyük
+        const faceScale = Math.max(MIN_SCALE, (1 / faceRatio) * CORRECTION_OVERSHOOT);
+        const sil = so.ok ? so : approxSilFromFaceBox(fo.box);
+        const r = pinchHead(o.data, o.W, o.H, sil, fo.box.height, faceScale);
+        const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
+          .jpeg({ quality: 95 })
+          .toBuffer();
+        return {
+          buf, applied: true, reason: null,
+          s: faceScale, rawS: faceRatio, faceRatio, faceFallback: true,
+          sW: null, sH: null, shoulderRatio: plan.shoulderRatio ?? null,
+          movedPx: r.moved,
+        };
+      }
+    }
+    return { buf: null, applied: false, reason: plan.reason, ...info };
+  }
   const r = pinchHead(o.data, o.W, o.H, so, fo.box.height, plan.s);
   const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
     .jpeg({ quality: 95 })
@@ -323,6 +379,8 @@ module.exports = {
   personMask,
   measureSilhouette,
   planHeadScale,
+  approxSilFromFaceBox,
   APPLY_BELOW,
   MIN_SCALE,
+  _pinchHead: pinchHead,
 };

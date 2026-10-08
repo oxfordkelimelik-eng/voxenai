@@ -890,13 +890,11 @@ function eyesLookClosedVsReference(outputEyeOpenness, refEyeOpenness) {
  *  - ratio: yüzün kadrajı kaplama oranı (assessOutputFace'teki ile aynı tanım)
  *  - box:   ORİJİNAL görsel koordinatlarında yüz kutusu (kırpma için)
  */
-async function detectMainFace(buf) {
+async function detectMainFace(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
   const faceapi = await ensureModelsLoaded();
   const { tensor, scale } = await bufferToTensorScaled(buf);
   try {
-    const options = new faceapi.SsdMobilenetv1Options({
-      minConfidence: MIN_DETECTION_CONFIDENCE,
-    });
+    const options = new faceapi.SsdMobilenetv1Options({ minConfidence });
     const faces = await faceapi.detectAllFaces(tensor, options);
     if (faces.length === 0) return null;
     const [h, w] = tensor.shape;

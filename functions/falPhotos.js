@@ -5089,7 +5089,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           const n = (v) => (v != null ? v.toFixed(3) : "null");
           if (hs.applied && hs.buf) {
             deliverBuf = hs.buf;
-            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI s=${n(hs.s)} (ham=${n(hs.rawS)}) sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)} taşınanPx=${hs.movedPx}`);
+            const fbTag = hs.faceFallback ? ` [yüzkutusu faceRatio=${n(hs.faceRatio)}]` : "";
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI s=${n(hs.s)} (ham=${n(hs.rawS)}) sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)} taşınanPx=${hs.movedPx}${fbTag}`);
           } else {
             console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] s=${n(hs.s)} sW=${n(hs.sW)} sH=${n(hs.sH)} omuzOranı=${n(hs.shoulderRatio)}`);
           }
