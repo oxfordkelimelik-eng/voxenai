@@ -17,6 +17,7 @@
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
+const { patchFill } = require("./patchFill");
 
 const SEG_SIZE = 256;
 // ÖLÇÜ (2026-10-08, iş bb2cc441): kafa boyu artık YÜZ NOKTALARIYLA ölçülür
@@ -32,7 +33,14 @@ const SEG_SIZE = 256;
 // Bu kadar sapma ölçü gürültüsü; dokunulmaz (|1-s| < APPLY_MIN_DELTA).
 const APPLY_MIN_DELTA = 0.04;
 // Tek seferde en fazla. Daha büyük sapma ölçü hatası ya da yeniden kadraj.
-const MIN_SCALE = 0.8;
+// 0.8 → 0.9 (2026-10-09, f9f3b5c0 c6): 0.865 küçültme kafayı omuzlara
+// gömdü, kafanın yanındaki tablonun kenarını büktü ("kafa, tablo, omuzlar
+// öne eğilmiş").
+// 0.9 → 0.93 (2026-10-09, iş 61079257): 0.9'a kırpılan c2 "çok küçülmüş",
+// c3 "biraz küçük"; 0.9'da iyi bulunan c1/c6 ve 9d9507f0 c8'in "çok
+// küçültmüşsün" dediği 0.886 bu sınırla tutarlı. Yüz oranı 1.15+ ölçülen
+// karelerde ölçü algıdan fazlasını söylüyor (gözlüklü şablon, gür sakal).
+const MIN_SCALE = 0.93;
 const MAX_SCALE = 1.05;
 // Gövdeler bu kadar örtüşüyorsa çıktı şablonla aynı kadrajda ve aynı
 // omuzlara sahiptir; gövde ölçeği 1 alınır. Silüet omuz ölçümü tek başına
@@ -50,10 +58,13 @@ const FACE_ALIGNED_SHIFT = 0.35;
 // Hacim (saç ∪ yüz derisi, selfie_multiclass) karanlık sahnede çöküyor
 // (bb2cc441 c9 siyah-beyaz: yüz 1.14, hacim 0.86) — yüzden bu kadar
 // saparsa hacim yok sayılır.
+// KÜÇÜLTMEDE HACİM YOK (2026-10-09, iş 61079257 c5): şablonun kabarık saçı
+// hacmi şişirdi (yüz 1.103, hacim 1.010), ortalama + hacim tabanı s'yi
+// 0.96'ya çekip kareyi "tolerans içi" yaptı; kullanıcı "kafa çok büyük".
+// Küçültme kararı yalnızca yüzle verilir; aşırı küçültmeyi artık
+// MIN_SCALE sınırlar (taban bu yüzden kaldırıldı). Hacim yalnızca büyütmede.
 const VOLUME_TRUST_MAX_DIFF = 0.2;
-// Küçültme toplam kafa hacmini şablonun bu oranının altına indiremez
-// (c8: 0.886 küçültme hacmi 0.95'e indirdi, "çok küçültmüşsün").
-const VOLUME_FLOOR = 0.97;
+// Büyütme toplam kafa hacmini şablonun bu oranının üstüne çıkaramaz.
 const VOLUME_CEIL = 1.03;
 
 let _segPromise = null;
@@ -211,7 +222,7 @@ function measureSilhouette(mask, W, H, box, thr = 0.5) {
 /**
  * Yüz kutusu tabanlı yaklaşık siluet (karanlık görüntü fallback).
  * Segmentasyon başarısız olduğunda veya omuzu yanlış ölçtüğünde kullanılır.
- * pinchHead'in ihtiyaç duyduğu top/chin/cx/headW/headH alanlarını verir.
+ * scaleHeadPatch'in ihtiyaç duyduğu top/chin/cx/headW/headH alanlarını verir.
  */
 function approxSilFromFaceBox(box) {
   const cx = Math.round(box.x + box.width / 2);
@@ -263,6 +274,14 @@ function landmarkSizeRatio(ptsO, ptsT) {
 function perceivedHeadRatio(faceRatio, volRatio) {
   if (!(faceRatio > 0)) return { ratio: null, volUsed: false };
   if (!(volRatio > 0) || Math.abs(volRatio - faceRatio) > VOLUME_TRUST_MAX_DIFF) return { ratio: faceRatio, volUsed: false };
+  // TERS YÖN (2026-10-09, iş f9f3b5c0 c1/c4): yüz büyük derken hacim küçük
+  // diyorsa (şablonun gür/kıvırcık saçı ya da karanlık sahne) hacim kararı
+  // çeviriyordu — c4 yüz 1.056 / hacim 0.863 kafayı BÜYÜTTÜ, c1 yüz 1.099 /
+  // hacim 0.960 hiç küçültmedi; kullanıcı ikisinde de "küçülmeliydi" dedi.
+  // Hacim yalnızca yüzle aynı yönü gösterdiğinde kullanılır.
+  if ((faceRatio - 1) * (volRatio - 1) < 0) return { ratio: faceRatio, volUsed: false };
+  // Küçültme yönünde yalnızca yüz (bkz. VOLUME_CEIL üstündeki not).
+  if (faceRatio > 1) return { ratio: faceRatio, volUsed: false };
   return { ratio: Math.sqrt(faceRatio * volRatio), volUsed: true };
 }
 
@@ -275,12 +294,9 @@ function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRa
   const ph = perceivedHeadRatio(faceRatio, volRatio);
   if (!aligned) return { apply: false, reason: "reframed", rawS: 1 / ph.ratio, volUsed: ph.volUsed };
   let rawS = 1 / ph.ratio;
-  // Hacim tabanı/tavanı: düzeltme toplam kafa hacmini şablondan belirgin
-  // küçük/büyük bırakmasın.
-  if (ph.volUsed) {
-    if (rawS < 1) rawS = Math.max(rawS, VOLUME_FLOOR / volRatio);
-    else rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
-  }
+  // Hacim tavanı: büyütme toplam kafa hacmini şablondan belirgin büyük
+  // bırakmasın.
+  if (ph.volUsed && rawS > 1) rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
   if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed };
   return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, rawS)), volUsed: ph.volUsed };
 }
@@ -324,68 +340,528 @@ function bilinear(src, W, H, x, y, c) {
   return (src[i00] * (1 - fx) + src[i10] * fx) * (1 - fy) + (src[i01] * (1 - fx) + src[i11] * fx) * fy;
 }
 
+// Ayrılabilir kutu bulanıklığı (yalnızca küçük bir pencere için): kenar
+// yumuşatma. Tek kanallı Float32Array alır, aynı boyutta döner.
+function boxBlur(a, w, h, r) {
+  if (r < 1) return a;
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const n = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += a[y * w + Math.max(0, Math.min(w - 1, x))];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = sum / n;
+      sum += a[y * w + Math.min(w - 1, x + r + 1)] - a[y * w + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[Math.max(0, Math.min(h - 1, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / n;
+      sum += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+    }
+  }
+  return out;
+}
+
 /**
- * Kafayı yumuşak bir "liquify" dönüşümüyle ölçekler. O: RGB raw buffer.
- * sil: çıktının siluet ölçümü, faceH: yüz yüksekliği, s: ölçek (<1 küçült, >1 büyüt).
+ * Kafayı ölçekler. Kişi katmanı (çıktının kafası + boynu) çene ortasında
+ * sabit olarak s ile ölçeklenir; çene altında ölçek boyun boyunca yumuşakça
+ * 1'e döner (boyun kafaya kesintisiz bağlanır, yaka/omuz kıpırdamaz). Arka
+ * plan HİÇ bükülmez (f9f3b5c0 c6: eski liquify tabloyu/omuzları eğiyordu;
+ * kullanıcı kuralı: "fotoğraftaki her şey sabit, sadece yüz değişir").
  *
- * NEDEN DELİK AÇIP DOLDURMUYOR: ilk sürüm kafayı küçültüp açılan halkayı
- * şablonun arka planıyla dolduruyordu. Model arka planı şablondan birebir
- * değil, hafif kaydırarak yeniden çiziyor; yapıştırılan parça taş duvar gibi
- * dokulu zeminlerde görünür bir hilal/sıvanma bıraktı (5faa77dc c1). Şimdi
- * hiç delik açılmıyor: kafa elipsinin içi s ile küçülür, dışında etki
- * mesafeyle sıfıra iner, arka plan kafanın etrafında hafifçe içeri akar.
+ * Eski kişinin yeni kişiden taşan kısmının ARKASI yeniden kurulur:
+ * şablonun arka plan olduğu yerde şablondan; şablonda kişi olan yerde
+ * (saç, gözlük, yüz, boyun) çevredeki gerçek piksellerden doku kopyalanarak
+ * (patchFill). Şablondan asla kişi pikseli gelmez (b8ae3f8d: şablonun
+ * saçı/gözlüğü yeni kafanın arkasında ikinci kafa olarak kaldı); eski büyük
+ * kafa da bırakılmaz. 2026-10-09 (03d6c1f6): ilk sürüm kafayı çene
+ * hattından kesip yapıştırıyordu — eski çenenin yeri dolguyla kapanınca
+ * boyunda gömlek/gökyüzü parçaları ve "yapıştırılmış kafa" görünümü çıktı.
  *
- * Dönüşüm boyun tabanına (ax, neck) sabit: kafa boynun üstünde kalır;
- * çene ile boyun tabanı arasında etki sıfıra iner, boyun ve altı aynen kalır.
+ * Kafaya el/nesne değiyorsa HİÇ dokunulmaz (kafayla birlikte ölçeklenirdi).
+ * Doldurulacak delik çok kalınsa (doku kopyalama inandırıcı olmaz) yine
+ * dokunulmaz.
+ *
+ * O/T: çıktı ve şablon RGB raw (aynı boyut). Mo/Mt: kişi olasılıkları.
  */
-function pinchHead(O, W, H, sil, faceH, s) {
+const TOUCH_MAX = 1.05;
+// Şablon kişisi eşiği (sceneRestore ile aynı: saç teli/gözlük düşük
+// olasılıkla görünür).
+const T_PERSON_MIN = 0.08;
+// En derin delik pikselinin kenara uzaklığı / yüz yüksekliği. AI dolgusu
+// için de aynı sınır: derin delik çoğu zaman zayıf kişi maskesinden gelir ve
+// yeni yüzün kendisini kapsar (03d6c1f6 c4: siyah-beyaz karanlık kare, AI
+// yüzü sildi).
+const FILL_DEPTH_MAX = 0.35;
+function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false } = {}) {
   const out = Buffer.from(O);
-  const ax = sil.cx;
+  const cx = sil.cx;
   const chin = sil.chin;
   const neck = Math.min(H - 1, Math.round(chin + 0.45 * faceH));
-  const hx = sil.cx;
   const hy = (sil.top + chin) / 2;
   const ra = sil.headW / 2;
   const rb = sil.headH / 2;
-  const R = 2.2; // etkinin sıfıra indiği elips yarıçapı (kafa yarıçapı cinsinden)
-  const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
-  // ÜST SÖNDÜRME YOK (2026-10-08): kafa tepesinin üstünde etkiyi kesmek
-  // eşlemeyi katladı — saçın tepesi yerinde kalıp kafadan kopuk bir halka
-  // oldu (272e656a c1/c5). Kafanın çevresinde bükülen arka plan artık
-  // sceneRestore ile şablondan geri konuyor (şablondaki kişinin kapladığı
-  // alan hariç — orada esnetilmiş çıktı kalır).
-  const effect = (x, y) => {
-    if (y >= neck) return 0;
-    const r = Math.hypot((x - hx) / ra, (y - hy) / rb);
-    const radial = 1 - smooth((r - 1) / (R - 1));
-    const vert = y <= chin ? 1 : 1 - (y - chin) / (neck - chin);
-    return radial * vert;
-  };
-  const kOf = (x, y) => 1 - (1 - s) * effect(x, y);
+  const EL = 1.3; // kafa bölgesi elips yarıçapı (saç dahil olsun)
 
-  const x0 = Math.max(0, Math.floor(hx - R * ra - 2));
-  const x1 = Math.min(W - 1, Math.ceil(hx + R * ra + 2));
-  const y0 = Math.max(0, Math.floor(hy - R * rb - 2));
-  let moved = 0;
-  for (let y = y0; y < neck; y++) {
-    for (let x = x0; x <= x1; x++) {
-      // Ters eşleme: forward(q) = A + (q - A)·k(q) = p. Sabit nokta yinelemesi.
-      let qx = x;
-      let qy = y;
-      for (let it = 0; it < 12; it++) {
-        const k = kOf(qx, qy);
-        qx = ax + (x - ax) / k;
-        qy = neck + (y - neck) / k;
-      }
-      if (Math.abs(qx - x) < 0.05 && Math.abs(qy - y) < 0.05) continue;
-      moved++;
-      const i = (y * W + x) * 3;
-      for (let c = 0; c < 3; c++) {
-        out[i + c] = Math.max(0, Math.min(255, Math.round(bilinear(O, W, H, qx, qy, c))));
+  // Pencere: ölçekli ve ölçeksiz kafayı, boynu ve geçiş bandını kapsar.
+  const reach = Math.max(s, 1 / s);
+  const bx0 = Math.max(0, Math.floor(cx - (EL + 0.4) * ra * reach - 8));
+  const bx1 = Math.min(W - 1, Math.ceil(cx + (EL + 0.4) * ra * reach + 8));
+  const by0 = Math.max(0, Math.floor(chin - (chin - hy + EL * rb) * reach - 8));
+  const by1 = Math.min(H - 1, neck + 2);
+  const w = bx1 - bx0 + 1;
+  const h = by1 - by0 + 1;
+  if (w < 8 || h < 8) return { buf: out, moved: 0, neck };
+
+  // Kafaya değen el/nesne kontrolü: burun hizasından geçen kesintisiz kişi
+  // koşusu (saç dahil) tek başına bir kafada yüz yüksekliğini aşmaz; el,
+  // kulaklık, başka biri bitişikse aşar (c6 0.143, c8: el + kulaklık).
+  const seedX = Math.round(sil.seedX ?? sil.cx);
+  let maxRun = 0;
+  for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= Math.round(chin - 0.1 * faceH); y++) {
+    if (y < 0 || y >= H || Mo[y * W + seedX] < 0.5) continue;
+    let l = seedX;
+    let r = seedX;
+    while (l > 0 && Mo[y * W + l - 1] >= 0.5) l--;
+    while (r < W - 1 && Mo[y * W + r + 1] >= 0.5) r++;
+    if (r - l + 1 > maxRun) maxRun = r - l + 1;
+  }
+  const touch = maxRun / faceH;
+  if (touch > TOUCH_MAX) return { buf: out, moved: 0, neck, touch, skipped: true };
+
+  // Ölçek ağırlığı k(x, y): kafa bölgesinde 1, çene altında boyun boyunca
+  // 1 -> 0; yanlarda geçiş bandında 1 -> 0. Ölçek = 1 - k(1 - s).
+  const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  const band = 0.4 * ra;
+  const inX = (y) => {
+    // Kafa elipsinin yarı genişliği; elipsin alt yarısında en az çene
+    // hizasındaki genişlik (0.83 ra) — boyun sütunu buna bağlanır.
+    const t = (y - hy) / rb;
+    const e = Math.abs(t) < EL ? ra * Math.sqrt(EL * EL - t * t) : 0;
+    return y >= hy ? Math.max(0.83 * ra, e) : e;
+  };
+  const K = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const gy = y + by0;
+    const kv = gy <= chin ? 1 : 1 - smooth((gy - chin) / Math.max(1, neck - chin));
+    if (kv <= 0) continue;
+    const xi = inX(Math.min(gy, chin));
+    for (let x = 0; x < w; x++) {
+      const dx = Math.abs(x + bx0 - cx);
+      const kh = dx <= xi ? 1 : 1 - smooth((dx - xi) / band);
+      K[y * w + x] = kv * kh;
+    }
+  }
+
+  // Elips yüz merkezlidir; yana dönük kafada ense saçı elipsin dışına taşar
+  // ve K=0'da eski saç olduğu gibi kalır (03d6c1f6 c2: küçük kafanın
+  // arkasında eski saç telleri). Kafa ortası hizasının üstündeki kişi
+  // pikselleri yalnızca kafa/saçtır (omuz orada olamaz): bölgeye yumuşak
+  // kenarla katılır.
+  {
+    let hz = new Float32Array(w * h);
+    for (let y = 0; y < h && y + by0 <= hy; y++) {
+      for (let x = 0; x < w; x++) if (Mo[(y + by0) * W + (x + bx0)] >= 0.04) hz[y * w + x] = 1;
+    }
+    const r = Math.max(3, Math.round(band / 4));
+    hz = boxBlur(hz, w, h, r);
+    for (let i = 0; i < w * h; i++) hz[i] = hz[i] > 0.02 ? 1 : 0;
+    hz = boxBlur(hz, w, h, r);
+    for (let y = 0; y < h; y++) {
+      // Göz hizasının altına taşan bulanık kenar boyun bölgesine sızmasın.
+      const kv = y + by0 <= chin ? 1 : 0;
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const v = smooth(hz[i]) * kv;
+        if (v > K[i]) K[i] = v;
       }
     }
   }
-  return { buf: out, moved, neck };
+
+  // Kişi katmanı alfası (kaynak uzayı): kişi maskesinden doğrusal rampa.
+  const pb = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) pb[y * w + x] = Math.max(0, Math.min(1, (Mo[(y + by0) * W + (x + bx0)] - 0.15) / 0.45));
+  const soft = pb;
+  const sampleA = (qx, qy) => {
+    const x = qx - bx0;
+    const y = qy - by0;
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= w || y0 + 1 >= h) return 0;
+    const fx = x - x0;
+    const fy = y - y0;
+    return (soft[y0 * w + x0] * (1 - fx) + soft[y0 * w + x0 + 1] * fx) * (1 - fy) +
+      (soft[(y0 + 1) * w + x0] * (1 - fx) + soft[(y0 + 1) * w + x0 + 1] * fx) * fy;
+  };
+  // Ters eşleme (hedef p -> kaynak q): ölçek çene ortasında sabit; çene
+  // altında yalnızca yatay. Yeni kişi alfası hedef uzayında.
+  const A = new Float32Array(w * h);
+  const QX = new Float32Array(w * h);
+  const QY = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (K[i] <= 0) continue;
+      const sc = 1 - K[i] * (1 - s);
+      const gx = x + bx0;
+      const gy = y + by0;
+      QX[i] = cx + (gx - cx) / sc;
+      QY[i] = gy <= chin ? chin + (gy - chin) / sc : gy;
+      A[i] = sampleA(QX[i], QY[i]);
+    }
+  }
+
+  // Eski kişi izi (değişen bölgede, saç teli dahil biraz genişletilmiş).
+  let old = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (K[y * w + x] > 0.01 && Mo[(y + by0) * W + (x + bx0)] >= 0.04) old[y * w + x] = 1;
+    }
+  }
+  // Uçuşan saç telleri maske eşiğinin altında kalıp 8 px ötesine uzanır
+  // (03d6c1f6 c2: küçülen kafanın üstünde eski telin ince çizgisi).
+  old = boxBlur(old, w, h, Math.max(8, Math.round(0.07 * faceH)));
+  for (let i = 0; i < w * h; i++) old[i] = old[i] > 0.02 && K[i] > 0.01 ? 1 : 0;
+  const oldSoft = boxBlur(old, w, h, 2);
+  for (let i = 0; i < w * h; i++) if (K[i] <= 0.01) oldSoft[i] = 0;
+
+  // Şablon kişisi (genişletilmiş): oradan şablon pikseli ALINMAZ. Koyu
+  // saç koyu zeminde maskeden ~10 px taşar (03d6c1f6 c2: sütun önündeki
+  // şablon saçı arka plan sanılıp kopyalandı) — genişletme yüzle ölçeklenir.
+  let tPer = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (Mt[(y + by0) * W + (x + bx0)] >= T_PERSON_MIN) tPer[y * w + x] = 1;
+    }
+  }
+  tPer = boxBlur(tPer, w, h, Math.max(4, Math.round(0.07 * faceH)));
+  for (let i = 0; i < w * h; i++) tPer[i] = tPer[i] > 0.02 ? 1 : 0;
+
+  // Arka plan katmanı F: eski izin altında şablon arka planı ya da doku
+  // dolgusu; izin dışında çıktının kendisi.
+  const F = Buffer.from(O);
+  const hole = new Uint8Array(W * H);
+  // Açılan yer daima kişinin ARKASI: kaynak parça yalnızca arka plandan
+  // gelir (03d6c1f6 c2: gövdedeki siyah ceket dokusu kafanın arkasına
+  // kopyalandı).
+  const banned = new Uint8Array(W * H);
+  for (let g = 0; g < W * H; g++) if (Mo[g] >= 0.04) banned[g] = 1;
+  let holePx = 0;
+  let headArea = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (old[i]) headArea++;
+      const os = oldSoft[i];
+      if (os <= 0.003) continue;
+      const g = (y + by0) * W + (x + bx0);
+      if (tPer[i]) {
+        // Yeni kişinin tamamen örttüğü yer doldurulmaz; bağlam da olamaz
+        // (orada şablon kişisi ya da eski kafa durur).
+        if (A[i] < 0.98) { hole[g] = 1; holePx++; } else banned[g] = 1;
+        continue;
+      }
+      for (let c = 0; c < 3; c++) F[g * 3 + c] = Math.round(O[g * 3 + c] * (1 - os) + T[g * 3 + c] * os);
+    }
+  }
+  // Saç kenarı halkası: kişi maskesi eşiğinin altında kalan yumuşak saç
+  // kenarı (şablonun da çıktının da) birkaç piksel koyu kalır. Bilinen
+  // bağlam sayılırsa dolgu bu koyu tohumu içeri doğru büyütür (03d6c1f6 c2:
+  // kafanın arkasında siyah, karo desenli blok). Delik eski iz içinde bu
+  // halka kadar dışa genişletilir; eski kafaya bu mesafedeki pikseller de
+  // kaynak olamaz.
+  const RIM = Math.max(4, Math.round(0.03 * faceH));
+  if (holePx) {
+    let ring = hole;
+    for (let k = 0; k < RIM; k++) {
+      const next = Uint8Array.from(ring);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const g = (y + by0) * W + (x + bx0);
+          if (ring[g] || banned[g] || oldSoft[y * w + x] <= 0.003) continue;
+          if ((x > 0 && ring[g - 1]) || (x < w - 1 && ring[g + 1]) || (y > 0 && ring[g - W]) || (y < h - 1 && ring[g + W])) next[g] = 1;
+        }
+      }
+      ring = next;
+    }
+    for (let g = 0; g < W * H; g++) if (ring[g] && !hole[g]) { hole[g] = 1; holePx++; }
+  }
+  {
+    let near = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (Mo[(y + by0) * W + (x + bx0)] >= 0.04) near[y * w + x] = 1;
+    near = boxBlur(near, w, h, RIM);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const g = (y + by0) * W + (x + bx0);
+        if (near[y * w + x] > 0.001 && !hole[g]) banned[g] = 1;
+      }
+    }
+  }
+  // Delik derinliği (kenara en uzak delik pikseli, şehir-blok uzaklığı).
+  let holeDepth = 0;
+  let seam = 0;
+  let seamHi = 0;
+  let Fpre = null; // doku dolgusunun kenar geçişi öncesi hâli (AI dolgusu için)
+  if (holePx) {
+    const d = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (hole[(y + by0) * W + x + bx0]) d[y * w + x] = 1e9;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!d[i]) continue;
+        if (x > 0) d[i] = Math.min(d[i], d[i - 1] + 1);
+        if (y > 0) d[i] = Math.min(d[i], d[i - w] + 1);
+      }
+    }
+    for (let y = h - 1; y >= 0; y--) {
+      for (let x = w - 1; x >= 0; x--) {
+        const i = y * w + x;
+        if (!d[i]) continue;
+        if (x < w - 1) d[i] = Math.min(d[i], d[i + 1] + 1);
+        if (y < h - 1) d[i] = Math.min(d[i], d[i + w] + 1);
+        if (d[i] > holeDepth && d[i] < 1e8) holeDepth = d[i];
+      }
+    }
+    if (holeDepth > FILL_DEPTH_MAX * faceH) {
+      return { buf: out, moved: 0, neck, touch, skipped: true, reason: "fill-too-deep", holePx, holeDepth };
+    }
+    const fillStats = {};
+    patchFill(F, W, H, hole, banned, { searchR: Math.max(40, Math.round(0.5 * faceH)), stats: fillStats });
+    seam = fillStats.seam;
+    seamHi = fillStats.seamHi;
+    if (deferInpaint) Fpre = Buffer.from(F);
+    // İz kenarındaki yumuşak geçiş: dışı çıktının kendi arka planı.
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const g = (y + by0) * W + (x + bx0);
+        const os = oldSoft[y * w + x];
+        if (!hole[g] || os >= 1) continue;
+        for (let c = 0; c < 3; c++) F[g * 3 + c] = Math.round(O[g * 3 + c] * (1 - os) + F[g * 3 + c] * os);
+      }
+    }
+  }
+
+  let moved = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (K[i] <= 0) continue;
+      const na = A[i];
+      if (oldSoft[i] <= 0.003 && na < 0.003) continue;
+      const gi = ((y + by0) * W + (x + bx0)) * 3;
+      moved++;
+      for (let c = 0; c < 3; c++) {
+        const v = F[gi + c] * (1 - na) + bilinear(O, W, H, QX[i], QY[i], c) * na;
+        out[gi + c] = Math.max(0, Math.min(255, Math.round(v)));
+      }
+    }
+  }
+  let inpaint = null;
+  if (Fpre) {
+    // AI dolgusunun pikseli bileşime doğrusal girer: delik pikselinde
+    // out = (O(1-os) + P*os)(1-na) + kafa*na, P = dolgu. P değişince
+    // out += os(1-na)(P' - P).
+    const wgt = new Float32Array(W * H);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const g = (y + by0) * W + (x + bx0);
+        if (hole[g]) wgt[g] = oldSoft[y * w + x] * (1 - A[y * w + x]);
+      }
+    }
+    inpaint = prepareInpaint(out, Fpre, W, H, hole, banned, wgt);
+  }
+  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint };
+}
+
+// AI DOLGUSU (2026-10-09, kullanıcı kararı: "OpenAI maskeli düzenleme").
+// Doku dolgusu sade arka planda (gökyüzü, düz duvar, yaprak) temiz, ama
+// yapılı arka planda (perde çizgisi, tabela yazısı, tavan şeridi) yamalı
+// görünüyor ve bunu ölçüyle ayırmak mümkün olmadı. Delik çevresi kare
+// kırpılıp maskeyle görsel modele verilir; dönen görselden YALNIZCA delik
+// pikselleri alınır — fotoğrafın geri kalanı bit bit aynı kalır.
+const INPAINT_SIZE = 1024;
+// Modelin renk/parlaklık kayması: delik çevresindeki bilinen arka plan
+// halkasında ölçülür, yumuşak bir düzeltme alanıyla deliğe taşınır. Kayma
+// ya da düzeltme sonrası kalan fark bu sınırları aşarsa model arka planı
+// değiştirmiş demektir: sonuç kullanılmaz.
+const INPAINT_SHIFT_MAX = 40;
+// Halka pikseli "uyuyor": ortalama kanal farkı (global kayma düşülünce) bu
+// değerin altında. Kenar halkasında uymayan pay INPAINT_EDGE_BAD_MAX'ı ya da
+// halkanın yarısını aşarsa dolgu kullanılmaz.
+const INPAINT_INLIER = 30;
+const INPAINT_EDGE_BAD_MAX = 0.2;
+// Delikte modelin çizdiği kişi payı (bileşim ağırlıklı kişi olasılığı).
+// Model kırpımdaki kişiyi de yeniden çiziyor ve kafayı çoğu zaman eski,
+// büyük boyunda çiziyor; delik kafanın hemen yanında olduğu için o kafanın
+// kenarı (burun, dudak, saç) yeni kafanın yanında saydam bir profil olarak
+// kalıyordu (61079257 c6, 2026-10-09). Ölçülen: izli kareler 0.069/0.070,
+// temizler ≤ 0.043. Aşılırsa dolgu kullanılmaz, kafa küçültülmez.
+const INPAINT_PERSON_MAX = 0.05;
+
+function prepareInpaint(out, Fpre, W, H, hole, banned, wgt) {
+  let x0 = W;
+  let y0 = H;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!hole[y * W + x]) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  const span = Math.max(x1 - x0 + 1, y1 - y0 + 1);
+  const side = Math.min(W, H, Math.max(256, Math.round(span * 1.6) + 96));
+  const left = Math.max(0, Math.min(W - side, Math.round((x0 + x1) / 2 - side / 2)));
+  const top = Math.max(0, Math.min(H - side, Math.round((y0 + y1) / 2 - side / 2)));
+  const N = side * side;
+  const rgb = Buffer.alloc(N * 3);
+  const holeC = new Uint8Array(N);
+  const ringOk = new Uint8Array(N);
+  const wC = new Float32Array(N);
+  const PC = new Float32Array(N * 3);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const g = (y + top) * W + (x + left);
+      const i = y * side + x;
+      for (let c = 0; c < 3; c++) rgb[i * 3 + c] = out[g * 3 + c];
+      if (hole[g]) {
+        holeC[i] = 1;
+        wC[i] = wgt[g];
+        for (let c = 0; c < 3; c++) PC[i * 3 + c] = Fpre[g * 3 + c];
+      } else if (!banned[g]) ringOk[i] = 1;
+    }
+  }
+  return { out, W, H, left, top, side, rgb, holeC, ringOk, wC, PC };
+}
+
+/** Modele gidecek kırpım (PNG) ve maske (PNG, şeffaf = doldur). */
+async function encodeInpaint(job) {
+  const S = INPAINT_SIZE;
+  const { side } = job;
+  const image = await sharp(job.rgb, { raw: { width: side, height: side, channels: 3 } })
+    .resize(S, S, { kernel: "lanczos3" }).png().toBuffer();
+  // Maske 3 px genişletilir: model kenarı da yeniden çizsin, biz yalnızca
+  // deliği alırız.
+  let m = new Float32Array(side * side);
+  for (let i = 0; i < m.length; i++) m[i] = job.holeC[i];
+  m = boxBlur(m, side, side, Math.max(3, Math.round(side / 60)));
+  const a = Buffer.alloc(side * side * 4);
+  for (let i = 0; i < side * side; i++) {
+    a[i * 4 + 3] = m[i] > 0.001 ? 0 : 255;
+  }
+  const mask = await sharp(a, { raw: { width: side, height: side, channels: 4 } })
+    .resize(S, S, { kernel: "nearest" }).png().toBuffer();
+  return { image, mask };
+}
+
+/**
+ * Model çıktısını deliğe yerleştirir. Dönüş: { buf, shift, resid } ya da
+ * kayma/fark sınırı aşılırsa { buf: null, reason, shift, resid }.
+ */
+async function finishInpaint(job, aiBuf, baseJpeg) {
+  const { side, W, left, top } = job;
+  const N = side * side;
+  const { data: ai } = await sharp(aiBuf).removeAlpha()
+    .resize(side, side, { fit: "fill", kernel: "lanczos3" }).raw().toBuffer({ resolveWithObject: true });
+  // Halka: deliğe yakın bilinen arka plan. Model maskeye sıkı uymuyor —
+  // kırpımın tamamını yeniden çiziyor, arka plandaki kişileri/nesneleri
+  // silebiliyor (bb2cc441 c3). Bu yüzden halkanın tamamı değil, yalnızca
+  // modelin aslına UYDUĞU pikselleri renk düzeltmesine girer; uymayan
+  // pikseller düzeltme alanını deliğe leke olarak taşıyordu.
+  const R = Math.max(6, Math.round(side / 40));
+  let near = new Float32Array(N);
+  for (let i = 0; i < N; i++) near[i] = job.holeC[i];
+  const near1 = boxBlur(near, side, side, R);
+  near = boxBlur(near, side, side, 2 * R);
+  const ring = new Uint8Array(N);
+  let rn = 0;
+  let shift = 0;
+  const gm = [0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    if (!job.ringOk[i] || near[i] <= 0.001) continue;
+    ring[i] = 1;
+    rn++;
+    for (let c = 0; c < 3; c++) {
+      const d = job.rgb[i * 3 + c] - ai[i * 3 + c];
+      shift += Math.abs(d);
+      gm[c] += d;
+    }
+  }
+  if (rn < 50) return { buf: null, reason: "inpaint-no-ring", shift: null, resid: null };
+  shift /= rn * 3;
+  for (let c = 0; c < 3; c++) gm[c] /= rn;
+  const rw = new Float32Array(N);
+  let inl = 0;
+  for (let i = 0; i < N; i++) {
+    if (!ring[i]) continue;
+    let e = 0;
+    for (let c = 0; c < 3; c++) e += Math.abs(job.rgb[i * 3 + c] - ai[i * 3 + c] - gm[c]);
+    if (e / 3 < INPAINT_INLIER) { rw[i] = 1; inl++; }
+  }
+  // Düzeltme alanı: uyan halka pikselindeki farkın normalize evrişimi (dar
+  // ölçek yerel kaymayı, geniş ölçek boşlukları kapatır).
+  const corr = [];
+  const den1 = boxBlur(rw, side, side, 2 * R);
+  const den2 = boxBlur(rw, side, side, 8 * R);
+  for (let c = 0; c < 3; c++) {
+    const d = new Float32Array(N);
+    for (let i = 0; i < N; i++) if (rw[i]) d[i] = job.rgb[i * 3 + c] - ai[i * 3 + c];
+    const n1 = boxBlur(d, side, side, 2 * R);
+    const n2 = boxBlur(d, side, side, 8 * R);
+    const k = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      k[i] = den1[i] > 0.02 ? n1[i] / den1[i] : den2[i] > 0.002 ? n2[i] / den2[i] : gm[c];
+    }
+    corr.push(k);
+  }
+  // Deliğin hemen kenarında (R içinde) düzeltme sonrası aslına uymayan
+  // piksel payı: model orada yapıyı değiştirdiyse (silinen nesne, kaymış
+  // çizgi) dolgu kenarda kopuk görünür.
+  let en = 0;
+  let bad = 0;
+  for (let i = 0; i < N; i++) {
+    if (!ring[i] || near1[i] <= 0.001) continue;
+    en++;
+    let e = 0;
+    for (let c = 0; c < 3; c++) e += Math.abs(job.rgb[i * 3 + c] - (ai[i * 3 + c] + corr[c][i]));
+    if (e / 3 > INPAINT_INLIER) bad++;
+  }
+  const resid = en ? bad / en : 1;
+  // Delikte modelin çizdiği KİŞİ payı (bileşim ağırlığıyla).
+  const Pai = await personMask(ai, side, side);
+  let pw = 0;
+  let pp = 0;
+  for (let i = 0; i < N; i++) {
+    if (!job.holeC[i]) continue;
+    pw += job.wC[i];
+    pp += job.wC[i] * Pai[i];
+  }
+  const person = pw > 0 ? pp / pw : 0;
+  if (shift > INPAINT_SHIFT_MAX || resid > INPAINT_EDGE_BAD_MAX || inl < rn * 0.5) {
+    return { buf: null, reason: "inpaint-mismatch", shift, resid, person };
+  }
+  if (person > INPAINT_PERSON_MAX) return { buf: null, reason: "inpaint-person", shift, resid, person };
+  const res = job.out ? Buffer.from(job.out) : await sharp(baseJpeg).removeAlpha().raw().toBuffer();
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const i = y * side + x;
+      if (!job.holeC[i]) continue;
+      const g = (y + top) * W + (x + left);
+      for (let c = 0; c < 3; c++) {
+        const v = res[g * 3 + c] + job.wC[i] * (ai[i * 3 + c] + corr[c][i] - job.PC[i * 3 + c]);
+        res[g * 3 + c] = Math.max(0, Math.min(255, Math.round(v)));
+      }
+    }
+  }
+  const buf = await sharp(res, { raw: { width: W, height: job.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  return { buf, shift, resid, person };
 }
 
 async function rawRgb(buf, W = null, H = null) {
@@ -401,7 +877,7 @@ async function rawRgb(buf, W = null, H = null) {
  *
  * @returns {{buf: Buffer|null, applied: boolean, reason: string|null, ...}}
  */
-async function correctHeadScale(outputBuf, templateBuf) {
+async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false } = {}) {
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
@@ -445,14 +921,27 @@ async function correctHeadScale(outputBuf, templateBuf) {
   const P = lo.pts;
   const chin = Math.round(P[8].y);
   const cx = Math.round(P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17);
-  const sil = { ...base, cx, chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
+  const sil = { ...base, cx, seedX: Math.round(P[30].x), jaw: P.slice(0, 17), chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
   const faceH = Math.max(lo.box.height, chin - lo.box.y);
-  const r = pinchHead(o.data, o.W, o.H, sil, faceH, plan.s);
+  const r = scaleHeadPatch(o.data, t.data, Mo, Mt, o.W, o.H, sil, faceH, plan.s, { deferInpaint });
+  if (r.skipped) return { buf: null, applied: false, reason: r.reason || "head-touched", touch: r.touch, sEff: r.sEff ?? null, ...info };
   const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
     .jpeg({ quality: 95 })
     .toBuffer();
   const head = { cx: sil.cx, cy: (sil.top + sil.chin) / 2, rx: sil.headW / 2, ry: sil.headH / 2, chin: sil.chin, neck: r.neck };
-  return { buf, applied: true, reason: null, ...info, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
+  // deferInpaint: buf doku dolgulu hâl; çağıran inpaint.image/mask'ı modele
+  // verip inpaint.finish(aiBuf) ile son hâli alır (ağ çağrısı ağır katman
+  // kilidinin DIŞINDA yapılabilsin diye ayrık).
+  let inpaint = null;
+  if (r.inpaint) {
+    const job = r.inpaint;
+    // Tam çözünürlüklü ham kopya ağ çağrısı boyunca tutulmasın (bellek —
+    // bkz. falPhotos POST_LAYER_LOCK); finish JPEG'i yeniden açar.
+    job.out = null;
+    const { image, mask } = await encodeInpaint(job);
+    inpaint = { image, mask, rect: { left: job.left, top: job.top, side: job.side }, finish: (aiBuf) => finishInpaint(job, aiBuf, buf) };
+  }
+  return { buf, applied: true, reason: null, inpaint, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
 module.exports = {
@@ -468,7 +957,8 @@ module.exports = {
   MAX_SCALE,
   BODY_ALIGNED_IOU,
   FACE_ALIGNED_SHIFT,
-  VOLUME_FLOOR,
   VOLUME_CEIL,
-  _pinchHead: pinchHead,
+  _scaleHeadPatch: scaleHeadPatch,
+  _encodeInpaint: encodeInpaint,
+  _finishInpaint: finishInpaint,
 };

@@ -338,8 +338,10 @@ async function meanSaturation(buf) {
 async function matchGrayscale(outputBuf, templateBuf) {
   const satT = await meanSaturation(templateBuf);
   if (satT >= GRAY_SAT_MAX) return { buf: null, applied: false, reason: "color-template", satT };
+  // Çıktının ortalamasına bakılmaz (2026-10-09, f9f3b5c0 c4): gri sahnede
+  // küçük renkli bir yüz ortalamayı 0.5'te bırakıp "zaten gri" sayıldı.
   const satO = await meanSaturation(outputBuf);
-  if (satO < GRAY_SAT_MAX) return { buf: null, applied: false, reason: "already-gray", satT, satO };
+  if (satO < 0.05) return { buf: null, applied: false, reason: "already-gray", satT, satO };
   const buf = await sharp(outputBuf).greyscale().toColourspace("srgb").png().toBuffer();
   return { buf, applied: true, reason: null, satT, satO };
 }

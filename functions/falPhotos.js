@@ -258,6 +258,8 @@ const FREE_TIER_CHUNK_COUNT = 1;
 // selfie olunca (bkz. orderRefsByPose) bakış ilk denemede doğru çıkıyor —
 // 3 açıyla (0.05/0.76/0.77) yarı-profil şablonlara yakın kare yoktu.
 // Mağazadaki eski uygulama 3 göndermeye devam ettiği için ikisi de kabul.
+// Yüz ışığı aktarımı (faceLight.transferFaceLight) — bkz. YÜZ IŞIĞI AKTARIMI.
+const FACE_LIGHT_TRANSFER = false;
 const FACE_PHOTO_COUNT = 5;
 const ALLOWED_FACE_PHOTO_COUNTS = [3, 5];
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
@@ -1199,6 +1201,10 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
   // "selfie tonunu olduğu gibi taşı, yüzü yeniden aydınlatma" cümlesi
   // kaldırıldı — gün batımı sahnesinde yüz nötr kalıyordu (9d9507f0 c9) ve
   // siyah-beyaz sahnede renkli kalıyordu (c4).
+  // 2026-10-09 SADELEŞTİRME: tekrarlar tek yere toplandı ("selfie'den yalnız
+  // kimlik" TASK'ta, dikiş CLEAN EDGES'te, ışık C'de). C'deki "aynı parlak/
+  // gölge taraf, aynı kontrast" çıkarıldı — f9f3b5c0'da her yüzde gereksiz
+  // gölge vardı; yerine "tabanda olmayan gölge ekleme". Kural sırası aynı.
   // GPT (Buton 1) ve Qwen aynı metni alır.
   return (
     "TASK: The FIRST image is the BASE and your only canvas. Every other image is a close-up SELFIE " +
@@ -1206,8 +1212,9 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "the BASE unchanged: background, lighting, camera angle, framing, pose, body, clothing and " +
     "accessories. Only the head changes.\n" +
     "Use the selfies only for the TARGET's facial identity, hair, eye shape and colour, and skin tone. " +
-    "Never take clothing, accessories, pose, head angle, head size, expression, gaze direction, " +
-    "lighting or colour cast from them.\n\n" +
+    "Never take head angle, head size, gaze direction, expression, pose, clothing, accessories, " +
+    "lighting or colour cast from them: they are zoomed in and face the lens only because they are " +
+    "selfies.\n\n" +
     "CHECK THESE THREE FIRST — they fail most often:\n\n" +
     "A) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE. A head that faces a different way from " +
     "the BASE ruins the photo even if everything else is perfect. Before drawing, read the BASE " +
@@ -1215,46 +1222,42 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "edge, straight at the lens, up or down; (2) how far the head is turned — straight on, slightly " +
     "turned, three-quarter or profile; (3) which cheek is visible and how much of each ear shows; " +
     "(4) the tilt and the chin height. Draw the new head pointing in EXACTLY that direction by " +
-    "EXACTLY that amount, with the same cheek and the same amount of each ear visible. The selfies " +
-    "face the lens only because they are selfies: never copy their head turn, never turn the head " +
+    "EXACTLY that amount, with the same cheek and the same amount of each ear visible: never turn the head " +
     "toward the camera, never turn it further away, never straighten or re-centre it. Then the " +
     "eyes: they look at exactly the same point as the BASE person's eyes — the same side of the " +
-    "frame, the same object (a cup, a phone, the sea), the same distance — with the irises in the " +
-    "same position inside each eye. If the BASE looks away from the lens, the output looks away " +
-    "from the lens. Only if the BASE looks into the lens may the output look into the lens. Eyes " +
-    "are open, clear and alert, never half-closed or enlarged.\n\n" +
+    "frame, the same object (a cup, a phone, the sea) — with the irises in the same position inside " +
+    "each eye. The output looks into the lens only if the BASE does.\n\n" +
     "B) HEAD ON THE BODY: The new head sits on the BASE neck exactly where the BASE head sat, at " +
     "the same size against the shoulders and with the same lean. The neck keeps the BASE width, " +
-    "length and angle and flows into the jaw with no step, kink, seam or colour break. The head " +
-    "must look like it grows from this body, never pasted on, floating, oversized, undersized or " +
-    "pushed forward. Never take head scale from the zoomed-in selfies.\n\n" +
-    "C) LIGHT ON THE FACE: Light the new face exactly like the BASE person's face: the same light " +
-    "direction, the same bright side and shadow side, the same contrast between them, the same " +
-    "brightness and the same colour of light (golden sunset, cool daylight, warm indoor lamp, " +
-    "flash). The TARGET's own skin tone sits underneath that light. If the BASE photo is black and " +
-    "white, the whole output, including the face, is black and white.\n\n" +
+    "length and angle. The head must look like it grows from this body, never pasted on, floating, " +
+    "oversized, undersized or pushed forward.\n\n" +
+    "C) LIGHT ON THE FACE: Light the new face like the BASE person's face: the same light direction, " +
+    "brightness and colour of light (golden sunset, cool daylight, warm indoor lamp, flash). Add no " +
+    "shadow, darkening or contrast that the BASE face does not have. The TARGET's own skin tone sits " +
+    "underneath that light. If the BASE photo is black and white, the whole output, including the " +
+    "face, is black and white.\n\n" +
     "1) IDENTITY (highest priority after rule A): Copy the selfie person feature by feature: eyes, " +
     "eyebrows, nose, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
     "beautify, symmetrise, average, round, puff, widen or stretch. Keep the BASE expression and add " +
-    "no smile that is not there. Keep permanent features such as moles, freckles, scars and facial " +
-    "hair. Gently clean temporary blemishes.\n\n" +
+    "no smile that is not there. Eyes are open and clear, never half-closed or enlarged. Keep " +
+    "permanent features such as moles, freckles, scars and facial hair. Gently clean temporary " +
+    "blemishes.\n\n" +
     "2) HAIR: Take hairline, density, length, texture and colour from the selfies, never from the " +
     "BASE person, and never invent any. If the TARGET is bald or balding, the output is bald or " +
     "balding to the same degree.\n\n" +
     "3) SKIN TONE: Use ONE continuous TARGET tone from face through neck, chest, shoulders, arms, " +
-    "hands and legs, lit by the BASE scene's light as in rule C. Do not flatten highlights or " +
-    "brighten the face beyond the BASE.\n\n" +
+    "hands and legs, under the light described in rule C.\n\n" +
     "REMOVE: Remove all glasses and sunglasses completely. Remove all tattoos.\n\n" +
     "CLEAN EDGES: Nothing of the BASE person may remain — no faint outline of their hair, head, " +
     "headphones, glasses or limbs, no semi-transparent ghost, no double edge. The new face blends " +
-    "into the hairline, temples, ears, jaw and neck with no visible boundary. Never leave a " +
-    "straight-edged block, patch or washed-out streak on the face or along the hairline. No dark " +
-    "smudges on knuckles or joints.\n\n" +
+    "into the hairline, temples, ears, jaw and neck with no visible boundary, step or colour break. " +
+    "Never leave a straight-edged block, patch or washed-out streak on the face or along the " +
+    "hairline. No dark smudges on knuckles or joints.\n\n" +
     "QUALITY: The result must look like the BASE photograph was naturally taken with the TARGET in " +
     "it: an ordinary, unedited phone photo, not a face swap or a generated image. Add no glow, " +
-    "sheen, airbrush, beauty filter or CGI look. The face is the sharpest region of the frame: crisp " +
-    "irises and catchlights, defined lashes and brow hairs, clean lip edges, skin with fine pores. It " +
-    "must never be softer, noisier or lower-resolution than the clothing and background around it."
+    "sheen, airbrush, beauty filter or CGI look. The face is the sharpest region of the frame, with " +
+    "crisp eyes, lashes and brows and natural skin texture, never softer, noisier or lower-resolution " +
+    "than the clothing and background around it."
   );
 }
 
@@ -1947,6 +1950,39 @@ async function generateWithOpenAI(prompt, imageUrls, model = OPENAI_MODEL_ID) {
     return await postOpenAiImageEdit(form, buffers.length);
   } catch (e) {
     console.error("OpenAI images/edits hata:", e.message || e);
+    return null;
+  }
+}
+
+// KAFA KÜÇÜLTME AI DOLGUSU (2026-10-09, kullanıcı kararı: "OpenAI maskeli
+// düzenleme"). Küçülen kafanın açtığı arka plan deliği doku dolgusuyla
+// yapılı sahnelerde (tabela, perde, tavan) yamalı görünüyordu. Model maskeye
+// sıkı uymuyor, kırpımı baştan çiziyor — bu yüzden promptta arka plandaki
+// diğer kişilerin korunması AÇIKÇA istenir (ilk sürüm "no person" diyordu,
+// model arka plandaki insanları silip kenarda kopukluk üretti). Dönen
+// görselden yalnızca delik pikselleri alınır (bkz. headScale finishInpaint).
+// Kafayı olduğu boyda tutma cümlesi (2026-10-09, 61079257 c6): model kafayı
+// eski büyük boyunda yeniden çizip kenarını deliğe taşıyordu (yüzün yanında
+// saydam profil). Cümleyle delikteki kişi payı 0.069 → 0.012, 0.070 → 0.043.
+const HEAD_INPAINT_PROMPT = "Edit only the transparent masked area. It is the part of the background that was hidden behind the person's head; the head is now smaller. The person's head, hair, face and ears must stay exactly where and as large as they are now: do not enlarge, extend, move or redraw them, and do not continue their outline into the masked area. Fill it with the background that would be visible there, continuing exactly the surrounding walls, signs, lines, plants, objects, lighting, depth of field, blur and grain. Do not draw hair, a head, a face or skin inside the mask. Keep everything outside the mask exactly as it is, including the main person and any other people or objects in the background.";
+
+/**
+ * Kafa küçültme deliğini maskeli düzenlemeyle doldurur. Dönüş: PNG buffer ya
+ * da null (FAIL-SAFE: çağıran kafayı küçültmeden bırakır, retry yok).
+ */
+async function inpaintHeadHoleWithOpenAI(imagePng, maskPng) {
+  try {
+    const form = new FormData();
+    form.append("model", OPENAI_MODEL_ID);
+    form.append("prompt", HEAD_INPAINT_PROMPT);
+    form.append("quality", "medium");
+    form.append("size", "1024x1024");
+    form.append("output_format", "png");
+    form.append("image[]", new Blob([imagePng], { type: "image/png" }), "crop.png");
+    form.append("mask", new Blob([maskPng], { type: "image/png" }), "mask.png");
+    return await postOpenAiImageEdit(form, 1);
+  } catch (e) {
+    console.error("OpenAI kafa dolgusu hata:", e.message || e);
     return null;
   }
 }
@@ -5299,6 +5335,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // Kafa ölçeklendiyse kafanın geometrisi — arka plan geri yüklemesi
     // kafa çevresinde geçişi yumuşatır (bkz. sceneRestore HEAD_BLEND_R).
     let scaledHead = null;
+    let pendingScale = null;
     await withPostLayerLock(async () => {
       // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
       // çöz). Kafa yüz noktalarıyla ölçülür ve şablondaki kafayla aynı boya
@@ -5315,13 +5352,21 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
         } else {
           const { correctHeadScale } = require("./headScale");
-          const hs = await correctHeadScale(deliverBuf, tplForScale);
-          if (hs.applied) scaledHead = hs.head;
+          // Delik AI ile doldurulur; ağ çağrısı kilidin DIŞINDA yapılır
+          // (aşağıda), kilit 30-60 sn tutulmasın.
+          const hs = await correctHeadScale(deliverBuf, tplForScale, { deferInpaint: true });
           const n = (v) => (v != null ? v.toFixed(3) : "null");
-          const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} gözÇene=${n(hs.parts && hs.parts.eyeChin)} kaşBurun=${n(hs.parts && hs.parts.browNose)} gözBurun=${n(hs.parts && hs.parts.eyeNose)} burunBoyu=${n(hs.parts && hs.parts.noseLen)} kafaHacmi=${n(hs.volRatio)}${hs.volUsed ? "" : "[kullanılmadı]"} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}`;
+          const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} gözÇene=${n(hs.parts && hs.parts.eyeChin)} kaşBurun=${n(hs.parts && hs.parts.browNose)} gözBurun=${n(hs.parts && hs.parts.eyeNose)} burunBoyu=${n(hs.parts && hs.parts.noseLen)} kafaHacmi=${n(hs.volRatio)}${hs.volUsed ? "" : "[kullanılmadı]"} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}${hs.planS != null ? ` plan=${n(hs.planS)} açıkŞablon=${n(hs.exposed)}` : ""}${hs.sEff != null ? ` izinliS=${n(hs.sEff)}` : ""}`;
           if (hs.applied && hs.buf) {
-            deliverBuf = hs.buf;
-            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} taşınanPx=${hs.movedPx}`);
+            const delik = `taşınanPx=${hs.movedPx} delikPx=${hs.holePx ?? "null"} delikDerinlik=${hs.holeDepth != null ? Math.round(hs.holeDepth) : "null"}`;
+            if (hs.inpaint) {
+              pendingScale = { hs, ölçü: `${ölçü} ${delik}` };
+            } else {
+              // Delik yok (büyütme ya da dolgu gerekmeyen küçültme).
+              deliverBuf = hs.buf;
+              scaledHead = hs.head;
+              console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${delik}`);
+            }
           } else {
             console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] ${ölçü}`);
           }
@@ -5329,7 +5374,31 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       } catch (e) {
         console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
       }
+    });
 
+    // KAFA KÜÇÜLTME AI DOLGUSU — kilit dışında (ağ). Başarısızlıkta ya da
+    // model arka planı değiştirdiyse kafa küçültülmez (kullanıcı kararı:
+    // retry yok, bozuk dolgu yerine dokunulmamış kare).
+    if (pendingScale) {
+      const { hs, ölçü } = pendingScale;
+      pendingScale = null;
+      try {
+        const ai = await inpaintHeadHoleWithOpenAI(hs.inpaint.image, hs.inpaint.mask);
+        const fin = ai ? await hs.inpaint.finish(ai) : { buf: null, reason: "inpaint-failed" };
+        const k = `kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"}`;
+        if (fin.buf) {
+          deliverBuf = fin.buf;
+          scaledHead = hs.head;
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${k}`);
+        } else {
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${ölçü} ${k}`);
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: kafa dolgusu hata verdi (küçültülmedi):", e);
+      }
+    }
+
+    await withPostLayerLock(async () => {
       // TEN TONU ALANI (2026-10-07, kullanıcı kararı: elemek yerine çöz).
       // Vücut derisini segmentasyon modeliyle bulur ve kolları/elleri/boynu
       // yüz tonuna çeker; kolun bir yerinin koyu bir yerinin açık kalmasını
@@ -5355,9 +5424,16 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // ile çıktıdaki ışık tamamen aynı olmalı"). Şablon yüzünün ışık deseni
       // (yön, kontrast, renk geçişi) çıktı yüzüne aktarılır; ten ortalaması
       // korunur (bkz. faceLight.js).
+      //
+      // KAPALI (2026-10-09, iş f9f3b5c0, kullanıcı: "yüze gereksiz gölge
+      // eklemişsin her fotoğrafta"). 10 karenin 9'unda uygulandı; yüzün bir
+      // yarısını karartıp diğerini parlattı (c2, c7) ve yumuşak yüz maskesi
+      // yüzün dışına taşıp arka planda parlak hale bıraktı (c1 gökyüzü, c7
+      // duvar). Işık prompt'tan geliyor; katman yeniden açılmadan önce bu
+      // iki kusur çözülmeli.
       try {
         const tplForLight = recompositedOk ? restore.originalBuf : (restore ? (Buffer.isBuffer(templateInput) ? templateInput : null) : templateSourceBuf);
-        if (tplForLight) {
+        if (FACE_LIGHT_TRANSFER && tplForLight) {
           const { transferFaceLight } = require("./faceLight");
           const fl = await transferFaceLight(deliverBuf, tplForLight);
           const n = (v) => (v != null ? v.toFixed(3) : "null");
@@ -5423,6 +5499,26 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         }
       } catch (e) {
         console.error("OpenAI yolu: arka plan geri yükleme hata verdi (atlanıyor):", e);
+      }
+
+      // SİYAH-BEYAZ — SON GEÇİŞ (2026-10-09, f9f3b5c0 c4): ten/detay
+      // katmanları gri kareye yeniden renk katabiliyor; şablon griyse teslim
+      // edilen kare de tamamen gri olur.
+      try {
+        let tplForGray2 = null;
+        if (recompositedOk) tplForGray2 = restore.originalBuf;
+        else if (restore) tplForGray2 = Buffer.isBuffer(templateInput) ? templateInput : null;
+        else tplForGray2 = templateSourceBuf;
+        if (tplForGray2) {
+          const { matchGrayscale } = require("./faceLight");
+          const g = await matchGrayscale(deliverBuf, tplForGray2);
+          if (g.applied && g.buf) {
+            deliverBuf = g.buf;
+            console.log(`SİYAH-BEYAZ SON (style=${styleId}, chunk=${chunkIdx}): UYGULANDI şablonDoygunluk=${g.satT.toFixed(1)} çıktıDoygunluk=${g.satO.toFixed(1)}`);
+          }
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: siyah-beyaz son geçiş hata verdi (atlanıyor):", e);
       }
     });
 
