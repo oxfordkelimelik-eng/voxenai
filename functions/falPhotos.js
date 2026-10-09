@@ -1265,21 +1265,23 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
  */
 function buildEditPromptCompact() {
   return (
-    "TASK: The FIRST image is the BASE and your only canvas. The other images are selfies of the " +
-    "TARGET. Replace the BASE person with the TARGET and keep everything else unchanged: background, " +
-    "lighting, framing, pose, clothing and accessories. Use the selfies only for the face, hair, eyes " +
-    "and skin tone, never for clothing, pose, head angle, head size, expression, gaze or lighting.\n\n" +
-    "IDENTITY (highest priority): The output must be unmistakably the same person as in the selfies. " +
-    "Copy every facial feature exactly: eyes, brows, nose, lips, jaw, chin, cheekbones and face shape " +
-    "and proportions. Do not beautify, symmetrise, average or reshape. Keep moles, freckles, scars and " +
-    "facial hair. Take hairline, length, texture and colour from the selfies; if the TARGET is bald or " +
-    "balding, the output is too. Use one continuous TARGET skin tone across all visible skin under the " +
-    "BASE light. Keep the BASE expression.\n\n" +
-    "HEAD SIZE, ANGLE AND GAZE: Keep the BASE head size relative to the shoulders exactly, and never " +
-    "take scale from the zoomed-in selfies or enlarge the head. Keep the BASE head rotation, tilt and " +
-    "chin height exactly; do not turn it toward the camera. The eyes must look exactly where the BASE " +
-    "person's eyes look, not into the lens like the selfies. Eyes are open, clear and natural-sized.\n\n" +
-    "REMOVE: Remove all glasses, sunglasses and tattoos."
+    "TASK: The FIRST image is the BASE and the only canvas. Replace its person with the TARGET from " +
+    "the other images. Keep everything else unchanged: background, lighting, framing, camera angle, " +
+    "body, pose, clothing and accessories. Use references only for TARGET identity, hair, eyes and " +
+    "skin tone.\n\n" +
+    "HEAD & GAZE (CRITICAL): Match the BASE head angle, tilt, chin height, visible cheeks, ears and " +
+    "head size exactly. Preserve neck alignment and match the exact gaze direction and iris position. " +
+    "Never turn toward the camera unless the BASE does.\n\n" +
+    "IDENTITY: Faithfully reproduce the TARGET's facial features and proportions: eyes, brows, nose, " +
+    "lips, jaw, chin and face shape. No beautification or reshaping. Match the TARGET's hairline, " +
+    "length, texture and colour.\n\n" +
+    "SKIN & LIGHTING: Keep TARGET skin tone consistent across all visible skin, matching the BASE " +
+    "lighting, shadows, contrast and colour temperature.\n\n" +
+    "REMOVE: All glasses, sunglasses and tattoos.\n\n" +
+    "REALISM: Remove all traces of the BASE person's head. Blend hairline, ears, jaw and neck " +
+    "seamlessly, without ghosts, seams, patches or colour breaks. Preserve natural anatomy.\n\n" +
+    "QUALITY: Make it indistinguishable from an authentic phone photo. No CGI, filters, glow or " +
+    "excessive retouching. Keep facial details sharp, with natural pores, realistic eyes and brows."
   );
 }
 
