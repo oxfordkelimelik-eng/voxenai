@@ -276,7 +276,7 @@ test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   assert.ok(m, "buildEditPromptP800 bulunamadı");
   const joined = m[0].replace(/"\s*\+\s*"/g, "");
   assert.match(joined, /Use the selfies only for/);
-  assert.match(joined, /CHECK THESE THREE FIRST[\s\S]*A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
+  assert.match(joined, /A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
   assert.match(joined, /never turn the head\s*toward the camera, never turn it further away/);
   assert.match(joined, /look at exactly the same point as the BASE person's eyes/);
   assert.match(joined, /black and\s*white, the whole output, including the face, is black and white/);

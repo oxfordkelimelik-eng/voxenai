@@ -1183,18 +1183,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 mode: 'compact',
               ),
             ),
-            const SizedBox(height: 10),
-            // Qwen, Buton 1 ile aynı P800'ü kullanır; sunucu Qwen'de `mode`u
-            // yok sayar, burada yalnızca iş kaydına doğru yazılsın diye var.
-            _AltGenerateButton(
-              label: 'Fotoğraflarımı Oluştur Versiyon 3',
-              hint: 'Test — Qwen Image 2.1 Pro',
-              enabled: _refsReady && !_preparing,
-              onPressed: () => _generate(
-                modelId: 'qwen-image-2.1-pro',
-                mode: 'p800',
-              ),
-            ),
+            // Versiyon 3 (Qwen) kaldırıldı (2026-10-10).
           ],
           // const SizedBox(height: 10),
           // PrimaryButton(

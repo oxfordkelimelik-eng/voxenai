@@ -31,7 +31,9 @@ const SEG_SIZE = 256;
 // iki yönlüdür: büyük kafa küçülür, küçük kafa büyür.
 //
 // Bu kadar sapma ölçü gürültüsü; dokunulmaz (|1-s| < APPLY_MIN_DELTA).
-const APPLY_MIN_DELTA = 0.04;
+// 0.04 → 0.03 (2026-10-10, iş b602b4b0 c5): s=0.966 "tolerans içi" kaldı,
+// kullanıcı "bi tık küçültmeliydin".
+const APPLY_MIN_DELTA = 0.03;
 // Tek seferde en fazla. Daha büyük sapma ölçü hatası ya da yeniden kadraj.
 // 0.8 → 0.9 (2026-10-09, f9f3b5c0 c6): 0.865 küçültme kafayı omuzlara
 // gömdü, kafanın yanındaki tablonun kenarını büktü ("kafa, tablo, omuzlar
@@ -699,8 +701,13 @@ const INPAINT_EDGE_BAD_MAX = 0.2;
 // büyük boyunda çiziyor; delik kafanın hemen yanında olduğu için o kafanın
 // kenarı (burun, dudak, saç) yeni kafanın yanında saydam bir profil olarak
 // kalıyordu (61079257 c6, 2026-10-09). Ölçülen: izli kareler 0.069/0.070,
-// temizler ≤ 0.043. Aşılırsa dolgu kullanılmaz, kafa küçültülmez.
-const INPAINT_PERSON_MAX = 0.05;
+// temizler ≤ 0.043.
+// KADEMELİ (2026-10-10, b602b4b0 c0: pay 0.126, kare hiç küçültülmedi,
+// kullanıcı "küçültmeliydin"): modelin kişi çizdiği delik piksellerinde AI
+// pikseli alınmaz, doku dolgusu kalır; yalnızca deliğin bu kadarından
+// fazlası kişiyse dolgu bütünüyle reddedilir.
+const INPAINT_PERSON_PX = 0.15; // piksel kişi sayılır (AI çıktısında olasılık)
+const INPAINT_PERSON_MAX = 0.5; // bundan fazlası kişiyse dolgu kullanılmaz
 
 function prepareInpaint(out, Fpre, W, H, hole, banned, wgt) {
   let x0 = W;
@@ -847,21 +854,33 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
   if (shift > INPAINT_SHIFT_MAX || resid > INPAINT_EDGE_BAD_MAX || inl < rn * 0.5) {
     return { buf: null, reason: "inpaint-mismatch", shift, resid, person };
   }
-  if (person > INPAINT_PERSON_MAX) return { buf: null, reason: "inpaint-person", shift, resid, person };
+  // Kişi çizilen pikseller (genişletilip yumuşatılmış): orada doku dolgusu
+  // kalır. Saç teli ve kenar yumuşaması maske eşiğinin altında kaldığı için
+  // genişletme kenar halkası kadar.
+  let pm = new Float32Array(N);
+  for (let i = 0; i < N; i++) pm[i] = Pai[i] >= INPAINT_PERSON_PX ? 1 : 0;
+  pm = boxBlur(pm, side, side, R);
+  for (let i = 0; i < N; i++) pm[i] = pm[i] > 0.01 ? 1 : 0;
+  pm = boxBlur(pm, side, side, Math.max(2, R >> 1));
+  let kept = 0;
+  for (let i = 0; i < N; i++) if (job.holeC[i]) kept += job.wC[i] * pm[i];
+  const fallback = pw > 0 ? kept / pw : 0;
+  if (fallback > INPAINT_PERSON_MAX) return { buf: null, reason: "inpaint-person", shift, resid, person, fallback };
   const res = job.out ? Buffer.from(job.out) : await sharp(baseJpeg).removeAlpha().raw().toBuffer();
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
       const i = y * side + x;
       if (!job.holeC[i]) continue;
       const g = (y + top) * W + (x + left);
+      const wAi = job.wC[i] * (1 - pm[i]);
       for (let c = 0; c < 3; c++) {
-        const v = res[g * 3 + c] + job.wC[i] * (ai[i * 3 + c] + corr[c][i] - job.PC[i * 3 + c]);
+        const v = res[g * 3 + c] + wAi * (ai[i * 3 + c] + corr[c][i] - job.PC[i * 3 + c]);
         res[g * 3 + c] = Math.max(0, Math.min(255, Math.round(v)));
       }
     }
   }
   const buf = await sharp(res, { raw: { width: W, height: job.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
-  return { buf, shift, resid, person };
+  return { buf, shift, resid, person, fallback };
 }
 
 async function rawRgb(buf, W = null, H = null) {

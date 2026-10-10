@@ -116,27 +116,14 @@ const OPENAI_MODEL_ID = "gpt-image-2";
 // ayarlandı, model OpenAI tarafında sessizce kayarsa karşılaştırma bozulur.
 // Yalnızca ops hesabına açık (bkz. startPhotoGeneration).
 const OPENAI_MODEL_V25_ID = "gpt-image-2.5-sunburst-2026-09-08";
-// QWEN TEST MODELİ (2026-09-26): "Fotoğraflarımı Oluştur Versiyon 3" butonu.
-// 2.0 ailesi seçildi çünkü prompt sınırı 1300 token (edit/plus/max: 800);
-// sınırı aşan kısım HATA VERMEDEN kesiliyor. 2026-09-27'den beri Qwen de
-// kısaltılmış P800'ü alır (~1030 token; bkz. generateForMode).
-// 2026-10-07: 2.0 Pro hesapta artık yok (403 AccessDenied.Unpurchased), 2.1
-// Pro'ya geçildi. 2.1 Pro yalnızca workspace'e özel adresten çağrılıyor
-// (anahtar "sk-ws-" workspace anahtarı) ve 10'a kadar referans alıyor; Qwen
-// artık GPT ile aynı seti alır (taban + tüm yüz açıları). Prompt sınırı
-// belgede yazmıyor; 1300 eşiği yalnızca uyarı loglar.
-const QWEN_MODEL_ID = "qwen-image-2.1-pro";
-// Yüklü eski uygulama Versiyon 3 butonunda hâlâ bunu gönderiyor; sunucu yeni
-// modele çevirir (bkz. startPhotoGeneration).
-const QWEN_LEGACY_MODEL_ID = "qwen-image-2.0-pro-2026-06-22";
-const QWEN_KEY = defineSecret("DASHSCOPE_API_KEY");
-const QWEN_EDIT_URL =
-  "https://ws-0vb4se84ze2fnhm8.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
-const QWEN_MAX_INPUT_IMAGES = 10;
-const QWEN_PROMPT_TOKEN_LIMIT = 1300;
+// QWEN KALDIRILDI (2026-10-10, kullanıcı kararı: "3. buton olan qwen
+// butonunu direkt kaldıralım"). Yüklü eski uygulama Versiyon 3 butonunda hâlâ
+// bu kimlikleri gönderebilir; sunucu isteği Buton 1'e (gpt-image-2 + p800)
+// çevirir (bkz. startPhotoGeneration).
+const QWEN_LEGACY_MODEL_IDS = new Set(["qwen-image-2.1-pro", "qwen-image-2.0-pro-2026-06-22"]);
 // Üretimi senkron bu fonksiyon içinde yapan modeller (webhook'suz yol).
-const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID, QWEN_MODEL_ID]);
-const OPS_ONLY_MODELS = new Set([OPENAI_MODEL_V25_ID, QWEN_MODEL_ID]);
+const OPENAI_DIRECT_MODELS = new Set([OPENAI_MODEL_ID, OPENAI_MODEL_V25_ID]);
+const OPS_ONLY_MODELS = new Set([OPENAI_MODEL_V25_ID]);
 // opsPanel.js OPS_EMAIL ile EL İLE senkron (döngüsel require'dan kaçınmak için).
 const OPS_EMAIL = "destek@voxenai.com.tr";
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
@@ -1205,7 +1192,6 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
   // kimlik" TASK'ta, dikiş CLEAN EDGES'te, ışık C'de). C'deki "aynı parlak/
   // gölge taraf, aynı kontrast" çıkarıldı — f9f3b5c0'da her yüzde gereksiz
   // gölge vardı; yerine "tabanda olmayan gölge ekleme". Kural sırası aynı.
-  // GPT (Buton 1) ve Qwen aynı metni alır.
   return (
     "TASK: The FIRST image is the BASE and your only canvas. Every other image is a close-up SELFIE " +
     "of the TARGET person. Replace the person in the BASE with the TARGET and keep everything else in " +
@@ -1215,9 +1201,7 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "Never take head angle, head size, gaze direction, expression, pose, clothing, accessories, " +
     "lighting or colour cast from them: they are zoomed in and face the lens only because they are " +
     "selfies.\n\n" +
-    "CHECK THESE THREE FIRST — they fail most often:\n\n" +
-    "A) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE. A head that faces a different way from " +
-    "the BASE ruins the photo even if everything else is perfect. Before drawing, read the BASE " +
+    "A) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE. Before drawing, read the BASE " +
     "head: (1) which way the nose points — toward the left edge of the frame, toward the right " +
     "edge, straight at the lens, up or down; (2) how far the head is turned — straight on, slightly " +
     "turned, three-quarter or profile; (3) which cheek is visible and how much of each ear shows; " +
@@ -1252,39 +1236,45 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "headphones, glasses or limbs, no semi-transparent ghost, no double edge. The new face blends " +
     "into the hairline, temples, ears, jaw and neck with no visible boundary, step or colour break. " +
     "Never leave a straight-edged block, patch or washed-out streak on the face or along the " +
-    "hairline. No dark smudges on knuckles or joints.\n\n" +
+    "hairline.\n\n" +
     "QUALITY: The result must look like the BASE photograph was naturally taken with the TARGET in " +
     "it: an ordinary, unedited phone photo, not a face swap or a generated image. Add no glow, " +
     "sheen, airbrush, beauty filter or CGI look. The face is the sharpest region of the frame, with " +
     "crisp eyes, lashes and brows and natural skin texture, never softer, noisier or lower-resolution " +
-    "than the clothing and background around it."
+    "than the clothing and background around it. No dark smudges on knuckles or joints."
   );
 }
 
 /**
- * "Versiyon 2" butonunun prompt'u (2026-10-07, kullanıcının verdiği metin
- * birebir). P800'ün kısaltılmışı: aynı kurallar, adım numaraları ve
- * SEAMLESS EDGE / QUALITY yok. Model gpt-image-2 (Buton 1 ile aynı).
+ * "Versiyon 2" butonunun prompt'u. 2026-10-10 (kullanıcı: "yeni promptun ana
+ * hatları kalarak iyice sadeleştirilmiş versiyonu"): P800'ün bölüm sırası
+ * birebir korunur (A kafa yönü+bakış, B kafa-gövde, C yüz ışığı, kimlik, saç,
+ * ten, kaldır, temiz kenar, kalite); her bölüm tek-iki cümleye indirildi.
+ * Gözlük P800'deki gibi kaldırılır, şablonda varsa en son eklenir (bkz.
+ * eyewear.js). Model gpt-image-2 (Buton 1 ile aynı).
  */
 function buildEditPromptCompact() {
   return (
     "TASK: The FIRST image is the BASE and the only canvas. Replace its person with the TARGET from " +
-    "the other images. Keep everything else unchanged: background, lighting, framing, camera angle, " +
-    "body, pose, clothing and accessories. Use references only for TARGET identity, hair, eyes and " +
-    "skin tone.\n\n" +
-    "HEAD & GAZE (CRITICAL): Match the BASE head angle, tilt, chin height, visible cheeks, ears and " +
-    "head size exactly. Preserve neck alignment and match the exact gaze direction and iris position. " +
-    "Never turn toward the camera unless the BASE does.\n\n" +
-    "IDENTITY: Faithfully reproduce the TARGET's facial features and proportions: eyes, brows, nose, " +
-    "lips, jaw, chin and face shape. No beautification or reshaping. Match the TARGET's hairline, " +
-    "length, texture and colour.\n\n" +
-    "SKIN & LIGHTING: Keep TARGET skin tone consistent across all visible skin, matching the BASE " +
-    "lighting, shadows, contrast and colour temperature.\n\n" +
+    "the other images (selfies). Keep everything else unchanged: background, lighting, framing, pose, " +
+    "body, clothing and accessories. Take only identity, hair, eyes and skin tone from the selfies, " +
+    "never head angle, head size, gaze, expression or light.\n\n" +
+    "A) HEAD & GAZE (MOST IMPORTANT): The new head points the same way as the BASE head by the same " +
+    "amount: same nose direction, same visible cheek and ears, same tilt and chin height. Never turn " +
+    "it toward the camera or re-centre it. The eyes look at the same point as the BASE eyes.\n\n" +
+    "B) HEAD ON BODY: Same place, size and lean on the BASE neck; the neck keeps its width and " +
+    "angle.\n\n" +
+    "C) LIGHT: Light the face like the BASE face: same direction, brightness and colour of light. Add " +
+    "no extra shadow. If the BASE is black and white, so is the face.\n\n" +
+    "IDENTITY: Copy the TARGET's eyes, brows, nose, lips, jaw, chin and face shape exactly. No " +
+    "beautifying or reshaping. Keep the BASE expression.\n\n" +
+    "HAIR: Hairline, length, texture and colour from the selfies; bald stays bald.\n\n" +
+    "SKIN: One continuous TARGET tone on all visible skin.\n\n" +
     "REMOVE: All glasses, sunglasses and tattoos.\n\n" +
-    "REALISM: Remove all traces of the BASE person's head. Blend hairline, ears, jaw and neck " +
-    "seamlessly, without ghosts, seams, patches or colour breaks. Preserve natural anatomy.\n\n" +
-    "QUALITY: Make it indistinguishable from an authentic phone photo. No CGI, filters, glow or " +
-    "excessive retouching. Keep facial details sharp, with natural pores, realistic eyes and brows."
+    "CLEAN EDGES: Nothing of the BASE person remains: no ghost, outline or double edge. Hairline, " +
+    "ears, jaw and neck blend seamlessly.\n\n" +
+    "QUALITY: An ordinary, unedited phone photo, not a face swap. No glow or filters. The face is the " +
+    "sharpest part of the frame."
   );
 }
 
@@ -2052,152 +2042,6 @@ async function postOpenAiImageEdit(form, refCount) {
     return null;
   } finally {
     releaseOpenAiImageSlot();
-  }
-}
-
-// Qwen için AYRI eşzamanlılık kuyruğu: OpenAI kuyruğunu paylaşırsa test işleri
-// aynı instance'taki gerçek kullanıcıların üretimini yavaşlatırdı.
-// 2026-10-07: 2 -> 1. Görsel modellerinin dakikalık istek sınırı düşük; iki
-// eşzamanlı istek 10 parçalık bir işte sürekli 429 RateQuota veriyordu.
-const QWEN_MAX_CONCURRENCY = 1;
-// Hesabın modele erişimi yoksa (403 AccessDenied.*, ör. "Unpurchased": kota
-// bitti / faturalandırma kapalı) aynı instance'taki sonraki Qwen çağrıları
-// istek atmadan düşer — her parça aynı hatayı tek tek almasın. Süre dolunca
-// tekrar denenir; hesap düzelince kendiliğinden açılır.
-const QWEN_ACCESS_DENIED_PAUSE_MS = 10 * 60 * 1000;
-let _qwenAccessDeniedUntil = 0;
-let _qwenAccessDeniedCode = "";
-let _qwenActive = 0;
-const _qwenWaitQueue = [];
-
-function acquireQwenSlot() {
-  if (_qwenActive < QWEN_MAX_CONCURRENCY) {
-    _qwenActive++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => _qwenWaitQueue.push(resolve));
-}
-
-function releaseQwenSlot() {
-  const next = _qwenWaitQueue.shift();
-  if (next) next();
-  else _qwenActive--;
-}
-
-/**
- * Alibaba DashScope (Qwen) görsel edit çağrısı — generateWithOpenAI ile aynı
- * sözleşme: JPEG buffer ya da (her hata durumunda) null.
- *
- * Dikkat edilenler:
- * - prompt_extend AÇIK (2026-09-26 kullanıcı kararı): Qwen prompt'u kendisi
- *   yeniden yazar. Sonuç kötüyse ilk şüpheli budur — talimatlarımız modele
- *   bizim yazdığımız hâliyle ulaşmıyor olabilir.
- * - Çıktı boyutu varsayılan olarak SON girdi görselinin oranını alır; bizde
- *   son görsel bir selfie. Bu yüzden boyut tabanın (ilk görsel) oranından
- *   açıkça hesaplanıyor.
- * - Çıktı PNG gelir; kalite kapısı JPEG çözdüğü için JPEG'e çevriliyor
- *   (bkz. generateWithOpenAI'deki output_format notu).
- */
-async function generateWithQwen(prompt, imageUrls) {
-  if (Date.now() < _qwenAccessDeniedUntil) {
-    console.error(`QWEN ERİŞİM YOK (${_qwenAccessDeniedCode}): istek atlanıyor — Alibaba Model Studio'da model erişimi/faturalandırma açılmalı`);
-    return null;
-  }
-  try {
-    const sharp = require("sharp");
-    const approxTokens = Math.round(prompt.length / 4);
-    if (approxTokens > QWEN_PROMPT_TOKEN_LIMIT) {
-      console.warn(`QWEN PROMPT UZUN: ~${approxTokens} token > ${QWEN_PROMPT_TOKEN_LIMIT}, sonu kesilecek`);
-    }
-
-    const buffers = await Promise.all(imageUrls.map(async (url) => {
-      const raw = Buffer.isBuffer(url) ? url : await (async () => {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`referans indirilemedi: ${r.status}`);
-        return Buffer.from(await r.arrayBuffer());
-      })();
-      return sharp(raw)
-        .resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 92 })
-        .toBuffer();
-    }));
-
-    // 2.0 ailesi: toplam piksel 512*512 ile 2048*2048 arasında, kenarlar 16'nın katı.
-    const meta = await sharp(buffers[0]).metadata();
-    const px = meta.width * meta.height;
-    const scale = Math.min(
-      Math.max(1, Math.sqrt((512 * 512) / px)),
-      Math.sqrt((2048 * 2048) / px)
-    );
-    // Büyütürken yukarı, küçültürken aşağı yuvarla — yoksa sınır aşılır.
-    const snap = scale > 1 ? Math.ceil : Math.floor;
-    const round16 = (v) => Math.max(16, snap(v / 16) * 16);
-    const size = `${round16(meta.width * scale)}*${round16(meta.height * scale)}`;
-
-    const body = {
-      model: QWEN_MODEL_ID,
-      input: {
-        messages: [{
-          role: "user",
-          content: [
-            ...buffers.map((b) => ({ image: `data:image/jpeg;base64,${b.toString("base64")}` })),
-            { text: prompt },
-          ],
-        }],
-      },
-      parameters: { n: 1, size, prompt_extend: true, watermark: false },
-    };
-
-    await acquireQwenSlot();
-    let json;
-    try {
-      const maxAttempts = 3;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const resp = await fetch(QWEN_EDIT_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${QWEN_KEY.value()}`,
-          },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(300000),
-        });
-        if (resp.status === 429 && attempt < maxAttempts) {
-          console.warn(`Qwen 429 (oran limiti), ${attempt * 5}sn beklenip tekrar denenecek (deneme ${attempt}/${maxAttempts})`);
-          await new Promise((r) => setTimeout(r, attempt * 5000));
-          continue;
-        }
-        json = await resp.json();
-        if (!resp.ok || json.code) {
-          console.error(`Qwen edit başarısız (deneme ${attempt}): ${resp.status} ${JSON.stringify(json).slice(0, 300)}`);
-          if (resp.status === 403 && /^AccessDenied/.test(String(json.code || ""))) {
-            _qwenAccessDeniedUntil = Date.now() + QWEN_ACCESS_DENIED_PAUSE_MS;
-            _qwenAccessDeniedCode = String(json.code);
-          }
-          return null;
-        }
-        break;
-      }
-    } finally {
-      releaseQwenSlot();
-    }
-    if (!json) return null;
-
-    const outUrl = json?.output?.choices?.[0]?.message?.content?.find((c) => c.image)?.image;
-    if (!outUrl) {
-      console.error("Qwen edit OK ama görsel yok:", JSON.stringify(json).slice(0, 300));
-      return null;
-    }
-    console.log(
-      `MALIYET GORSEL (qwen): model=${QWEN_MODEL_ID} boyut=${size} ` +
-      `usage=${JSON.stringify(json.usage || {})} referansSayisi=${buffers.length} ~promptToken=${approxTokens}`
-    );
-    const r = await fetch(outUrl);
-    if (!r.ok) throw new Error(`Qwen çıktısı indirilemedi: ${r.status}`);
-    return await sharp(Buffer.from(await r.arrayBuffer())).jpeg({ quality: 92 }).toBuffer();
-  } catch (e) {
-    console.error("Qwen edit hata:", e.message || e);
-    return null;
   }
 }
 
@@ -3262,6 +3106,7 @@ const REJECTION_REASON_LABELS = {
   "vision-exposure": "Yüz aşırı parlak çıktı, detay kayboldu",
   "vision-artifact": "Yüzde yama/leke tespit edildi",
   "face-artifact": "Yüzde yama/leke tespit edildi",
+  "head-ghost": "Kafanın çevresinde şablondaki kişiden iz kaldı",
   "vision-orientation": "Kafa yönü sahneye/gövdeye uymuyor",
   "vision-ghosting": "Gövde/kol yarı saydam çıktı (arka plan içinden görünüyor)",
   "limb-ghost": "El/kol yarı saydam, bozuk ya da sıvanmış çıktı",
@@ -3516,6 +3361,9 @@ async function tryArtifactRepair({ buf, faceBox, apiKey, refDescriptor, preDist 
 const GATE_REPEAT_ELIGIBLE = new Set([
   "vision-hair",
   "face-artifact",
+  // head-ghost EKLENDİ (2026-10-10): Vision yorumu; yanlış pozitif chunk'ı
+  // tüketmesin.
+  "head-ghost",
 ]);
 
 // YAW (KAFANIN YANA DÖNÜKLÜĞÜ) SAPMA SINIRI (2026-08-11).
@@ -3851,6 +3699,15 @@ function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null, y
       "it, do not re-centre it.\n\n"
     );
   }
+  if (g === "head-ghost") {
+    return (
+      "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
+      "Your last render left a faint trace of the BASE person around the new head: an outline " +
+      "of their hair, head, face or glasses. Wherever the BASE person's hair, head or glasses " +
+      "reached beyond the new head, draw only the background that belongs there, continuing " +
+      "the surroundings. Nothing of the BASE person may remain, not even a see-through edge.\n\n"
+    );
+  }
   if (g === "limb-ghost") {
     return (
       "PREVIOUS ATTEMPT WAS REJECTED — READ THIS FIRST.\n" +
@@ -3925,17 +3782,6 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
     [PHOTO_MODE_COMPACT]: buildEditPromptCompact,
   };
   const build = promptBuilders[mode] || buildEditPrompt; // varsayılan: tam prompt
-
-  if (imageModel === QWEN_MODEL_ID) {
-    // Qwen yalnızca tek atım; 3 aşamalı mod bu modelde denenmedi. `mode`
-    // burada KULLANILMAZ: üç buton da aynı P800'ü alır, tek fark model
-    // (2026-09-27). Kısaltılmış P800 (~1030 token) Qwen'in 1300 sınırına
-    // sığıyor; aşarsa generateWithQwen "QWEN PROMPT UZUN" uyarısı loglar.
-    return await generateWithQwen(
-      retryHint + buildEditPromptP800(identityCaption, bodyProfile),
-      fullSet.slice(0, QWEN_MAX_INPUT_IMAGES)
-    );
-  }
 
   if (mode === PHOTO_MODE_STAGED) {
     // MOD 2 — 3 AŞAMALI PIPELINE. Her aşamanın çıktısı bir sonrakinin TUVALİ.
@@ -4396,7 +4242,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // OpenAI 429'unu iki denemesinde de tüketip TAMAMEN sessizce
       // kayboluyordu — loglarda o chunk'ın var olduğu bile görünmüyordu,
       // sebep ancak diğer tüm chunk'lar tek tek elenerek bulunabiliyordu.
-      console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (${imageModel === QWEN_MODEL_ID ? 'Qwen hatası — yukarıdaki "Qwen edit başarısız" / "QWEN ERİŞİM YOK" satırına bak' : 'muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak'})`);
+      console.warn(`ÜRETİM BAŞARISIZ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): generateForMode null döndü (muhtemelen OpenAI 429/hata — yukarıdaki "OpenAI images/edits başarısız" satırına bak)`);
       // lastRejectGate BİLEREK sıfırlanmıyor: burada üretim hiç olmadı, bu bir
       // kalite reddi değil. Varsa önceki kalite reddinin uyarısı hâlâ en
       // güncel bilgidir ve sonraki denemeye taşınmalı.
@@ -5202,6 +5048,48 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
 
+    // KAFA ÇEVRESİ KALINTI KAPISI (2026-10-10) — bkz. headGhost.js. Şablon
+    // kişisinden kafanın çevresinde kalan iz (saç halesi, saç teli, gözlük
+    // camı, saydam profil). Diğer BÜTÜN kapılardan sonra: yalnızca kabul
+    // edilecek kare için sorulur. Yorum kapısı — aynı chunk'ta
+    // GATE_REPEAT_DISABLE_AFTER kez elerse bu chunk için devre dışı kalır.
+    // FAIL-SAFE: yüz yok / cevap okunamadı -> ELEMEZ.
+    if (!disabledGates.has("head-ghost")) {
+      try {
+        const { judgeHeadGhost } = require("./headGhost");
+        const { detectMainFace } = require("./faceQuality");
+        const tplForGhost = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+        const fd = (await detectMainFace(buf)) || (await detectMainFace(buf, LOW_CONF_FACE));
+        if (!fd || !fd.box || !Buffer.isBuffer(tplForGhost)) {
+          console.log(`KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${!fd || !fd.box ? "yüz-yok" : "şablon-yok"}]`);
+        } else {
+          const gh = await judgeHeadGhost(buf, tplForGhost, fd.box, OPENAI_KEY.value());
+          if (!gh.ok) {
+            console.log(`KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI[${gh.reason}]`);
+          } else if (gh.bad) {
+            recordGateRejection("head-ghost");
+            console.log(
+              `KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
+              `RED[head-ghost] bölge="${gh.where}" gerekçe="${gh.detail}"`
+            );
+            lastRejectGate = "head-ghost";
+            await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+              mode, gate: "head-ghost", distance: mathDist,
+              detail: `${gh.where || "?"} — ${gh.detail}`,
+            });
+            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            break;
+          } else {
+            console.log(`KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): GEÇTİ`);
+          }
+        }
+      } catch (e) {
+        console.error("OpenAI yolu: kafa kalıntı kapısı hata verdi (bu katman atlanıyor):", e);
+      }
+    } else {
+      console.warn(`KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ATLANDI — kapı bu chunk için devre dışı`);
+    }
+
     finalBuf = buf;
     break;
   }
@@ -5360,7 +5248,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           if (hs.applied && hs.buf) {
             const delik = `taşınanPx=${hs.movedPx} delikPx=${hs.holePx ?? "null"} delikDerinlik=${hs.holeDepth != null ? Math.round(hs.holeDepth) : "null"}`;
             if (hs.inpaint) {
-              pendingScale = { hs, ölçü: `${ölçü} ${delik}` };
+              pendingScale = { hs, ölçü: `${ölçü} ${delik}`, tpl: tplForScale };
             } else {
               // Delik yok (büyütme ya da dolgu gerekmeyen küçültme).
               deliverBuf = hs.buf;
@@ -5380,16 +5268,34 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // model arka planı değiştirdiyse kafa küçültülmez (kullanıcı kararı:
     // retry yok, bozuk dolgu yerine dokunulmamış kare).
     if (pendingScale) {
-      const { hs, ölçü } = pendingScale;
+      const { hs, ölçü, tpl } = pendingScale;
       pendingScale = null;
       try {
         const ai = await inpaintHeadHoleWithOpenAI(hs.inpaint.image, hs.inpaint.mask);
         const fin = ai ? await hs.inpaint.finish(ai) : { buf: null, reason: "inpaint-failed" };
-        const k = `kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"}`;
-        if (fin.buf) {
+        const k = `kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
+        // KÜÇÜLTME SONRASI KALINTI (2026-10-10): dolgu kafanın yanında iz
+        // bırakmışsa (model kafayı eski boyunda çizdi) küçültme geri alınır.
+        // Ham kare kalıntı kapısından geçtiği için iz küçültmeden gelir. Kapı
+        // bu chunk'ta devre dışıysa (ham karede de iz görüyordu) sorulmaz.
+        let ghost = null;
+        if (fin.buf && Buffer.isBuffer(tpl) && !disabledGates.has("head-ghost")) {
+          try {
+            const { judgeHeadGhost } = require("./headGhost");
+            const { detectMainFace } = require("./faceQuality");
+            const fd = (await detectMainFace(fin.buf)) || (await detectMainFace(fin.buf, LOW_CONF_FACE));
+            if (fd && fd.box) ghost = await judgeHeadGhost(fin.buf, tpl, fd.box, OPENAI_KEY.value());
+          } catch (e) {
+            console.error("OpenAI yolu: küçültme sonrası kalıntı kontrolü hata verdi (atlanıyor):", e);
+          }
+        }
+        const gk = ghost ? (ghost.ok ? (ghost.bad ? `kalıntı=VAR(${ghost.where}: ${ghost.detail})` : "kalıntı=yok") : `kalıntı=ölçülemedi[${ghost.reason}]`) : "kalıntı=sorulmadı";
+        if (fin.buf && ghost && ghost.ok && ghost.bad) {
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[ghost-after-scale] ${ölçü} ${k} ${gk}`);
+        } else if (fin.buf) {
           deliverBuf = fin.buf;
           scaledHead = hs.head;
-          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${k}`);
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${k} ${gk}`);
         } else {
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${ölçü} ${k}`);
         }
@@ -5521,6 +5427,60 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         console.error("OpenAI yolu: siyah-beyaz son geçiş hata verdi (atlanıyor):", e);
       }
     });
+
+    // GÖZLÜK EN SON (2026-10-10, kullanıcı kararı: "önce yüz şekli tamamen
+    // bitsin, gözlüğü en son ekle"). Ana üretim gözlüğü her zaman kaldırır;
+    // kimlik, kafa ölçeği ve yüz katmanları gözlüksüz yüzde çalıştı. Şablonda
+    // gözlük varsa şablonun gözlüğü burada, bitmiş yüze eklenir (bkz.
+    // eyewear.js). FAIL-SAFE: yargı/ekleme başarısızsa kare gözlüksüz teslim
+    // edilir, retry yok.
+    try {
+      let tplForEyewear = null;
+      if (recompositedOk) tplForEyewear = restore.originalBuf;
+      else if (restore) tplForEyewear = Buffer.isBuffer(templateInput) ? templateInput : null;
+      else tplForEyewear = templateSourceBuf;
+      if (Buffer.isBuffer(tplForEyewear)) {
+        const { detectMainFace } = require("./faceQuality");
+        const { judgeEyewear } = require("./headGhost");
+        const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
+        const ew = fdT && fdT.box ? await judgeEyewear(tplForEyewear, fdT.box, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+        if (!ew.ok) {
+          console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[şablon-belirlenemedi:${ew.reason || "?"}]`);
+        } else if (!ew.eyewear) {
+          console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): şablonda yok`);
+        } else {
+          const { prepareEyewear, EYEWEAR_ADD_PROMPT } = require("./eyewear");
+          const job = await prepareEyewear(deliverBuf, tplForEyewear);
+          if (!job.finish) {
+            console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${job.reason}] — gözlüksüz teslim`);
+          } else {
+            const form = new FormData();
+            form.append("model", OPENAI_MODEL_ID);
+            form.append("prompt", EYEWEAR_ADD_PROMPT);
+            form.append("quality", "medium");
+            form.append("size", "1024x1024");
+            form.append("output_format", "png");
+            form.append("image[]", new Blob([job.image], { type: "image/png" }), "photo.png");
+            form.append("image[]", new Blob([job.ref], { type: "image/png" }), "glasses.png");
+            form.append("mask", new Blob([job.mask], { type: "image/png" }), "mask.png");
+            const ai = await postOpenAiImageEdit(form, 2);
+            if (!ai) {
+              console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[edit-failed] — gözlüksüz teslim`);
+            } else {
+              const fin = await job.finish(ai);
+              deliverBuf = fin.buf;
+              console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): EKLENDİ gözArası=${Math.round(job.iod)}px taşmaEklendi=${fin.grown.toFixed(3)}`);
+              // Şablon griyse eklenen gözlük renk getirmesin.
+              const { matchGrayscale } = require("./faceLight");
+              const g = await matchGrayscale(deliverBuf, tplForEyewear);
+              if (g.applied && g.buf) deliverBuf = g.buf;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: gözlük ekleme hata verdi (gözlüksüz teslim):", e);
+    }
 
     const textured = await addPhoneCameraTexture(deliverBuf);
     // holdForApproval → staging; aksi halde doğrudan dating_results.
@@ -5795,7 +5755,7 @@ exports.startPhotoGeneration = onCall(
   // "network connection lost" görür (bkz. 2026-08-15 gerçek olay, aynı kökten
   // — client/server timeout uyumsuzluğu).
   {
-    secrets: [FAL_KEY, OPENAI_KEY, QWEN_KEY],
+    secrets: [FAL_KEY, OPENAI_KEY],
     region: "europe-west1",
     // 2GiB -> 4GiB (2026-10-08 gerçek olay, iş 6f9e524e): kafa ölçeği ve ten
     // alanı katmanları eklendikten sonraki ilk üretimde süreç "Memory limit
@@ -5815,10 +5775,12 @@ exports.startPhotoGeneration = onCall(
     // GPT 2.5 KALDIRILDI (2026-10-07): "Versiyon 2" butonu artık gpt-image-2 +
     // kısa prompt. Yüklü eski uygulama hâlâ 2.5 modelini gönderiyor; yeni
     // build yayına girene kadar o istek buraya çevrilir.
+    // Qwen de kaldırıldı (2026-10-10): eski uygulamanın Versiyon 3 isteği
+    // Buton 1 olarak üretilir.
     const legacyV25 = rawModel === OPENAI_MODEL_V25_ID;
-    const model = legacyV25 ? OPENAI_MODEL_ID
-      : rawModel === QWEN_LEGACY_MODEL_ID ? QWEN_MODEL_ID : rawModel;
-    const mode = legacyV25 ? PHOTO_MODE_COMPACT : rawMode;
+    const legacyQwen = QWEN_LEGACY_MODEL_IDS.has(rawModel);
+    const model = legacyV25 || legacyQwen ? OPENAI_MODEL_ID : rawModel;
+    const mode = legacyV25 ? PHOTO_MODE_COMPACT : legacyQwen ? PHOTO_MODE_P800 : rawMode;
     if (!jobId) {
       throw new HttpsError("invalid-argument", "jobId zorunlu.");
     }
@@ -6899,6 +6861,7 @@ exports.cleanupExpiredReadyJobs = onSchedule(
 // aynı desen.
 exports._testables = {
   retryCorrectionPrefix,
+  buildEditPromptP800,
   headWidthMeasurement,
   TEMPLATE_RETRY_LARGE_FACE_RATIO,
   generateCountFor,
