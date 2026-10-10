@@ -690,12 +690,12 @@ const INPAINT_SIZE = 1024;
 // halkasında ölçülür, yumuşak bir düzeltme alanıyla deliğe taşınır. Kayma
 // ya da düzeltme sonrası kalan fark bu sınırları aşarsa model arka planı
 // değiştirmiş demektir: sonuç kullanılmaz.
-const INPAINT_SHIFT_MAX = 40;
+const INPAINT_SHIFT_MAX = 12;
 // Halka pikseli "uyuyor": ortalama kanal farkı (global kayma düşülünce) bu
 // değerin altında. Kenar halkasında uymayan pay INPAINT_EDGE_BAD_MAX'ı ya da
 // halkanın yarısını aşarsa dolgu kullanılmaz.
 const INPAINT_INLIER = 30;
-const INPAINT_EDGE_BAD_MAX = 0.2;
+const INPAINT_EDGE_BAD_MAX = 0.08;
 // Delikte modelin çizdiği kişi payı (bileşim ağırlıklı kişi olasılığı).
 // Model kırpımdaki kişiyi de yeniden çiziyor ve kafayı çoğu zaman eski,
 // büyük boyunda çiziyor; delik kafanın hemen yanında olduğu için o kafanın
@@ -862,6 +862,9 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
   pm = boxBlur(pm, side, side, R);
   for (let i = 0; i < N; i++) pm[i] = pm[i] > 0.01 ? 1 : 0;
   pm = boxBlur(pm, side, side, Math.max(2, R >> 1));
+  // allowAi (saçak temizliği): yeni kafanın hemen dibinde modelin çizdiği saç
+  // yeni kafanın kendi kenarıdır, AI pikseli kabul edilir.
+  if (job.allowAi) for (let i = 0; i < N; i++) pm[i] *= 1 - job.allowAi[i];
   let kept = 0;
   for (let i = 0; i < N; i++) if (job.holeC[i]) kept += job.wC[i] * pm[i];
   const fallback = pw > 0 ? kept / pw : 0;
@@ -963,8 +966,130 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false }
   return { buf, applied: true, reason: null, inpaint, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
+// KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, 790bd56b c0, kullanıcı: "base fotodan
+// herhangi bir silüet kalmamalı"). Model, şablon kişisinin kabarık/kıvırcık
+// saçının ince tellerini yeni kafanın üstünde perde önünde bırakıyor; kalıntı
+// kapısı (Vision) hafif telleri çoğunlukla görmüyor (1/6). Segmentasyon bu
+// telleri kafanın "saçağı" olarak işaretliyor: maskenin dolu gövdesi (morfolojik
+// açma — ince yapılar silinir) dışında kalan saçak + şablon kafasının kapladığı
+// ama yeni kafanın kapsamadığı alan, çene hizasının üstünde, arka planla
+// yeniden boyanır (kafa küçültmedeki AI dolgusunun aynısı; model orada kişi
+// çizerse doku dolgusu kalır).
+const FRINGE_OPEN_FACE = 0.08; // açma yarıçapı, yüz genişliğine oranla
+const FRINGE_PERSON_MIN = 0.15; // saçak sayılan en düşük kişi olasılığı
+const FRINGE_RING_FACE = 0.25; // dolu kafanın çevresindeki halka, yüz genişliğine oranla
+const FRINGE_ALLOW_FACE = 0.06; // kafanın dibinde AI saçının kabul edildiği bant
+const FRINGE_FADE_FACE = 0.2; // çene hizasına yaklaşırken karışım bandı
+const FRINGE_MIN_HOLE_FACE2 = 0.02; // bundan küçük delik (yüz alanına oranla) boyanmaz
+
+async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
+  const { faceLandmarks } = require("./faceQuality");
+  const o = await rawRgb(outputBuf);
+  const t = await rawRgb(templateBuf, o.W, o.H);
+  const { W, H } = o;
+  const lo = (await faceLandmarks(outputBuf)) || (await faceLandmarks(outputBuf, 0.1));
+  if (!lo) return { applied: false, reason: "no-face-output" };
+  const [Mo, Mt] = await Promise.all([personMask(o.data, W, H), personMask(t.data, W, H)]);
+  let inter = 0;
+  let uni = 0;
+  for (let i = 0; i < Mo.length; i++) {
+    const a = Mo[i] >= 0.5;
+    const b = Mt[i] >= 0.5;
+    if (a && b) inter++;
+    if (a || b) uni++;
+  }
+  const bodyIou = uni ? inter / uni : 0;
+  // Şablon aynı kadrajda değilse "şablon kafasının alanı" anlamsız.
+  if (bodyIou < BODY_ALIGNED_IOU) return { applied: false, reason: "not-aligned", bodyIou };
+  const P = lo.pts;
+  const faceW = Math.max(lo.box.width, Math.hypot(P[0].x - P[16].x, P[0].y - P[16].y));
+  const chin = P[8].y;
+  const cx = P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17;
+  const bx0 = Math.max(0, Math.round(cx - 2 * faceW));
+  const bx1 = Math.min(W - 1, Math.round(cx + 2 * faceW));
+  const by0 = Math.max(0, Math.round(lo.box.y - 2.2 * faceW));
+  const by1 = Math.min(H - 1, Math.round(chin));
+  const w = bx1 - bx0 + 1;
+  const h = by1 - by0 + 1;
+  if (w < 16 || h < 16) return { applied: false, reason: "tiny" };
+  // Yerel kesitte dolu gövde: açma (aşındır + genişlet).
+  const r = Math.max(2, Math.round(FRINGE_OPEN_FACE * faceW));
+  const A = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) A[y * w + x] = Mo[(y + by0) * W + x + bx0] >= 0.5 ? 1 : 0;
+  let solid = boxBlur(A, w, h, r);
+  for (let i = 0; i < solid.length; i++) solid[i] = solid[i] >= 0.999 ? 1 : 0;
+  solid = boxBlur(solid, w, h, r);
+  for (let i = 0; i < solid.length; i++) solid[i] = solid[i] > 0.001 ? 1 : 0;
+  // Yeni kafanın gerçek kenarı korunur: dolu gövdenin 2 px çevresine dokunulmaz.
+  let guard = boxBlur(solid, w, h, 2);
+  // En soluk teller segmentasyonda kişi bile sayılmıyor (790bd56b c0 ilk
+  // deneme: dıştaki teller delik dışında kaldı) — dolu kafanın çevresindeki
+  // sabit halka da deliğe girer.
+  let ring = boxBlur(solid, w, h, Math.max(4, Math.round(FRINGE_RING_FACE * faceW)));
+  const hole = new Uint8Array(W * H);
+  const banned = new Uint8Array(W * H);
+  let holePx = 0;
+  let fringePx = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const g = (y + by0) * W + x + bx0;
+      if (guard[i] > 0.001) { banned[g] = 1; continue; }
+      const fringe = Mo[g] >= FRINGE_PERSON_MIN;
+      const tplOnly = Mt[g] >= 0.5;
+      if (fringe || tplOnly || ring[i] > 0.001) {
+        hole[g] = 1;
+        holePx++;
+        if (fringe) fringePx++;
+      }
+    }
+  }
+  // Doku dolgusu kişi gibi görünen hiçbir pikseli kaynak almasın (tel kopyalıyordu).
+  for (let g = 0; g < W * H; g++) if (!hole[g] && (Mo[g] >= FRINGE_PERSON_MIN || Mt[g] >= 0.5)) banned[g] = 1;
+  guard = null;
+  ring = null;
+  if (holePx < FRINGE_MIN_HOLE_FACE2 * faceW * faceW) return { applied: false, reason: "no-fringe", holePx, fringePx, bodyIou };
+  // Doku dolgusu: AI'nin kişi çizdiği piksellerde yedek, başarısızlıkta kullanılmaz.
+  const F = Buffer.from(o.data);
+  patchFill(F, W, H, hole, banned, { searchR: Math.max(40, Math.round(0.6 * faceW)) });
+  // Delik çene hizasında kesiliyor; alt kenarda dolgu orijinale yumuşakça
+  // karışır (790bd56b c1: kesik çizgide beyaz parça kalıyordu).
+  const fadeH = Math.max(4, FRINGE_FADE_FACE * faceW);
+  const wgt = new Float32Array(W * H);
+  const out = Buffer.from(o.data);
+  for (let g = 0; g < W * H; g++) {
+    if (!hole[g]) continue;
+    const y = Math.floor(g / W);
+    const wv = Math.max(0, Math.min(1, (by1 - y) / fadeH));
+    wgt[g] = wv;
+    for (let c = 0; c < 3; c++) out[g * 3 + c] = Math.round(o.data[g * 3 + c] * (1 - wv) + F[g * 3 + c] * wv);
+  }
+  const job = prepareInpaint(out, F, W, H, hole, banned, wgt);
+  // Kafanın dibindeki bantta modelin çizdiği saç yeni kafanın kenarıdır;
+  // orada doku dolgusuna düşmek saçın üstünde açık yama bırakıyordu
+  // (790bd56b c0). Daha dıştaki "kişi" pikselleri (teller) yine reddedilir.
+  const near = boxBlur(solid, w, h, Math.max(2, Math.round(FRINGE_ALLOW_FACE * faceW)));
+  job.allowAi = new Float32Array(job.side * job.side);
+  for (let y = 0; y < job.side; y++) {
+    for (let x = 0; x < job.side; x++) {
+      const lx = x + job.left - bx0;
+      const ly = y + job.top - by0;
+      if (lx < 0 || ly < 0 || lx >= w || ly >= h) continue;
+      job.allowAi[y * job.side + x] = near[ly * w + lx] > 0.001 ? 1 : 0;
+    }
+  }
+  const filledJpeg = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  job.out = null;
+  const { image, mask } = await encodeInpaint(job);
+  return {
+    applied: true, holePx, fringePx, bodyIou, faceW,
+    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, finish: (aiBuf) => finishInpaint(job, aiBuf, filledJpeg) },
+  };
+}
+
 module.exports = {
   correctHeadScale,
+  prepareHeadFringeRepaint,
   personMask,
   measureSilhouette,
   approxSilFromFaceBox,

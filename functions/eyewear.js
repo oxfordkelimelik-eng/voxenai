@@ -35,8 +35,10 @@ const CROP_FACE_MULT = 2.6; // kırpım kenarı = yüz genişliği x bu
 const LENS_RX = 0.6; // cam elipsi, göz arası mesafeye oranla
 const LENS_RY = 0.42;
 const ARM_HALF = 0.16; // sap şeridi yarı kalınlığı
-const GROW_IOD = 0.35; // maske dışına taşan gözlük en fazla bu kadar alınır
+const GROW_IOD = 0.2; // maske dışına taşan gözlük en fazla bu kadar (adım) alınır
 const GROW_DIFF = 40; // taşma sayılan renk farkı (RGB uzaklığı)
+const GROW_DARKER = 15; // taşma pikseli tabandan en az bu kadar koyu (çerçeve)
+const GROW_MAX_FRAC = 0.15; // taşma maskenin bu oranını aşarsa hiç alınmaz
 
 function segDist(px, py, a, b) {
   const vx = b.x - a.x, vy = b.y - a.y;
@@ -109,10 +111,21 @@ async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb) {
     for (let c = 0; c < 3; c++) { const d = aiRgb[i * 3 + c] + off[c] - baseRgb[gi + c]; s += d * d; }
     D[i] = Math.sqrt(s);
   }
-  // Taşma: maskeden başlayıp belirgin değişmiş komşu piksellere yayıl.
-  const zone = await blur1(m, side, side, Math.max(1, (GROW_IOD * geom.iod) / 2));
+  // Taşma: maskeden başlayıp belirgin değişmiş VE koyulaşmış (çerçeve gibi)
+  // komşu piksellere, en fazla GROW_IOD adım yayıl. 790bd56b c2: ilk sürüm
+  // açıklık şartı ve gerçek mesafe sınırı olmadan yayıldı (bulanık bölge
+  // tasarlanandan çok genişti), modelin yeniden çizdiği yüz kenarını aldı —
+  // yüzün yanında ikinci yüz (taşma 0.369). Taşma GROW_MAX_FRAC'ı aşarsa
+  // model gözlük değil yüz çiziyor demektir: hiç alınmaz.
+  const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+  const darker = (i) => {
+    const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+    return lum(aiRgb[i * 3] + off[0], aiRgb[i * 3 + 1] + off[1], aiRgb[i * 3 + 2] + off[2]) <
+      lum(baseRgb[gi], baseRgb[gi + 1], baseRgb[gi + 2]) - GROW_DARKER;
+  };
+  const maxSteps = Math.max(2, Math.round(GROW_IOD * geom.iod));
+  const steps = new Uint16Array(N);
   const grown = new Uint8Array(N);
-  const q = [];
   const nb = (i) => {
     const x = i % side, out = [];
     if (x > 0) out.push(i - 1);
@@ -121,19 +134,34 @@ async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb) {
     if (i < N - side) out.push(i + side);
     return out;
   };
+  let q = [];
   for (let i = 0; i < N; i++) {
     if (!m[i]) continue;
-    for (const j of nb(i)) if (!m[j] && !grown[j] && D[j] > GROW_DIFF) { grown[j] = 1; q.push(j); }
+    for (const j of nb(i)) {
+      if (!m[j] && !grown[j] && D[j] > GROW_DIFF && darker(j)) { grown[j] = 1; steps[j] = 1; q.push(j); }
+    }
   }
   while (q.length) {
-    const i = q.pop();
-    for (const j of nb(i)) if (!m[j] && !grown[j] && zone[j] && D[j] > GROW_DIFF) { grown[j] = 1; q.push(j); }
+    const next = [];
+    for (const i of q) {
+      if (steps[i] >= maxSteps) continue;
+      for (const j of nb(i)) {
+        if (m[j] || grown[j] || D[j] <= GROW_DIFF || !darker(j)) continue;
+        grown[j] = 1;
+        steps[j] = steps[i] + 1;
+        next.push(j);
+      }
+    }
+    q = next;
   }
   let maskPx = 0, grownPx = 0;
   for (let i = 0; i < N; i++) {
-    if (grown[i]) { m[i] = 1; grownPx++; }
     if (m[i]) maskPx++;
+    if (grown[i]) grownPx++;
   }
+  const grownFrac = maskPx ? grownPx / maskPx : 0;
+  const useGrowth = grownFrac <= GROW_MAX_FRAC;
+  if (useGrowth) for (let i = 0; i < N; i++) if (grown[i]) m[i] = 1;
   const wgt = await blur1(m, side, side, feather);
   const out = Buffer.from(baseRgb);
   for (let i = 0; i < N; i++) {
@@ -144,7 +172,7 @@ async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb) {
       out[gi + c] = Math.max(0, Math.min(255, Math.round(baseRgb[gi + c] * (1 - w) + (aiRgb[i * 3 + c] + off[c]) * w)));
     }
   }
-  return { rgb: out, grown: maskPx ? grownPx / maskPx : 0 };
+  return { rgb: out, grown: useGrowth ? grownFrac : 0, grownRejected: useGrowth ? 0 : grownFrac };
 }
 
 /**
@@ -187,9 +215,9 @@ async function prepareEyewear(outBuf, tplBuf) {
   const finish = async (aiBuf) => {
     const baseRgb = await sharp(outBuf).removeAlpha().raw().toBuffer();
     const aiRgb = await sharp(aiBuf).resize(side, side, { kernel: "lanczos3" }).removeAlpha().raw().toBuffer();
-    const { rgb, grown } = await compositeEyewear(baseRgb, W, H, rect, geom, aiRgb);
+    const { rgb, grown, grownRejected } = await compositeEyewear(baseRgb, W, H, rect, geom, aiRgb);
     const buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
-    return { buf, grown };
+    return { buf, grown, grownRejected };
   };
   return { image, ref, mask, finish, rect, iod: geom.iod };
 }

@@ -70,3 +70,38 @@ test("gözlük promptu yüzü değiştirmemeyi ve tam çerçeveyi ister", () => 
   assert.ok(/both lenses with their full rims/.test(EYEWEAR_ADD_PROMPT));
   assert.ok(/THIS man's face/.test(EYEWEAR_ADD_PROMPT));
 });
+
+// 790bd56b c2: model yüz kenarını yeniden çizdi, taşma onu aldı — yüzün
+// yanında ikinci yüz. Açık (ten gibi) değişiklik taşma sayılmaz.
+test("maskenin yanındaki açık renkli değişiklik (yüz kenarı) alınmaz", async () => {
+  const W = 400, H = 400;
+  const base = solid(W, H, [60, 50, 45]);
+  const g = eyewearGeometry(fakePts());
+  const rect = { left: 50, top: 50, side: 300 };
+  const ai = solid(rect.side, rect.side, [60, 50, 45]);
+  const x0 = Math.round(g.eL.x + 0.6 * g.iod - 2);
+  for (let y = 190; y <= 290; y++) for (let x = x0; x <= x0 + 10; x++) {
+    const i = ((y - rect.top) * rect.side + (x - rect.left)) * 3;
+    ai[i] = 200; ai[i + 1] = 160; ai[i + 2] = 140;
+  }
+  const { rgb, grown } = await compositeEyewear(base, W, H, rect, g, ai);
+  assert.equal(grown, 0);
+  const px = (x, y) => rgb[(y * W + x) * 3];
+  assert.equal(px(x0 + 6, 260), 60, "maske altındaki ten şeridi alınmamış");
+});
+
+test("taşma çok büyükse hiç alınmaz", async () => {
+  const W = 400, H = 400;
+  const base = solid(W, H, [180, 140, 120]);
+  const g = eyewearGeometry(fakePts());
+  const rect = { left: 50, top: 50, side: 300 };
+  const ai = solid(rect.side, rect.side, [180, 140, 120]);
+  // Camların hemen altında, yanakta geniş koyu şerit: model yüzü yeniden çizmiş.
+  for (let y = 240; y <= 275; y++) for (let x = 90; x <= 310; x++) {
+    const i = ((y - rect.top) * rect.side + (x - rect.left)) * 3;
+    ai[i] = 30; ai[i + 1] = 25; ai[i + 2] = 20;
+  }
+  const { grown, grownRejected } = await compositeEyewear(base, W, H, rect, g, ai);
+  assert.equal(grown, 0);
+  assert.ok(grownRejected > 0.15);
+});

@@ -1960,11 +1960,16 @@ const HEAD_INPAINT_PROMPT = "Edit only the transparent masked area. It is the pa
  * Kafa küçültme deliğini maskeli düzenlemeyle doldurur. Dönüş: PNG buffer ya
  * da null (FAIL-SAFE: çağıran kafayı küçültmeden bırakır, retry yok).
  */
-async function inpaintHeadHoleWithOpenAI(imagePng, maskPng) {
+// KAFA SAÇAĞI TEMİZLİĞİ prompt'u (2026-10-10, bkz. headScale
+// prepareHeadFringeRepaint): maske kafanın çevresindeki halka; içinde yalnızca
+// arka plan olmalı.
+const HEAD_FRINGE_PROMPT = "Edit only the transparent masked area. It lies around the person's head and must contain only background. Remove every loose hair strand, wisp, faint hair, halo or outline in it and fill it with the background that continues the surroundings exactly: walls, curtains, windows, sky, objects, lighting, blur and grain. The person's head, hair, face and ears outside the mask stay exactly where and as large as they are: do not extend the hair or the head into the mask. Do not draw hair, a head, a face or skin inside the mask. Keep everything outside the mask exactly as it is.";
+
+async function inpaintHeadHoleWithOpenAI(imagePng, maskPng, prompt = HEAD_INPAINT_PROMPT) {
   try {
     const form = new FormData();
     form.append("model", OPENAI_MODEL_ID);
-    form.append("prompt", HEAD_INPAINT_PROMPT);
+    form.append("prompt", prompt);
     form.append("quality", "medium");
     form.append("size", "1024x1024");
     form.append("output_format", "png");
@@ -5222,6 +5227,29 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // girince süreç 2GiB'ı aştı.
     // Kafa ölçeklendiyse kafanın geometrisi — arka plan geri yüklemesi
     // kafa çevresinde geçişi yumuşatır (bkz. sceneRestore HEAD_BLEND_R).
+    // ŞABLON GÖZLÜĞÜ — kafa ölçeğinden ÖNCE sorulur (2026-10-10, 790bd56b
+    // c1): gözlüklü şablonda göz noktaları camın altında kayıyor, yüz oranı
+    // parçaları birbirini tutmuyor (gözÇene 0.96, kaşBurun 1.16) ve kafa
+    // gereksiz yere 0.93'e küçültüldü. Gözlük varsa kafa ölçeğine dokunulmaz.
+    // Sonuç GÖZLÜK EN SON adımında da kullanılır.
+    let tplForEyewear = null;
+    if (recompositedOk) tplForEyewear = restore.originalBuf;
+    else if (restore) tplForEyewear = Buffer.isBuffer(templateInput) ? templateInput : null;
+    else tplForEyewear = templateSourceBuf;
+    let templateEyewear = { ok: false, reason: "no-template" };
+    if (Buffer.isBuffer(tplForEyewear)) {
+      try {
+        const { detectMainFace } = require("./faceQuality");
+        const { judgeEyewear } = require("./headGhost");
+        const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
+        templateEyewear = fdT && fdT.box ? await judgeEyewear(tplForEyewear, fdT.box, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+      } catch (e) {
+        console.error("OpenAI yolu: şablon gözlük yargısı hata verdi:", e);
+        templateEyewear = { ok: false, reason: "error" };
+      }
+    }
+    const tplHasEyewear = templateEyewear.ok && templateEyewear.eyewear === true;
+
     let scaledHead = null;
     let pendingScale = null;
     await withPostLayerLock(async () => {
@@ -5238,6 +5266,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         else tplForScale = templateSourceBuf;
         if (!tplForScale) {
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
+        } else if (tplHasEyewear) {
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[template-eyewear] — şablonun göz noktaları gözlük altında güvenilmez`);
         } else {
           const { correctHeadScale } = require("./headScale");
           // Delik AI ile doldurulur; ağ çağrısı kilidin DIŞINDA yapılır
@@ -5302,6 +5332,36 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       } catch (e) {
         console.error("OpenAI yolu: kafa dolgusu hata verdi (küçültülmedi):", e);
       }
+    }
+
+    // KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, kullanıcı: "base fotodan herhangi
+    // bir silüet kalmamalı"). 790bd56b: c0 şablonun kıvırcık saç telleri yeni
+    // kafanın üstünde kaldı (kalıntı kapısı GEÇTİ dedi), c2 yüzün yanında
+    // ikinci yüz kenarı. Yeni kafanın dolu gövdesi dışındaki halka (saçak +
+    // şablon kafasının alanı + sabit halka) arka planla yeniden boyanır (bkz.
+    // headScale prepareHeadFringeRepaint). Gözlükten ÖNCE: halka, yüzün
+    // dışına taşan uzak camı silmesin. FAIL-SAFE: dolgu reddedilirse kare
+    // olduğu gibi kalır, retry yok.
+    try {
+      if (Buffer.isBuffer(tplForEyewear)) {
+        const { prepareHeadFringeRepaint } = require("./headScale");
+        const fr = await withPostLayerLock(() => prepareHeadFringeRepaint(deliverBuf, tplForEyewear));
+        if (!fr.applied) {
+          console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fr.reason}]${fr.bodyIou != null ? ` gövdeIoU=${fr.bodyIou.toFixed(3)}` : ""}`);
+        } else {
+          const ai = await inpaintHeadHoleWithOpenAI(fr.inpaint.image, fr.inpaint.mask, HEAD_FRINGE_PROMPT);
+          const fin = ai ? await withPostLayerLock(() => fr.inpaint.finish(ai)) : { buf: null, reason: "inpaint-failed" };
+          const k = `delikPx=${fr.holePx} saçakPx=${fr.fringePx} kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
+          if (fin.buf) {
+            deliverBuf = fin.buf;
+            console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): TEMİZLENDİ ${k}`);
+          } else {
+            console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${k}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: kafa saçağı temizliği hata verdi (atlanıyor):", e);
     }
 
     await withPostLayerLock(async () => {
@@ -5435,15 +5495,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // eyewear.js). FAIL-SAFE: yargı/ekleme başarısızsa kare gözlüksüz teslim
     // edilir, retry yok.
     try {
-      let tplForEyewear = null;
-      if (recompositedOk) tplForEyewear = restore.originalBuf;
-      else if (restore) tplForEyewear = Buffer.isBuffer(templateInput) ? templateInput : null;
-      else tplForEyewear = templateSourceBuf;
       if (Buffer.isBuffer(tplForEyewear)) {
-        const { detectMainFace } = require("./faceQuality");
-        const { judgeEyewear } = require("./headGhost");
-        const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
-        const ew = fdT && fdT.box ? await judgeEyewear(tplForEyewear, fdT.box, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+        const ew = templateEyewear; // kafa ölçeğinden önce soruldu
         if (!ew.ok) {
           console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[şablon-belirlenemedi:${ew.reason || "?"}]`);
         } else if (!ew.eyewear) {
@@ -5469,7 +5522,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             } else {
               const fin = await job.finish(ai);
               deliverBuf = fin.buf;
-              console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): EKLENDİ gözArası=${Math.round(job.iod)}px taşmaEklendi=${fin.grown.toFixed(3)}`);
+              console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): EKLENDİ gözArası=${Math.round(job.iod)}px taşmaEklendi=${fin.grown.toFixed(3)}${fin.grownRejected ? ` taşmaReddedildi=${fin.grownRejected.toFixed(3)}` : ""}`);
               // Şablon griyse eklenen gözlük renk getirmesin.
               const { matchGrayscale } = require("./faceLight");
               const g = await matchGrayscale(deliverBuf, tplForEyewear);
