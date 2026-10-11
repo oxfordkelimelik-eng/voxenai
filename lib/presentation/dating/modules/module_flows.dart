@@ -22,7 +22,6 @@ import '../../../data/sources/claude_api_service.dart' show PhotoScore;
 import '../../../data/sources/review_prompt_service.dart';
 import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
-import '../../ops/ops_gate.dart' show kOpsEmail;
 import '../../screens/analysis/guided_capture_screen.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/ai_consent_gate.dart';
@@ -628,7 +627,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       ),
     );
     if (!mounted) return;
-    context.go('${DatingRoutes.hub}?tab=photos');
+    // r: her seferinde yeni istek — hub zaten açıksa da sekme değişsin
+    // (bkz. ModuleHubScreen.tabRequest).
+    context.go(
+        '${DatingRoutes.hub}?tab=photos&r=${DateTime.now().millisecondsSinceEpoch}');
   }
 
   /// Eski hesaplarda onboarding'de boy/tip yoksa üretim öncesi bir kez sor.
@@ -784,6 +786,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
         builder: (_) => const GuidedCaptureScreen(
           kind: CaptureKind.face,
           angles: kAiFaceAngles,
+          resultOrder: kAiFaceUploadOrder,
         ),
       ),
     );
@@ -961,34 +964,64 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
 
 
   // Adım 1: stil seçimi — 4 stil alt alta, her birinde kapak fotoğrafı.
+  // EKRANA SIĞAR (2026-10-11, kullanıcı: "Old Money'i görmek için scroll
+  // etmek zorunda kalıyorum"): kart yüksekliği sabit değil, başlık ile buton
+  // arasında kalan alanın eşit payı. Yalnızca o pay _styleCardMinHeight'ın
+  // altına düşerse (çok küçük ekran) liste kaydırılabilir olur.
+  static const double _styleCardGap = 10;
+  static const double _styleCardMinHeight = 84;
+  static const double _styleCardMaxHeight = 164;
+
   Widget _styleStep() {
+    const styles = PhotoStyle.coreStyles;
     return Column(
       children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Stilini seç',
+              Text('Stilini seç',
                   style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
                       color: AppColors.textPrimary)),
-              const SizedBox(height: 4),
-              const Text(
+              SizedBox(height: 4),
+              Text(
                   'Fotoğrafların seçtiğin stildeki mekân ve kıyafetlerle '
                   'üretilir.',
                   style:
                       TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 14),
-              for (final st in PhotoStyle.coreStyles) ...[
-                _StyleCard(
-                  style: st,
-                  selected: _selectedStyle == st.id,
-                  onTap: () => setState(() => _selectedStyle = st.id),
-                ),
-                const SizedBox(height: 12),
-              ],
             ],
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final gaps = _styleCardGap * (styles.length - 1);
+                final fit = (c.maxHeight - gaps) / styles.length;
+                final cardH =
+                    fit.clamp(_styleCardMinHeight, _styleCardMaxHeight);
+                final cards = [
+                  for (int i = 0; i < styles.length; i++) ...[
+                    if (i > 0) const SizedBox(height: _styleCardGap),
+                    _StyleCard(
+                      style: styles[i],
+                      height: cardH,
+                      selected: _selectedStyle == styles[i].id,
+                      onTap: () =>
+                          setState(() => _selectedStyle = styles[i].id),
+                    ),
+                  ],
+                ];
+                if (fit < _styleCardMinHeight) {
+                  return ListView(children: cards);
+                }
+                return Column(children: cards);
+              },
+            ),
           ),
         ),
         Padding(
@@ -1166,25 +1199,9 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 ? () => _generate(modelId: 'gpt-image-2', mode: 'p800')
                 : null,
           ),
-          // TEST (2026-10-07): GPT 2.5 kaldırıldı. Versiyon 2 = Buton 1 ile aynı
-          // model (gpt-image-2), yalnızca prompt kısa ('compact'). Yalnızca ops
-          // hesabında görünür.
-          if ((FirebaseAuth.instance.currentUser?.email ?? '')
-                  .toLowerCase()
-                  .trim() ==
-              kOpsEmail) ...[
-            const SizedBox(height: 10),
-            _AltGenerateButton(
-              label: 'Fotoğraflarımı Oluştur Versiyon 2',
-              hint: 'Test — GPT Image 2, kısa prompt',
-              enabled: _refsReady && !_preparing,
-              onPressed: () => _generate(
-                modelId: 'gpt-image-2',
-                mode: 'compact',
-              ),
-            ),
-            // Versiyon 3 (Qwen) kaldırıldı (2026-10-10).
-          ],
+          // Versiyon 2 (kısa 'compact' prompt, yalnız ops hesabında) kaldırıldı
+          // (2026-10-11, kullanıcı kararı): tek buton, ana uzun prompt (p800).
+          // Versiyon 3 (Qwen) 2026-10-10'da kaldırılmıştı.
           // const SizedBox(height: 10),
           // PrimaryButton(
           //   label:
@@ -2467,6 +2484,9 @@ Future<List<String>> _findFacelessPhotos(List<File> files) async {
 /// Alternatif üretim butonu (A/B karşılaştırması için ikincil stil).
 /// Ana "Fotoğraflarımı Oluştur-1" butonundan görsel olarak ayrışsın diye
 /// outlined; altında ne yaptığını anlatan kısa bir ipucu satırı var.
+/// Şu an kullanılmıyor (2026-10-11: tek buton); paket adımındaki yorumlu
+/// karşılaştırma butonları geri açılırsa diye duruyor.
+// ignore: unused_element
 class _AltGenerateButton extends StatelessWidget {
   final String label;
   final String hint;
@@ -2523,15 +2543,24 @@ class _StyleCard extends StatelessWidget {
   final PhotoStyle style;
   final bool selected;
   final VoidCallback onTap;
+  /// Kartın toplam yüksekliği (stil adımı ekrana sığacak şekilde hesaplar).
+  final double height;
   const _StyleCard(
-      {required this.style, required this.selected, required this.onTap});
+      {required this.style,
+      required this.selected,
+      required this.onTap,
+      required this.height});
 
   @override
   Widget build(BuildContext context) {
+    // İç yükseklik: 10'ar px dolgu + en kalın (seçili) kenarlık.
+    final imageH = height - 24;
+    final compact = height < 120;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
+        height: height,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: selected ? AppColors.goldSurface : AppColors.surface,
@@ -2549,8 +2578,9 @@ class _StyleCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
-                width: 108,
-                height: 144,
+                // Kapak 3:4 oranını korur, kartın yüksekliğiyle küçülür.
+                width: imageH * 0.75,
+                height: imageH,
                 child: DatingModuleImage(
                   assetPath: style.sampleAsset,
                   fallbackIcon: style.icon,
@@ -2562,17 +2592,25 @@ class _StyleCard extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(style.icon, color: AppColors.gold, size: 22),
-                  const SizedBox(height: 6),
+                  // Kısa kartta ikon yer kaplamasın — ad + açıklama yeter.
+                  if (!compact) ...[
+                    Icon(style.icon, color: AppColors.gold, size: 22),
+                    const SizedBox(height: 6),
+                  ],
                   Text(style.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: AppColors.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.w900)),
                   const SizedBox(height: 2),
                   Text(style.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: AppColors.textSecondary,
                           fontSize: 13,

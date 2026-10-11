@@ -15,8 +15,21 @@ enum CaptureKind { face, body }
 /// kafa yönünü selfie'den alıyor, şablon açısına yakın selfie gerekiyor).
 enum CaptureAngle { front, right, left, slightRight, slightLeft, fullRight, fullLeft }
 
-/// AI foto üretimi için 5 yüz açısı (functions/falPhotos.js FACE_PHOTO_COUNT).
+/// AI foto üretimi için 5 yüz açısının ÇEKİM sırası (2026-10-11, kullanıcı
+/// kararı): önden sonra hafif sağ → tam sağ, sonra hafif sol → tam sol —
+/// kullanıcı başını bir yöne adım adım çevirip sonra diğer yöne geçiyor.
 const kAiFaceAngles = [
+  CaptureAngle.front,
+  CaptureAngle.slightRight,
+  CaptureAngle.fullRight,
+  CaptureAngle.slightLeft,
+  CaptureAngle.fullLeft,
+];
+
+/// Sunucuya GİDEN sıra değişmedi (functions/falPhotos.js FACE_PHOTO_COUNT):
+/// ilk kare ön kare kabul ediliyor; eski sırayı korumak, çekim sırası
+/// değişikliğini sunucu tarafında risksiz kılıyor.
+const kAiFaceUploadOrder = [
   CaptureAngle.front,
   CaptureAngle.slightRight,
   CaptureAngle.slightLeft,
@@ -62,7 +75,10 @@ class GuidedCaptureScreen extends StatefulWidget {
   final CaptureKind kind;
   /// null ise ön/sağ/sol. Tek elemanlı liste = tek kare (ör. tam boy).
   final List<CaptureAngle>? angles;
-  const GuidedCaptureScreen({super.key, required this.kind, this.angles});
+  /// Dönen dosya listesinin sırası; null ise [angles] (çekim) sırası.
+  final List<CaptureAngle>? resultOrder;
+  const GuidedCaptureScreen(
+      {super.key, required this.kind, this.angles, this.resultOrder});
 
   @override
   State<GuidedCaptureScreen> createState() => _GuidedCaptureScreenState();
@@ -425,7 +441,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   /// Onay ekranında "Kullan" → istenen açı sırasıyla dosya listesi döndür.
   void _confirm() {
     Navigator.of(context).pop(<File>[
-      for (final a in _angles) _captured[a]!,
+      for (final a in widget.resultOrder ?? _angles) _captured[a]!,
     ]);
   }
 
@@ -680,11 +696,15 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(a.label,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12)),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(a.label,
+                                maxLines: 1,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12)),
+                          ),
                         ],
                       ),
                     ),
@@ -749,57 +769,106 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                 icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-              const Spacer(),
-              Text(
-                '${widget.kind == CaptureKind.face ? "YÜZ" : "VÜCUT"} • ${_angle.label} AÇI',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                  letterSpacing: 1,
-                ),
-              ),
-              const Spacer(),
-              const SizedBox(width: 48),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Açı adım göstergesi
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(_angles.length, (i) {
-              final done = _captured.containsKey(_angles[i]);
-              final active = i == _angleIndex;
-              return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color: done
-                      ? AppColors.success.withValues(alpha: 0.9)
-                      : active
-                          ? AppColors.gold.withValues(alpha: 0.85)
-                          : Colors.white24,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
+              // Başlık iki satır: üstte tür + adım sayacı, altta açının adı.
+              // Dar ekranda tek satırlık "YÜZ • HAFİF SAĞ AÇI" taşıyordu.
+              Expanded(
+                child: Column(
                   children: [
-                    if (done)
-                      const Icon(Icons.check, size: 14, color: Colors.white),
-                    if (done) const SizedBox(width: 4),
                     Text(
-                      _angles[i].label,
+                      _angles.length > 1
+                          ? '${widget.kind == CaptureKind.face ? "YÜZ" : "VÜCUT"} • ${_angleIndex + 1}/${_angles.length}'
+                          : (widget.kind == CaptureKind.face ? 'YÜZ' : 'VÜCUT'),
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Colors.white70,
                         fontWeight: FontWeight.w700,
-                        fontSize: 12,
+                        fontSize: 11,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${_angle.label} AÇI',
+                        maxLines: 1,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          letterSpacing: 1,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              );
-            }),
+              ),
+              const SizedBox(width: 48),
+            ],
           ),
+          if (_angles.length > 1) ...[
+            const SizedBox(height: 8),
+            // Açı adım göstergesi: her açı eşit genişlikte bir bölüm. Eski
+            // kapsül dizisi 5 açıda ("HAFİF SAĞ" x2) ekrandan taşıyordu.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: List.generate(_angles.length, (i) {
+                  final done = _captured.containsKey(_angles[i]);
+                  final active = i == _angleIndex;
+                  final color = done
+                      ? AppColors.success
+                      : active
+                          ? AppColors.gold
+                          : Colors.white24;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Column(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (done) ...[
+                                  const Icon(Icons.check,
+                                      size: 12, color: AppColors.success),
+                                  const SizedBox(width: 2),
+                                ],
+                                Text(
+                                  _angles[i].label,
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                    color: active || done
+                                        ? Colors.white
+                                        : Colors.white60,
+                                    fontWeight: active
+                                        ? FontWeight.w800
+                                        : FontWeight.w600,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
         ],
         ),
       ),

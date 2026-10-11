@@ -147,6 +147,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       _snack('$n fotoğraf teslim edildi, kullanıcıya bildirim gönderildi.');
       _selected.clear();
       ref.invalidate(opsJobDetailProvider);
+      // Paneldeki "N iş ONAY BEKLİYOR" sayacı da güncellensin.
+      ref.invalidate(opsOverviewProvider);
     } catch (e) {
       _snack('Onay başarısız: $e', error: true);
     } finally {

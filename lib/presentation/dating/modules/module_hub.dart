@@ -15,13 +15,29 @@ class ModuleHubScreen extends ConsumerStatefulWidget {
   /// Hangi sekmeyle açılacağı. Üretim bitip iş onaya düştüğünde kullanıcı
   /// doğrudan "Fotoğraflarım" (1) sekmesine bırakılıyor.
   final int initialTab;
-  const ModuleHubScreen({super.key, this.initialTab = 0});
+  /// Sekme isteğinin kimliği (?r=...). Hub zaten açıkken (modül onun üstüne
+  /// push edilmişti) go('/hub?tab=photos') aynı State'i yeniden kullanıyor —
+  /// GoRouter'ın sayfa anahtarı sorguyu içermiyor — ve initialTab ilk
+  /// oluşturmadan sonra okunmadığı için kullanıcı Modüller'de kalıyordu
+  /// (2026-10-11, kullanıcı bildirimi). Her yeni istek farklı kimlikle gelir;
+  /// didUpdateWidget sekmeyi değiştirir, aynı istek art arda gelse de çalışır.
+  final String? tabRequest;
+  const ModuleHubScreen({super.key, this.initialTab = 0, this.tabRequest});
   @override
   ConsumerState<ModuleHubScreen> createState() => _ModuleHubScreenState();
 }
 
 class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   late int _tab = widget.initialTab;
+
+  @override
+  void didUpdateWidget(ModuleHubScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.tabRequest != oldWidget.tabRequest ||
+        widget.initialTab != oldWidget.initialTab) {
+      _tab = widget.initialTab;
+    }
+  }
 
   /// Modüle her zaman girilebilir: ilk çıktı ekranda ücretsiz gösterilir,
   /// devamı için paket gerekiyorsa akış (module_flows) içinde paywall'a

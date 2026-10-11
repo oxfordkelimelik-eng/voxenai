@@ -88,6 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         // sekmesine bırakılıyor (bkz. module_flows.dart onay bekleme akışı).
         builder: (c, s) => ModuleHubScreen(
           initialTab: s.uri.queryParameters['tab'] == 'photos' ? 1 : 0,
+          tabRequest: s.uri.queryParameters['r'],
         ),
       ),
       // Modül ekranı — /module/:id

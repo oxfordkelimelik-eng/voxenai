@@ -87,8 +87,13 @@ final opsResolvedRangeProvider = Provider<OpsDateRange>((ref) {
 
 const _opsRegion = 'europe-west1';
 
-final opsOverviewProvider =
-    FutureProvider.family<OpsOverview, OpsDateRange>((ref, range) async {
+// autoDispose (2026-10-11 gerçek olay): önbellek uygulama ömrü boyunca
+// tutuluyordu — panel kapatılıp açılınca sunucuya gidilmiyor, onaya yeni
+// düşen iş (4642a50b) görünmüyordu; yalnız sağ üstteki yenile işe yarıyordu.
+// Artık panel her açılışta bir kez çeker (anahtar gün boyunca sabit, bkz.
+// toRange — hız sınırını zorlamaz).
+final opsOverviewProvider = FutureProvider.autoDispose
+    .family<OpsOverview, OpsDateRange>((ref, range) async {
   final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
       .httpsCallable('opsGetOverview');
   final result = await callable.call(<String, dynamic>{
@@ -102,8 +107,8 @@ final opsOverviewProvider =
 
 typedef OpsJobKey = ({String uid, String jobId});
 
-final opsJobDetailProvider =
-    FutureProvider.family<OpsJobDetail, OpsJobKey>((ref, key) async {
+final opsJobDetailProvider = FutureProvider.autoDispose
+    .family<OpsJobDetail, OpsJobKey>((ref, key) async {
   final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
       .httpsCallable('opsGetJobDetail');
   final result = await callable.call(<String, dynamic>{
