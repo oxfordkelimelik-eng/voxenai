@@ -275,11 +275,11 @@ test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   const m = /function buildEditPromptP800[\s\S]*?\n}\r?\n/.exec(FAL);
   assert.ok(m, "buildEditPromptP800 bulunamadı");
   const joined = m[0].replace(/"\s*\+\s*"/g, "");
-  assert.match(joined, /Use the selfies only for/);
+  assert.match(joined, /From the selfies take only facial identity/);
   assert.match(joined, /A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
-  assert.match(joined, /never turn the head\s*toward the camera, never turn it further away/);
-  assert.match(joined, /look at exactly the same point as the BASE person's eyes/);
-  assert.match(joined, /black and\s*white, the whole output, including the face, is black and white/);
+  assert.match(joined, /never turn it toward the camera or further away/);
+  assert.match(joined, /look at exactly the same point as the BASE eyes/);
+  assert.match(joined, /If the BASE is black and white, the whole output is black and white/);
   assert.match(joined, /not a face swap/);
   // Eski "yüzü yeniden aydınlatma" talimatı sahne ışığını yüze vermeyi
   // yasaklıyordu (9d9507f0 c9 gün batımı) — geri gelmemeli.

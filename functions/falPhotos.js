@@ -1192,56 +1192,56 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
   // kimlik" TASK'ta, dikiş CLEAN EDGES'te, ışık C'de). C'deki "aynı parlak/
   // gölge taraf, aynı kontrast" çıkarıldı — f9f3b5c0'da her yüzde gereksiz
   // gölge vardı; yerine "tabanda olmayan gölge ekleme". Kural sırası aynı.
+  // 2026-10-10 (3cd612ba): "tüm gözlükleri kaldır" gömleğe asılı gözlüğü de
+  // sildi (c3 d1) — yalnız yüzdeki kaldırılır (judgeEyewear da yalnız onu
+  // ekler). Şablon saçının silüeti kalıyordu (c6 d2, c9 d2) → taşan yerde arka
+  // plan. C'deki ten cümlesi 3)'ün tekrarıydı.
+  // 2026-10-11 KISALTMA (kullanıcı: "promptun genel yapısında kısaltman
+  // gereken yerler varsa kısalt"): kurallar ve sıra aynı, hiçbir kural
+  // çıkarılmadı. TASK'ın iki paragrafı birleşti; A'daki okuma prosedürü ve
+  // CLEAN EDGES'in kendini tekrarlayan dikiş cümleleri sıkıştırıldı.
   return (
-    "TASK: The FIRST image is the BASE and your only canvas. Every other image is a close-up SELFIE " +
-    "of the TARGET person. Replace the person in the BASE with the TARGET and keep everything else in " +
-    "the BASE unchanged: background, lighting, camera angle, framing, pose, body, clothing and " +
-    "accessories. Only the head changes.\n" +
-    "Use the selfies only for the TARGET's facial identity, hair, eye shape and colour, and skin tone. " +
-    "Never take head angle, head size, gaze direction, expression, pose, clothing, accessories, " +
-    "lighting or colour cast from them: they are zoomed in and face the lens only because they are " +
-    "selfies.\n\n" +
-    "A) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE. Before drawing, read the BASE " +
-    "head: (1) which way the nose points — toward the left edge of the frame, toward the right " +
-    "edge, straight at the lens, up or down; (2) how far the head is turned — straight on, slightly " +
-    "turned, three-quarter or profile; (3) which cheek is visible and how much of each ear shows; " +
-    "(4) the tilt and the chin height. Draw the new head pointing in EXACTLY that direction by " +
-    "EXACTLY that amount, with the same cheek and the same amount of each ear visible: never turn the head " +
-    "toward the camera, never turn it further away, never straighten or re-centre it. Then the " +
-    "eyes: they look at exactly the same point as the BASE person's eyes — the same side of the " +
-    "frame, the same object (a cup, a phone, the sea) — with the irises in the same position inside " +
-    "each eye. The output looks into the lens only if the BASE does.\n\n" +
-    "B) HEAD ON THE BODY: The new head sits on the BASE neck exactly where the BASE head sat, at " +
-    "the same size against the shoulders and with the same lean. The neck keeps the BASE width, " +
-    "length and angle. The head must look like it grows from this body, never pasted on, floating, " +
-    "oversized, undersized or pushed forward.\n\n" +
-    "C) LIGHT ON THE FACE: Light the new face like the BASE person's face: the same light direction, " +
-    "brightness and colour of light (golden sunset, cool daylight, warm indoor lamp, flash). Add no " +
-    "shadow, darkening or contrast that the BASE face does not have. The TARGET's own skin tone sits " +
-    "underneath that light. If the BASE photo is black and white, the whole output, including the " +
-    "face, is black and white.\n\n" +
+    "TASK: The FIRST image is the BASE and your only canvas. The other images are close-up SELFIES " +
+    "of the TARGET person. Replace the BASE person with the TARGET; everything else in the BASE stays " +
+    "unchanged: background, lighting, framing, pose, body, clothing and accessories. Only the head " +
+    "changes. From the selfies take only facial identity, hair, eye shape and colour, and skin tone, " +
+    "never head angle, head size, gaze, expression, pose, clothing, accessories or light: they face " +
+    "the lens only because they are selfies.\n\n" +
+    "A) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE. Read the BASE head first: which way the " +
+    "nose points (left edge, right edge, lens, up, down), how far it is turned (straight, slightly, " +
+    "three-quarter, profile), which cheek and how much of each ear show, the tilt and the chin " +
+    "height. Draw the new head exactly the same: never turn it toward the camera or further away, " +
+    "never straighten or re-centre it. The eyes look at exactly the same point as the BASE eyes (the " +
+    "same side of the frame, the same object such as a cup, a phone or the sea), with the irises in " +
+    "the same position. The output looks into the lens only if the BASE does.\n\n" +
+    "B) HEAD ON THE BODY: The new head sits on the BASE neck exactly where the BASE head sat, at the " +
+    "same size against the shoulders and with the same lean; the neck keeps the BASE width, length " +
+    "and angle. It grows from this body, never pasted on, floating, oversized, undersized or pushed " +
+    "forward.\n\n" +
+    "C) LIGHT ON THE FACE: The same light direction, brightness and colour as on the BASE face " +
+    "(golden sunset, cool daylight, warm lamp, flash). Add no shadow, darkening or contrast the BASE " +
+    "face does not have. If the BASE is black and white, the whole output is black and white.\n\n" +
     "1) IDENTITY (highest priority after rule A): Copy the selfie person feature by feature: eyes, " +
     "eyebrows, nose, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
-    "beautify, symmetrise, average, round, puff, widen or stretch. Keep the BASE expression and add " +
-    "no smile that is not there. Eyes are open and clear, never half-closed or enlarged. Keep " +
-    "permanent features such as moles, freckles, scars and facial hair. Gently clean temporary " +
-    "blemishes.\n\n" +
-    "2) HAIR: Take hairline, density, length, texture and colour from the selfies, never from the " +
-    "BASE person, and never invent any. If the TARGET is bald or balding, the output is bald or " +
-    "balding to the same degree.\n\n" +
-    "3) SKIN TONE: Use ONE continuous TARGET tone from face through neck, chest, shoulders, arms, " +
-    "hands and legs, under the light described in rule C.\n\n" +
-    "REMOVE: Remove all glasses and sunglasses completely. Remove all tattoos.\n\n" +
-    "CLEAN EDGES: Nothing of the BASE person may remain — no faint outline of their hair, head, " +
-    "headphones, glasses or limbs, no semi-transparent ghost, no double edge. The new face blends " +
-    "into the hairline, temples, ears, jaw and neck with no visible boundary, step or colour break. " +
-    "Never leave a straight-edged block, patch or washed-out streak on the face or along the " +
-    "hairline.\n\n" +
-    "QUALITY: The result must look like the BASE photograph was naturally taken with the TARGET in " +
-    "it: an ordinary, unedited phone photo, not a face swap or a generated image. Add no glow, " +
-    "sheen, airbrush, beauty filter or CGI look. The face is the sharpest region of the frame, with " +
-    "crisp eyes, lashes and brows and natural skin texture, never softer, noisier or lower-resolution " +
-    "than the clothing and background around it. No dark smudges on knuckles or joints."
+    "beautify, symmetrise, average, round, puff, widen or stretch. Keep the BASE expression; add no " +
+    "smile. Eyes are open and clear, never half-closed or enlarged. Keep moles, freckles, scars and " +
+    "facial hair; gently clean temporary blemishes.\n\n" +
+    "2) HAIR: Hairline, density, length, texture and colour come from the selfies only, never from " +
+    "the BASE person and never invented. Bald or balding stays bald or balding to the same degree.\n\n" +
+    "3) SKIN TONE: One continuous TARGET tone on face, neck, chest, shoulders, arms, hands and legs, " +
+    "under the light of rule C.\n\n" +
+    "REMOVE: Glasses and sunglasses that sit on the face, and all tattoos. Eyewear hanging on the " +
+    "clothing, pushed up on the head or held in a hand is an accessory and stays.\n\n" +
+    "CLEAN EDGES: Nothing of the BASE person remains: no faint outline of their hair, head, " +
+    "headphones, glasses or limbs, no semi-transparent ghost, no double edge. Wherever the BASE " +
+    "person's hair or head reached further than the TARGET's, continue the BASE background there. The " +
+    "face blends into the hairline, temples, ears, jaw and neck with no boundary, step, colour break, " +
+    "straight-edged patch or washed-out streak.\n\n" +
+    "QUALITY: It must look like the BASE photo was naturally taken with the TARGET in it: an " +
+    "ordinary, unedited phone photo, not a face swap or a generated image. No glow, sheen, airbrush, " +
+    "beauty filter or CGI look. The face is the sharpest region, with crisp eyes, lashes and brows " +
+    "and natural skin texture, never softer, noisier or lower-resolution than the clothing and " +
+    "background. No dark smudges on knuckles or joints."
   );
 }
 
@@ -1270,9 +1270,11 @@ function buildEditPromptCompact() {
     "beautifying or reshaping. Keep the BASE expression.\n\n" +
     "HAIR: Hairline, length, texture and colour from the selfies; bald stays bald.\n\n" +
     "SKIN: One continuous TARGET tone on all visible skin.\n\n" +
-    "REMOVE: All glasses, sunglasses and tattoos.\n\n" +
-    "CLEAN EDGES: Nothing of the BASE person remains: no ghost, outline or double edge. Hairline, " +
-    "ears, jaw and neck blend seamlessly.\n\n" +
+    "REMOVE: Glasses and sunglasses on the face, and tattoos. Eyewear on the clothing or in a hand " +
+    "stays.\n\n" +
+    "CLEAN EDGES: Nothing of the BASE person remains: no ghost, outline or double edge. Where the " +
+    "BASE hair or head reached further, continue the background. Hairline, ears, jaw and neck blend " +
+    "seamlessly.\n\n" +
     "QUALITY: An ordinary, unedited phone photo, not a face swap. No glow or filters. The face is the " +
     "sharpest part of the frame."
   );
@@ -1876,7 +1878,14 @@ async function submitStyleJob(uid, jobId, styleId, chunkIdx, templateUrl, refUrl
 // (Cloud Functions yük altında 2. bir instance açarsa o da kendi kuyruğunu
 // çalıştırır) pay bırakmak için düşük tutuldu; 429 yine gelirse mevcut
 // retry (aşağıda) devreye girer.
-const OPENAI_IMAGE_MAX_CONCURRENCY = 2;
+// 2 -> 6 (2026-10-11, kullanıcı: "çok yavaş, fazla maliyet olmadan
+// hızlandır"). Ölçüldü (iş 3b16bf69): 10 karenin ilk üretimi 72-218. sn
+// arasında ikişer ikişer bitti, kafa çevresi/gözlük çağrıları da aynı 2'li
+// kuyrukta bekledi; iş 645 sn sürdü. Son bir ayda gerçek oran sınırı 429'u
+// HİÇ yok (09-14/15'teki 415 kayıt "credit_balance_exhausted" — kredi
+// bitmesi). Çağrı sayısı değişmez, maliyet aynı; 429 gelirse aşağıdaki
+// bekle-yeniden-dene yolu devrede.
+const OPENAI_IMAGE_MAX_CONCURRENCY = 6;
 let _openaiImageActive = 0;
 const _openaiImageWaitQueue = [];
 
@@ -1963,22 +1972,36 @@ const HEAD_INPAINT_PROMPT = "Edit only the transparent masked area. It is the pa
 // KAFA SAÇAĞI TEMİZLİĞİ prompt'u (2026-10-10, bkz. headScale
 // prepareHeadFringeRepaint): maske kafanın çevresindeki halka; içinde yalnızca
 // arka plan olmalı.
-const HEAD_FRINGE_PROMPT = "Edit only the transparent masked area. It lies around the person's head and must contain only background. Remove every loose hair strand, wisp, faint hair, halo or outline in it and fill it with the background that continues the surroundings exactly: walls, curtains, windows, sky, objects, lighting, blur and grain. The person's head, hair, face and ears outside the mask stay exactly where and as large as they are: do not extend the hair or the head into the mask. Do not draw hair, a head, a face or skin inside the mask. Keep everything outside the mask exactly as it is.";
+const HEAD_FRINGE_PROMPT = "Edit only the transparent masked area. It lies around the person's head and must contain only background. Remove every loose hair strand, wisp, faint hair, halo or outline in it and fill it with the background that continues the surroundings exactly: walls, curtains, windows, sky, objects, lighting, blur and grain. Every straight line or edge that enters the mask (a wall joint, a door frame, a window edge, a horizon) continues straight through it and leaves at exactly the height and angle where it meets the mask on the other side. Add no new line, pole, edge or object that does not already come in from outside the mask. The person's head, hair, face and ears outside the mask stay exactly where and as large as they are: do not extend the hair or the head into the mask. Do not draw hair, a head, a face or skin inside the mask. Keep everything outside the mask exactly as it is.";
 
-async function inpaintHeadHoleWithOpenAI(imagePng, maskPng, prompt = HEAD_INPAINT_PROMPT) {
+// İsteğe bağlı son AI adımlarının tahmini maliyeti (low kalite, ölçülen
+// ~$0.015 / ~$0.019 + pay) — bkz. jobContext maliyet sınırı.
+const EST_FILL_USD = 0.018;
+const EST_EYEWEAR_USD = 0.022;
+
+async function inpaintHeadHoleWithOpenAI(imagePng, maskPng, prompt = HEAD_INPAINT_PROMPT, { timeoutMs = POST_AI_TIMEOUT_MS } = {}) {
+  // MALİYET SINIRI: bütçe yetmiyorsa çağrı yapılmaz; çağıran adımı atlar.
+  const slot = tryReserveOptional(EST_FILL_USD);
+  if (!slot) return { skipped: "maliyet-bütçesi" };
   try {
     const form = new FormData();
     form.append("model", OPENAI_MODEL_ID);
     form.append("prompt", prompt);
-    form.append("quality", "medium");
+    // LOW (2026-10-11, maliyet sınırı): dönen görselden yalnız maskedeki dar
+    // şerit alınıyor; d44b63e8 c2/c4/c5'te low ile medium gözle ayırt
+    // edilemedi (taş duvar, ağaç kenarı dahil), uyum kaymaları aynı (2-4 px).
+    // Çıktı token'ı 1756 -> 196, çağrı ~$0.062 -> ~$0.015.
+    form.append("quality", "low");
     form.append("size", "1024x1024");
     form.append("output_format", "png");
     form.append("image[]", new Blob([imagePng], { type: "image/png" }), "crop.png");
     form.append("mask", new Blob([maskPng], { type: "image/png" }), "mask.png");
-    return await postOpenAiImageEdit(form, 1);
+    return await postOpenAiImageEdit(form, 1, { timeoutMs });
   } catch (e) {
     console.error("OpenAI kafa dolgusu hata:", e.message || e);
     return null;
+  } finally {
+    slot.release();
   }
 }
 
@@ -1988,16 +2011,56 @@ async function inpaintHeadHoleWithOpenAI(imagePng, maskPng, prompt = HEAD_INPAIN
  * alma/bırakma try/finally ile HER çıkış yolunda (başarı, hata, tükenen
  * retry) garanti olsun.
  */
-async function postOpenAiImageEdit(form, refCount) {
+// OPENAI ÇAĞRI ZAMAN AŞIMI (2026-10-11, iş d44b63e8): fetch'in zaman aşımı
+// yoktu; iki çağrı "fetch failed" ile 5 ve 12+ dakika asılı kaldı, eşzamanlılık
+// slotlarının ikisini de tuttu ve iş 900 sn sınırını aşıp "Zaman aşımı" ile
+// düştü (7/10 kare bitmişken). Asılı çağrı artık bu sürede kesilir ve null
+// döner — mevcut hata yolu, retry EKLENMEDİ (bkz. fal-credit-burn-incident).
+const OPENAI_IMAGE_TIMEOUT_MS = 300000;
+
+// İŞ SÜRE BÜTÇESİ (2026-10-11, iş d44b63e8): startPhotoGeneration 900 sn
+// çalışabiliyor; son katmanlar (kafa çevresi, gözlük) sona yığılınca iş sınırı
+// aştı, 7/10 kare bitmişken "Zaman aşımı" ile düştü ve hepsi iade edildi.
+// Her chunk çalışması bitiş zamanını AsyncLocalStorage ile taşır; isteğe bağlı
+// AI adımları süre azalınca atlanır (kare onlarsız teslim edilir), yeni üretim
+// denemesi başlatılmaz, her OpenAI çağrısı kalan süreyle sınırlanır.
+const { jobClock, recordUsage, tryReserveOptional, releaseMandatoryReserve, createLedger, chunkContext } = require("./jobContext");
+const JOB_TIME_LIMIT_MS = 900 * 1000; // startPhotoGeneration timeoutSeconds ile senkron
+const JOB_FINALIZE_RESERVE_MS = 45 * 1000; // son kayıt/teslim için pay
+const GEN_ATTEMPT_MIN_LEFT_MS = 300 * 1000; // yeni üretim denemesi için gereken süre
+const POST_AI_MIN_LEFT_MS = 150 * 1000; // isteğe bağlı AI son adımı için gereken süre
+const EYEWEAR_MIN_LEFT_MS = 90 * 1000;
+const POST_AI_TIMEOUT_MS = 150 * 1000;
+
+function jobTimeLeftMs() {
+  const st = jobClock.getStore();
+  return st && st.deadline ? st.deadline - Date.now() : Infinity;
+}
+
+async function postOpenAiImageEdit(form, refCount, { timeoutMs = OPENAI_IMAGE_TIMEOUT_MS } = {}) {
   await acquireOpenAiImageSlot();
   try {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const resp = await fetch(OPENAI_IMAGE_EDIT_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_KEY.value()}` },
-        body: form,
-      });
+      // Slot beklenirken süre azalmış olabilir: kalan süreden fazla bekleme.
+      const left = jobTimeLeftMs() - 5000;
+      const limitMs = Math.min(timeoutMs, left);
+      if (limitMs < 20000) {
+        console.warn(`OpenAI images/edits atlandı: işin süresi bitiyor (kalan ${Math.round(left / 1000)}sn)`);
+        return null;
+      }
+      let resp;
+      try {
+        resp = await fetch(OPENAI_IMAGE_EDIT_URL, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${OPENAI_KEY.value()}` },
+          body: form,
+          signal: AbortSignal.timeout(limitMs),
+        });
+      } catch (e) {
+        console.error(`OpenAI images/edits ağ hatası ya da zaman aşımı (sınır ${Math.round(limitMs / 1000)}sn, deneme ${attempt}): ${e.name || ""} ${e.message || e}`);
+        return null;
+      }
       if (resp.status === 429 && attempt < maxAttempts) {
         // OpenAI oran limiti. ÖNEMLİ (2026-07-29 gerçek log): limit "input
         // images per min" üzerinden geliyor ("Limit 5, Used 5") ve OpenAI
@@ -2035,11 +2098,12 @@ async function postOpenAiImageEdit(form, refCount) {
       if (json.usage) {
         const u = json.usage;
         const d = u.input_tokens_details || {};
+        const usd = recordUsage(String(form.get("model") || OPENAI_MODEL_ID), u);
         console.log(
           `MALIYET GORSEL: girdi=${u.input_tokens ?? "?"} ` +
           `(metin=${d.text_tokens ?? "?"} gorsel=${d.image_tokens ?? "?"}) ` +
           `cikti=${u.output_tokens ?? "?"} toplam=${u.total_tokens ?? "?"} ` +
-          `kalite=medium referansSayisi=${refCount}`
+          `kalite=${form.get("quality") || "?"} referansSayisi=${refCount} usd=${usd.toFixed(4)}`
         );
       }
       return Buffer.from(b64, "base64");
@@ -2585,18 +2649,22 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
          "BAD_GHOSTING: <e.g. right arm see-through, railing visible through torso>\n" +
          "BAD_PULLED: <e.g. walking aside but face yanked to the lens>");
 
-    // detail "high": kimlik karşılaştırması için yüz ayrıntısı şart; "low"
-    // (512px) yüz hatlarını ayırt etmeye yetmiyor. Maliyet farkı ihmal
-    // edilebilir (~1500 giriş token'ı ≈ yarım cent).
+    // Çıktı her zaman detail "high" (kusurlar ince ayrıntıda). Selfie'ler
+    // için bkz. aşağıdaki LOW DETAIL notu.
     const content = [
       { type: "text", text: prompt },
       { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}`, detail: "high" } },
     ];
+    // SELFIE'LER LOW DETAIL (2026-10-11, maliyet sınırı): "ref" çağrısı 6
+    // görselle ~6700 token'dı. Selfie'ler low (85 token) gidince 42 karelik
+    // arşiv kümesinde (3 iş + vision retleri) kararların 42'si de aynı kaldı,
+    // kare başı Vision $0.027 -> $0.015. Çıktı ve taban (base çağrısı) high.
+    // Kümede kimlik/saç reddi yoktu — kimlik ayrıca sayısal ölçülüyor.
     for (const r of refs) {
       const refUrl = Buffer.isBuffer(r)
         ? `data:image/jpeg;base64,${r.toString("base64")}`
         : r; // public URL (fal CDN / imzalı Firebase URL)
-      content.push({ type: "image_url", image_url: { url: refUrl, detail: "high" } });
+      content.push({ type: "image_url", image_url: { url: refUrl, detail: mode === "ref" ? "low" : "high" } });
     }
 
     const resp = await fetch(OPENAI_CHAT_URL, {
@@ -2631,6 +2699,7 @@ async function assessOutputWithVisionOnce(buf, referenceImages, mode = "self") {
     // MALİYET ÖLÇÜMÜ — bkz. generateWithOpenAI'daki aynı gerekçe.
     if (json.usage) {
       const u = json.usage;
+      recordUsage(VISION_MODEL, u);
       console.log(
         `MALIYET VISION: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
         `toplam=${u.total_tokens ?? "?"} model=${VISION_MODEL} gorselSayisi=${refs.length + 1}`
@@ -3158,6 +3227,14 @@ function withPostLayerLock(fn) {
   _postLayerTail = run.catch(() => {});
   return run;
 }
+// WORKER HAVUZU (2026-10-11, bkz. postPool.js): ağır son katman görevi
+// (postTasks.js) havuz açıksa ayrı iş parçacığında paralel, değilse aynı kod
+// bu kilitle ana iş parçacığında sırayla çalışır.
+function runPostTask(name, payload) {
+  const pool = require("./postPool");
+  if (pool.enabled()) return pool.run(name, payload);
+  return withPostLayerLock(() => require("./postTasks")[name](payload));
+}
 const chunkTemplateKey = (jobId, styleId, chunkIdx) => `${jobId}/${styleId}/${chunkIdx}`;
 // Chunk'ın o anki şablonu kırpıldıysa geri yerleştirme bilgisi
 // ({ originalBuf, geo, cropBuf }). Reddedilen kareler de admin panelinden
@@ -3239,6 +3316,13 @@ async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, me
 // dispatch'teki pickTemplatesFromPool çağrısı + candidates dizisi) — aksi
 // halde 3. denemeden sonra "farklı şablon" diye aynı şablon tekrar denenir.
 const OPENAI_DIRECT_MAX_ATTEMPTS = 6;
+// ONAY AKIŞINDA TEK DENEME (2026-10-11, kullanıcı kararı: "5'li pakette
+// ürettiğimiz 10 foto reddedilenlerle birlikte toplam 10 olsun", 10 karenin
+// maliyeti 1.5 $'ı geçmesin). Kapıdan geçemeyen kare yeniden üretilmez; ham
+// hâliyle reddedilen kareler arasına kaydedilir, admin onay ekranında görür
+// ve isterse onaylar. Eski istemci (holdForApproval yok) 6 denemede kalır —
+// orada vaat edilen sayı kadar üretiliyor, yedek kare yok.
+const HOLD_MAX_ATTEMPTS = 1;
 
 // AYNI KAPI TEKRAR SINIRI (2026-09-13) — bkz. runOpenAiDirectChunk içindeki
 // gateRejectCounts başlığı. Bir "yorum" kapısı aynı chunk'ta bu kadar kez
@@ -3404,7 +3488,13 @@ const GATE_REPEAT_ELIGIBLE = new Set([
 // edilen kareler: c3 0.31→0.56 (+0.25), c6 0.06→0.49 (+0.44), c9 0.07→0.57
 // (+0.50). 2026-09-06'da 0.25'te gözle sorunsuz bulunan +0.22/+0.29 kareler
 // artık elenecek — kullanıcı bu bedeli açıkça kabul etti.
-const OUTPUT_YAW_DRIFT_MAX = 0.20;
+// 0.20 -> 0.35 GEVŞETİLDİ (2026-10-10, iş 3cd612ba, kullanıcı: "gereksiz yere
+// ret vermemeli"). 0.20'de 6 retin 5'i yaw-drift'ti; +0.30 (c9 d1), +0.27
+// (c6 d2), +0.22 (c9 d2) kullanıcıya göre iyi kareydi ve retler saçak
+// temizliğinden geçmediği için şablon saçı üstlerinde kaldı. +0.47 (c6 d1)
+// gözle de dönmüştü → hâlâ elenir. 9d9507f0 c3'teki +0.25 şikâyeti artık
+// geçer; bedel bilinerek.
+const OUTPUT_YAW_DRIFT_MAX = 0.35;
 // Yaw kapısında yüz bulunamazsa yeniden denenen tespit güveni (bkz. YAW KAPISI).
 const LOW_CONF_FACE = 0.1;
 
@@ -4026,12 +4116,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel, templateNames);
   } finally {
     clearInterval(heartbeatTimer);
+    releaseMandatoryReserve();
     CHUNK_TEMPLATE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
     CHUNK_RESTORE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
   }
 }
 
 async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode = PHOTO_MODE_FULL, refEyeOpenness = null, refSkinTone = null, refHasFaceShine = false, holdForApproval = false, imageModel = OPENAI_MODEL_ID, templateNames = null) {
+  const maxAttempts = holdForApproval ? HOLD_MAX_ATTEMPTS : OPENAI_DIRECT_MAX_ATTEMPTS;
   // Şablon bir kez hazırlanır (kırpma gerekiyorsa burada olur) ve tüm
   // denemelerde aynı tuval kullanılır — her retry'de yeniden kırpmak gereksiz.
   // `restore`: kırpma yapıldıysa, üretim bittikten sonra sonucu ORİJİNAL
@@ -4163,7 +4255,13 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       );
     }
   };
-  for (let attempt = 1; attempt <= OPENAI_DIRECT_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // SÜRE BÜTÇESİ: yeni deneme işi 900 sn sınırına taşımasın (bkz.
+    // jobTimeLeftMs). Retry sınırını DÜŞÜRÜR, artırmaz.
+    if (attempt > 1 && jobTimeLeftMs() < GEN_ATTEMPT_MIN_LEFT_MS) {
+      console.warn(`SÜRE BÜTÇESİ (style=${styleId}, chunk=${chunkIdx}): deneme ${attempt} başlatılmıyor, kalan ${Math.round(jobTimeLeftMs() / 1000)}sn`);
+      break;
+    }
     // HEARTBEAT (2026-09-07 gerçek olay, 2026-09-10'da runOpenAiDirectChunk
     // sarmalayıcısındaki setInterval ile GENİŞLETİLDİ — bkz. fonksiyon başı):
     // cleanupStuckGenJobs her 5 dakikada bir 'generating' işlerde updatedAt'i
@@ -4251,7 +4349,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       // lastRejectGate BİLEREK sıfırlanmıyor: burada üretim hiç olmadı, bu bir
       // kalite reddi değil. Varsa önceki kalite reddinin uyarısı hâlâ en
       // güncel bilgidir ve sonraki denemeye taşınmalı.
-      if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+      if (attempt < maxAttempts) continue;
       break;
     }
 
@@ -4329,7 +4427,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
           mode, gate: lastRejectGate, distance: mathDist,
         });
-        if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+        if (attempt < maxAttempts) continue;
         break;
       }
       if (noFace) {
@@ -4411,7 +4509,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               distance: mathDist,
               detail: `çıktı=${outYaw.toFixed(2)} şablon=${templateYaw.toFixed(2)}`,
             });
-            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            if (attempt < maxAttempts) continue;
             break;
           }
         } else if (pulledNoTpl) {
@@ -4422,7 +4520,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             distance: mathDist,
             detail: `çıktı=${outYaw.toFixed(2)} şablon=null`,
           });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          if (attempt < maxAttempts) continue;
           break;
         } else {
           console.log(`YAW ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ÖLÇÜLEMEDİ çıktı=${outYaw != null ? outYaw.toFixed(2) : "null"} şablon=${templateYaw != null ? templateYaw.toFixed(2) : "null"} çekildi=false`);
@@ -4521,7 +4619,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             mode, gate: "skin-tone", distance: mathDist,
             detail: `yüzeGöreOran=${rt}`,
           });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          if (attempt < maxAttempts) continue;
           break;
         }
       } catch (e) {
@@ -4568,7 +4666,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "math-no-face+vision-inconclusive", distance: null,
           });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          if (attempt < maxAttempts) continue;
           break;
         }
         console.warn(`KALITE: vektör yok ama yüz kutusu var (oran=${mathFaceRatio.toFixed(3)}) — birleşik red yok, kare Vision kararsız-kabul ile devam (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt})`);
@@ -4689,7 +4787,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: lastRejectGate, distance: mathDist, detail: visionDetail,
           });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          if (attempt < maxAttempts) continue;
           break;
         }
       }
@@ -4715,7 +4813,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             mode, gate: "eyes-closed", distance: mathDist,
             detail: `çıktı=${oe} referans=${re}`,
           });
-          if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+          if (attempt < maxAttempts) continue;
           break;
         }
       } catch (e) {
@@ -4860,7 +4958,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               mode, gate: "face-artifact", distance: mathDist,
               detail: `${fa.where || "?"} — ${fa.detail}`,
             });
-            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            if (attempt < maxAttempts) continue;
             break;
             }
           } else {
@@ -5044,7 +5142,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               mode, gate: "head-dx", distance: mathDist,
               detail: `dx=${p.dx.toFixed(2)}`,
             });
-            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            if (attempt < maxAttempts) continue;
             break;
           }
         }
@@ -5082,7 +5180,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               mode, gate: "head-ghost", distance: mathDist,
               detail: `${gh.where || "?"} — ${gh.detail}`,
             });
-            if (attempt < OPENAI_DIRECT_MAX_ATTEMPTS) continue;
+            if (attempt < maxAttempts) continue;
             break;
           } else {
             console.log(`KAFA KALINTI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): GEÇTİ`);
@@ -5225,13 +5323,15 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // POST_LAYER_LOCK): kafa ölçeği ve ten alanı tam çözünürlüklü kopyalar
     // ve segmentasyon modelleri kullanır; paralel chunk'lar aynı anda
     // girince süreç 2GiB'ı aştı.
-    // Kafa ölçeklendiyse kafanın geometrisi — arka plan geri yüklemesi
-    // kafa çevresinde geçişi yumuşatır (bkz. sceneRestore HEAD_BLEND_R).
     // ŞABLON GÖZLÜĞÜ — kafa ölçeğinden ÖNCE sorulur (2026-10-10, 790bd56b
     // c1): gözlüklü şablonda göz noktaları camın altında kayıyor, yüz oranı
     // parçaları birbirini tutmuyor (gözÇene 0.96, kaşBurun 1.16) ve kafa
-    // gereksiz yere 0.93'e küçültüldü. Gözlük varsa kafa ölçeğine dokunulmaz.
+    // gereksiz yere 0.93'e küçültüldü. Gözlük varsa kafa ölçeği gözsüz
+    // ölçüyle yapılır (3cd612ba'da tamamen atlamak c1/c2/c9'u büyük bıraktı).
     // Sonuç GÖZLÜK EN SON adımında da kullanılır.
+    // Kapılardan geçti: bu karenin zorunlu maliyet payının kalanı isteğe
+    // bağlı son adımlara açılır (bkz. jobContext).
+    releaseMandatoryReserve();
     let tplForEyewear = null;
     if (recompositedOk) tplForEyewear = restore.originalBuf;
     else if (restore) tplForEyewear = Buffer.isBuffer(templateInput) ? templateInput : null;
@@ -5250,59 +5350,137 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     }
     const tplHasEyewear = templateEyewear.ok && templateEyewear.eyewear === true;
 
-    let scaledHead = null;
+    // TEN ALANI, YÜZ DETAYI, ARKA PLAN GERİ YÜKLEME, SİYAH-BEYAZ SON — tek
+    // görev (bkz. postTasks.layers; açıklamalar orada). Worker havuzu varsa
+    // kareler paralel, yoksa eskisi gibi kilitte sırayla.
+    let bgRestored = false;
+    try {
+      const r = await runPostTask("layers", { buf: deliverBuf, tpl: Buffer.isBuffer(tplForEyewear) ? tplForEyewear : null, styleId, chunkIdx, faceLight: FACE_LIGHT_TRANSFER });
+      deliverBuf = r.buf;
+      bgRestored = r.bgRestored;
+    } catch (e) {
+      console.error("OpenAI yolu: son katmanlar hata verdi (atlanıyor):", e);
+    }
+
+    // KAFA ÖLÇEĞİ ARKA PLANDAN SONRA (2026-10-11, d44b63e8): küçültmenin
+    // açtığı delik böylece şablonun gerçek arka planıyla çevrili olur ve kafa
+    // çevresi temizliğiyle TEK AI çağrısında dolar (eskiden iki ayrı çağrı;
+    // ikisi de kafanın çevresinde farklı tonlu/tırtıklı izler bırakıyordu).
+    const preScaleBuf = deliverBuf;
     let pendingScale = null;
-    await withPostLayerLock(async () => {
-      // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
-      // çöz). Kafa yüz noktalarıyla ölçülür ve şablondaki kafayla aynı boya
-      // getirilir — büyükse küçültülür, küçükse büyütülür (bkz. headScale.js). Şablon eşi KONUM ÖLÇÜM ile aynı kurala göre seçilir:
-      // iki görüntü aynı kadraj uzayında olmalı. Emin olunamayan her durumda
-      // (omuz kadraj dışı, kafa başka bir şeye değiyor, sahne yeniden
-      // kadrajlanmış) dokunulmaz.
-      try {
-        let tplForScale = null;
-        if (recompositedOk) tplForScale = restore.originalBuf;
-        else if (restore) tplForScale = Buffer.isBuffer(templateInput) ? templateInput : null;
-        else tplForScale = templateSourceBuf;
-        if (!tplForScale) {
-          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
-        } else if (tplHasEyewear) {
-          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[template-eyewear] — şablonun göz noktaları gözlük altında güvenilmez`);
+    // KAFA ÖLÇEĞİ DÜZELTMESİ (2026-10-07, kullanıcı kararı: elemek yerine
+    // çöz). Kafa yüz noktalarıyla ölçülür ve şablondaki kafayla aynı boya
+    // getirilir (bkz. headScale.js). Emin olunamayan her durumda (omuz kadraj
+    // dışı, kafa başka bir şeye değiyor, sahne yeniden kadrajlanmış)
+    // dokunulmaz. Gözlüklü şablonda göz noktaları kullanılmaz, yalnız
+    // küçültülür (bkz. headScale eyewearFaceRatio — 3cd612ba c1/c2/c9).
+    try {
+      if (!Buffer.isBuffer(tplForEyewear)) {
+        console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
+      } else {
+        const hs = await runPostTask("headScale", { buf: deliverBuf, tpl: tplForEyewear, templateEyewear: tplHasEyewear });
+        if (hs.applied && hs.inpaint) {
+          pendingScale = { hs, ölçü: `${hs.ölçü} ${hs.delik}`, tpl: tplForEyewear };
+        } else if (hs.applied) {
+          // Delik yok (büyütme ya da dolgu gerekmeyen küçültme).
+          deliverBuf = hs.buf;
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${hs.ölçü} ${hs.delik}`);
         } else {
-          const { correctHeadScale } = require("./headScale");
-          // Delik AI ile doldurulur; ağ çağrısı kilidin DIŞINDA yapılır
-          // (aşağıda), kilit 30-60 sn tutulmasın.
-          const hs = await correctHeadScale(deliverBuf, tplForScale, { deferInpaint: true });
-          const n = (v) => (v != null ? v.toFixed(3) : "null");
-          const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} gözÇene=${n(hs.parts && hs.parts.eyeChin)} kaşBurun=${n(hs.parts && hs.parts.browNose)} gözBurun=${n(hs.parts && hs.parts.eyeNose)} burunBoyu=${n(hs.parts && hs.parts.noseLen)} kafaHacmi=${n(hs.volRatio)}${hs.volUsed ? "" : "[kullanılmadı]"} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}${hs.planS != null ? ` plan=${n(hs.planS)} açıkŞablon=${n(hs.exposed)}` : ""}${hs.sEff != null ? ` izinliS=${n(hs.sEff)}` : ""}`;
-          if (hs.applied && hs.buf) {
-            const delik = `taşınanPx=${hs.movedPx} delikPx=${hs.holePx ?? "null"} delikDerinlik=${hs.holeDepth != null ? Math.round(hs.holeDepth) : "null"}`;
-            if (hs.inpaint) {
-              pendingScale = { hs, ölçü: `${ölçü} ${delik}`, tpl: tplForScale };
-            } else {
-              // Delik yok (büyütme ya da dolgu gerekmeyen küçültme).
-              deliverBuf = hs.buf;
-              scaledHead = hs.head;
-              console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${delik}`);
+          console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] ${hs.ölçü}`);
+        }
+      }
+    } catch (e) {
+      console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
+    }
+
+    // KAFA ÇEVRESİ (2026-10-11, iş d44b63e8, kullanıcı: "kafanın üst
+    // kısmındaki silüetlenme, renklenme, küçültmeden dolayı oynama gibi
+    // problemleri kesin olarak çözmeliyiz"). Arka plan, şablon kafasının
+    // silüeti dışında şablondan geldi; kafanın çevresinde AI yalnızca gerçek
+    // kusura girer: küçültmenin açtığı delik, hayalet saç, saçak telleri
+    // (bkz. headSurround.js). Kusur yoksa AI çağrısı yapılmaz. Dolgu
+    // reddedilirse kafa küçültülmez, kare geri yüklenmiş hâliyle kalır.
+    // Retry yok. Gözlükten ÖNCE (yüzün dışına taşan camı silmesin).
+    if (bgRestored) {
+      const scaled = pendingScale;
+      pendingScale = null;
+      try {
+        const base = scaled ? scaled.hs.buf : deliverBuf;
+        const sf = await runPostTask("surroundPrep", { buf: base, extraHole: scaled ? scaled.hs.holeMask : null });
+        const sp = `şerit=${sf.bandPx ?? "null"} delik=${sf.holePx ?? 0} hayalet=${sf.ghostPx ?? "null"} saçak=${sf.fringePx ?? "null"} saydamHayalet=${sf.sheerPx ?? 0}`;
+        let fin = null;
+        let why = null;
+        if (!sf.applied) {
+          why = sf.reason;
+          console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${why}] ${sp}`);
+        } else if (jobTimeLeftMs() < POST_AI_MIN_LEFT_MS) {
+          why = "süre-bütçesi";
+          console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${why}] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn ${sp}`);
+        } else {
+          const ai = await inpaintHeadHoleWithOpenAI(sf.inpaint.image, sf.inpaint.mask, HEAD_FRINGE_PROMPT);
+          fin = Buffer.isBuffer(ai) ? await runPostTask("finishInpaint", { job: sf.inpaint.job, ai, base: sf.inpaint.base }) : { buf: null, reason: (ai && ai.skipped) || "inpaint-failed" };
+          why = fin.reason;
+          const k = `${sp} kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} yumuşakDolgu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
+          console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ${fin.buf ? "TEMİZLENDİ" : `ATLANDI[${why}]`} ${k}`);
+        }
+        // Temizlenecek kusur yoksa (küçültme de yok) kare olduğu gibi kalır.
+        let out = fin && fin.buf ? fin.buf : (!scaled ? deliverBuf : null);
+        if (scaled) {
+          // KÜÇÜLTME SONRASI KALINTI (2026-10-10): model kafayı eski boyunda
+          // çizip iz bıraktıysa küçültme geri alınır. Kapı bu chunk'ta devre
+          // dışıysa (ham karede de iz görüyordu) sorulmaz.
+          let ghost = null;
+          if (out && Buffer.isBuffer(scaled.tpl) && !disabledGates.has("head-ghost")) {
+            try {
+              const { judgeHeadGhost } = require("./headGhost");
+              const { detectMainFace } = require("./faceQuality");
+              const fd = (await detectMainFace(out)) || (await detectMainFace(out, LOW_CONF_FACE));
+              if (fd && fd.box) ghost = await judgeHeadGhost(out, scaled.tpl, fd.box, OPENAI_KEY.value());
+            } catch (e) {
+              console.error("OpenAI yolu: küçültme sonrası kalıntı kontrolü hata verdi (atlanıyor):", e);
             }
+          }
+          const gk = ghost ? (ghost.ok ? (ghost.bad ? `kalıntı=VAR(${ghost.where}: ${ghost.detail})` : "kalıntı=yok") : `kalıntı=ölçülemedi[${ghost.reason}]`) : "kalıntı=sorulmadı";
+          if (!out) {
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[çevre-${why}] ${scaled.ölçü}`);
+          } else if (ghost && ghost.ok && ghost.bad) {
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[ghost-after-scale] ${scaled.ölçü} ${gk}`);
+            out = null;
           } else {
-            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${hs.reason}] ${ölçü}`);
+            console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${scaled.ölçü} ${gk}`);
           }
         }
+        if (out) {
+          deliverBuf = out;
+          // Gri şablonda dolgu renk getirmesin (SİYAH-BEYAZ SON bundan önceydi).
+          if (fin && fin.buf && Buffer.isBuffer(tplForEyewear)) {
+            const { matchGrayscale } = require("./faceLight");
+            const g = await matchGrayscale(deliverBuf, tplForEyewear);
+            if (g.applied && g.buf) deliverBuf = g.buf;
+          }
+        } else {
+          deliverBuf = preScaleBuf;
+        }
       } catch (e) {
-        console.error("OpenAI yolu: kafa ölçeği düzeltmesi hata verdi (atlanıyor):", e);
+        console.error("OpenAI yolu: kafa çevresi hata verdi (atlanıyor):", e);
+        deliverBuf = preScaleBuf;
       }
-    });
+    }
 
-    // KAFA KÜÇÜLTME AI DOLGUSU — kilit dışında (ağ). Başarısızlıkta ya da
-    // model arka planı değiştirdiyse kafa küçültülmez (kullanıcı kararı:
-    // retry yok, bozuk dolgu yerine dokunulmamış kare).
+    // GERİ YÜKLEME YOKSA (sahne yeniden kadrajlanmış vb.) eski yol: KAFA
+    // KÜÇÜLTME AI DOLGUSU — kilit dışında (ağ). Başarısızlıkta ya da model
+    // arka planı değiştirdiyse kafa küçültülmez (kullanıcı kararı: retry yok,
+    // bozuk dolgu yerine dokunulmamış kare).
+    if (pendingScale && jobTimeLeftMs() < POST_AI_MIN_LEFT_MS) {
+      console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[süre-bütçesi] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn ${pendingScale.ölçü}`);
+      pendingScale = null;
+    }
     if (pendingScale) {
       const { hs, ölçü, tpl } = pendingScale;
       pendingScale = null;
       try {
         const ai = await inpaintHeadHoleWithOpenAI(hs.inpaint.image, hs.inpaint.mask);
-        const fin = ai ? await hs.inpaint.finish(ai) : { buf: null, reason: "inpaint-failed" };
+        const fin = Buffer.isBuffer(ai) ? await runPostTask("finishInpaint", { job: hs.inpaint.job, ai, base: hs.inpaint.base }) : { buf: null, reason: (ai && ai.skipped) || "inpaint-failed" };
         const k = `kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
         // KÜÇÜLTME SONRASI KALINTI (2026-10-10): dolgu kafanın yanında iz
         // bırakmışsa (model kafayı eski boyunda çizdi) küçültme geri alınır.
@@ -5324,7 +5502,6 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[ghost-after-scale] ${ölçü} ${k} ${gk}`);
         } else if (fin.buf) {
           deliverBuf = fin.buf;
-          scaledHead = hs.head;
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} ${k} ${gk}`);
         } else {
           console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${ölçü} ${k}`);
@@ -5334,159 +5511,37 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
 
-    // KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, kullanıcı: "base fotodan herhangi
-    // bir silüet kalmamalı"). 790bd56b: c0 şablonun kıvırcık saç telleri yeni
-    // kafanın üstünde kaldı (kalıntı kapısı GEÇTİ dedi), c2 yüzün yanında
-    // ikinci yüz kenarı. Yeni kafanın dolu gövdesi dışındaki halka (saçak +
-    // şablon kafasının alanı + sabit halka) arka planla yeniden boyanır (bkz.
-    // headScale prepareHeadFringeRepaint). Gözlükten ÖNCE: halka, yüzün
-    // dışına taşan uzak camı silmesin. FAIL-SAFE: dolgu reddedilirse kare
-    // olduğu gibi kalır, retry yok.
+    // KAFA SAÇAĞI TEMİZLİĞİ — yalnız arka plan geri yüklenemediyse (geri
+    // yüklendiyse KAFA ÇEVRESİ yaptı). 790bd56b: c0 şablonun kıvırcık saç
+    // telleri yeni kafanın üstünde kaldı, c2 yüzün yanında ikinci yüz kenarı
+    // (bkz. headScale prepareHeadFringeRepaint). FAIL-SAFE, retry yok.
     try {
-      if (Buffer.isBuffer(tplForEyewear)) {
-        const { prepareHeadFringeRepaint } = require("./headScale");
-        const fr = await withPostLayerLock(() => prepareHeadFringeRepaint(deliverBuf, tplForEyewear));
-        if (!fr.applied) {
-          console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fr.reason}]${fr.bodyIou != null ? ` gövdeIoU=${fr.bodyIou.toFixed(3)}` : ""}`);
+      if (!bgRestored && Buffer.isBuffer(tplForEyewear)) {
+        if (jobTimeLeftMs() < POST_AI_MIN_LEFT_MS) {
+          console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[süre-bütçesi] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn`);
         } else {
-          const ai = await inpaintHeadHoleWithOpenAI(fr.inpaint.image, fr.inpaint.mask, HEAD_FRINGE_PROMPT);
-          const fin = ai ? await withPostLayerLock(() => fr.inpaint.finish(ai)) : { buf: null, reason: "inpaint-failed" };
-          const k = `delikPx=${fr.holePx} saçakPx=${fr.fringePx} kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
-          if (fin.buf) {
-            deliverBuf = fin.buf;
-            console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): TEMİZLENDİ ${k}`);
+          const fr = await runPostTask("fringePrep", { buf: deliverBuf, tpl: tplForEyewear });
+          if (!fr.applied) {
+            console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fr.reason}]${fr.bodyIou != null ? ` gövdeIoU=${fr.bodyIou.toFixed(3)}` : ""}`);
           } else {
-            console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${k}`);
+            const ai = await inpaintHeadHoleWithOpenAI(fr.inpaint.image, fr.inpaint.mask, HEAD_FRINGE_PROMPT);
+            const fin = Buffer.isBuffer(ai) ? await runPostTask("finishInpaint", { job: fr.inpaint.job, ai, base: fr.inpaint.base }) : { buf: null, reason: (ai && ai.skipped) || "inpaint-failed" };
+            const k = `delikPx=${fr.holePx} saçakPx=${fr.fringePx} hayaletPx=${fr.ghostPx ?? "null"} kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
+            if (fin.buf) {
+              deliverBuf = fin.buf;
+              console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): TEMİZLENDİ ${k}`);
+              const { matchGrayscale } = require("./faceLight");
+              const g = await matchGrayscale(deliverBuf, tplForEyewear);
+              if (g.applied && g.buf) deliverBuf = g.buf;
+            } else {
+              console.log(`KAFA SAÇAĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fin.reason}] ${k}`);
+            }
           }
         }
       }
     } catch (e) {
       console.error("OpenAI yolu: kafa saçağı temizliği hata verdi (atlanıyor):", e);
     }
-
-    await withPostLayerLock(async () => {
-      // TEN TONU ALANI (2026-10-07, kullanıcı kararı: elemek yerine çöz).
-      // Vücut derisini segmentasyon modeliyle bulur ve kolları/elleri/boynu
-      // yüz tonuna çeker; kolun bir yerinin koyu bir yerinin açık kalmasını
-      // (iki tonlu kol) giderir (bkz. skinTone.js). Kutuyla sınırlı EL TONU
-      // katmanından SONRA, tam kadrajda çalışır — o katmanın kutu dışında
-      // bıraktığı kol parçası da burada düzelir. Kıyafet/aksesuar boyanmaz.
-      try {
-        const { correctSkinToneField } = require("./skinTone");
-        const st = await correctSkinToneField(deliverBuf);
-        const n = (v) => (v != null ? v.toFixed(1) : "null");
-        const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"}`;
-        if (st.applied && st.buf) {
-          deliverBuf = st.buf;
-          console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
-        } else {
-          console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${st.reason}] ${ölçü}`);
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
-      }
-
-      // YÜZ IŞIĞI AKTARIMI (2026-10-08, kullanıcı: "base fotodaki yüzdeki ışık
-      // ile çıktıdaki ışık tamamen aynı olmalı"). Şablon yüzünün ışık deseni
-      // (yön, kontrast, renk geçişi) çıktı yüzüne aktarılır; ten ortalaması
-      // korunur (bkz. faceLight.js).
-      //
-      // KAPALI (2026-10-09, iş f9f3b5c0, kullanıcı: "yüze gereksiz gölge
-      // eklemişsin her fotoğrafta"). 10 karenin 9'unda uygulandı; yüzün bir
-      // yarısını karartıp diğerini parlattı (c2, c7) ve yumuşak yüz maskesi
-      // yüzün dışına taşıp arka planda parlak hale bıraktı (c1 gökyüzü, c7
-      // duvar). Işık prompt'tan geliyor; katman yeniden açılmadan önce bu
-      // iki kusur çözülmeli.
-      try {
-        const tplForLight = recompositedOk ? restore.originalBuf : (restore ? (Buffer.isBuffer(templateInput) ? templateInput : null) : templateSourceBuf);
-        if (FACE_LIGHT_TRANSFER && tplForLight) {
-          const { transferFaceLight } = require("./faceLight");
-          const fl = await transferFaceLight(deliverBuf, tplForLight);
-          const n = (v) => (v != null ? v.toFixed(3) : "null");
-          if (fl.applied && fl.buf) {
-            deliverBuf = fl.buf;
-            console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI gölgelemeFarkı=${n(fl.diffBefore)}`);
-          } else {
-            console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] gölgelemeFarkı=${n(fl.diffBefore)} yawFarkı=${n(fl.yawDiff)}`);
-          }
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: yüz ışığı aktarımı hata verdi (atlanıyor):", e);
-      }
-
-      // YÜZ DETAYI EŞİTLEME (2026-10-08, kullanıcı: "kıyafet kaliteli, yüz
-      // kalitesiz görünüyor"). Yüzün ince detayı, şablondaki yüz/kıyafet
-      // oranına ulaşana kadar keskinleştirilir (bkz. faceDetail.js). Şablon
-      // eşi KAFA ÖLÇEK ile aynı kural.
-      try {
-        let tplForDetail = null;
-        if (recompositedOk) tplForDetail = restore.originalBuf;
-        else if (restore) tplForDetail = Buffer.isBuffer(templateInput) ? templateInput : null;
-        else tplForDetail = templateSourceBuf;
-        if (tplForDetail) {
-          const { matchFaceDetail } = require("./faceDetail");
-          const fd = await matchFaceDetail(deliverBuf, tplForDetail);
-          const n = (v) => (v != null ? v.toFixed(2) : "null");
-          const ölçü = `kazanç=${n(fd.gain)} yüz=${n(fd.outFace)}->${n(fd.after)} hedef=${n(fd.target)} kıyafet=${n(fd.outCloth)} şablonYüz/Kıyafet=${n(fd.tplFace)}/${n(fd.tplCloth)}`;
-          if (fd.applied && fd.buf) {
-            deliverBuf = fd.buf;
-            console.log(`YÜZ DETAYI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü}`);
-          } else {
-            console.log(`YÜZ DETAYI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fd.reason}] ${ölçü}`);
-          }
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: yüz detayı eşitleme hata verdi (atlanıyor):", e);
-      }
-
-      // ARKA PLAN GERİ YÜKLEME (2026-10-08, kullanıcı kararı: "sadece yüz
-      // değişecek"). EN SON katman, bilinçli: kişi silüetleri dışındaki her
-      // piksel şablondan aynen geri konur — modelin yeniden çizdiği/kaydırdığı
-      // arka plan, kırpma geri yerleştirmesinin dikişi, kafa liquify'ının
-      // büktüğü yapılar ve ten katmanının kişi dışına taşan boyaması birlikte
-      // silinir (bkz. sceneRestore.js). Şablon eşi KAFA ÖLÇEK ile aynı kural.
-      try {
-        let tplForBg = null;
-        if (recompositedOk) tplForBg = restore.originalBuf;
-        else if (restore) tplForBg = Buffer.isBuffer(templateInput) ? templateInput : null;
-        else tplForBg = templateSourceBuf;
-        if (!tplForBg) {
-          console.log(`ARKA PLAN (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
-        } else {
-          const { restoreTemplateBackground } = require("./sceneRestore");
-          const bg = await restoreTemplateBackground(deliverBuf, tplForBg, { head: scaledHead });
-          const n = (v) => (v != null ? v.toFixed(2) : "null");
-          if (bg.applied && bg.buf) {
-            deliverBuf = bg.buf;
-            console.log(`ARKA PLAN (style=${styleId}, chunk=${chunkIdx}): UYGULANDI kişiIoU=${n(bg.iou)} arkaPlanFarkı=${n(bg.bgDiff)} geriKonanPx=${bg.restoredPx} tonEşitlenenPx=${bg.harmonizedPx}`);
-          } else {
-            console.log(`ARKA PLAN (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${bg.reason}] kişiIoU=${n(bg.iou)}`);
-          }
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: arka plan geri yükleme hata verdi (atlanıyor):", e);
-      }
-
-      // SİYAH-BEYAZ — SON GEÇİŞ (2026-10-09, f9f3b5c0 c4): ten/detay
-      // katmanları gri kareye yeniden renk katabiliyor; şablon griyse teslim
-      // edilen kare de tamamen gri olur.
-      try {
-        let tplForGray2 = null;
-        if (recompositedOk) tplForGray2 = restore.originalBuf;
-        else if (restore) tplForGray2 = Buffer.isBuffer(templateInput) ? templateInput : null;
-        else tplForGray2 = templateSourceBuf;
-        if (tplForGray2) {
-          const { matchGrayscale } = require("./faceLight");
-          const g = await matchGrayscale(deliverBuf, tplForGray2);
-          if (g.applied && g.buf) {
-            deliverBuf = g.buf;
-            console.log(`SİYAH-BEYAZ SON (style=${styleId}, chunk=${chunkIdx}): UYGULANDI şablonDoygunluk=${g.satT.toFixed(1)} çıktıDoygunluk=${g.satO.toFixed(1)}`);
-          }
-        }
-      } catch (e) {
-        console.error("OpenAI yolu: siyah-beyaz son geçiş hata verdi (atlanıyor):", e);
-      }
-    });
 
     // GÖZLÜK EN SON (2026-10-10, kullanıcı kararı: "önce yüz şekli tamamen
     // bitsin, gözlüğü en son ekle"). Ana üretim gözlüğü her zaman kaldırır;
@@ -5501,22 +5556,30 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[şablon-belirlenemedi:${ew.reason || "?"}]`);
         } else if (!ew.eyewear) {
           console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): şablonda yok`);
+        } else if (jobTimeLeftMs() < EYEWEAR_MIN_LEFT_MS) {
+          console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[süre-bütçesi] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn`);
         } else {
           const { prepareEyewear, EYEWEAR_ADD_PROMPT } = require("./eyewear");
           const job = await prepareEyewear(deliverBuf, tplForEyewear);
+          const slot = job.finish ? tryReserveOptional(EST_EYEWEAR_USD) : null;
           if (!job.finish) {
             console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${job.reason}] — gözlüksüz teslim`);
+          } else if (!slot) {
+            console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[maliyet-bütçesi] — gözlüksüz teslim`);
           } else {
             const form = new FormData();
             form.append("model", OPENAI_MODEL_ID);
             form.append("prompt", EYEWEAR_ADD_PROMPT);
-            form.append("quality", "medium");
+            // LOW (2026-10-11, maliyet sınırı): d44b63e8 c2/c5/c6'da çerçeve,
+            // cam ve yansıma medium'la aynı kaldı; çağrı ~$0.066 -> ~$0.019.
+            // gpt-image-1-mini denendi: yüzü bozdu, kullanılamaz.
+            form.append("quality", "low");
             form.append("size", "1024x1024");
             form.append("output_format", "png");
             form.append("image[]", new Blob([job.image], { type: "image/png" }), "photo.png");
             form.append("image[]", new Blob([job.ref], { type: "image/png" }), "glasses.png");
             form.append("mask", new Blob([job.mask], { type: "image/png" }), "mask.png");
-            const ai = await postOpenAiImageEdit(form, 2);
+            const ai = await postOpenAiImageEdit(form, 2, { timeoutMs: POST_AI_TIMEOUT_MS }).finally(() => slot.release());
             if (!ai) {
               console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[edit-failed] — gözlüksüz teslim`);
             } else {
@@ -5815,8 +5878,14 @@ exports.startPhotoGeneration = onCall(
     // of 2048 MiB exceeded with 2060 MiB used" ile öldü; o an son adımdaki 3
     // kare kayboldu ve iş "Zaman aşımı" ile düştü. Katmanlar ayrıca
     // POST_LAYER_LOCK ile sıraya alındı; bu artış güvenlik payı.
-    memory: "4GiB",
-    timeoutSeconds: 900,
+    // 4GiB -> 8GiB, 4 vCPU, örnek başına tek iş (2026-10-11, kullanıcı:
+    // "genel hızı hızlandıralım" → worker threads). Son katmanlar artık 3
+    // worker'da paralel (bkz. postPool.js); her worker modelleri ayrı yükler.
+    // Aynı örneğe ikinci iş düşerse bellek iki katına çıkardı — concurrency 1.
+    memory: "8GiB",
+    cpu: 4,
+    concurrency: 1,
+    timeoutSeconds: JOB_TIME_LIMIT_MS / 1000, // 900 — süre bütçesi bununla senkron (bkz. jobTimeLeftMs)
   },
   async (request) => {
     if (!request.auth) {
@@ -5825,6 +5894,7 @@ exports.startPhotoGeneration = onCall(
     const uid = request.auth.uid;
     checkAppAttestation(request, "startPhotoGeneration");
     const { styles, photoCount: rawPhotoCount, jobId, model: rawModel, mode: rawMode, holdForApproval: rawHold, style: rawStyle } = request.data || {};
+    const jobDeadline = Date.now() + JOB_TIME_LIMIT_MS - JOB_FINALIZE_RESERVE_MS;
     // GPT 2.5 KALDIRILDI (2026-10-07): "Versiyon 2" butonu artık gpt-image-2 +
     // kısa prompt. Yüklü eski uygulama hâlâ 2.5 modelini gönderiyor; yeni
     // build yayına girene kadar o istek buraya çevrilir.
@@ -6193,6 +6263,9 @@ exports.startPhotoGeneration = onCall(
             return signedUrlCache.get(file.name);
           };
 
+          // MALİYET DEFTERİ (bkz. jobContext): tüm chunk'lar aynı defteri
+          // paylaşır; isteğe bağlı AI adımları sınırı aşmayacaksa çalışır.
+          const costLedger = createLedger(picked.length);
           await Promise.all(picked.map(async (file, i) => {
             // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
             // (i, generateCount+i, 2*generateCount+i, ... konumları), böylece
@@ -6220,11 +6293,11 @@ exports.startPhotoGeneration = onCall(
             ];
             try {
               const urls = await Promise.all(uniqueCandidates.map(cachedSignedUrl));
-              await runOpenAiDirectChunk(
+              await jobClock.run(chunkContext(jobDeadline, costLedger), () => runOpenAiDirectChunk(
                 uid, jobId, bucketId, i, urls, refUrls, identityCaption,
                 bodyProfile, refDescriptor, jobRef, photoMode, refEyeOpenness, refSkinTone, refHasFaceShine,
                 holdForApproval, modelId, uniqueCandidates.map((f) => f.name)
-              );
+              ));
             } catch (e) {
               // TEK CHUNK'IN HATASI BÜTÜN İŞİ GÖTÜRMESİN (2026-09-21, aynı
               // olay): burada catch yoktu, bir chunk'ın hatası (imzalı URL
@@ -6241,6 +6314,10 @@ exports.startPhotoGeneration = onCall(
               await finalizeChunk(uid, jobId, bucketId, i, { failed: true });
             }
           }));
+          console.log(
+            `MALIYET İŞ (${jobId}): harcanan=$${costLedger.spentUsd.toFixed(3)} sınır=$${costLedger.limitUsd.toFixed(2)} ` +
+            `kare=${picked.length} bütçedenAtlananAdım=${costLedger.skipped}`
+          );
         }
       } else {
         // fal.ai YOLU — submit hızlı döner, webhook sonuçlandırıyor.
@@ -6919,4 +6996,8 @@ exports._testables = {
   TEMPLATE_RETRY_LARGE_FACE_RATIO,
   generateCountFor,
   deliverPhotoPath,
+  jobClock,
+  jobTimeLeftMs,
+  JOB_TIME_LIMIT_MS,
+  JOB_FINALIZE_RESERVE_MS,
 };

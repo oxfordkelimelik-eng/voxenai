@@ -269,6 +269,64 @@ function landmarkSizeRatio(ptsO, ptsT) {
   return { ratio: median(Object.values(parts)), parts };
 }
 
+// GÖZLÜKLÜ ŞABLON ÖLÇÜSÜ (2026-10-10, iş 3cd612ba). Şablonda gözlük varken
+// kafa ölçeği tamamen atlanıyordu (790bd56b c1: göz noktaları camın altında
+// kaydı, kafa yanlış küçüldü); bu kez c1/c2/c9 "kafa küçülmeliydi" dendi.
+// Koyu camda face-api 68 noktayı birlikte oturttuğu için çene hattı da kayıyor;
+// tek başına hiçbir ölçü etiketli 13 kareyi doğru sıralamadı (gözsüz noktalar
+// c6'yı 1.31, yüz derisi alanı c1'i 1.00 — sakal saç sayılıyor —, kutu c5'i
+// 1.21 ölçtü). Dört bağımsız ölçünün MEDYANI hepsini doğru tarafa koydu:
+// c1 1.16, c2 1.05, c9 1.10 küçülür; 790bd56b c1 (küçültme öncesi) ~1.03
+// tolerans içinde kalır. Büyütme yönü doğrulanmadı → yalnız küçültme.
+//   gözsüz noktalar: burun ucu-çene, burun-ağız, ağız eni, alt çene eni
+//   yüz alanı: yüz derisi + aksesuar (gözlük "others" sınıfı; çıktıda gözlük
+//     henüz yok, orası yüz derisi — iki tarafta da aynı alan sayılır)
+//   kutu: SSD yüz kutusunun eni ve boyu
+function eyeFreeLandmarkRatio(ptsO, ptsT) {
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mean = (ps) => ({ x: ps.reduce((q, p) => q + p.x, 0) / ps.length, y: ps.reduce((q, p) => q + p.y, 0) / ps.length });
+  const m = (P) => ({
+    noseChin: d(P[33], P[8]),
+    noseMouth: d(P[33], mean(P.slice(48, 60))),
+    mouthW: d(P[48], P[54]),
+    jawLow: d(P[4], P[12]),
+  });
+  const o = m(ptsO);
+  const t = m(ptsT);
+  const parts = {};
+  for (const k of Object.keys(o)) parts[k] = t[k] > 0 ? o[k] / t[k] : NaN;
+  return { ratio: median(Object.values(parts)), parts };
+}
+
+/** Gözlüklü şablonda yüz oranı: dört ölçünün medyanı. SAF. */
+function eyewearFaceRatio({ landmark = null, faceArea = null, boxW = null, boxH = null } = {}) {
+  const parts = { landmark, faceArea, boxW, boxH };
+  return { ratio: median(Object.values(parts).filter((v) => v > 0)), parts };
+}
+
+/**
+ * Yüz derisi + aksesuar alanı oranı (çıktı / şablon), çıktının yüz kutusunun
+ * 3 katı kesitte (iki görüntü aynı kadraj uzayında). Hata/ölçüsüzlükte null.
+ */
+async function faceAreaRatio(oRgb, tRgb, W, H, box) {
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const side = Math.min(W, H, Math.round(Math.max(box.width, box.height) * 3));
+  const left = Math.max(0, Math.min(W - side, Math.round(box.x + box.width / 2 - side / 2)));
+  const top = Math.max(0, Math.min(H - side, Math.round(box.y + box.height / 2 - side / 2)));
+  const S = 512;
+  const area = async (rgb) => {
+    const raw = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
+      .extract({ left, top, width: side, height: side }).resize(S, S).raw().toBuffer();
+    const P = await classProbs(raw, S, S);
+    let n = 0;
+    for (let i = 0; i < S * S; i++) if (P[CLASSES.faceSkin][i] + P[CLASSES.others][i] > 0.5) n++;
+    return n;
+  };
+  const ao = await area(oRgb);
+  const at = await area(tRgb);
+  return ao > 0 && at > 0 ? Math.sqrt(ao / at) : null;
+}
+
 /**
  * Algılanan kafa oranı: yüz ile toplam kafa hacminin geometrik ortalaması.
  * Hacim yoksa ya da yüzden çok sapıyorsa (karanlık sahne) yalnızca yüz. SAF.
@@ -422,9 +480,14 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   // Kafaya değen el/nesne kontrolü: burun hizasından geçen kesintisiz kişi
   // koşusu (saç dahil) tek başına bir kafada yüz yüksekliğini aşmaz; el,
   // kulaklık, başka biri bitişikse aşar (c6 0.143, c8: el + kulaklık).
+  // BURUN UCUNDA BİTER (2026-10-10, 3cd612ba): ağız hizasındaki sigara (c1,
+  // dokunma 1.55) ve kalkık palto yakası (c3, 1.15) kafaya değen el sayıldı,
+  // ikisi de büyük kalan kafayı küçültmedi. Kulağa/şakağa değen el (c8)
+  // burun hizasının üstünde de görünür.
   const seedX = Math.round(sil.seedX ?? sil.cx);
+  const touchY1 = Math.round(Math.min(chin - 0.1 * faceH, sil.noseY ?? Infinity));
   let maxRun = 0;
-  for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= Math.round(chin - 0.1 * faceH); y++) {
+  for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= touchY1; y++) {
     if (y < 0 || y >= H || Mo[y * W + seedX] < 0.5) continue;
     let l = seedX;
     let r = seedX;
@@ -676,7 +739,7 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
     }
     inpaint = prepareInpaint(out, Fpre, W, H, hole, banned, wgt);
   }
-  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint };
+  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint, holeMask: holePx ? hole : null };
 }
 
 // AI DOLGUSU (2026-10-09, kullanıcı kararı: "OpenAI maskeli düzenleme").
@@ -857,18 +920,44 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
   // Kişi çizilen pikseller (genişletilip yumuşatılmış): orada doku dolgusu
   // kalır. Saç teli ve kenar yumuşaması maske eşiğinin altında kaldığı için
   // genişletme kenar halkası kadar.
+  // Yumuşak yedekte genişletme dar: geniş halka kafanın çevresini baştan
+  // sona enterpolasyona çevirip bulanık hale bırakıyordu (d44b63e8 c5 denemesi).
+  const pr = job.smoothFallback ? Math.max(2, R >> 2) : R;
   let pm = new Float32Array(N);
   for (let i = 0; i < N; i++) pm[i] = Pai[i] >= INPAINT_PERSON_PX ? 1 : 0;
-  pm = boxBlur(pm, side, side, R);
+  pm = boxBlur(pm, side, side, pr);
   for (let i = 0; i < N; i++) pm[i] = pm[i] > 0.01 ? 1 : 0;
-  pm = boxBlur(pm, side, side, Math.max(2, R >> 1));
+  pm = boxBlur(pm, side, side, Math.max(2, pr >> 1));
   // allowAi (saçak temizliği): yeni kafanın hemen dibinde modelin çizdiği saç
   // yeni kafanın kendi kenarıdır, AI pikseli kabul edilir.
   if (job.allowAi) for (let i = 0; i < N; i++) pm[i] *= 1 - job.allowAi[i];
   let kept = 0;
   for (let i = 0; i < N; i++) if (job.holeC[i]) kept += job.wC[i] * pm[i];
   const fallback = pw > 0 ? kept / pw : 0;
-  if (fallback > INPAINT_PERSON_MAX) return { buf: null, reason: "inpaint-person", shift, resid, person, fallback };
+  if (fallback > (job.personMax ?? INPAINT_PERSON_MAX)) return { buf: null, reason: "inpaint-person", shift, resid, person, fallback };
+  // smoothFallback (kafa çevresi, bkz. headSurround.js): AI'nin kişi çizdiği
+  // piksel doku yaması yerine çevresindeki kabul edilen AI ve gerçek
+  // piksellerden yumuşak enterpolasyonla kapanır — yama sınırı basamak
+  // bırakıyordu (d44b63e8 c2/c4/c5).
+  let FB = job.PC;
+  if (job.smoothFallback) {
+    const { pushPullField } = require("./sceneRestore");
+    FB = new Float32Array(N * 3);
+    const known = new Uint8Array(N);
+    // Bilinen: kişi olmayan AI pikselleri ve delik dışındaki kişi olmayan
+    // gerçek pikseller (kafanın rengi enterpolasyona girmesin).
+    for (let i = 0; i < N; i++) {
+      if (job.holeC[i]) {
+        if (pm[i] > 0.01 || Pai[i] >= INPAINT_PERSON_PX) continue;
+        for (let c = 0; c < 3; c++) FB[i * 3 + c] = ai[i * 3 + c] + corr[c][i];
+      } else {
+        if (!job.ringOk[i]) continue;
+        for (let c = 0; c < 3; c++) FB[i * 3 + c] = job.rgb[i * 3 + c];
+      }
+      known[i] = 1;
+    }
+    pushPullField(FB, side, side, 3, known);
+  }
   const res = job.out ? Buffer.from(job.out) : await sharp(baseJpeg).removeAlpha().raw().toBuffer();
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
@@ -876,8 +965,9 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
       if (!job.holeC[i]) continue;
       const g = (y + top) * W + (x + left);
       const wAi = job.wC[i] * (1 - pm[i]);
+      const wFb = job.wC[i] * pm[i];
       for (let c = 0; c < 3; c++) {
-        const v = res[g * 3 + c] + wAi * (ai[i * 3 + c] + corr[c][i] - job.PC[i * 3 + c]);
+        const v = res[g * 3 + c] + wAi * (ai[i * 3 + c] + corr[c][i] - job.PC[i * 3 + c]) + wFb * (FB[i * 3 + c] - job.PC[i * 3 + c]);
         res[g * 3 + c] = Math.max(0, Math.min(255, Math.round(v)));
       }
     }
@@ -899,7 +989,7 @@ async function rawRgb(buf, W = null, H = null) {
  *
  * @returns {{buf: Buffer|null, applied: boolean, reason: string|null, ...}}
  */
-async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false } = {}) {
+async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, templateEyewear = false } = {}) {
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
@@ -920,21 +1010,38 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false }
     if (a || b) uni++;
   }
   const bodyIou = uni ? inter / uni : 0;
-  const lr = landmarkSizeRatio(lo.pts, lt.pts);
+  let lr = landmarkSizeRatio(lo.pts, lt.pts);
   const centre = (P) => ({ x: P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17, y: P.slice(0, 17).reduce((q, p) => q + p.y, 0) / 17 });
   const co = centre(lo.pts);
   const ct = centre(lt.pts);
   const tplFaceW = Math.hypot(lt.pts[0].x - lt.pts[16].x, lt.pts[0].y - lt.pts[16].y);
   const faceShift = tplFaceW > 0 ? Math.hypot(co.x - ct.x, co.y - ct.y) / tplFaceW : Infinity;
   let volRatio = null;
-  try {
-    volRatio = await headVolumeRatio(o.data, t.data, o.W, o.H, lo.box, lt.box);
-  } catch (e) {
-    console.error("Kafa hacmi ölçülemedi (yalnızca yüz ölçüsü):", e.message || e);
+  if (templateEyewear) {
+    // Gözlüklü şablon: göz/kaş noktaları yok, hacim yok (bkz. eyewearFaceRatio).
+    let faceArea = null;
+    try {
+      faceArea = await faceAreaRatio(o.data, t.data, o.W, o.H, lo.box);
+    } catch (e) {
+      console.error("Yüz alanı ölçülemedi (gözlüklü şablon):", e.message || e);
+    }
+    lr = eyewearFaceRatio({
+      landmark: eyeFreeLandmarkRatio(lo.pts, lt.pts).ratio,
+      faceArea,
+      boxW: lt.box.width > 0 ? lo.box.width / lt.box.width : null,
+      boxH: lt.box.height > 0 ? lo.box.height / lt.box.height : null,
+    });
+  } else {
+    try {
+      volRatio = await headVolumeRatio(o.data, t.data, o.W, o.H, lo.box, lt.box);
+    } catch (e) {
+      console.error("Kafa hacmi ölçülemedi (yalnızca yüz ölçüsü):", e.message || e);
+    }
   }
   const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio });
-  const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, bodyIou, faceShift };
+  const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, bodyIou, faceShift, eyewear: templateEyewear };
   if (!plan.apply) return { buf: null, applied: false, reason: plan.reason, ...info };
+  if (templateEyewear && plan.s > 1) return { buf: null, applied: false, reason: "eyewear-no-enlarge", ...info };
 
   // Dönüşüm geometrisi: silüetten kafa tepesi/genişliği; çene ve merkez
   // yüz noktalarından (kutu çeneyi sakalın üstünde bitiriyordu).
@@ -943,7 +1050,7 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false }
   const P = lo.pts;
   const chin = Math.round(P[8].y);
   const cx = Math.round(P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17);
-  const sil = { ...base, cx, seedX: Math.round(P[30].x), jaw: P.slice(0, 17), chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
+  const sil = { ...base, cx, seedX: Math.round(P[30].x), noseY: P[33].y, jaw: P.slice(0, 17), chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
   const faceH = Math.max(lo.box.height, chin - lo.box.y);
   const r = scaleHeadPatch(o.data, t.data, Mo, Mt, o.W, o.H, sil, faceH, plan.s, { deferInpaint });
   if (r.skipped) return { buf: null, applied: false, reason: r.reason || "head-touched", touch: r.touch, sEff: r.sEff ?? null, ...info };
@@ -961,9 +1068,10 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false }
     // bkz. falPhotos POST_LAYER_LOCK); finish JPEG'i yeniden açar.
     job.out = null;
     const { image, mask } = await encodeInpaint(job);
-    inpaint = { image, mask, rect: { left: job.left, top: job.top, side: job.side }, finish: (aiBuf) => finishInpaint(job, aiBuf, buf) };
+    // job/base: worker iş parçacığına taşınabilir hâl (bkz. postTasks.js).
+    inpaint = { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: buf, finish: (aiBuf) => finishInpaint(job, aiBuf, buf) };
   }
-  return { buf, applied: true, reason: null, inpaint, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
+  return { buf, applied: true, reason: null, inpaint, holeMask: r.holeMask, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
 // KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, 790bd56b c0, kullanıcı: "base fotodan
@@ -981,7 +1089,9 @@ const FRINGE_RING_FACE = 0.25; // dolu kafanın çevresindeki halka, yüz geniş
 const FRINGE_ALLOW_FACE = 0.06; // kafanın dibinde AI saçının kabul edildiği bant
 const FRINGE_FADE_FACE = 0.2; // çene hizasına yaklaşırken karışım bandı
 const FRINGE_MIN_HOLE_FACE2 = 0.02; // bundan küçük delik (yüz alanına oranla) boyanmaz
-
+// Arka plan geri yüklendiyse bu katman çalışmaz; kafanın çevresini
+// headSurround.js temizler (2026-10-11). Burası geri yükleme yapılamayan
+// kareler için.
 async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
@@ -1012,10 +1122,56 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   const w = bx1 - bx0 + 1;
   const h = by1 - by0 + 1;
   if (w < 16 || h < 16) return { applied: false, reason: "tiny" };
+  const ringR = Math.max(4, Math.round(FRINGE_RING_FACE * faceW));
+  // YALNIZ KAFA (2026-10-10, 3cd612ba c8): kişi maskesi kafayı elden/koldan
+  // ayırmıyor — delik şablonun kolunu, elini ve omzunu da kapsadı (c8 elin
+  // yanında hayalet, tavandaki ışık şeridi kafaya uzatıldı; c6 d2 omuz
+  // hizasında yatay bant). Şablon tarafından yalnız kafa sınıfları (saç, yüz
+  // derisi, aksesuar: gözlük/kulaklık) alınır; saçak ve halka yeni kafanın
+  // yakınıyla sınırlanır.
+  // YARI SAYDAM HAYALET (aynı iş, c9 d2): şablon saçının gri silüeti kişi
+  // maskesinde 0.4-0.95 (dolu gövde sayılıp korunuyordu, üstü düz kesik blok
+  // kaldı) ama çok sınıflı model 8136 pikselin hepsine "arka plan" dedi;
+  // gerçek saçta saç 1.0. Kaşların üstünde kişi maskesinde olup çok sınıflı
+  // modelde arka plan olan piksel dolu gövdeye katılmaz (kalkık koldaki
+  // kıyafet "clothes" — dokunulmaz). Sınıflandırma başarısızsa eski davranış.
+  const browY = Math.min(...P.slice(17, 27).map((p) => p.y));
+  let headT = null;
+  let nearHead = null;
+  let ghost = null;
+  let ghostPx = 0;
+  try {
+    const { classProbs, CLASSES } = require("./skinSeg");
+    const hc = Math.max(16, Math.min(h, Math.round(chin) - by0 + 1));
+    const crop = async (rgb) => sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
+      .extract({ left: bx0, top: by0, width: w, height: hc }).raw().toBuffer();
+    const headOf = (P) => {
+      const m = new Float32Array(w * h);
+      for (let i = 0; i < w * hc; i++) m[i] = P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] + P[CLASSES.others][i] >= 0.5 ? 1 : 0;
+      return m;
+    };
+    const Po = await classProbs(await crop(o.data), w, hc);
+    const headO = headOf(Po);
+    ghost = new Uint8Array(w * h);
+    for (let y = 0; y < hc && y + by0 < browY; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (Mo[(y + by0) * W + x + bx0] < FRINGE_PERSON_MIN) continue;
+        if (headO[i] || Po[CLASSES.background][i] < 0.5) continue;
+        ghost[i] = 1;
+        ghostPx++;
+      }
+    }
+    const Pt = await classProbs(await crop(t.data), w, hc);
+    headT = headOf(Pt);
+    nearHead = boxBlur(headO, w, h, ringR);
+  } catch (e) {
+    console.error("Kafa saçağı: sınıflandırma başarısız (tüm kişi maskesi kullanılıyor):", e.message || e);
+  }
   // Yerel kesitte dolu gövde: açma (aşındır + genişlet).
   const r = Math.max(2, Math.round(FRINGE_OPEN_FACE * faceW));
   const A = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) A[y * w + x] = Mo[(y + by0) * W + x + bx0] >= 0.5 ? 1 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) A[y * w + x] = Mo[(y + by0) * W + x + bx0] >= 0.5 && !(ghost && ghost[y * w + x]) ? 1 : 0;
   let solid = boxBlur(A, w, h, r);
   for (let i = 0; i < solid.length; i++) solid[i] = solid[i] >= 0.999 ? 1 : 0;
   solid = boxBlur(solid, w, h, r);
@@ -1025,7 +1181,7 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   // En soluk teller segmentasyonda kişi bile sayılmıyor (790bd56b c0 ilk
   // deneme: dıştaki teller delik dışında kaldı) — dolu kafanın çevresindeki
   // sabit halka da deliğe girer.
-  let ring = boxBlur(solid, w, h, Math.max(4, Math.round(FRINGE_RING_FACE * faceW)));
+  let ring = boxBlur(solid, w, h, ringR);
   const hole = new Uint8Array(W * H);
   const banned = new Uint8Array(W * H);
   let holePx = 0;
@@ -1035,9 +1191,10 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
       const i = y * w + x;
       const g = (y + by0) * W + x + bx0;
       if (guard[i] > 0.001) { banned[g] = 1; continue; }
-      const fringe = Mo[g] >= FRINGE_PERSON_MIN;
-      const tplOnly = Mt[g] >= 0.5;
-      if (fringe || tplOnly || ring[i] > 0.001) {
+      const near = !nearHead || nearHead[i] > 0.001;
+      const fringe = near && Mo[g] >= FRINGE_PERSON_MIN;
+      const tplOnly = headT ? headT[i] > 0 : Mt[g] >= 0.5;
+      if (fringe || tplOnly || (near && ring[i] > 0.001)) {
         hole[g] = 1;
         holePx++;
         if (fringe) fringePx++;
@@ -1048,7 +1205,10 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   for (let g = 0; g < W * H; g++) if (!hole[g] && (Mo[g] >= FRINGE_PERSON_MIN || Mt[g] >= 0.5)) banned[g] = 1;
   guard = null;
   ring = null;
-  if (holePx < FRINGE_MIN_HOLE_FACE2 * faceW * faceW) return { applied: false, reason: "no-fringe", holePx, fringePx, bodyIou };
+  nearHead = null;
+  ghost = null;
+  headT = null;
+  if (holePx < FRINGE_MIN_HOLE_FACE2 * faceW * faceW) return { applied: false, reason: "no-fringe", holePx, fringePx, ghostPx, bodyIou };
   // Doku dolgusu: AI'nin kişi çizdiği piksellerde yedek, başarısızlıkta kullanılmaz.
   const F = Buffer.from(o.data);
   patchFill(F, W, H, hole, banned, { searchR: Math.max(40, Math.round(0.6 * faceW)) });
@@ -1082,8 +1242,8 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   job.out = null;
   const { image, mask } = await encodeInpaint(job);
   return {
-    applied: true, holePx, fringePx, bodyIou, faceW,
-    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, finish: (aiBuf) => finishInpaint(job, aiBuf, filledJpeg) },
+    applied: true, holePx, fringePx, ghostPx, bodyIou, faceW,
+    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: filledJpeg, finish: (aiBuf) => finishInpaint(job, aiBuf, filledJpeg) },
   };
 }
 
@@ -1094,6 +1254,8 @@ module.exports = {
   measureSilhouette,
   approxSilFromFaceBox,
   landmarkSizeRatio,
+  eyeFreeLandmarkRatio,
+  eyewearFaceRatio,
   perceivedHeadRatio,
   planLandmarkScale,
   APPLY_MIN_DELTA,
@@ -1105,4 +1267,7 @@ module.exports = {
   _scaleHeadPatch: scaleHeadPatch,
   _encodeInpaint: encodeInpaint,
   _finishInpaint: finishInpaint,
+  _prepareInpaint: prepareInpaint,
+  _rawRgb: rawRgb,
+  _boxBlur: boxBlur,
 };

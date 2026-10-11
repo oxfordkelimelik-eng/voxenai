@@ -144,6 +144,7 @@ async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_
     const json = await resp.json();
     if (json.usage) {
       const u = json.usage;
+      require("./jobContext").recordUsage(model, u);
       console.log(`MALIYET KAFA KALINTI: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} model=${model}`);
     }
     const raw = (json?.choices?.[0]?.message?.content || "").trim();
@@ -200,6 +201,7 @@ async function judgeEyewear(templateBuf, faceBox, apiKey) {
     });
     if (!resp.ok) return { ok: false, reason: `http-${resp.status}` };
     const json = await resp.json();
+    if (json.usage) require("./jobContext").recordUsage(HEAD_GHOST_MODEL, json.usage);
     return parseEyewearReply((json?.choices?.[0]?.message?.content || "").trim());
   } catch (e) {
     console.error("Gözlük yargısı hata verdi (gözlük yok sayılıyor):", e.message || e);

@@ -220,6 +220,7 @@ async function askCells(markedBuf, apiKey) {
   const json = await resp.json();
   if (json.usage) {
     const u = json.usage;
+    require("./jobContext").recordUsage(LIMB_CELL_MODEL, u);
     console.log(
       `MALIYET UZUV KONUMU: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
       `toplam=${u.total_tokens ?? "?"} model=${LIMB_CELL_MODEL}`
@@ -495,6 +496,7 @@ async function askLimbCrop(cropBuf, apiKey, temperature = 0) {
   const json = await resp.json();
   if (json.usage) {
     const u = json.usage;
+    require("./jobContext").recordUsage(LIMB_CELL_MODEL, u);
     console.log(
       `MALIYET UZUV KIRPMA: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
       `toplam=${u.total_tokens ?? "?"} model=${LIMB_CELL_MODEL}`

@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { measureSilhouette, approxSilFromFaceBox, landmarkSizeRatio, planLandmarkScale, MIN_SCALE, MAX_SCALE, BODY_ALIGNED_IOU, FACE_ALIGNED_SHIFT, perceivedHeadRatio, _scaleHeadPatch, _encodeInpaint, _finishInpaint } = require("../headScale");
+const { measureSilhouette, approxSilFromFaceBox, landmarkSizeRatio, eyeFreeLandmarkRatio, eyewearFaceRatio, planLandmarkScale, MIN_SCALE, MAX_SCALE, BODY_ALIGNED_IOU, FACE_ALIGNED_SHIFT, perceivedHeadRatio, _scaleHeadPatch, _encodeInpaint, _finishInpaint } = require("../headScale");
 const sharp = require("sharp");
 const { dilate } = require("../sceneRestore");
 
@@ -267,6 +267,39 @@ test("scaleHeadPatch: kafaya el/nesne bitişikse hiç dokunmaz (c6 eğilmesi)", 
   const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30);
   assert.equal(r.skipped, true);
   assert.equal(r.moved, 0);
+});
+
+// 3cd612ba c1/c3: ağızdaki sigara ve kalkık yaka el sayılıp küçültmeyi durdurdu.
+test("scaleHeadPatch: burun ucunun altındaki nesne (sigara, yaka) dokunma sayılmaz", () => {
+  const sc = headScene(30, 40);
+  const t = sc.mk(25, 34);
+  for (let y = 92; y < 100; y++) for (let x = 110; x < 150; x++) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(40, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80, noseY: 88 };
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30);
+  assert.notEqual(r.skipped, true);
+  assert.ok(r.moved > 0);
+});
+
+// Gözlüklü şablon (3cd612ba): göz noktaları camın altında kayar, ölçü onları kullanmaz.
+function fakeFaceMouth(k = 1, cx = 200, cy = 200) {
+  const P = fakeFace(k, cx, cy);
+  for (let i = 48; i <= 59; i++) P[i] = { x: cx + k * (-20 + ((i - 48) % 7) * (40 / 6)), y: cy + k * (i < 55 ? 48 : 52) };
+  return P;
+}
+test("gözlüklü şablon: gözsüz noktalar şablonun kaymış gözlerinden etkilenmez", () => {
+  const t = fakeFaceMouth(1);
+  for (let i = 17; i <= 27; i++) t[i] = { x: t[i].x, y: t[i].y + 12 };
+  for (let i = 36; i <= 47; i++) t[i] = { x: t[i].x, y: t[i].y + 12 };
+  const r = eyeFreeLandmarkRatio(fakeFaceMouth(1.1), t);
+  assert.ok(Math.abs(r.ratio - 1.1) < 1e-6, `ratio=${r.ratio}`);
+  assert.ok(Math.abs(landmarkSizeRatio(fakeFaceMouth(1.1), t).ratio - 1.1) > 0.05, "eski ölçü kayardı");
+});
+
+test("gözlüklü şablon: dört ölçünün medyanı tek sapan ölçüyü yok sayar, eksik ölçü atlanır", () => {
+  // 3cd612ba c6: noktalar 1.29 dedi, diğerleri ~1.17
+  assert.ok(Math.abs(eyewearFaceRatio({ landmark: 1.29, faceArea: 1.0, boxW: 1.14, boxH: 1.17 }).ratio - 1.155) < 1e-9);
+  assert.equal(eyewearFaceRatio({ landmark: 1.1, faceArea: null, boxW: 1.0, boxH: 1.2 }).ratio, 1.1);
+  assert.equal(eyewearFaceRatio({}).ratio, null);
 });
 
 test("plan: maske gövdeyi göremese de yüz yerindeyse düzeltilir (karanlık sahne)", () => {

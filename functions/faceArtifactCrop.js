@@ -191,6 +191,7 @@ async function judgeFaceArtifact(buf, faceBox, apiKey) {
     const json = await resp.json();
     if (json.usage) {
       const u = json.usage;
+      require("./jobContext").recordUsage(FACE_CROP_MODEL, u);
       console.log(
         `MALIYET YÜZ ARTEFAKT: girdi=${u.prompt_tokens ?? "?"} cikti=${u.completion_tokens ?? "?"} ` +
         `toplam=${u.total_tokens ?? "?"} model=${FACE_CROP_MODEL}`

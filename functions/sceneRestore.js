@@ -34,8 +34,9 @@ const MASK_THRESHOLD = 0.25;
 // kulaklık silüeti): kişi maskesi saç tellerini, kulaklığı, gözlüğü düşük
 // olasılıkla görür; 0.25 eşiğinde bunlar "arka plan" sayılıp şablondan geri
 // konuyor ve şablondaki kişinin parçaları yarı saydam sızıyordu. Şablon
-// tarafı çok daha kapsayıcı eşikle alınır, ayrıca şablonun kafası
-// çevresindeki elips (saç, kulaklık, şapka) hiçbir zaman şablondan gelmez.
+// tarafı çok daha kapsayıcı eşikle alınır, ayrıca şablonun kafası (saç,
+// kulaklık, şapka — genişletilmiş silüet, bkz. headSurround.templateHeadMask;
+// bulunamazsa elips) hiçbir zaman şablondan gelmez.
 const TEMPLATE_MASK_THRESHOLD = 0.08;
 const TEMPLATE_HEAD_RX = 1.3; // yüz kutusu genişliği cinsinden yarı eksen
 const TEMPLATE_HEAD_RY = 1.5; // yüz kutusu yüksekliği cinsinden yarı eksen
@@ -80,7 +81,7 @@ function dilate(bin, W, H, r) {
  * Birleşik kişi maskesinden alfa üretir: kişinin kendisi 1, genişletilmiş
  * bant yumuşakça 0'a iner. SAF değil (sharp blur).
  */
-async function personAlpha(Mo, Mt, W, H, tplHead = null) {
+async function personAlpha(Mo, Mt, W, H, tplHead = null, tplHeadMask = null) {
   let inter = 0;
   let uni = 0;
   const union = new Uint8Array(W * H);
@@ -91,7 +92,9 @@ async function personAlpha(Mo, Mt, W, H, tplHead = null) {
     if (a || b) uni++;
     if (a || Mt[i] >= TEMPLATE_MASK_THRESHOLD) union[i] = 1;
   }
-  if (tplHead) {
+  if (tplHeadMask) {
+    for (let i = 0; i < union.length; i++) if (tplHeadMask[i]) union[i] = 1;
+  } else if (tplHead) {
     const { cx, cy, rx, ry } = tplHead;
     const y0 = Math.max(0, Math.floor(cy - ry)), y1 = Math.min(H - 1, Math.ceil(cy + ry));
     const x0 = Math.max(0, Math.floor(cx - rx)), x1 = Math.min(W - 1, Math.ceil(cx + rx));
@@ -242,6 +245,7 @@ async function restoreTemplateBackground(outputBuf, templateBuf, { head = null }
   const t = await sharp(templateBuf).rotate().removeAlpha().resize(W, H, { fit: "fill" }).raw().toBuffer();
   const [Mo, Mt] = await Promise.all([personMask(o.data, W, H), personMask(t, W, H)]);
   let tplHead = null;
+  let tplHeadMask = null;
   try {
     const { detectMainFace } = require("./faceQuality");
     const tJpeg = await sharp(t, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 92 }).toBuffer();
@@ -251,11 +255,17 @@ async function restoreTemplateBackground(outputBuf, templateBuf, { head = null }
         cx: f.box.x + f.box.width / 2, cy: f.box.y + f.box.height * 0.35,
         rx: TEMPLATE_HEAD_RX * f.box.width, ry: TEMPLATE_HEAD_RY * f.box.height,
       };
+      // ŞABLON KAFASI SİLÜETİ (2026-10-11, d44b63e8): elips kafanın çevresinde
+      // gerçek arka planı da dışarıda bırakıyordu; orada modelin farklı tonlu,
+      // kayık arka planı kaldı (c3/c6 hale). Artık yalnız şablon kafasının
+      // kendisi (genişletilmiş) — bkz. headSurround.js. Silüet çıkarılamazsa elips.
+      const { templateHeadMask } = require("./headSurround");
+      tplHeadMask = await templateHeadMask(t, Mt, W, H, f.box);
     }
   } catch (e) {
-    console.error("Arka plan: şablon yüzü bulunamadı (kafa elipsi atlanıyor):", e.message || e);
+    console.error("Arka plan: şablon kafası bulunamadı (elips/atlanıyor):", e.message || e);
   }
-  const { alpha, iou, unionFrac } = await personAlpha(Mo, Mt, W, H, tplHead);
+  const { alpha, iou, unionFrac } = await personAlpha(Mo, Mt, W, H, tplHead, tplHeadMask);
   if (iou < MIN_PERSON_IOU) return { buf: null, applied: false, reason: "reframed", iou };
 
   // KAFA BANDINDA YUMUŞAK GEÇİŞ (2026-10-08, bb2cc441 c4/c2/c5): kafa
@@ -321,7 +331,7 @@ async function restoreTemplateBackground(outputBuf, templateBuf, { head = null }
   }
   const buf = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   return {
-    buf, applied: true, reason: null, iou, unionFrac,
+    buf, applied: true, reason: null, iou, unionFrac, tplHeadMask, W, H,
     bgDiff: diffN ? diffSum / diffN : 0, restoredPx: restored, harmonizedPx,
   };
 }
