@@ -120,6 +120,8 @@ class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
               subtitle: DatingConfig.supportEmail,
               onTap: () => _info(context, 'Destek',
                   'Her türlü soru için: ${DatingConfig.supportEmail}')),
+          _tile(Icons.logout_rounded, 'Çıkış Yap',
+              onTap: () => _confirmSignOut(context)),
           _tile(Icons.delete_forever_outlined, 'Hesabımı ve Verilerimi Sil',
               danger: true,
               onTap: () => _confirmDelete(context, ref)),
@@ -237,6 +239,54 @@ class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
                   color: AppColors.textSecondary,
                   height: 1.5)),
         ),
+      ),
+    );
+  }
+
+  /// Çıkış: veriler silinmez; tekrar girişte bakiye ve fotoğraflar geri gelir.
+  void _confirmSignOut(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: AppColors.surfaceElevated,
+        title: const Text('Çıkış yapılsın mı?',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: const Text(
+            'Hesabın ve verilerin silinmez. Aynı hesapla tekrar giriş '
+            'yaptığında paket bakiyen ve fotoğrafların geri gelir.',
+            style: TextStyle(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: const Text('Vazgeç',
+                  style: TextStyle(color: AppColors.textSecondary))),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(dCtx);
+              try {
+                await ref.read(entitlementProvider.notifier).signOut();
+                if (!context.mounted) return;
+                // Onboarding'e değil: oradaki test baştan sorulurdu. Girişsiz
+                // vitrin + üstünde giriş ekranı (geri = vitrin; giriş = hub).
+                final router = GoRouter.of(context);
+                router.go(DatingRoutes.modules);
+                // go yeni yığını bir sonraki karede kurar; push hemen
+                // çağrılırsa eski (ayarlar) yığınının üstüne binebilir.
+                WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => router.push('${DatingRoutes.login}?restore=1'));
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content:
+                          Text('Çıkış yapılamadı. Lütfen tekrar dene.')));
+                }
+              }
+            },
+            child: const Text('Çıkış Yap',
+                style: TextStyle(
+                    color: AppColors.gold, fontWeight: FontWeight.w800)),
+          ),
+        ],
       ),
     );
   }

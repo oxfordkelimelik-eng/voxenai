@@ -299,6 +299,20 @@ class EntitlementNotifier extends StateNotifier<Entitlement> {
     await _onAuthChanged(ref.read(authServiceProvider).currentUser);
   }
 
+  /// Çıkış yap: hesap ve sunucudaki veriler KALIR (tekrar girişte bakiye ve
+  /// fotoğraflar geri gelir). Yalnızca oturum kapanır ve bu cihazdaki giriş/
+  /// bakiye önbelleği temizlenir; onboarding cevapları ve rıza korunur ki
+  /// tekrar girişte baştan sorulmasın.
+  Future<void> signOut() async {
+    await ref.read(authServiceProvider).signOut();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(DatingKeys.signedInProvider);
+    await prefs.remove(DatingKeys.packPhotoBalance);
+    await prefs.remove(DatingKeys.packAnalysisBalance);
+    state = Entitlement(consentGiven: state.consentGiven);
+    ref.read(packBalanceProvider.notifier).reset();
+  }
+
   /// Hesabı ve verileri sil (KVKK/GDPR — Bölüm 9). Gerçek silme işlemi
   /// Cloud Function üzerinden Admin SDK ile yapılır (client tarafı
   /// `user.delete()` "requires-recent-login" ile başarısız olabileceği
@@ -393,23 +407,61 @@ class PackBalance {
   final int analysis;
   final bool freePhotoUsed; // AI foto ücretsiz denemesi kullanıldı mı
   final bool freeAnalysisUsed; // foto analizi ücretsiz denemesi kullanıldı mı
+  /// Satın alınan paketlerin defteri (wallet.photoPacks: boy -> adet).
+  /// Bkz. functions/photoPacks.js — packCounts aynı hesabı yapar.
+  final Map<int, int> photoPacks;
   const PackBalance({
     this.photo = 0,
     this.analysis = 0,
     this.freePhotoUsed = false,
     this.freeAnalysisUsed = false,
+    this.photoPacks = const {},
   });
   PackBalance copyWith(
           {int? photo,
           int? analysis,
           bool? freePhotoUsed,
-          bool? freeAnalysisUsed}) =>
+          bool? freeAnalysisUsed,
+          Map<int, int>? photoPacks}) =>
       PackBalance(
         photo: photo ?? this.photo,
         analysis: analysis ?? this.analysis,
         freePhotoUsed: freePhotoUsed ?? this.freePhotoUsed,
         freeAnalysisUsed: freeAnalysisUsed ?? this.freeAnalysisUsed,
+        photoPacks: photoPacks ?? this.photoPacks,
       );
+
+  /// ELİNDEKİ PAKETLER (2026-10-12, kullanıcı: "elinde ne varsa onu
+  /// soracak"). Defter bakiyeyi aşamaz (aşarsa önce küçük paketler düşer);
+  /// deftere girmeyen serbest haklar (eksik teslim iadesi, defterden önce
+  /// alınmış paketler) büyükten küçüğe paket boylarına bölünür. Sunucudaki
+  /// functions/photoPacks.js effectivePacks ile EL İLE senkron.
+  Map<int, int> get packCounts {
+    const sizes = DatingConfig.photoPackSizes; // küçükten büyüğe
+    final packs = {for (final s in sizes) s: (photoPacks[s] ?? 0).clamp(0, 1 << 30)};
+    int total() => sizes.fold(0, (t, s) => t + s * packs[s]!);
+    for (final s in sizes) {
+      while (packs[s]! > 0 && total() > photo) {
+        packs[s] = packs[s]! - 1;
+      }
+    }
+    var loose = photo - total();
+    for (final s in sizes.reversed) {
+      if (loose <= 0) break;
+      final n = loose ~/ s;
+      packs[s] = packs[s]! + n;
+      loose -= n * s;
+    }
+    return packs;
+  }
+
+  /// Seçilebilecek paket boyları (elinde en az bir tane olan), büyükten küçüğe.
+  List<int> get packOptions {
+    final counts = packCounts;
+    return DatingConfig.photoPackSizes.reversed
+        .where((s) => (counts[s] ?? 0) > 0)
+        .toList();
+  }
 
   /// Verilen sayıda FOTOĞRAF üretimini karşılayabilir mi? Sunucudaki
   /// startPhotoGeneration mantığıyla aynı — kredi harcamadan ÖNCE
@@ -475,11 +527,17 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
         .listen((snap) {
       final data = snap.data();
       if (data == null) return;
+      final rawPacks = data['photoPacks'];
       state = PackBalance(
         photo: (data['photoBalance'] as num?)?.toInt() ?? 0,
         analysis: (data['analysisBalance'] as num?)?.toInt() ?? 0,
         freePhotoUsed: data['freePhotoUsed'] == true,
         freeAnalysisUsed: data['freeAnalysisUsed'] == true,
+        photoPacks: {
+          if (rawPacks is Map)
+            for (final s in DatingConfig.photoPackSizes)
+              s: (rawPacks['$s'] as num?)?.toInt() ?? 0,
+        },
       );
       _persist();
       _syncReminders();

@@ -131,12 +131,12 @@ async function headScale({ buf, tpl, templateEyewear = false }) {
   const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} ${parçalar} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}${hs.planS != null ? ` plan=${n(hs.planS)} açıkŞablon=${n(hs.exposed)}` : ""}${hs.sEff != null ? ` izinliS=${n(hs.sEff)}` : ""}`;
   const applied = !!(hs.applied && hs.buf);
   const delik = applied ? `taşınanPx=${hs.movedPx} delikPx=${hs.holePx ?? "null"} delikDerinlik=${hs.holeDepth != null ? Math.round(hs.holeDepth) : "null"}` : "";
-  return { applied, reason: hs.reason, buf: applied ? hs.buf : null, holeMask: applied ? hs.holeMask || null : null, inpaint: applied ? plainInpaint(hs.inpaint) : null, ölçü, delik };
+  return { applied, reason: hs.reason, buf: applied ? hs.buf : null, holeMask: applied ? hs.holeMask || null : null, headMask: applied ? hs.headMask || null : null, inpaint: applied ? plainInpaint(hs.inpaint) : null, ölçü, delik };
 }
 
-async function surroundPrep({ buf, extraHole = null }) {
+async function surroundPrep({ buf, extraHole = null, newHead = null }) {
   const { prepareHeadSurroundFill } = require("./headSurround");
-  const sf = await prepareHeadSurroundFill(toBuf(buf), { extraHole });
+  const sf = await prepareHeadSurroundFill(toBuf(buf), { extraHole, newHead });
   const { inpaint, ...rest } = sf;
   return { ...rest, inpaint: plainInpaint(inpaint) };
 }

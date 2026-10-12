@@ -179,6 +179,27 @@ test("scaleHeadPatch: şablon kafası çıktı kadar büyükse de küçültür, 
   assert.ok(r.holePx > 0);
 });
 
+// e0eb8dd5 c2/c8 (2026-10-12): kafanın yanındaki koyu nesne (şemsiye) ya da
+// arkadaki kişi kişi maskesinde görünür; kafaya bağlı değilse küçültülmez,
+// deliğe girmez, yerinde kalır.
+test("scaleHeadPatch: kafaya bağlı olmayan nesne küçültülmez, silinmez", () => {
+  const sc = headScene(30, 40);
+  const t = sc.mk(25, 34, 75, RED);
+  // kafa ortasının üstünde, kafadan tel payından (8 px) uzak dikey direk
+  for (let y = 20; y < 75; y++) for (let x = 122; x < 130; x++) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(10, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30, { deferInpaint: true });
+  assert.notEqual(r.skipped, true);
+  for (let y = 20; y < 75; y++) {
+    for (let x = 122; x < 130; x++) {
+      assert.ok(r.buf[(y * sc.W + x) * 3] <= 12, `direk değişti (${x},${y})`);
+      assert.equal(r.holeMask ? r.holeMask[y * sc.W + x] : 0, 0, `direk deliğe girdi (${x},${y})`);
+    }
+  }
+  // yeni kafa yerel dolgu modeline bağlam olarak verilmez
+  assert.ok(r.inpaint && r.inpaint.headC && r.inpaint.headC.some((v) => v));
+});
+
 // AI dolgusu (2026-10-09): yalnızca delik pikselleri değişir; model arka
 // planı değiştirdiyse sonuç kullanılmaz.
 async function inpaintJob() {

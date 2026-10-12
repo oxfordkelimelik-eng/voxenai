@@ -2,6 +2,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { google } = require("googleapis");
 const { admin, db, bucket } = require("./_shared");
+const { packSizeOfCredit, addPack } = require("./photoPacks");
 
 const GOOGLE_SERVICE_ACCOUNT_JSON = defineSecret("GOOGLE_SERVICE_ACCOUNT_JSON");
 const APPLE_ISSUER_ID = defineSecret("APPLE_ISSUER_ID");
@@ -282,6 +283,11 @@ exports.verifyPurchase = onCall(
       for (const [field, amount] of Object.entries(credit)) {
         updated[field] = (current[field] || 0) + amount;
       }
+      // PAKET DEFTERİ (2026-10-12): hangi paketin alındığı ayrıca sayılır —
+      // birden fazla paketi olan kullanıcıya üretimde hangisini kullanacağı
+      // sorulur (bkz. photoPacks.js).
+      const packSize = packSizeOfCredit(credit);
+      if (packSize) updated.photoPacks = addPack(current.photoPacks, packSize);
       tx.set(walletRef, updated, { merge: true });
       tx.set(processedRef, {
         productId,

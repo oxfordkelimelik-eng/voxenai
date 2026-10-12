@@ -209,12 +209,116 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   //
   // Bakiye hiçbir paketi karşılamıyorsa en küçük boy döner; bu durumda
   // _generate zaten paywall'a yönlendirir (canAffordPhotos false).
+  //
+  // ELİNDEKİ PAKETLER (2026-10-12, kullanıcı: "elindeki 25 ve 5 ise 25 mi 5
+  // mi diye sormalı, 10 devreye girmemeli"): cüzdan satın alınan paketleri
+  // ayrıca sayıyor (wallet.photoPacks, bkz. functions/photoPacks.js).
+  // Elinde farklı boyda paket varsa (25 + 5 -> 25 / 5; 3x10 + 5 -> 10 / 5)
+  // kullanıcıya hangisini kullanacağı sorulur; seçtiği boy
+  // (_chosenPhotoCount) üretilir, sunucu o paketi ve o kadar hakkı düşer.
+  // Tek boy paketi olana soru gelmez.
   int get _photoCount {
-    final balance = ref.read(packBalanceProvider).photo;
-    final affordable =
-        DatingConfig.photoPackSizes.where((n) => n <= balance).toList();
-    if (affordable.isEmpty) return DatingConfig.photoPackSizes.first;
-    return affordable.reduce((a, b) => a > b ? a : b);
+    final options = _packOptions;
+    if (options.isEmpty) return DatingConfig.photoPackSizes.first;
+    final chosen = _chosenPhotoCount;
+    if (chosen != null && options.contains(chosen)) return chosen;
+    return options.first;
+  }
+
+  /// Elindeki paket boyları, büyükten küçüğe.
+  List<int> get _packOptions => ref.read(packBalanceProvider).packOptions;
+
+  /// Elinde farklı boyda paket var mı?
+  bool get _needsPackChoice => _packOptions.length >= 2;
+
+  /// Kullanıcının bu üretim için seçtiği paket boyu (yalnız _needsPackChoice).
+  int? _chosenPhotoCount;
+
+  /// Paket seçimi gerekiyorsa ve geçerli bir seçim yoksa sorar. false:
+  /// kullanıcı vazgeçti.
+  Future<bool> _ensurePackChosen({bool force = false}) async {
+    if (!_needsPackChoice) return true;
+    final chosen = _chosenPhotoCount;
+    if (!force && chosen != null && _packOptions.contains(chosen)) {
+      return true;
+    }
+    final n = await _askPackSize();
+    if (n == null || !mounted) return false;
+    setState(() => _chosenPhotoCount = n);
+    return true;
+  }
+
+  Future<int?> _askPackSize() {
+    final counts = ref.read(packBalanceProvider).packCounts;
+    final sizes = _packOptions;
+    return showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Hangi paketi kullanmak istersin?',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              const Text(
+                  'Seçtiğin paketteki fotoğraflar tek seferde üretilir ve '
+                  'o paket kullanılmış sayılır.',
+                  style: TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
+              const SizedBox(height: 14),
+              for (final n in sizes) ...[
+                Material(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => Navigator.pop(ctx, n),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('$n fotoğraflık paket',
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.textPrimary)),
+                                const SizedBox(height: 2),
+                                Text('Elinde ${counts[n] ?? 0} adet',
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded,
+                              color: AppColors.gold),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// ÇALIŞMAKTA OLAN işin foto sayısı — _generate bakiyeyi düşmeden ÖNCE
@@ -276,6 +380,10 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
     // Bakiye/ücretsiz hak yetmiyorsa SUNUCUYA HİÇ GİTME: ne fal.ai kredisi ne
     // de paket hakkı harcanır. Bunun yerine blurlu "teaser" gösterilir; blura
     // dokununca paket ekranına yönlendirilir.
+    // Birden fazla paket varsa hangisinin kullanılacağı (bakiye akış
+    // sırasında değiştiyse yeniden) sorulur — bkz. _needsPackChoice.
+    if (!await _ensurePackChosen()) return;
+    if (!mounted) return;
     final pack = ref.read(packBalanceProvider);
     // Bu üretimde çıkacak foto sayısı BİR KEZ sabitlenir: bakiye akış
     // sırasında (başka bir cihazdan satın alma, iade) değişebilir ve
@@ -375,6 +483,8 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _prepareError = null;
       _stage = _AiStage.loading;
       _errorMessage = null;
+      // Seçim bu üretimde kullanıldı; sonraki üretimde yeniden sorulur.
+      _chosenPhotoCount = null;
     });
 
     // Callable dönmeden ÖNCE dinlemeye başla: OpenAI yolu senkron ve uzun
@@ -579,6 +689,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _stage = _AiStage.style;
       _facePhotos.clear();
       _activePhotoCount = null;
+      _chosenPhotoCount = null;
       _jobData = null;
       _showRejected = false;
       _generationHandoffDone = false;
@@ -1028,7 +1139,12 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
           child: PrimaryButton(
             label: 'Devam Et',
-            onPressed: () => setState(() => _stage = _AiStage.package),
+            onPressed: () async {
+              // Birden fazla paket varsa foto oluşturmaya girerken sorulur.
+              if (!await _ensurePackChosen()) return;
+              if (!mounted) return;
+              setState(() => _stage = _AiStage.package);
+            },
           ),
         ),
       ],
@@ -1062,11 +1178,33 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
                 // Stil kategorileri kaldırıldı — "N stil" ve stil rozetleri
                 // artık kullanıcı için anlamsız (hiç stil seçmiyor), sadece
                 // üretilecek foto sayısı gösteriliyor.
-                Text('$_photoCount fotoğraf',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('$_photoCount fotoğraf',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900)),
+                    ),
+                    if (_needsPackChoice)
+                      TextButton(
+                        onPressed: _preparing
+                            ? null
+                            : () => _ensurePackChosen(force: true),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 32),
+                        ),
+                        child: const Text('Değiştir',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Colors.white)),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text(_accessLabel,
                     style: const TextStyle(color: Colors.white70)),
@@ -1699,9 +1837,9 @@ class _AwaitingApprovalNotice extends StatelessWidget {
                       ? 'Üretim arka planda sürüyor. Hazır olunca burada '
                           'görünecek ve sana bildirim göndereceğiz. '
                           'Uygulamayı açık tutmana gerek yok.'
-                      : 'Üretim tamamlandı. Ekibimiz en iyi kareleri seçiyor; '
-                          'hazır olduğunda burada görünecek ve sana bildirim '
-                          'göndereceğiz. Uygulamayı açık tutmana gerek yok.',
+                      : 'Üretim tamamlandı. Hazır olduğunda burada görünecek '
+                          've sana bildirim göndereceğiz. Uygulamayı açık '
+                          'tutmana gerek yok.',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.35,

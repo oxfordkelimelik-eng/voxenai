@@ -15,10 +15,15 @@
 // silüetidir (saç, yüz, aksesuar — biraz genişletilmiş). Geri yükleme elips
 // yerine bu silüeti dışarıda bırakır (templateHeadMask); geriye kalan şerit =
 // şablon kafası ∖ yeni kafa (+ hayalet saç, saçak telleri, kafa küçültmenin
-// açtığı delik). Bu şerit TEK bir maskeli AI düzenlemesiyle doldurulur; dışı
-// şablonun gerçek arka planı olduğu için çizgiler doğru yerden sürer. AI'nin
-// yeni kafadan uzakta kişi çizdiği küçük parçalar doku yaması yerine çevreden
-// yumuşak enterpolasyonla kapanır (yama sınırı görünmez).
+// açtığı delik). Bu şerit tek bir dolguyla doldurulur; dışı şablonun gerçek
+// arka planı olduğu için çizgiler doğru yerden sürer.
+//
+// DOLGU YEREL MODELLE (2026-10-12, e0eb8dd5): OpenAI maskeli düzenlemesi
+// kırpımın tamamını yeniden çiziyordu — renk/doku kayması kareyi reddettirdi
+// (c4, c8 küçültülemedi; c2/c5/c6 temizlenemedi), kabul edilen karelerde de
+// eski kafanın sınırında açık yay (c1), saçın boyanması (c7), kişi çizilen
+// yerde bulanık blok kaldı. LaMa (bkz. lamaFill.js) yalnız maskeyi doldurur,
+// kişi çizmez, maliyeti yok; reddetme kapısı gerekmez.
 
 const sharp = require("sharp");
 
@@ -29,12 +34,11 @@ const TPL_HEAD_CLASS_MIN = 0.3;
 const TPL_STRAND_MIN = 0.05;
 const TPL_GROW_FACE = 0.06; // yüz genişliğine oranla
 const TPL_GROW_TOP_FACE = 0.1;
-// Yeni kafanın dolu gövdesi (açma yarıçapı) ve AI saçının kabul edildiği
-// kenar bandı, yüz genişliğine oranla.
+// Yeni kafanın dolu gövdesi (açma yarıçapı), yüz genişliğine oranla.
 const CORE_OPEN_FACE = 0.08;
-const ALLOW_AI_FACE = 0.04;
 const FRINGE_RING_FACE = 0.25;
 const SOFT_EDGE_FACE = 0.012;
+const SOFT_EDGE_OUT_FACE = 0.04;
 // Delik yoksa hayalet+saçak bu kadardan (yüz alanına oranla) azsa AI'ye
 // gidilmez: birkaç yüz piksel kafanın kendi yumuşak saç kenarıdır, dolgu
 // yalnızca risk getirir (d44b63e8 c2/c3/c6: 300-1500 px, kenar temizdi).
@@ -47,8 +51,12 @@ const MIN_DEFECT_FACE2 = 0.05;
 // olsa dolguyu tetikler.
 const GHOST_FAR_FACE = 0.08;
 const GHOST_FAR_MIN_FACE2 = 0.004;
-// Şeritte AI'nin kişi çizdiği payın üst sınırı (bundan fazlası: dolgu yok).
-const SURROUND_PERSON_MAX = 0.35;
+// Küçültme deliğinde yeni kafanın korunan yumuşak kenarı, yüz genişliğine oranla.
+const HEAD_SOFT_EDGE_FACE = 0.03;
+// Yerel dolgu modeline kafa da maskeli verilir (saçı deliğe uzatmasın):
+// kafa bileşeninin bu kadar (yüz genişliğine oranla) çevresindeki korunan
+// pikseller.
+const LAMA_HEAD_REACH_FACE = 0.1;
 
 /**
  * Chamfer (3-4) uzaklık dönüşümü: her piksel için en yakın mask=1 pikseline
@@ -244,13 +252,15 @@ function sheerHairMask(rgb, W, Mo, Po, CLASSES, { w, hc, bx0, by0, browY, faceW 
 }
 
 /**
- * Kafa çevresi şeridinin AI dolgusunu hazırlar. buf: arka planı geri
+ * Kafa çevresi şeridinin dolgusunu hazırlar. buf: arka planı geri
  * yüklenmiş (ve varsa kafası ölçeklenmiş) kare; extraHole: kafa küçültmenin
- * açtığı delik (Uint8Array W*H).
- * Dönüş { applied, reason, bandPx, ghostPx, fringePx, inpaint{image,mask,rect,finish} }.
+ * açtığı delik (Uint8Array W*H); newHead: küçültülmüş kafanın kendisi
+ * (Uint8Array W*H, headScale headMask) — delikte yalnız o korunur.
+ * Dönüş { applied, reason, bandPx, ghostPx, fringePx, inpaint{rect,job,base} };
+ * dolgu lamaFill.finishInpaintLama(job, base) ile tamamlanır.
  */
-async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
-  const { personMask, _rawRgb: rawRgb, _boxBlur: boxBlur, _prepareInpaint: prepareInpaint, _encodeInpaint: encodeInpaint, _finishInpaint: finishInpaint } = require("./headScale");
+async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null } = {}) {
+  const { personMask, _rawRgb: rawRgb, _prepareInpaint: prepareInpaint } = require("./headScale");
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(buf);
   const { W, H } = o;
@@ -280,8 +290,8 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
   const hc = Math.max(16, Math.min(h, Math.round(chin) - by0 + 1));
   const core = new Uint8Array(w * h);
   const ghost = new Uint8Array(w * h);
-  let ghostPx = 0;
-  let sheerPx = 0;
+  // Kullanıcının kendi dolu saçı (saç sınıfı, saydam hayalet değil).
+  const hairDense = new Uint8Array(w * h);
   let classified = false;
   try {
     const { classProbs, CLASSES } = require("./skinSeg");
@@ -293,12 +303,11 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
         const m = Mo[G(x, y)];
         const head = Po[CLASSES.hair][i] + Po[CLASSES.faceSkin][i] + Po[CLASSES.others][i] >= 0.5;
         if ((!head && y + by0 < browY && m >= 0.15 && Po[CLASSES.background][i] >= 0.5) || sheer[i]) {
-          ghost[i] = 1;
-          ghostPx++;
-          if (sheer[i]) sheerPx++;
+          ghost[i] = sheer[i] ? 2 : 1;
           continue;
         }
         if (head || m >= 0.5) core[i] = 1;
+        if (Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i]) hairDense[i] = 1;
       }
     }
     classified = true;
@@ -307,6 +316,64 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
   }
   for (let y = classified ? hc : 0; y < h; y++) {
     for (let x = 0; x < w; x++) if (Mo[G(x, y)] >= 0.5) core[y * w + x] = 1;
+  }
+
+  // YALNIZ KAFA (2026-10-12, e0eb8dd5 c2/c8): kişi maskesi kafanın yanındaki
+  // koyu nesneyi (şemsiye) ve arkadaki insanları da "kişi" görüyor; onlar
+  // dolu gövdeye, çevrelerindeki soluk pikseller saçak/hayalete girip
+  // siliniyordu. Çene hizasının üstünde kafa = yüzden başlayan bileşen;
+  // ona bağlı olmayan dolu pikseller korunur ama kafa sayılmaz.
+  const yChin = Math.min(h - 1, Math.floor(chin - by0));
+  const headComp = new Uint8Array(w * h);
+  {
+    const sx = clampI(cx - bx0, 0, w - 1);
+    const sy = clampI((browY + chin) / 2 - by0, 0, yChin);
+    if (core[sy * w + sx]) {
+      headComp[sy * w + sx] = 1;
+      const stack = [sy * w + sx];
+      while (stack.length) {
+        const i = stack.pop();
+        const x = i % w;
+        const y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < yChin ? i + w : -1]) {
+          if (j >= 0 && core[j] && !headComp[j]) { headComp[j] = 1; stack.push(j); }
+        }
+      }
+    } else {
+      for (let y = 0; y <= yChin; y++) for (let x = 0; x < w; x++) headComp[y * w + x] = core[y * w + x];
+    }
+  }
+  const otherCore = new Uint8Array(w * h);
+  for (let y = 0; y <= yChin; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (core[i] && !headComp[i]) { otherCore[i] = 1; core[i] = 0; }
+    }
+  }
+  // Hayalet yalnızca kafaya bağlıysa (2 px boşluk payıyla): kafadan kopuk
+  // "arka plan sınıfı kişi" pikselleri başka bir nesnedir.
+  const dHead = chamfer(headComp, w, h);
+  {
+    const dG = chamfer(ghost, w, h);
+    const reach = new Uint8Array(w * h);
+    const stack = [];
+    for (let i = 0; i < w * h; i++) if (ghost[i] && dHead[i] <= 2) { reach[i] = 1; stack.push(i); }
+    while (stack.length) {
+      const i = stack.pop();
+      const x = i % w;
+      const y = (i - x) / w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+        if (j >= 0 && !reach[j] && dG[j] <= 2) { reach[j] = 1; stack.push(j); }
+      }
+    }
+    for (let i = 0; i < w * h; i++) if (ghost[i] && !reach[i]) ghost[i] = 0;
+  }
+  let ghostPx = 0;
+  let sheerPx = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!ghost[i]) continue;
+    ghostPx++;
+    if (ghost[i] === 2) sheerPx++;
   }
   // Dolu gövde: açma (ince teller ayrılır). Chamfer ile yuvarlak — kare
   // genişletme basamaklı kenar bırakıyordu.
@@ -320,12 +387,29 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
   const solid = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) solid[i] = core[i] && dEr[i] <= rOpen + 1 ? 1 : 0;
   // Korunan: dolu gövde + kaşların altında kişinin yumuşak kenarı (3b16bf69
-  // c7: AI başın arkasına saç şeridi ekledi, kazak kenarını tırtıklı boyadı).
+  // c7: AI başın arkasına saç şeridi ekledi, kazak kenarını tırtıklı boyadı)
+  // + kafaya bağlı olmayan dolu pikseller (şemsiye, arkadaki insanlar).
+  // KULLANICININ SAÇI KORUNUR (2026-10-12, e0eb8dd5 c7, kullanıcı: "saçı
+  // boyamışsın"): açma, dolu gövdeden 2x0.08 yüz genişliğinden ince her
+  // saç tutamını (perçem, kabarık uçlar) gövdeden ayırıyordu; onlar "saçak"
+  // sayılıp yeniden boyanınca saçın üst kenarı düz, boyanmış göründü. Kafaya
+  // bağlı dolu saç pikselleri (saç sınıfı, saydam hayalet değil) korunur;
+  // saçak yalnızca saç olmayan soluk kişi pikselleridir.
+  // Küçültme deliğinin içi (doku dolgusu, eski kafanın kalıntısı) yalnız
+  // yeni kafa (küçültmenin katman alfası, newHead) ve kaş altında onun
+  // yumuşak kenarı kadar korunur; geri kalanı baştan dolar. Delikteki doku
+  // dolgusunu sınıflandırıcı saç/kişi sanabiliyor (c4 denemesi: saçın
+  // üstünde açık leke korunup kaldı).
+  const softR = Math.max(2, HEAD_SOFT_EDGE_FACE * faceW);
   const prot = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      if (solid[i] || (y + by0 >= browY && Mo[G(x, y)] >= 0.25)) prot[i] = 1;
+      const g = G(x, y);
+      const inHole = !!(extraHole && extraHole[g]);
+      const soft = y + by0 >= browY && Mo[g] >= 0.25 && (!inHole || dHead[i] <= softR);
+      const headPx = inHole && newHead ? newHead[g] === 1 : solid[i] || (headComp[i] && hairDense[i]);
+      if (headPx || (otherCore[i] && !inHole) || soft) prot[i] = 1;
     }
   }
   const dProt = chamfer(prot, w, h);
@@ -366,9 +450,14 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
   const farGhost = sheerPx > 0 || farGhostPx >= GHOST_FAR_MIN_FACE2 * faceW * faceW;
   if (!holePx && !farGhost && bandPx < MIN_DEFECT_FACE2 * faceW * faceW) return { applied: false, reason: "clean", bandPx, ghostPx, fringePx, farGhostPx, sheerPx, faceW };
 
-  // Yumuşak kenar: dolgu şeridin birkaç piksel dışına (şablon arka planına)
-  // azalarak taşar; korunan kafaya hiç girmez.
+  // Yumuşak kenar: dolgu şeridin dışına (şablon arka planına) azalarak
+  // taşar; korunan kafaya hiç girmez. DIŞ GEÇİŞ GENİŞ (2026-10-12, e0eb8dd5
+  // c1/c7): şeridin dış sınırı eski kafanın silüetini izliyor; dolgu tonu
+  // dışarıdan azıcık farklıysa 2-3 px'lik geçişte eski kafanın şekli çizgi
+  // olarak görünüyordu (c1 açık yay, c7 çenenin yanında koyu tel). Yerel
+  // model maske dışıyla tutarlı olduğu için geniş geçiş güvenli.
   const rs = Math.max(2, SOFT_EDGE_FACE * faceW);
+  const rsOut = Math.max(rs, SOFT_EDGE_OUT_FACE * faceW);
   const dBand = chamfer(band, w, h);
   const hole = new Uint8Array(W * H);
   const banned = new Uint8Array(W * H);
@@ -378,33 +467,30 @@ async function prepareHeadSurroundFill(buf, { extraHole = null } = {}) {
       const i = y * w + x;
       const g = G(x, y);
       if (dProt[i] <= 1.5) { banned[g] = 1; continue; }
-      if (dBand[i] > rs) continue;
+      if (dBand[i] > rsOut) continue;
       hole[g] = 1;
-      const edgeIn = Math.min(1, (dProt[i] - 1.5) / rs); // kafaya doğru da yumuşak
-      wgt[g] = (1 - dBand[i] / (rs + 1)) * edgeIn;
+      const edgeIn = Math.min(1, (dProt[i] - 1.5) / rs); // kafaya doğru dar ve yumuşak
+      const t = dBand[i] / (rsOut + 1);
+      wgt[g] = (1 - t * t * (3 - 2 * t)) * edgeIn;
     }
   }
-  // Renk kayması halkası kişi piksellerinden ölçülmez (model kişiyi yeniden çiziyor).
-  for (let g = 0; g < W * H; g++) if (!hole[g] && Mo[g] >= 0.15) banned[g] = 1;
-  const job = prepareInpaint(o.data, o.data, W, H, hole, banned, wgt);
-  // Yeni kafanın dibinde AI'nin çizdiği saç kafanın kendi kenarıdır.
-  const allowD = Math.max(2, ALLOW_AI_FACE * faceW);
-  job.allowAi = new Float32Array(job.side * job.side);
-  for (let y = 0; y < job.side; y++) {
-    for (let x = 0; x < job.side; x++) {
-      const lx = x + job.left - bx0;
-      const ly = y + job.top - by0;
-      if (lx < 0 || ly < 0 || lx >= w || ly >= h) continue;
-      if (dSolid[ly * w + lx] <= allowD) job.allowAi[y * job.side + x] = 1;
+  // YEREL DOLGU (2026-10-12, e0eb8dd5, kullanıcı: "kesin çözüm"): şerit
+  // OpenAI yerine LaMa ile dolar (bkz. lamaFill.js). Kafa (çene hizasına
+  // kadar, yumuşak kenarıyla) modele bağlam olarak verilmez — verilince
+  // saçı deliğe doğru gri pus olarak uzatıyordu (c4 denemesi).
+  const reachR = LAMA_HEAD_REACH_FACE * faceW;
+  const head = new Uint8Array(W * H);
+  for (let y = 0; y <= yChin; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (prot[i] && !otherCore[i] && dHead[i] <= reachR) head[G(x, y)] = 1;
     }
   }
-  job.smoothFallback = true;
-  job.personMax = SURROUND_PERSON_MAX;
+  const job = prepareInpaint(o.data, o.data, W, H, hole, banned, wgt, head);
   job.out = null;
-  const { image, mask } = await encodeInpaint(job);
   return {
     applied: true, bandPx, holePx, ghostPx, fringePx, farGhostPx, sheerPx, faceW,
-    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: buf, finish: (aiBuf) => finishInpaint(job, aiBuf, buf) },
+    inpaint: { rect: { left: job.left, top: job.top, side: job.side }, job, base: buf },
   };
 }
 

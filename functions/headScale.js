@@ -457,6 +457,87 @@ const T_PERSON_MIN = 0.08;
 // yeni yüzün kendisini kapsar (03d6c1f6 c4: siyah-beyaz karanlık kare, AI
 // yüzü sildi).
 const FILL_DEPTH_MAX = 0.35;
+
+const BG_FIELD_CELL = 4;
+/**
+ * Pencerenin (w x h, sol üst bx0, by0) alçak frekanslı arka plan alanı:
+ * isKnown(x, y) piksellerinin hücre ortalamaları (BG_FIELD_CELL px), boş
+ * hücreler çok ölçekli ortalamayla dolar. Dönüş: tam kare koordinatında
+ * bilineer örnekleyici (gx, gy, c) ya da bilinen piksel yoksa null.
+ */
+function backgroundField(O, W, bx0, by0, w, h, isKnown) {
+  const { pushPullField } = require("./sceneRestore");
+  const C = BG_FIELD_CELL;
+  const gw = Math.ceil(w / C);
+  const gh = Math.ceil(h / C);
+  const F = new Float32Array(gw * gh * 3);
+  const n = new Float32Array(gw * gh);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!isKnown(x, y)) continue;
+      const j = Math.floor(y / C) * gw + Math.floor(x / C);
+      const g = ((y + by0) * W + x + bx0) * 3;
+      n[j]++;
+      for (let c = 0; c < 3; c++) F[j * 3 + c] += O[g + c];
+    }
+  }
+  const known = new Uint8Array(gw * gh);
+  let any = 0;
+  for (let j = 0; j < gw * gh; j++) {
+    if (n[j] < (C * C) / 4) continue;
+    known[j] = 1;
+    any++;
+    for (let c = 0; c < 3; c++) F[j * 3 + c] /= n[j];
+  }
+  if (!any) return null;
+  pushPullField(F, gw, gh, 3, known);
+  return (gx, gy, c) => {
+    const fx = Math.max(0, Math.min(gw - 1, (gx - bx0) / C - 0.5));
+    const fy = Math.max(0, Math.min(gh - 1, (gy - by0) / C - 0.5));
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const x1 = Math.min(gw - 1, x0 + 1);
+    const y1 = Math.min(gh - 1, y0 + 1);
+    const ax = fx - x0;
+    const ay = fy - y0;
+    return (F[(y0 * gw + x0) * 3 + c] * (1 - ax) + F[(y0 * gw + x1) * 3 + c] * ax) * (1 - ay) +
+      (F[(y1 * gw + x0) * 3 + c] * (1 - ax) + F[(y1 * gw + x1) * 3 + c] * ax) * ay;
+  };
+}
+
+/**
+ * Kafa bölgesi, pencere kesitinde (w x h) Uint8Array: çene hizasının
+ * üstünde (sx, sy) tohumundan başlayan dolu kişi bileşeni (Mo >= 0.5), r
+ * kadar genişletilmiş. Tohum kişi değilse null (çağıran eski davranışa
+ * döner). SAF.
+ */
+function headZone(Mo, W, bx0, by0, w, h, sx, sy, chin, r) {
+  const lx = sx - bx0;
+  const ly = sy - by0;
+  const yMax = Math.min(h - 1, Math.floor(chin - by0));
+  if (lx < 0 || ly < 0 || lx >= w || ly > yMax || Mo[sy * W + sx] < 0.5) return null;
+  const comp = new Uint8Array(w * h);
+  comp[ly * w + lx] = 1;
+  const stack = [ly * w + lx];
+  while (stack.length) {
+    const i = stack.pop();
+    const x = i % w;
+    const y = (i - x) / w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < yMax ? i + w : -1]) {
+      if (j < 0 || comp[j]) continue;
+      const jx = j % w;
+      if (Mo[((j - jx) / w + by0) * W + jx + bx0] < 0.5) continue;
+      comp[j] = 1;
+      stack.push(j);
+    }
+  }
+  const { chamfer } = require("./headSurround");
+  const d = chamfer(comp, w, h);
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) out[i] = d[i] <= r ? 1 : 0;
+  return out;
+}
+
 function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false } = {}) {
   const out = Buffer.from(O);
   const cx = sil.cx;
@@ -522,6 +603,17 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
     }
   }
 
+  // YALNIZ KAFA (2026-10-12, e0eb8dd5 c8, kullanıcı: "kesin çözüm"): kişi
+  // maskesi arkadaki insanları ve kafanın yanındaki koyu nesneleri (c2
+  // şemsiye) düşük olasılıkla "kişi" görüyor; kafa ortasının üstündeki her
+  // kişi pikseli kafa sayılınca onlar da küçültülüp deliğe giriyor, dolgu
+  // onları siliyordu (c8 kafanın yanında lekeler, c2 kesik şemsiye). Çene
+  // hizasının üstünde kafa = yüzden başlayan dolu kişi bileşeni, uçuşan tel
+  // payı (eski izin genişletmesiyle aynı) kadar genişletilmiş.
+  const strandR = Math.max(8, Math.round(0.07 * faceH));
+  const zone = headZone(Mo, W, bx0, by0, w, h, seedX, Math.round(hy), chin, strandR);
+  const inZone = (x, y) => !zone || y + by0 > chin || zone[y * w + x] === 1;
+
   // Elips yüz merkezlidir; yana dönük kafada ense saçı elipsin dışına taşar
   // ve K=0'da eski saç olduğu gibi kalır (03d6c1f6 c2: küçük kafanın
   // arkasında eski saç telleri). Kafa ortası hizasının üstündeki kişi
@@ -530,7 +622,7 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   {
     let hz = new Float32Array(w * h);
     for (let y = 0; y < h && y + by0 <= hy; y++) {
-      for (let x = 0; x < w; x++) if (Mo[(y + by0) * W + (x + bx0)] >= 0.04) hz[y * w + x] = 1;
+      for (let x = 0; x < w; x++) if (Mo[(y + by0) * W + (x + bx0)] >= 0.04 && inZone(x, y)) hz[y * w + x] = 1;
     }
     const r = Math.max(3, Math.round(band / 4));
     hz = boxBlur(hz, w, h, r);
@@ -549,7 +641,7 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
 
   // Kişi katmanı alfası (kaynak uzayı): kişi maskesinden doğrusal rampa.
   const pb = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) pb[y * w + x] = Math.max(0, Math.min(1, (Mo[(y + by0) * W + (x + bx0)] - 0.15) / 0.45));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inZone(x, y)) pb[y * w + x] = Math.max(0, Math.min(1, (Mo[(y + by0) * W + (x + bx0)] - 0.15) / 0.45));
   const soft = pb;
   const sampleA = (qx, qy) => {
     const x = qx - bx0;
@@ -584,12 +676,12 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   let old = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (K[y * w + x] > 0.01 && Mo[(y + by0) * W + (x + bx0)] >= 0.04) old[y * w + x] = 1;
+      if (K[y * w + x] > 0.01 && Mo[(y + by0) * W + (x + bx0)] >= 0.04 && inZone(x, y)) old[y * w + x] = 1;
     }
   }
   // Uçuşan saç telleri maske eşiğinin altında kalıp 8 px ötesine uzanır
   // (03d6c1f6 c2: küçülen kafanın üstünde eski telin ince çizgisi).
-  old = boxBlur(old, w, h, Math.max(8, Math.round(0.07 * faceH)));
+  old = boxBlur(old, w, h, strandR);
   for (let i = 0; i < w * h; i++) old[i] = old[i] > 0.02 && K[i] > 0.01 ? 1 : 0;
   const oldSoft = boxBlur(old, w, h, 2);
   for (let i = 0; i < w * h; i++) if (K[i] <= 0.01) oldSoft[i] = 0;
@@ -710,6 +802,14 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
     }
   }
 
+  // SAÇ KENARINDAKİ ESKİ ARKA PLAN (2026-10-12, e0eb8dd5 c4 denemesi):
+  // kafanın yumuşak kenar pikseli saç ile ESKİ konumdaki arka planın
+  // karışımı. Kafa küçülünce piksel içeri taşınır, altına başka zemin gelir;
+  // eski zeminin payı kenarda açık/koyu pus olarak kalıyordu (açık duvarın
+  // önündeki saç tavana taşındı). Bölmesiz düzeltme: kenar pikseline
+  // (1 - alfa) x (yeni konumdaki zemin - eski konumdaki zemin) eklenir; zemin
+  // eski izin dışındaki gerçek arka plandan alçak frekansla kestirilir.
+  const bgAt = backgroundField(O, W, bx0, by0, w, h, (x, y) => old[y * w + x] === 0 && Mo[(y + by0) * W + x + bx0] < 0.04);
   let moved = 0;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -719,15 +819,30 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
       if (oldSoft[i] <= 0.003 && na < 0.003) continue;
       const gi = ((y + by0) * W + (x + bx0)) * 3;
       moved++;
+      const edge = na > 0.003 && na < 0.997 && bgAt ? 1 - na : 0;
       for (let c = 0; c < 3; c++) {
-        const v = F[gi + c] * (1 - na) + bilinear(O, W, H, QX[i], QY[i], c) * na;
+        let hv = bilinear(O, W, H, QX[i], QY[i], c);
+        if (edge) hv += edge * (bgAt(x + bx0, y + by0, c) - bgAt(QX[i], QY[i], c));
+        const v = F[gi + c] * (1 - na) + hv * na;
         out[gi + c] = Math.max(0, Math.min(255, Math.round(v)));
       }
     }
   }
   let inpaint = null;
+  // Yeni kafa (çene hizasına kadar, katman alfası >= 0.5). Yerel dolgu
+  // modeline bağlam olarak verilmez (saçı deliğe doğru uzatır, bkz.
+  // lamaFill.js); kafa çevresi şeridi de deliğin içinde YALNIZ bunu korur —
+  // delikteki doku dolgusu artığını sınıflandırıcı "saç" sanabiliyor
+  // (e0eb8dd5 c4 denemesi: saçın üstünde açık leke).
+  let head = null;
+  if (holePx) {
+    head = new Uint8Array(W * H);
+    for (let y = 0; y < h && y + by0 <= chin; y++) {
+      for (let x = 0; x < w; x++) if (A[y * w + x] >= 0.5) head[(y + by0) * W + (x + bx0)] = 1;
+    }
+  }
   if (Fpre) {
-    // AI dolgusunun pikseli bileşime doğrusal girer: delik pikselinde
+    // Dolgunun pikseli bileşime doğrusal girer: delik pikselinde
     // out = (O(1-os) + P*os)(1-na) + kafa*na, P = dolgu. P değişince
     // out += os(1-na)(P' - P).
     const wgt = new Float32Array(W * H);
@@ -737,9 +852,9 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
         if (hole[g]) wgt[g] = oldSoft[y * w + x] * (1 - A[y * w + x]);
       }
     }
-    inpaint = prepareInpaint(out, Fpre, W, H, hole, banned, wgt);
+    inpaint = prepareInpaint(out, Fpre, W, H, hole, banned, wgt, head);
   }
-  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint, holeMask: holePx ? hole : null };
+  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint, holeMask: holePx ? hole : null, headMask: head };
 }
 
 // AI DOLGUSU (2026-10-09, kullanıcı kararı: "OpenAI maskeli düzenleme").
@@ -772,7 +887,7 @@ const INPAINT_EDGE_BAD_MAX = 0.08;
 const INPAINT_PERSON_PX = 0.15; // piksel kişi sayılır (AI çıktısında olasılık)
 const INPAINT_PERSON_MAX = 0.5; // bundan fazlası kişiyse dolgu kullanılmaz
 
-function prepareInpaint(out, Fpre, W, H, hole, banned, wgt) {
+function prepareInpaint(out, Fpre, W, H, hole, banned, wgt, head = null) {
   let x0 = W;
   let y0 = H;
   let x1 = -1;
@@ -796,11 +911,13 @@ function prepareInpaint(out, Fpre, W, H, hole, banned, wgt) {
   const ringOk = new Uint8Array(N);
   const wC = new Float32Array(N);
   const PC = new Float32Array(N * 3);
+  const headC = head ? new Uint8Array(N) : null;
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
       const g = (y + top) * W + (x + left);
       const i = y * side + x;
       for (let c = 0; c < 3; c++) rgb[i * 3 + c] = out[g * 3 + c];
+      if (headC && head[g]) headC[i] = 1;
       if (hole[g]) {
         holeC[i] = 1;
         wC[i] = wgt[g];
@@ -808,7 +925,7 @@ function prepareInpaint(out, Fpre, W, H, hole, banned, wgt) {
       } else if (!banned[g]) ringOk[i] = 1;
     }
   }
-  return { out, W, H, left, top, side, rgb, holeC, ringOk, wC, PC };
+  return { out, W, H, left, top, side, rgb, holeC, ringOk, wC, PC, headC };
 }
 
 /** Modele gidecek kırpım (PNG) ve maske (PNG, şeffaf = doldur). */
@@ -1058,20 +1175,18 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
     .jpeg({ quality: 95 })
     .toBuffer();
   const head = { cx: sil.cx, cy: (sil.top + sil.chin) / 2, rx: sil.headW / 2, ry: sil.headH / 2, chin: sil.chin, neck: r.neck };
-  // deferInpaint: buf doku dolgulu hâl; çağıran inpaint.image/mask'ı modele
-  // verip inpaint.finish(aiBuf) ile son hâli alır (ağ çağrısı ağır katman
-  // kilidinin DIŞINDA yapılabilsin diye ayrık).
+  // deferInpaint: buf doku dolgulu hâl; çağıran deliği yerel modelle doldurur
+  // (lamaFill.finishInpaintLama(job, base); 2026-10-12'ye kadar OpenAI).
   let inpaint = null;
   if (r.inpaint) {
     const job = r.inpaint;
-    // Tam çözünürlüklü ham kopya ağ çağrısı boyunca tutulmasın (bellek —
-    // bkz. falPhotos POST_LAYER_LOCK); finish JPEG'i yeniden açar.
+    // Tam çözünürlüklü ham kopya dolgu boyunca tutulmasın (bellek); dolgu
+    // JPEG'i yeniden açar.
     job.out = null;
-    const { image, mask } = await encodeInpaint(job);
     // job/base: worker iş parçacığına taşınabilir hâl (bkz. postTasks.js).
-    inpaint = { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: buf, finish: (aiBuf) => finishInpaint(job, aiBuf, buf) };
+    inpaint = { rect: { left: job.left, top: job.top, side: job.side }, job, base: buf };
   }
-  return { buf, applied: true, reason: null, inpaint, holeMask: r.holeMask, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
+  return { buf, applied: true, reason: null, inpaint, holeMask: r.holeMask, headMask: r.headMask, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
 // KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, 790bd56b c0, kullanıcı: "base fotodan

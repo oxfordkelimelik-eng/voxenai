@@ -190,6 +190,25 @@ const PHOTO_PACK_OVERPRODUCTION = { 5: 10, 10: 15, 25: 30 };
 // `holdForApproval: true` gönderdiği işlerde açılır. Bayrak yoksa eski
 // davranış — vaat edilen kadar üretim, doğrudan dating_results, status=done.
 // Böylece güncellenmemiş telefonlar hâlâ foto alır; yeni sürüm onay bekler.
+/**
+ * Mağaza inceleme (demo) hesabı mı? Liste kodda değil, Firestore
+ * config/reviewDemo {emails: [...]} belgesinde — istemciler okuyamaz/yazamaz
+ * (firestore.rules varsayılan red), hesap değişince deploy gerekmez.
+ * Doğrulanmamış e-posta ya da okuma hatası = demo değil (onay akışı korunur).
+ */
+async function isReviewDemoAccount(auth) {
+  const email = String((auth && auth.token && auth.token.email) || "").trim().toLowerCase();
+  if (!email || !(auth.token.email_verified)) return false;
+  try {
+    const snap = await db.doc("config/reviewDemo").get();
+    const list = snap.exists ? snap.get("emails") : null;
+    return Array.isArray(list) && list.map((e) => String(e).trim().toLowerCase()).includes(email);
+  } catch (e) {
+    console.error("İnceleme hesabı listesi okunamadı (onay akışı korunuyor):", e.message || e);
+    return false;
+  }
+}
+
 function generateCountFor(photoCount, holdForApproval = false) {
   if (!holdForApproval) return photoCount;
   return PHOTO_PACK_OVERPRODUCTION[photoCount] || photoCount;
@@ -1978,6 +1997,32 @@ const HEAD_FRINGE_PROMPT = "Edit only the transparent masked area. It lies aroun
 // ~$0.015 / ~$0.019 + pay) — bkz. jobContext maliyet sınırı.
 const EST_FILL_USD = 0.018;
 const EST_EYEWEAR_USD = 0.022;
+
+/**
+ * Kafa ölçeği/çevresi dolgusu — yerel LaMa (2026-10-12, bkz. lamaFill.js;
+ * OpenAI maliyeti yok). Hata fırlatmaz: başarısızlıkta { buf: null, reason },
+ * çağıran küçültmeyi geri alır. k: log parçası.
+ */
+const LOCAL_FILL_TIMEOUT_MS = 120000;
+async function fillHeadJobLocally(job, base) {
+  const t0 = Date.now();
+  let timer = null;
+  try {
+    const { finishInpaintLama } = require("./lamaFill");
+    const limit = Math.max(10000, Math.min(LOCAL_FILL_TIMEOUT_MS, jobTimeLeftMs() - POST_AI_MIN_LEFT_MS / 2));
+    const r = await Promise.race([
+      finishInpaintLama(job, base),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), limit); }),
+    ]);
+    if (!r) return { buf: null, reason: "yerel-dolgu-süre", k: `yerelDolgu=süre(${Date.now() - t0}ms)` };
+    return { buf: r.buf, reason: null, k: `yerelDolgu parça=${r.runs} ölçek=${r.scale.toFixed(2)} süre=${r.ms}ms` };
+  } catch (e) {
+    console.error("Yerel dolgu (LaMa) hata:", e);
+    return { buf: null, reason: "yerel-dolgu-hata", k: "yerelDolgu=hata" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function inpaintHeadHoleWithOpenAI(imagePng, maskPng, prompt = HEAD_INPAINT_PROMPT, { timeoutMs = POST_AI_TIMEOUT_MS } = {}) {
   // MALİYET SINIRI: bütçe yetmiyorsa çağrı yapılmaz; çağıran adımı atlar.
@@ -5396,17 +5441,21 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // KAFA ÇEVRESİ (2026-10-11, iş d44b63e8, kullanıcı: "kafanın üst
     // kısmındaki silüetlenme, renklenme, küçültmeden dolayı oynama gibi
     // problemleri kesin olarak çözmeliyiz"). Arka plan, şablon kafasının
-    // silüeti dışında şablondan geldi; kafanın çevresinde AI yalnızca gerçek
-    // kusura girer: küçültmenin açtığı delik, hayalet saç, saçak telleri
-    // (bkz. headSurround.js). Kusur yoksa AI çağrısı yapılmaz. Dolgu
-    // reddedilirse kafa küçültülmez, kare geri yüklenmiş hâliyle kalır.
+    // silüeti dışında şablondan geldi; kafanın çevresinde dolgu yalnızca
+    // gerçek kusura girer: küçültmenin açtığı delik, hayalet saç, saçak
+    // telleri (bkz. headSurround.js). Kusur yoksa dolgu yapılmaz. Dolgu
+    // başarısızsa kafa küçültülmez, kare geri yüklenmiş hâliyle kalır.
     // Retry yok. Gözlükten ÖNCE (yüzün dışına taşan camı silmesin).
+    // YEREL DOLGU (2026-10-12, e0eb8dd5): OpenAI yerine LaMa (bkz.
+    // lamaFill.js) — OpenAI dolgusu kayma kapısında reddedilip c4/c8'i
+    // küçültmesiz bıraktı, kabul edilenlerde yay (c1) ve boyanmış saç (c7)
+    // kaldı. Yerel model maske dışını değiştirmediği için kapı yok.
     if (bgRestored) {
       const scaled = pendingScale;
       pendingScale = null;
       try {
         const base = scaled ? scaled.hs.buf : deliverBuf;
-        const sf = await runPostTask("surroundPrep", { buf: base, extraHole: scaled ? scaled.hs.holeMask : null });
+        const sf = await runPostTask("surroundPrep", { buf: base, extraHole: scaled ? scaled.hs.holeMask : null, newHead: scaled ? scaled.hs.headMask : null });
         const sp = `şerit=${sf.bandPx ?? "null"} delik=${sf.holePx ?? 0} hayalet=${sf.ghostPx ?? "null"} saçak=${sf.fringePx ?? "null"} saydamHayalet=${sf.sheerPx ?? 0}`;
         let fin = null;
         let why = null;
@@ -5417,11 +5466,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           why = "süre-bütçesi";
           console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${why}] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn ${sp}`);
         } else {
-          const ai = await inpaintHeadHoleWithOpenAI(sf.inpaint.image, sf.inpaint.mask, HEAD_FRINGE_PROMPT);
-          fin = Buffer.isBuffer(ai) ? await runPostTask("finishInpaint", { job: sf.inpaint.job, ai, base: sf.inpaint.base }) : { buf: null, reason: (ai && ai.skipped) || "inpaint-failed" };
+          fin = await fillHeadJobLocally(sf.inpaint.job, sf.inpaint.base);
           why = fin.reason;
-          const k = `${sp} kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} yumuşakDolgu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
-          console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ${fin.buf ? "TEMİZLENDİ" : `ATLANDI[${why}]`} ${k}`);
+          console.log(`KAFA ÇEVRESİ (style=${styleId}, chunk=${chunkIdx}): ${fin.buf ? "TEMİZLENDİ" : `ATLANDI[${why}]`} ${sp} ${fin.k}`);
         }
         // Temizlenecek kusur yoksa (küçültme de yok) kare olduğu gibi kalır.
         let out = fin && fin.buf ? fin.buf : (!scaled ? deliverBuf : null);
@@ -5468,9 +5515,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     }
 
     // GERİ YÜKLEME YOKSA (sahne yeniden kadrajlanmış vb.) eski yol: KAFA
-    // KÜÇÜLTME AI DOLGUSU — kilit dışında (ağ). Başarısızlıkta ya da model
-    // arka planı değiştirdiyse kafa küçültülmez (kullanıcı kararı: retry yok,
-    // bozuk dolgu yerine dokunulmamış kare).
+    // KÜÇÜLTME DOLGUSU (2026-10-12'den beri yerel LaMa, bkz. lamaFill.js).
+    // Başarısızlıkta kafa küçültülmez (kullanıcı kararı: retry yok, bozuk
+    // dolgu yerine dokunulmamış kare).
     if (pendingScale && jobTimeLeftMs() < POST_AI_MIN_LEFT_MS) {
       console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[süre-bütçesi] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn ${pendingScale.ölçü}`);
       pendingScale = null;
@@ -5479,9 +5526,8 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       const { hs, ölçü, tpl } = pendingScale;
       pendingScale = null;
       try {
-        const ai = await inpaintHeadHoleWithOpenAI(hs.inpaint.image, hs.inpaint.mask);
-        const fin = Buffer.isBuffer(ai) ? await runPostTask("finishInpaint", { job: hs.inpaint.job, ai, base: hs.inpaint.base }) : { buf: null, reason: (ai && ai.skipped) || "inpaint-failed" };
-        const k = `kayma=${fin.shift != null ? fin.shift.toFixed(1) : "null"} kenarUyumsuz=${fin.resid != null ? fin.resid.toFixed(2) : "null"} delikteKişi=${fin.person != null ? fin.person.toFixed(3) : "null"} dokuDolgusu=${fin.fallback != null ? fin.fallback.toFixed(3) : "null"}`;
+        const fin = await fillHeadJobLocally(hs.inpaint.job, hs.inpaint.base);
+        const k = fin.k;
         // KÜÇÜLTME SONRASI KALINTI (2026-10-10): dolgu kafanın yanında iz
         // bırakmışsa (model kafayı eski boyunda çizdi) küçültme geri alınır.
         // Ham kare kalıntı kapısından geçtiği için iz küçültmeden gelir. Kapı
@@ -5917,7 +5963,12 @@ exports.startPhotoGeneration = onCall(
 
     // SÜRÜM KAPISI: yalnızca açıkça true gönderen (yeni) istemci onay
     // akışına girer. Bayrak yok / false → eski doğrudan teslim.
-    const holdForApproval = rawHold === true;
+    // MAĞAZA İNCELEME HESABI (2026-10-11, Play "giriş bilgisi eksik" reddi,
+    // kullanıcı kararı): hakemin işi onay beklemeden teslim edilir — inceleme
+    // saatini bilemiyoruz, hakem "oluşturuluyor" ekranında takılmasın.
+    const reviewDemo = await isReviewDemoAccount(request.auth);
+    const holdForApproval = rawHold === true && !reviewDemo;
+    if (reviewDemo) console.log(`İNCELEME HESABI (${jobId}): onay atlandı, doğrudan teslim`);
 
     // ESKİ İSTEMCİ UYUMLULUĞU (2026-09-18) — ATLANAMAZ, GERÇEK OLAY VAR.
     //
@@ -6094,6 +6145,7 @@ exports.startPhotoGeneration = onCall(
     const unitsNeeded = photoUnitsFor(photoCount);
     let unitsToCharge = unitsNeeded;
     let usedFreeTier = false;
+    let packConsumed = null;
 
     await db.runTransaction(async (tx) => {
       const walletSnap = await tx.get(walletRef);
@@ -6150,6 +6202,12 @@ exports.startPhotoGeneration = onCall(
       };
       if (unitsToCharge > 0) {
         walletUpdate.photoBalance = wallet.photoBalance - unitsToCharge;
+        // PAKET DEFTERİ (2026-10-12): kullanıcının seçtiği paket düşülür
+        // (bkz. photoPacks.js). Tam iadede aynı paket geri verilir.
+        const { chargePacks } = require("./photoPacks");
+        const ch = chargePacks(wallet.photoBalance, wallet.photoPacks, photoCount);
+        walletUpdate.photoPacks = ch.packs;
+        packConsumed = ch.consumed;
       }
       if (usedFreeTier) {
         walletUpdate.freePhotoUsed = true;
@@ -6176,6 +6234,8 @@ exports.startPhotoGeneration = onCall(
         results: {},
         errorMessage: null,
         packUnitsCharged: unitsToCharge,
+        // Defterden düşülen paket boyu (null: serbest haktan) — tam iadede geri verilir.
+        packConsumed,
         usedFreeTier,
         model: modelId, // hangi model kullanıldı — izleme/karşılaştırma için
         photoMode, // hangi prompt stratejisi — A/B karşılaştırması için
@@ -6266,6 +6326,10 @@ exports.startPhotoGeneration = onCall(
           // MALİYET DEFTERİ (bkz. jobContext): tüm chunk'lar aynı defteri
           // paylaşır; isteğe bağlı AI adımları sınırı aşmayacaksa çalışır.
           const costLedger = createLedger(picked.length);
+          // YEREL DOLGU MODELİ ISINMASI (bkz. lamaFill.js): model indirme +
+          // oturum açma örnek başına bir kez 10-20 sn; kareler kafa çevresine
+          // gelene kadar arka planda (ayrı iş parçacığı) hazır olur.
+          require("./lamaFill").warmup().catch((e) => console.error("Yerel dolgu ısınması başarısız (ilk kullanımda yeniden denenecek):", e.message || e));
           await Promise.all(picked.map(async (file, i) => {
             // [birincil, yedek1..yedek5] — her chunk'ın KENDİ yedekleri var
             // (i, generateCount+i, 2*generateCount+i, ... konumları), böylece
@@ -6851,6 +6915,8 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
           photoBalance: (wallet.photoBalance || 0) + (j.packUnitsCharged || 0),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         };
+        // Tam iade: düşülen paket de geri verilir (bkz. photoPacks.js).
+        if (j.packConsumed) walletUpdate.photoPacks = require("./photoPacks").addPack(wallet.photoPacks, j.packConsumed);
         if (j.usedFreeTier === true) {
           walletUpdate.freePhotoUsed = false;
         }
@@ -6904,6 +6970,10 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
       photoBalance: (wallet.photoBalance || 0) + unitsToRefund,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
+    // Tam iade: düşülen paket de geri verilir (bkz. photoPacks.js).
+    if (job.packConsumed && unitsToRefund >= (job.packUnitsCharged || 0) && unitsToRefund > 0) {
+      walletUpdate.photoPacks = require("./photoPacks").addPack(wallet.photoPacks, job.packConsumed);
+    }
     // İş ücretsiz hakla başlatıldıysa ve foto üretilemedise ücretsiz hakkı da
     // geri ver — aksi halde kullanıcı hiç foto almadan ücretsiz denemesini
     // kaybediyordu ("Yetersiz paket bakiyesi" ile kilitleniyordu).
