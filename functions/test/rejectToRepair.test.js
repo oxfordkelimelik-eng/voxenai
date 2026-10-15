@@ -280,7 +280,15 @@ test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   assert.match(joined, /never turn it toward the camera or further away/);
   assert.match(joined, /look at exactly the same point as the BASE eyes/);
   assert.match(joined, /If the BASE is black and white, the whole output is black and white/);
+  assert.match(joined, /C\) LIGHT ON THE FACE — FROM THE BASE, NEVER FROM THE SELFIES/);
+  assert.match(joined, /brighter and darker side and colour of light as on the BASE face/);
   assert.match(joined, /not a face swap/);
+  // Kısık gözlü manken pozu ifadeyle birlikte kopyalanıyordu (cbdbef13).
+  assert.match(joined, /EYES — AWAKE, NEVER SLEEPY/);
+  assert.match(joined, /Eyelids and eye opening come from the TARGET's most open selfie, never from the BASE person/);
+  // Selfie'den göz kapağı alınırken bakış kameraya kaymamalı.
+  assert.match(joined, /the gaze still follows rule A/);
+  assert.doesNotMatch(joined, /Keep the BASE expression/);
   // Eski "yüzü yeniden aydınlatma" talimatı sahne ışığını yüze vermeyi
   // yasaklıyordu (9d9507f0 c9 gün batımı) — geri gelmemeli.
   assert.doesNotMatch(joined, /Do not relight the face/);

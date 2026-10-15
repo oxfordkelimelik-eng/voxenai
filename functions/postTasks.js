@@ -17,20 +17,41 @@ function plainInpaint(inp) {
 }
 
 /**
- * TEN ALANI → YÜZ IŞIĞI (bayrakla) → YÜZ DETAYI → ARKA PLAN → SİYAH-BEYAZ SON.
+ * YÜZ POZLAMA (bayrakla) → TEN ALANI → YÜZ IŞIĞI (bayrakla) → YÜZ DETAYI → ARKA PLAN → SİYAH-BEYAZ SON.
  * Açıklamalar falPhotos'taki eski kilit bloğundan; sıra aynı.
  */
 async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false }) {
   let deliverBuf = toBuf(buf);
   tpl = toBuf(tpl);
   let bgRestored = false;
+  let bodyLightRatio = null;
+  // YÜZ POZLAMASI — ten alanından ÖNCE: o adım vücut derisini yüze çektiği
+  // için sonra ölçülen yüz/vücut oranı farkı gizler (bkz. faceLight.exposurePlan).
+  try {
+    if (faceLight && tpl) {
+      const { matchFaceExposure } = require("./faceLight");
+      const fe = await matchFaceExposure(deliverBuf, tpl);
+      bodyLightRatio = fe.bodyLightRatio ?? null;
+      const n = (v) => (v != null ? v.toFixed(2) : "null");
+      const ölçü = `oran=${n(fe.ratio)} kazanç=${n(fe.gain)} renkAçısı=${n(fe.hueDiff)}°->döndürme=${n(fe.hueShift)}°[${fe.hueReason}] şablonYüz/Vücut=${n(fe.tpl)} çıktıYüz/Vücut=${n(fe.out)}`;
+      if (fe.applied && fe.buf) {
+        deliverBuf = fe.buf;
+        console.log(`YÜZ POZLAMA (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü}`);
+      } else {
+        console.log(`YÜZ POZLAMA (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fe.reason}] ${ölçü}`);
+      }
+    }
+  } catch (e) {
+    console.error("OpenAI yolu: yüz pozlaması hata verdi (atlanıyor):", e);
+  }
   // TEN TONU ALANI (2026-10-07): vücut derisini segmentasyonla bulup kolu/eli/
   // boynu yüz tonuna çeker (bkz. skinTone.js). Kıyafet/aksesuar boyanmaz.
+  // Açıklık hedefi şablonun vücut/yüz ışık oranıyla (pozlama adımı ölçer).
   try {
     const { correctSkinToneField } = require("./skinTone");
-    const st = await correctSkinToneField(deliverBuf);
+    const st = await correctSkinToneField(deliverBuf, { bodyLightRatio });
     const n = (v) => (v != null ? v.toFixed(1) : "null");
-    const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"}`;
+    const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"} vücutIşığı=${bodyLightRatio != null ? bodyLightRatio.toFixed(2) : "null"}`;
     if (st.applied && st.buf) {
       deliverBuf = st.buf;
       console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
@@ -41,18 +62,19 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false }) {
     console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
   }
 
-  // YÜZ IŞIĞI AKTARIMI — KAPALI (2026-10-09, f9f3b5c0: yüze gereksiz gölge,
-  // arka planda hale). Bayrak falPhotos FACE_LIGHT_TRANSFER.
+  // YÜZ IŞIĞI AKTARIMI — yüzün ışığı şablondan (bkz. faceLight.lightPlan).
+  // Bayrak falPhotos FACE_LIGHT_TRANSFER.
   try {
     if (faceLight && tpl) {
       const { transferFaceLight } = require("./faceLight");
       const fl = await transferFaceLight(deliverBuf, tpl);
       const n = (v) => (v != null ? v.toFixed(3) : "null");
+      const ölçü = `gölgelemeFarkı=${n(fl.diffBefore)} şablonEğim=${n(fl.tplSlope)} çıktıEğim=${n(fl.outSlope)}`;
       if (fl.applied && fl.buf) {
         deliverBuf = fl.buf;
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI gölgelemeFarkı=${n(fl.diffBefore)}`);
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI[${fl.mode}] ${ölçü}`);
       } else {
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] gölgelemeFarkı=${n(fl.diffBefore)} yawFarkı=${n(fl.yawDiff)}`);
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] ${ölçü} yawFarkı=${n(fl.yawDiff)}`);
       }
     }
   } catch (e) {

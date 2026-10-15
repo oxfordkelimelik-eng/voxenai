@@ -56,7 +56,14 @@ const MAX_LIGHT_ALLOW = 15;
 // Kayma tavanları (Lab birimi).
 const MAX_SHIFT_L = 28;
 const MAX_SHIFT_AB = 10;
-// Uzuvların yüzden farkı (açıklık, kroma, iç yayılım/2) bundan küçükse dokunulmaz.
+// ŞABLONUN VÜCUT/YÜZ IŞIK ORANI (2026-10-14): uzuv hedefi yüzün kendisi
+// olunca şablonda gölgedeki boyun/el yüz kadar parladı (yerel test c17:
+// şablon vücut/yüz 0.77, çıktıda 1.00). Hedef = yüz × şablon oranı. Piksel
+// başına değil tek oran — dövmeli kolda piksel payı kolu taşımıştı (bkz.
+// IŞIK İZİ); oran bu aralıkla sınırlı.
+const BODY_LIGHT_MIN = 0.75;
+const BODY_LIGHT_MAX = 1.05;
+// Uzuvların hedeften farkı (açıklık, kroma, iç yayılım/2) bundan küçükse dokunulmaz.
 const MIN_DELTA = 2.5;
 // Vücut derisi olasılığı: ZERO altı hiç, FULL üstü tam ağırlık (arası yumuşak).
 // Taban sıfır değil: model kıyafete de 0.05-0.15 arası olasılık veriyor ve
@@ -286,22 +293,30 @@ function sampleBilinear(F, W, H, x, y) {
  * Saf düzeltme planı (test edilebilir): ten alanı + yüz tonu -> düzeltme alanları.
  * limbW: noktanın uzuv ağırlığı (0..1).
  */
-function planCorrection(field, limbW, faceTone, N) {
+function bodyTargetL(faceL, bodyLightRatio) {
+  if (!(bodyLightRatio > 0)) return faceL;
+  const r = Math.min(BODY_LIGHT_MAX, Math.max(BODY_LIGHT_MIN, bodyLightRatio));
+  return (faceL + 16) * Math.pow(r, 2.2 / 3) - 16;
+}
+
+function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null) {
   const clamp = (v, lim) => (v > lim ? lim : v < -lim ? -lim : v);
   const limbL = [];
   for (let i = 0; i < N; i++) if (limbW[i] > 0.5) limbL.push(field.fL[i]);
   if (limbL.length < 20) return null;
   const limbMedL = median(limbL);
+  const targetL = bodyTargetL(faceTone[0], bodyLightRatio);
 
-  // HEDEF AÇIKLIK = yüz + IŞIK İZİ (noktanın uzuv medyanından sapmasının
-  // OWN_KEEP kadarı). Kolun bir ucunun koyu, öbür ucunun açık kalması (iki
-  // tonlu kol) bu sapmadır; çoğu giderilir, ışık izi kalır.
+  // HEDEF AÇIKLIK = yüz (şablonun vücut/yüz ışık oranıyla) + IŞIK İZİ
+  // (noktanın uzuv medyanından sapmasının OWN_KEEP kadarı). Kolun bir ucunun
+  // koyu, öbür ucunun açık kalması (iki tonlu kol) bu sapmadır; çoğu
+  // giderilir, ışık izi kalır.
   const dL = new Float32Array(N), dA = new Float32Array(N), dB = new Float32Array(N);
   const beforeL = [], afterL = [], beforeC = [], afterC = [];
   for (let i = 0; i < N; i++) {
     if (limbW[i] <= 0) continue;
     const allowL = clamp((field.fL[i] - limbMedL) * OWN_KEEP, MAX_LIGHT_ALLOW);
-    dL[i] = clamp((faceTone[0] + allowL - field.fL[i]) * STRENGTH, MAX_SHIFT_L);
+    dL[i] = clamp((targetL + allowL - field.fL[i]) * STRENGTH, MAX_SHIFT_L);
     dA[i] = clamp((faceTone[1] - field.fA[i]) * STRENGTH, MAX_SHIFT_AB);
     dB[i] = clamp((faceTone[2] - field.fB[i]) * STRENGTH, MAX_SHIFT_AB);
     if (limbW[i] > 0.5) {
@@ -312,7 +327,7 @@ function planCorrection(field, limbW, faceTone, N) {
   }
   const stats = {
     // Yüz − uzuv açıklık farkı (medyan) ve kroma farkı.
-    deltaLBefore: faceTone[0] - median(beforeL), deltaLAfter: faceTone[0] - median(afterL),
+    deltaLBefore: targetL - median(beforeL), deltaLAfter: targetL - median(afterL),
     chromaBefore: median(beforeC), chromaAfter: median(afterC),
     // İKİ TONLU KOL ÖLÇÜSÜ: uzuv alanındaki açıklık yayılımı (p90 − p10).
     spreadBefore: pct(beforeL, 0.9) - pct(beforeL, 0.1),
@@ -324,9 +339,10 @@ function planCorrection(field, limbW, faceTone, N) {
 
 /**
  * @param {Buffer} outputBuf  teslim edilecek kare (tam kadraj)
+ * @param {{bodyLightRatio?: number|null}} [opts]  şablonda vücut/yüz derisi parlaklık oranı
  * @returns {{buf, applied, reason, deltaLBefore, deltaLAfter, chromaBefore, chromaAfter, spreadBefore, spreadAfter, skinPx, changedPx}}
  */
-async function correctSkinToneField(outputBuf) {
+async function correctSkinToneField(outputBuf, { bodyLightRatio = null } = {}) {
   const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, ...extra });
   try {
     const { detectMainFace } = require("./faceQuality");
@@ -376,7 +392,7 @@ async function correctSkinToneField(outputBuf) {
       if (region[i] <= 0.02) continue;
       limbW[i] = region[i] * smooth01((field.conf[i] - 0.08) / 0.22);
     }
-    const plan = planCorrection(field, limbW, faceTone, N);
+    const plan = planCorrection(field, limbW, faceTone, N, bodyLightRatio);
     if (!plan) return skip("no-limb-skin", { skinPx: field.count });
     const stats = { ...plan.stats, skinPx: field.count };
     if (!plan.needed) return skip("tone-already-matches", stats);
@@ -417,5 +433,7 @@ async function correctSkinToneField(outputBuf) {
 
 module.exports = {
   correctSkinToneField,
-  _testables: { blurField, mainPersonComponent, buildSkinField, planCorrection, faceToneOf, skinHue },
+  rgbToLab,
+  labToRgb,
+  _testables: { blurField, mainPersonComponent, buildSkinField, planCorrection, bodyTargetL, faceToneOf, skinHue },
 };

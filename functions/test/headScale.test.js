@@ -116,7 +116,9 @@ test("plan: gövde örtüşmüyor ve yüz kaymışsa (yeniden kadraj) dokunulmaz
 });
 
 test("plan: ölçek sınırları", () => {
-  assert.equal(planLandmarkScale(2, { bodyIou: 0.95 }).s, MIN_SCALE);
+  assert.equal(planLandmarkScale(1.25, { bodyIou: 0.95 }).s, MIN_SCALE);
+  // 2× ölçü tespit hatasıdır; kademe uygulanmaz (bkz. RAMP_TRUST_MIN_RAW_S).
+  assert.equal(planLandmarkScale(2, { bodyIou: 0.95 }).s, 0.93);
   assert.equal(planLandmarkScale(0.5, { bodyIou: 0.95 }).s, MAX_SCALE);
 });
 
@@ -350,10 +352,24 @@ test("plan: küçültmede hacim kullanılmaz (c5 atlanmıştı)", () => {
 });
 
 // 9d9507f0 c8: 0.886 "çok küçültmüşsün"; 61079257 c2: 0.9 "çok küçülmüş".
-test("plan: küçültme MIN_SCALE'de durur, 0.9 kadar küçültmez", () => {
+// cbdbef13: 1.12-1.89 ölçülen kareler 0.93'te büyük kaldı → kademeli genişleme.
+test("plan: 0.93 ötesi küçültme kademeli, 1.14 ölçüde 0.9'un altına inmez", () => {
   const p = planLandmarkScale(1.14, { bodyIou: 0.98, volRatio: 1.07 });
-  assert.equal(p.s, MIN_SCALE);
-  assert.ok(MIN_SCALE > 0.9);
+  assert.ok(p.s > 0.9 && p.s < 0.93, `s=${p.s}`);
+  const q = planLandmarkScale(1.05, { bodyIou: 0.98 });
+  assert.ok(Math.abs(q.s - 1 / 1.05) < 1e-9);
+  const big = planLandmarkScale(1.18, { bodyIou: 0.98 });
+  assert.ok(big.s < 0.9 && big.s >= MIN_SCALE, `s=${big.s}`);
+});
+
+// cbdbef13 c17/c24: yüz oranı 1.83-1.89 tespit hatası — kademe uygulanmaz.
+test("plan: inanılmaz büyük ölçü kademeyle en dibe itilmez, 0.93'te kalır", () => {
+  for (const r of [1.83, 1.89, 1.4]) {
+    const p = planLandmarkScale(r, { bodyIou: 0.98 });
+    assert.ok(Math.abs(p.s - 0.93) < 1e-9, `oran=${r} s=${p.s}`);
+  }
+  const real = planLandmarkScale(1.22, { bodyIou: 0.98 });
+  assert.ok(real.s < 0.9, `gerçek büyüme 1.22 hâlâ kademeyle küçülür: s=${real.s}`);
 });
 
 // 2026-10-09, f9f3b5c0 c1/c4: hacim yüzle ters yönü gösterince karar çevrilmez.

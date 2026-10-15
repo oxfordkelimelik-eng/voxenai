@@ -40,6 +40,21 @@ test("uzuv zaten yüz tonundaysa düzeltme gerekmez", () => {
   assert.equal(p.needed, false);
 });
 
+test("şablonda gölgedeki vücut yüz kadar açılmaz (vücut/yüz ışık oranı)", () => {
+  const N = 100;
+  const field = fieldOf(N, () => [52, 20, 18]);
+  const limbW = new Float32Array(N).fill(1);
+  // Oran yokken uzuv yüze (66) çekilir.
+  assert.equal(T.planCorrection(field, limbW, [66, 20, 18], N).needed, true);
+  // Şablonda vücut yüzden %23 koyu (parlaklık) → Lab hedefi ~52, uzuv zaten orada.
+  const p = T.planCorrection(field, limbW, [66, 20, 18], N, 0.77);
+  assert.equal(p.needed, false);
+  assert.ok(Math.abs(T.bodyTargetL(66, 0.77) - 52) < 1, `${T.bodyTargetL(66, 0.77)}`);
+  // Oran sınırlı: dövmeli/koyu şablon kolu 0.75'in altına itmez.
+  assert.equal(T.bodyTargetL(66, 0.4), T.bodyTargetL(66, 0.75));
+  assert.equal(T.bodyTargetL(66, null), 66);
+});
+
 test("uzuv yoksa plan kurulmaz", () => {
   const N = 100;
   const field = fieldOf(N, () => [40, 20, 18]);

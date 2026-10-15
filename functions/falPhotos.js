@@ -265,7 +265,10 @@ const FREE_TIER_CHUNK_COUNT = 1;
 // 3 açıyla (0.05/0.76/0.77) yarı-profil şablonlara yakın kare yoktu.
 // Mağazadaki eski uygulama 3 göndermeye devam ettiği için ikisi de kabul.
 // Yüz ışığı aktarımı (faceLight.transferFaceLight) — bkz. YÜZ IŞIĞI AKTARIMI.
-const FACE_LIGHT_TRANSFER = false;
+// 2026-10-14 yeniden açık (kullanıcı: "yüzdeki ışık base ile aynı olmalı,
+// selfiedeki ile değil"): maske artık yüz sınırı içinde söner (hale), yumuşak
+// şablonda selfie'nin yönlü ışığı düzleştirilir.
+const FACE_LIGHT_TRANSFER = true;
 const FACE_PHOTO_COUNT = 5;
 const ALLOWED_FACE_PHOTO_COUNTS = [3, 5];
 // Bir chunk (tek görsel) fal tarafında hata verirse kaç kez yeniden denenir.
@@ -1219,6 +1222,18 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
   // gereken yerler varsa kısalt"): kurallar ve sıra aynı, hiçbir kural
   // çıkarılmadı. TASK'ın iki paragrafı birleşti; A'daki okuma prosedürü ve
   // CLEAN EDGES'in kendini tekrarlayan dikiş cümleleri sıkıştırıldı.
+  // 2026-10-14 (kullanıcı: "gözler uyuşuk yorgun gibi kapalı durmamalı"):
+  // "tabandaki ifadeyi koru" cümlesi kısık gözlü manken pozunu da taşıyordu
+  // (cbdbef13 c0/c8/c29) — ifade ağız+ruh hâline daraltıldı, göz açıklığı
+  // ayrı EYES bölümünde selfie'nin en açık karesinden isteniyor.
+  // Yerel A/B (aynı 4 şablon, 2 tur): göz kapağı cümlesi göz açıklığını
+  // 0.30-0.35'ten 0.33-0.40'a çıkardı (selfie 0.43) → kaldı. Yüzün sahneye
+  // göre parlaklığı (1.25→1.27, 1.70→1.67), kafa boyu ve "dönük kafa aynı
+  // kafatası" cümleleri ölçüyü değiştirmedi → çıkarıldı; pozlama
+  // faceLight.matchFaceExposure'da, kafa boyu headScale'de.
+  // 2026-10-15: EYES bloğu sıkıştırıldı (75 → 52 kelime). "Göz kapaklarını
+  // selfie'den yeniden çiz" selfie'nin kameraya bakışını da taşıyabilir; bakış
+  // yönü açıkça A kuralına bağlandı (bkz. vision-gaze / iris-gaze reddi).
   return (
     "TASK: The FIRST image is the BASE and your only canvas. The other images are close-up SELFIES " +
     "of the TARGET person. Replace the BASE person with the TARGET; everything else in the BASE stays " +
@@ -1237,14 +1252,19 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "same size against the shoulders and with the same lean; the neck keeps the BASE width, length " +
     "and angle. It grows from this body, never pasted on, floating, oversized, undersized or pushed " +
     "forward.\n\n" +
-    "C) LIGHT ON THE FACE: The same light direction, brightness and colour as on the BASE face " +
-    "(golden sunset, cool daylight, warm lamp, flash). Add no shadow, darkening or contrast the BASE " +
-    "face does not have. If the BASE is black and white, the whole output is black and white.\n\n" +
+    "C) LIGHT ON THE FACE — FROM THE BASE, NEVER FROM THE SELFIES: the same light direction, " +
+    "brighter and darker side and colour of light as on the BASE face (golden sunset, cool daylight, " +
+    "warm lamp, neon). Add no shadow, darkening or contrast the BASE face does not have. If the BASE " +
+    "is black and white, the whole output is black and white.\n\n" +
     "1) IDENTITY (highest priority after rule A): Copy the selfie person feature by feature: eyes, " +
     "eyebrows, nose, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
-    "beautify, symmetrise, average, round, puff, widen or stretch. Keep the BASE expression; add no " +
-    "smile. Eyes are open and clear, never half-closed or enlarged. Keep moles, freckles, scars and " +
-    "facial hair; gently clean temporary blemishes.\n\n" +
+    "beautify, symmetrise, average, round, puff, widen or stretch. Keep only the BASE mouth " +
+    "expression; add no smile. Keep moles, freckles, scars and facial hair; gently clean temporary " +
+    "blemishes.\n\n" +
+    "EYES — AWAKE, NEVER SLEEPY: Eyelids and eye opening come from the TARGET's most open selfie, " +
+    "never from the BASE person's squint or heavy lids. Lids lifted, iris clearly visible and crisp " +
+    "with a small catch-light; never drowsy or half-closed. Same eye shape and size as the selfies, " +
+    "not enlarged; the gaze still follows rule A.\n\n" +
     "2) HAIR: Hairline, density, length, texture and colour come from the selfies only, never from " +
     "the BASE person and never invented. Bald or balding stays bald or balding to the same degree.\n\n" +
     "3) SKIN TONE: One continuous TARGET tone on face, neck, chest, shoulders, arms, hands and legs, " +
@@ -1258,9 +1278,9 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "straight-edged patch or washed-out streak.\n\n" +
     "QUALITY: It must look like the BASE photo was naturally taken with the TARGET in it: an " +
     "ordinary, unedited phone photo, not a face swap or a generated image. No glow, sheen, airbrush, " +
-    "beauty filter or CGI look. The face is the sharpest region, with crisp eyes, lashes and brows " +
-    "and natural skin texture, never softer, noisier or lower-resolution than the clothing and " +
-    "background. No dark smudges on knuckles or joints."
+    "beauty filter or CGI look. The face is the sharpest region: in-focus eyes and lashes, brow " +
+    "hairs, visible pores and fine skin texture, never blurry, waxy or softer than the background. " +
+    "No dark smudges on knuckles or joints."
   );
 }
 
@@ -1283,10 +1303,12 @@ function buildEditPromptCompact() {
     "it toward the camera or re-centre it. The eyes look at the same point as the BASE eyes.\n\n" +
     "B) HEAD ON BODY: Same place, size and lean on the BASE neck; the neck keeps its width and " +
     "angle.\n\n" +
-    "C) LIGHT: Light the face like the BASE face: same direction, brightness and colour of light. Add " +
-    "no extra shadow. If the BASE is black and white, so is the face.\n\n" +
+    "C) LIGHT: Light the face like the BASE face, never like the selfies: same direction, brightness " +
+    "and colour of light. Add no extra shadow. If the BASE is black and white, so is the face.\n\n" +
     "IDENTITY: Copy the TARGET's eyes, brows, nose, lips, jaw, chin and face shape exactly. No " +
-    "beautifying or reshaping. Keep the BASE expression.\n\n" +
+    "beautifying or reshaping. Keep only the BASE mouth expression.\n\n" +
+    "EYES: Awake, never sleepy or half-closed, even if the BASE model squints; same shape and size " +
+    "as the selfies; gaze as in rule A.\n\n" +
     "HAIR: Hairline, length, texture and colour from the selfies; bald stays bald.\n\n" +
     "SKIN: One continuous TARGET tone on all visible skin.\n\n" +
     "REMOVE: Glasses and sunglasses on the face, and tattoos. Eyewear on the clothing or in a hand " +
@@ -1295,7 +1317,7 @@ function buildEditPromptCompact() {
     "BASE hair or head reached further, continue the background. Hairline, ears, jaw and neck blend " +
     "seamlessly.\n\n" +
     "QUALITY: An ordinary, unedited phone photo, not a face swap. No glow or filters. The face is the " +
-    "sharpest part of the frame."
+    "sharpest part of the frame: in-focus eyes, visible skin texture, never blurry or waxy."
   );
 }
 
@@ -3196,6 +3218,12 @@ function visionRejectionOverridden(visionReason, distance) {
 // yalnızca teşhis değil, ürün özelliğinin bir parçası, false yapılamaz.
 const SAVE_REJECTED_FRAMES = true;
 const DEBUG_ROOT = "dating_rejected";
+
+// GEÇİCİ KAFA ÖLÇEĞİ TEŞHİSİ (2026-10-13): kullanıcı küçültme UYGULANDI
+// olan karelerde küçültme ÖNCESİ hâli de görmek istedi — gerçek üretimde
+// kanıtlamak için. İşe yaradıktan sonra false yapılıp bırakılabilir
+// (dosyalar dating_debug/headscale/ altında, otomatik silinmiyor).
+const DEBUG_HEAD_SCALE_BEFORE = true;
 
 // gate string -> kullanıcıya gösterilecek Türkçe gerekçe. saveRejectedFrame
 // çağrılarındaki TÜM gate değerlerini kapsar (hem runOpenAiDirectChunk'taki
@@ -5424,6 +5452,16 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         console.log(`KAFA ÖLÇEK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[no-template]`);
       } else {
         const hs = await runPostTask("headScale", { buf: deliverBuf, tpl: tplForEyewear, templateEyewear: tplHasEyewear });
+        if (hs.applied && DEBUG_HEAD_SCALE_BEFORE) {
+          // GEÇİCİ TEŞHİS (2026-10-13, kullanıcı: "küçültmeden önceki hali de
+          // kaydedelim"). Üretimde kabul edilen karelerde küçültme ÖNCESİ hiç
+          // saklanmıyordu — yalnızca reddedilenler dating_rejected'a yazılıyordu
+          // (bkz. saveRejectedFrame). Fail-safe: hata üretimi etkilemez.
+          bucket()
+            .file(`dating_debug/headscale/${uid}/${jobId}/pre_c${chunkIdx}.jpg`)
+            .save(preScaleBuf, { metadata: { contentType: "image/jpeg" } })
+            .catch((e) => console.error("KAFA ÖLÇEK DEBUG: önce-kare kaydı başarısız (atlanıyor):", e));
+        }
         if (hs.applied && hs.inpaint) {
           pendingScale = { hs, ölçü: `${hs.ölçü} ${hs.delik}`, tpl: tplForEyewear };
         } else if (hs.applied) {
@@ -7062,6 +7100,10 @@ exports.cleanupExpiredReadyJobs = onSchedule(
 exports._testables = {
   retryCorrectionPrefix,
   buildEditPromptP800,
+  prepareTemplate,
+  orderRefsByPose,
+  generateForMode,
+  PHOTO_MODE_P800,
   headWidthMeasurement,
   TEMPLATE_RETRY_LARGE_FACE_RATIO,
   generateCountFor,

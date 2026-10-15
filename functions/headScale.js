@@ -42,7 +42,18 @@ const APPLY_MIN_DELTA = 0.03;
 // c3 "biraz küçük"; 0.9'da iyi bulunan c1/c6 ve 9d9507f0 c8'in "çok
 // küçültmüşsün" dediği 0.886 bu sınırla tutarlı. Yüz oranı 1.15+ ölçülen
 // karelerde ölçü algıdan fazlasını söylüyor (gözlüklü şablon, gür sakal).
-const MIN_SCALE = 0.93;
+// KADEMELİ GENİŞLETME (2026-10-14, kullanıcı: "kafa büyüme"): cbdbef13'te 9
+// karenin 6'sı 1.12-1.89 ölçüldü, 0.93 sınırı hepsini büyük bıraktı. Yerel
+// testte (aynı şablonlar) 0.88 c8 (1.18) ve c17 (1.22) için doğal göründü.
+// 0.93'e kadar eskisi gibi; ötesinde istenen ek küçültmenin RAMP kadarı
+// uygulanır — ölçünün algıdan fazla dediği sakallı şablonlar çok küçülmesin.
+const SOFT_MIN_SCALE = 0.93;
+const MIN_SCALE = 0.88;
+const SCALE_RAMP = 0.5;
+// Kademe yalnız inanılır ölçüye: cbdbef13 c17/c24 ham 0.546/0.529 (yüz oranı
+// 1.83-1.89) tespit hatasıydı ama kademe onları en dibe (0.88) itiyordu.
+// Gerçek büyümeler 1.12-1.23 ölçüldü; bu sınırın altı eski 0.93'te kalır.
+const RAMP_TRUST_MIN_RAW_S = 0.77;
 const MAX_SCALE = 1.05;
 // Gövdeler bu kadar örtüşüyorsa çıktı şablonla aynı kadrajda ve aynı
 // omuzlara sahiptir; gövde ölçeği 1 alınır. Silüet omuz ölçümü tek başına
@@ -358,7 +369,10 @@ function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRa
   // bırakmasın.
   if (ph.volUsed && rawS > 1) rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
   if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed };
-  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, rawS)), volUsed: ph.volUsed };
+  const soft = rawS >= SOFT_MIN_SCALE ? rawS
+    : rawS < RAMP_TRUST_MIN_RAW_S ? SOFT_MIN_SCALE
+    : SOFT_MIN_SCALE - SCALE_RAMP * (SOFT_MIN_SCALE - rawS);
+  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, soft)), volUsed: ph.volUsed };
 }
 
 /**
