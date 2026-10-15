@@ -62,19 +62,20 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false }) {
     console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
   }
 
-  // YÜZ IŞIĞI AKTARIMI — yüzün ışığı şablondan (bkz. faceLight.lightPlan).
+  // YÜZ IŞIĞI AKTARIMI — yüzün ışık YAPISI şablondan (bkz. faceShading.js;
+  // 2026-10-15'e kadar faceLight.transferFaceLight tek düz eğim taşıyordu).
   // Bayrak falPhotos FACE_LIGHT_TRANSFER.
   try {
     if (faceLight && tpl) {
-      const { transferFaceLight } = require("./faceLight");
-      const fl = await transferFaceLight(deliverBuf, tpl);
-      const n = (v) => (v != null ? v.toFixed(3) : "null");
-      const ölçü = `gölgelemeFarkı=${n(fl.diffBefore)} şablonEğim=${n(fl.tplSlope)} çıktıEğim=${n(fl.outSlope)}`;
+      const { transferFaceShading } = require("./faceShading");
+      const fl = await transferFaceShading(deliverBuf, tpl);
+      const n = (v) => (v != null ? v.toFixed(2) : "null");
+      const ölçü = `fark=${n(fl.diff)} uyumŞablon=${n(fl.r2T)} uyumÇıktı=${n(fl.r2O)} ışıkŞablon=${fl.lightT ? `[${fl.lightT}]` : "null"} ışıkÇıktı=${fl.lightO ? `[${fl.lightO}]` : "null"}`;
       if (fl.applied && fl.buf) {
         deliverBuf = fl.buf;
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI[${fl.mode}] ${ölçü}`);
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI[gölgeleme] ${ölçü}`);
       } else {
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] ${ölçü} yawFarkı=${n(fl.yawDiff)}`);
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] ${ölçü}`);
       }
     }
   } catch (e) {

@@ -264,10 +264,10 @@ const FREE_TIER_CHUNK_COUNT = 1;
 // selfie olunca (bkz. orderRefsByPose) bakış ilk denemede doğru çıkıyor —
 // 3 açıyla (0.05/0.76/0.77) yarı-profil şablonlara yakın kare yoktu.
 // Mağazadaki eski uygulama 3 göndermeye devam ettiği için ikisi de kabul.
-// Yüz ışığı aktarımı (faceLight.transferFaceLight) — bkz. YÜZ IŞIĞI AKTARIMI.
-// 2026-10-14 yeniden açık (kullanıcı: "yüzdeki ışık base ile aynı olmalı,
-// selfiedeki ile değil"): maske artık yüz sınırı içinde söner (hale), yumuşak
-// şablonda selfie'nin yönlü ışığı düzleştirilir.
+// Yüz ışığı: pozlama + renk (faceLight.matchFaceExposure) ve ışık yapısı
+// (faceShading.transferFaceShading) — bkz. postTasks.layers. 2026-10-14
+// yeniden açık (kullanıcı: "yüzdeki ışık base ile aynı olmalı, selfiedeki
+// ile değil").
 const FACE_LIGHT_TRANSFER = true;
 const FACE_PHOTO_COUNT = 5;
 const ALLOWED_FACE_PHOTO_COUNTS = [3, 5];
