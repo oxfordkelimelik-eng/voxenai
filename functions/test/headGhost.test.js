@@ -40,3 +40,16 @@ test("kırpım kafanın üstünü ve yanlarını kapsar, görüntü dışına ta
   const edge = headCropRect({ x: 10, y: 5, width: 100, height: 120 }, 300, 400);
   assert.ok(edge.left >= 0 && edge.top >= 0 && edge.left + edge.width <= 300 && edge.top + edge.height <= 400);
 });
+
+// c29a2b31 c1: küçültme sonrası eski büyük kafanın koyu izi ilk soruyla
+// kaçtı; ikinci soru küçültme öncesi kareyle, sıkı kırpımla karşılaştırır.
+test("küçültme izi sorusu: eski kafayı arar, dolgu bulanıklığını iz saymaz, aynı biçimde cevap", () => {
+  const { SCALE_PROMPT, judgeScaleResidue } = require("../headGhost");
+  assert.equal(typeof judgeScaleResidue, "function");
+  assert.match(SCALE_PROMPT, /BIGGER head from IMAGE 1/);
+  assert.match(SCALE_PROMPT, /slightly blurred patch of plain background where the old head was filled in/);
+  assert.match(SCALE_PROMPT, /LEFTOVER: <NONE \| GHOST>/);
+  const r = parseHeadGhostReply("ABOVE: dark hair-shaped bump\nLEFT: bottles\nRIGHT: bottles\nLEFTOVER: GHOST\nWHERE: ABOVE");
+  assert.equal(r.bad, true);
+  assert.equal(r.where, "ABOVE");
+});

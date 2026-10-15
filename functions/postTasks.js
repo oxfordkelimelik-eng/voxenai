@@ -17,36 +17,43 @@ function plainInpaint(inp) {
 }
 
 /**
- * YÜZ POZLAMA (bayrakla) → TEN ALANI → YÜZ IŞIĞI (bayrakla) → YÜZ DETAYI → ARKA PLAN → SİYAH-BEYAZ SON.
- * Açıklamalar falPhotos'taki eski kilit bloğundan; sıra aynı.
+ * YÜZ IŞIĞI (bayrakla) → TEN ALANI → YÜZ DETAYI → ARKA PLAN → SİYAH-BEYAZ SON.
+ * Açıklamalar falPhotos'taki eski kilit bloğundan.
  */
-async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false }) {
+async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, templateEyewear = false }) {
   let deliverBuf = toBuf(buf);
   tpl = toBuf(tpl);
   let bgRestored = false;
   let bodyLightRatio = null;
-  // YÜZ POZLAMASI — ten alanından ÖNCE: o adım vücut derisini yüze çektiği
-  // için sonra ölçülen yüz/vücut oranı farkı gizler (bkz. faceLight.exposurePlan).
+  // YÜZ IŞIĞI VE TENİ (2026-10-16, bkz. faceRelight.js) — base'in ışık deseni
+  // yüze, yüzün parlaklığı/rengi kişinin kendi boynuna. Ten alanından ÖNCE:
+  // o adım kolu/eli yüze çeker, yüz önce doğru yerde olmalı. 2026-10-14/15'teki
+  // pozlama (faceLight.matchFaceExposure) ve küresel harmonik gölgeleme
+  // (faceShading.transferFaceShading) bunun yerine geçti.
   try {
     if (faceLight && tpl) {
-      const { matchFaceExposure } = require("./faceLight");
-      const fe = await matchFaceExposure(deliverBuf, tpl);
-      bodyLightRatio = fe.bodyLightRatio ?? null;
-      const n = (v) => (v != null ? v.toFixed(2) : "null");
-      const ölçü = `oran=${n(fe.ratio)} kazanç=${n(fe.gain)} renkAçısı=${n(fe.hueDiff)}°->döndürme=${n(fe.hueShift)}°[${fe.hueReason}] şablonYüz/Vücut=${n(fe.tpl)} çıktıYüz/Vücut=${n(fe.out)}`;
-      if (fe.applied && fe.buf) {
-        deliverBuf = fe.buf;
-        console.log(`YÜZ POZLAMA (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü}`);
+      const { relightFace } = require("./faceRelight");
+      const fl = await relightFace(deliverBuf, tpl, { templateEyewear });
+      const n = (v, d = 2) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
+      const tp = fl.tone || {};
+      // Ten alanının hedefi: base'de boyun/yüz parlaklık oranı.
+      if (tp.tplOk && tp.rT > 0) bodyLightRatio = 1 / tp.rT;
+      const ölçü = `desen=${fl.pattern ? n(fl.patternMean, 3) : "kapalı"} desenUyumu=${n(fl.corrBefore)} ` +
+        `ton[${tp.reason || "boyun"}] parlaklık=${n(tp.level != null ? Math.exp(tp.level) : null)} renkAçısı=${n(tp.hueShift, 1)}° doygunluk=${n(tp.chromaGain)} ` +
+        `şablonYüz/Boyun=${n(tp.rT)} çıktıYüz/Boyun=${n(tp.rO)} profil=${fl.profile ? 1 : 0}`;
+      if (fl.applied && fl.buf) {
+        deliverBuf = fl.buf;
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü}`);
       } else {
-        console.log(`YÜZ POZLAMA (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fe.reason}] ${ölçü}`);
+        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] ${ölçü}`);
       }
     }
   } catch (e) {
-    console.error("OpenAI yolu: yüz pozlaması hata verdi (atlanıyor):", e);
+    console.error("OpenAI yolu: yüz ışığı hata verdi (atlanıyor):", e);
   }
   // TEN TONU ALANI (2026-10-07): vücut derisini segmentasyonla bulup kolu/eli/
   // boynu yüz tonuna çeker (bkz. skinTone.js). Kıyafet/aksesuar boyanmaz.
-  // Açıklık hedefi şablonun vücut/yüz ışık oranıyla (pozlama adımı ölçer).
+  // Açıklık hedefi şablonun boyun/yüz ışık oranıyla (yüz ışığı adımı ölçer).
   try {
     const { correctSkinToneField } = require("./skinTone");
     const st = await correctSkinToneField(deliverBuf, { bodyLightRatio });
@@ -60,26 +67,6 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false }) {
     }
   } catch (e) {
     console.error("OpenAI yolu: ten tonu alan düzeltmesi hata verdi (atlanıyor):", e);
-  }
-
-  // YÜZ IŞIĞI AKTARIMI — yüzün ışık YAPISI şablondan (bkz. faceShading.js;
-  // 2026-10-15'e kadar faceLight.transferFaceLight tek düz eğim taşıyordu).
-  // Bayrak falPhotos FACE_LIGHT_TRANSFER.
-  try {
-    if (faceLight && tpl) {
-      const { transferFaceShading } = require("./faceShading");
-      const fl = await transferFaceShading(deliverBuf, tpl);
-      const n = (v) => (v != null ? v.toFixed(2) : "null");
-      const ölçü = `fark=${n(fl.diff)} uyumŞablon=${n(fl.r2T)} uyumÇıktı=${n(fl.r2O)} ışıkŞablon=${fl.lightT ? `[${fl.lightT}]` : "null"} ışıkÇıktı=${fl.lightO ? `[${fl.lightO}]` : "null"}`;
-      if (fl.applied && fl.buf) {
-        deliverBuf = fl.buf;
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI[gölgeleme] ${ölçü}`);
-      } else {
-        console.log(`YÜZ IŞIĞI (style=${styleId}, chunk=${chunkIdx}): ATLANDI[${fl.reason}] ${ölçü}`);
-      }
-    }
-  } catch (e) {
-    console.error("OpenAI yolu: yüz ışığı aktarımı hata verdi (atlanıyor):", e);
   }
 
   // YÜZ DETAYI EŞİTLEME (2026-10-08, "kıyafet kaliteli, yüz kalitesiz"):

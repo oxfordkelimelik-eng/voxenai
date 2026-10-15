@@ -110,7 +110,7 @@ function headCropRect(faceBox, W, H) {
  * @param {{x,y,width,height}} faceBox çıktıdaki yüz kutusu
  * @param {string} apiKey
  */
-async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_GHOST_MODEL } = {}) {
+async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_GHOST_MODEL, prompt = PROMPT, rectOf = headCropRect, enhance = false } = {}) {
   try {
     if (!Buffer.isBuffer(buf) || !Buffer.isBuffer(templateBuf) || !faceBox || !apiKey) {
       return { ok: false, reason: "insufficient-input" };
@@ -120,11 +120,15 @@ async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_
     if (faceBox.width < FACE_MIN_BOX_PX || faceBox.height < FACE_MIN_BOX_PX) {
       return { ok: false, reason: "face-too-small" };
     }
-    const r = headCropRect(faceBox, meta.width, meta.height);
+    const r = rectOf(faceBox, meta.width, meta.height);
     const scale = CROP_LONG_EDGE / Math.max(r.width, r.height);
     const size = [Math.max(1, Math.round(r.width * scale)), Math.max(1, Math.round(r.height * scale))];
     const tFull = await sharp(templateBuf).rotate().resize(meta.width, meta.height, { fit: "fill" }).toBuffer();
-    const crop = async (b) => sharp(b).extract(r).resize(size[0], size[1], { fit: "fill" }).jpeg({ quality: 92 }).toBuffer();
+    const crop = async (b) => {
+      let img = sharp(b).extract(r).resize(size[0], size[1], { fit: "fill" });
+      if (enhance) img = img.normalise({ lower: 1, upper: 99 });
+      return img.jpeg({ quality: 92 }).toBuffer();
+    };
     const [tCrop, oCrop] = await Promise.all([crop(tFull), crop(buf)]);
     const img = (b) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}`, detail: "high" } });
     const resp = await fetch(OPENAI_CHAT_URL, {
@@ -136,7 +140,7 @@ async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_
         ...(/^gpt-5|^o\d/.test(model) ? { max_completion_tokens: 4000 } : { temperature: 0, max_tokens: 120 }),
         messages: [
           { role: "system", content: SYSTEM_MSG },
-          { role: "user", content: [{ type: "text", text: PROMPT }, img(tCrop), img(oCrop)] },
+          { role: "user", content: [{ type: "text", text: prompt }, img(tCrop), img(oCrop)] },
         ],
       }),
     });
@@ -153,6 +157,57 @@ async function judgeHeadGhost(buf, templateBuf, faceBox, apiKey, { model = HEAD_
     console.error("Kafa kalıntı yargısı hata verdi (atlanıyor):", e.message || e);
     return { ok: false, reason: "error" };
   }
+}
+
+// KÜÇÜLTME İZİ (2026-10-16, c29a2b31 c1): kafa küçültüldükten sonra eski,
+// büyük kafanın yarı saydam koyu izi saçın üstünde kaldı ve judgeHeadGhost
+// "kalıntı yok" dedi — o soru ŞABLON kişisinin izini arar ve "yeni adamın
+// kendi saçı kalıntı değildir" der; buradaki iz yeni adamın kendi eski
+// boyudur. Bu soru küçültme ÖNCESİ kareyle karşılaştırır. Kişi maskesi
+// saçın üstündeki koyu kirişi saç sayıp kafayla taşıyordu; piksel ölçüleri
+// (delikte saç olasılığı, maskede kafa olmayan pus) izi saç gördü.
+const SCALE_PROMPT =
+  "Two crops of the same photo. In IMAGE 2 the man's head was made smaller than in IMAGE 1 " +
+  "and the uncovered area was filled with background.\n\n" +
+  "Step 1. Describe, in 3 to 8 plain words each, exactly what is visible in IMAGE 2 just " +
+  "outside the smaller head and hair:\n" +
+  "ABOVE: the area right above his hair\n" +
+  "LEFT: the area right beside the left side of his head\n" +
+  "RIGHT: the area right beside the right side of his head\n\n" +
+  "Step 2. Decide. Answer GHOST only if in one of those places IMAGE 2 clearly shows a " +
+  "leftover of the BIGGER head from IMAGE 1: a dark or see-through HAIR-SHAPED bump or cap, a " +
+  "second hair outline above or beside the real one, in the shape of the old head, sitting over " +
+  "the background. NOT a ghost: the smaller head's own hair, background objects that also " +
+  "appear in IMAGE 1, and a smooth, soft or slightly blurred patch of plain background where the " +
+  "old head was filled in. When unsure, answer NONE.\n\n" +
+  "Reply on exactly five lines:\n" +
+  "ABOVE: <words>\n" +
+  "LEFT: <words>\n" +
+  "RIGHT: <words>\n" +
+  "LEFTOVER: <NONE | GHOST>\n" +
+  "WHERE: <ABOVE | LEFT | RIGHT | NONE>";
+
+/**
+ * Küçültme sonrası eski kafanın izi var mı? preBuf: küçültme öncesi kare,
+ * buf: sonrası (aynı boyut). Döner judgeHeadGhost ile aynı biçim.
+ * FAIL-SAFE: okunamazsa { ok:false } — çağıran elemez.
+ */
+async function judgeScaleResidue(buf, preBuf, faceBox, apiKey, { model = HEAD_GHOST_MODEL } = {}) {
+  return judgeHeadGhost(buf, preBuf, faceBox, apiKey, { model, prompt: SCALE_PROMPT, rectOf: headTopCropRect, enhance: true });
+}
+
+/**
+ * Kafanın üstü ve yanları, sıkı kırpım (yüz kutusu cinsinden). Geniş
+ * kırpımda ve karanlık sahnede iz görünmedi (c1: iki denemede NONE); bu
+ * kırpım + kontrast açma ile c1 GHOST 2/2, temiz c7 NONE 2/2. SAF.
+ */
+function headTopCropRect(faceBox, W, H) {
+  const cx = faceBox.x + faceBox.width / 2;
+  const left = Math.max(0, Math.round(cx - 1.2 * faceBox.width));
+  const top = Math.max(0, Math.round(faceBox.y - 1.1 * faceBox.height));
+  const right = Math.min(W, Math.round(cx + 1.2 * faceBox.width));
+  const bottom = Math.min(H, Math.round(faceBox.y + 0.4 * faceBox.height));
+  return { left, top, width: Math.max(16, right - left), height: Math.max(16, bottom - top) };
 }
 
 // ŞABLONDA GÖZLÜK (2026-10-10, kullanıcı kararı: "base'de gözlük varsa
@@ -209,4 +264,4 @@ async function judgeEyewear(templateBuf, faceBox, apiKey) {
   }
 }
 
-module.exports = { judgeHeadGhost, parseHeadGhostReply, headCropRect, judgeEyewear, parseEyewearReply, PROMPT };
+module.exports = { judgeHeadGhost, judgeScaleResidue, parseHeadGhostReply, headCropRect, judgeEyewear, parseEyewearReply, PROMPT, SCALE_PROMPT };

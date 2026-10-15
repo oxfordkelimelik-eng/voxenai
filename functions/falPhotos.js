@@ -264,10 +264,9 @@ const FREE_TIER_CHUNK_COUNT = 1;
 // selfie olunca (bkz. orderRefsByPose) bakış ilk denemede doğru çıkıyor —
 // 3 açıyla (0.05/0.76/0.77) yarı-profil şablonlara yakın kare yoktu.
 // Mağazadaki eski uygulama 3 göndermeye devam ettiği için ikisi de kabul.
-// Yüz ışığı: pozlama + renk (faceLight.matchFaceExposure) ve ışık yapısı
-// (faceShading.transferFaceShading) — bkz. postTasks.layers. 2026-10-14
-// yeniden açık (kullanıcı: "yüzdeki ışık base ile aynı olmalı, selfiedeki
-// ile değil").
+// Yüz ışığı ve teni: base'in ışık deseni + kişinin kendi boynuna göre ton
+// (faceRelight.relightFace) — bkz. postTasks.layers. 2026-10-14 yeniden açık
+// (kullanıcı: "yüzdeki ışık base ile aynı olmalı, selfiedeki ile değil").
 const FACE_LIGHT_TRANSFER = true;
 const FACE_PHOTO_COUNT = 5;
 const ALLOWED_FACE_PHOTO_COUNTS = [3, 5];
@@ -1230,10 +1229,14 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
   // 0.30-0.35'ten 0.33-0.40'a çıkardı (selfie 0.43) → kaldı. Yüzün sahneye
   // göre parlaklığı (1.25→1.27, 1.70→1.67), kafa boyu ve "dönük kafa aynı
   // kafatası" cümleleri ölçüyü değiştirmedi → çıkarıldı; pozlama
-  // faceLight.matchFaceExposure'da, kafa boyu headScale'de.
-  // 2026-10-15: EYES bloğu sıkıştırıldı (75 → 52 kelime). "Göz kapaklarını
-  // selfie'den yeniden çiz" selfie'nin kameraya bakışını da taşıyabilir; bakış
-  // yönü açıkça A kuralına bağlandı (bkz. vision-gaze / iris-gaze reddi).
+  // faceRelight'ta (2026-10-16'ya kadar faceLight.matchFaceExposure), kafa
+  // boyu headScale'de.
+  // 2026-10-16 GERİ ALINDI (kullanıcı, c29a2b31 c3/c6: "prompt değişikliği
+  // öncesi bakışlar tutuyordu"): EYES bölümü "göz kapakları ve açıklığı
+  // selfie'den" diyordu — selfie'nin merceğe bakan gözü de geldi; c6'da base
+  // irisi göz köşesinde (0.76), çıktıda ortada (0.58). İfade ve göz cümlesi
+  // 2026-10-13 hâline döndü: model yönlendirilmediğinde base bakışını
+  // kendiliğinden taklit ediyor (bkz. bakış yönünü prompt'a yazma denemesi).
   return (
     "TASK: The FIRST image is the BASE and your only canvas. The other images are close-up SELFIES " +
     "of the TARGET person. Replace the BASE person with the TARGET; everything else in the BASE stays " +
@@ -1258,13 +1261,9 @@ function buildEditPromptP800(identityCaption, bodyProfile) {
     "is black and white, the whole output is black and white.\n\n" +
     "1) IDENTITY (highest priority after rule A): Copy the selfie person feature by feature: eyes, " +
     "eyebrows, nose, lips, jaw, chin, cheekbones, face outline and length-to-width ratio. Do not " +
-    "beautify, symmetrise, average, round, puff, widen or stretch. Keep only the BASE mouth " +
-    "expression; add no smile. Keep moles, freckles, scars and facial hair; gently clean temporary " +
-    "blemishes.\n\n" +
-    "EYES — AWAKE, NEVER SLEEPY: Eyelids and eye opening come from the TARGET's most open selfie, " +
-    "never from the BASE person's squint or heavy lids. Lids lifted, iris clearly visible and crisp " +
-    "with a small catch-light; never drowsy or half-closed. Same eye shape and size as the selfies, " +
-    "not enlarged; the gaze still follows rule A.\n\n" +
+    "beautify, symmetrise, average, round, puff, widen or stretch. Keep the BASE expression; add no " +
+    "smile. Eyes are open and clear, never half-closed or enlarged. Keep moles, freckles, scars and " +
+    "facial hair; gently clean temporary blemishes.\n\n" +
     "2) HAIR: Hairline, density, length, texture and colour come from the selfies only, never from " +
     "the BASE person and never invented. Bald or balding stays bald or balding to the same degree.\n\n" +
     "3) SKIN TONE: One continuous TARGET tone on face, neck, chest, shoulders, arms, hands and legs, " +
@@ -1306,9 +1305,7 @@ function buildEditPromptCompact() {
     "C) LIGHT: Light the face like the BASE face, never like the selfies: same direction, brightness " +
     "and colour of light. Add no extra shadow. If the BASE is black and white, so is the face.\n\n" +
     "IDENTITY: Copy the TARGET's eyes, brows, nose, lips, jaw, chin and face shape exactly. No " +
-    "beautifying or reshaping. Keep only the BASE mouth expression.\n\n" +
-    "EYES: Awake, never sleepy or half-closed, even if the BASE model squints; same shape and size " +
-    "as the selfies; gaze as in rule A.\n\n" +
+    "beautifying or reshaping. Keep the BASE expression.\n\n" +
     "HAIR: Hairline, length, texture and colour from the selfies; bald stays bald.\n\n" +
     "SKIN: One continuous TARGET tone on all visible skin.\n\n" +
     "REMOVE: Glasses and sunglasses on the face, and tattoos. Eyewear on the clothing or in a hand " +
@@ -3224,6 +3221,10 @@ const DEBUG_ROOT = "dating_rejected";
 // kanıtlamak için. İşe yaradıktan sonra false yapılıp bırakılabilir
 // (dosyalar dating_debug/headscale/ altında, otomatik silinmiyor).
 const DEBUG_HEAD_SCALE_BEFORE = true;
+// GEÇİCİ IŞIK TEŞHİSİ (2026-10-16): son katmanlara GİRMEDEN önceki kare
+// (dating_debug/layers/). c29a2b31'de yalnız katman sonrası vardı; yeni yüz
+// ışığını aynı girdiyle eskisiyle kıyaslamak mümkün olmadı.
+const DEBUG_SAVE_PRE_LAYERS = true;
 
 // gate string -> kullanıcıya gösterilecek Türkçe gerekçe. saveRejectedFrame
 // çağrılarındaki TÜM gate değerlerini kapsar (hem runOpenAiDirectChunk'taki
@@ -4192,6 +4193,30 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     releaseMandatoryReserve();
     CHUNK_TEMPLATE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
     CHUNK_RESTORE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
+  }
+}
+
+/**
+ * KÜÇÜLTME SONRASI KALINTI: önce şablon kişisinin izi (judgeHeadGhost), o
+ * temizse küçültme öncesi kareyle karşılaştırıp eski büyük kafanın izi
+ * (judgeScaleResidue — 2026-10-16, c29a2b31 c1: saçın üstünde koyu yarı
+ * saydam başlık kaldı, ilk soru "yok" dedi). FAIL-SAFE: hata/okunamayan
+ * cevap elemez. Döner judgeHeadGhost biçimi ya da null.
+ */
+async function judgeScaledHead(out, tpl, preBuf) {
+  try {
+    const { judgeHeadGhost, judgeScaleResidue } = require("./headGhost");
+    const { detectMainFace } = require("./faceQuality");
+    const fd = (await detectMainFace(out)) || (await detectMainFace(out, LOW_CONF_FACE));
+    if (!fd || !fd.box) return null;
+    const ghost = await judgeHeadGhost(out, tpl, fd.box, OPENAI_KEY.value());
+    if ((ghost && ghost.ok && ghost.bad) || !Buffer.isBuffer(preBuf)) return ghost;
+    const res = await judgeScaleResidue(out, preBuf, fd.box, OPENAI_KEY.value());
+    if (res && res.ok && res.bad) return { ...res, where: `küçültmeİzi-${res.where}` };
+    return ghost && ghost.ok ? ghost : res;
+  } catch (e) {
+    console.error("OpenAI yolu: küçültme sonrası kalıntı kontrolü hata verdi (atlanıyor):", e);
+    return null;
   }
 }
 
@@ -5427,8 +5452,17 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // görev (bkz. postTasks.layers; açıklamalar orada). Worker havuzu varsa
     // kareler paralel, yoksa eskisi gibi kilitte sırayla.
     let bgRestored = false;
+    if (DEBUG_SAVE_PRE_LAYERS) {
+      bucket()
+        .file(`dating_debug/layers/${uid}/${jobId}/raw_c${chunkIdx}.jpg`)
+        .save(deliverBuf, { metadata: { contentType: "image/jpeg" } })
+        .catch((e) => console.error("IŞIK DEBUG: katman öncesi kare kaydı başarısız (atlanıyor):", e));
+    }
     try {
-      const r = await runPostTask("layers", { buf: deliverBuf, tpl: Buffer.isBuffer(tplForEyewear) ? tplForEyewear : null, styleId, chunkIdx, faceLight: FACE_LIGHT_TRANSFER });
+      const r = await runPostTask("layers", {
+        buf: deliverBuf, tpl: Buffer.isBuffer(tplForEyewear) ? tplForEyewear : null, styleId, chunkIdx,
+        faceLight: FACE_LIGHT_TRANSFER, templateEyewear: tplHasEyewear,
+      });
       deliverBuf = r.buf;
       bgRestored = r.bgRestored;
     } catch (e) {
@@ -5516,14 +5550,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           // dışıysa (ham karede de iz görüyordu) sorulmaz.
           let ghost = null;
           if (out && Buffer.isBuffer(scaled.tpl) && !disabledGates.has("head-ghost")) {
-            try {
-              const { judgeHeadGhost } = require("./headGhost");
-              const { detectMainFace } = require("./faceQuality");
-              const fd = (await detectMainFace(out)) || (await detectMainFace(out, LOW_CONF_FACE));
-              if (fd && fd.box) ghost = await judgeHeadGhost(out, scaled.tpl, fd.box, OPENAI_KEY.value());
-            } catch (e) {
-              console.error("OpenAI yolu: küçültme sonrası kalıntı kontrolü hata verdi (atlanıyor):", e);
-            }
+            ghost = await judgeScaledHead(out, scaled.tpl, preScaleBuf);
           }
           const gk = ghost ? (ghost.ok ? (ghost.bad ? `kalıntı=VAR(${ghost.where}: ${ghost.detail})` : "kalıntı=yok") : `kalıntı=ölçülemedi[${ghost.reason}]`) : "kalıntı=sorulmadı";
           if (!out) {
@@ -5572,14 +5599,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         // bu chunk'ta devre dışıysa (ham karede de iz görüyordu) sorulmaz.
         let ghost = null;
         if (fin.buf && Buffer.isBuffer(tpl) && !disabledGates.has("head-ghost")) {
-          try {
-            const { judgeHeadGhost } = require("./headGhost");
-            const { detectMainFace } = require("./faceQuality");
-            const fd = (await detectMainFace(fin.buf)) || (await detectMainFace(fin.buf, LOW_CONF_FACE));
-            if (fd && fd.box) ghost = await judgeHeadGhost(fin.buf, tpl, fd.box, OPENAI_KEY.value());
-          } catch (e) {
-            console.error("OpenAI yolu: küçültme sonrası kalıntı kontrolü hata verdi (atlanıyor):", e);
-          }
+          ghost = await judgeScaledHead(fin.buf, tpl, preScaleBuf);
         }
         const gk = ghost ? (ghost.ok ? (ghost.bad ? `kalıntı=VAR(${ghost.where}: ${ghost.detail})` : "kalıntı=yok") : `kalıntı=ölçülemedi[${ghost.reason}]`) : "kalıntı=sorulmadı";
         if (fin.buf && ghost && ghost.ok && ghost.bad) {

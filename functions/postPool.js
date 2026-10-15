@@ -36,7 +36,9 @@ function spawn() {
   const w = new Worker(path.join(__dirname, "postWorker.js"));
   w.unref();
   w.current = null;
-  w.on("message", ({ id, ok, result, error }) => {
+  w.on("message", ({ id, ok, result, error, logs }) => {
+    // Worker'ın logları burada yazılır (bkz. postWorker.js).
+    for (const [level, line] of logs || []) (level === "error" ? console.error : level === "warn" ? console.warn : console.log)(line);
     const t = w.current;
     w.current = null;
     if (t && t.id === id) {

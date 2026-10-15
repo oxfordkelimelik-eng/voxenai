@@ -15,8 +15,11 @@
 // öğrenilir; çıktı, ÇIKTININ KENDİ normallerinde H·l_şablon / H·l_çıktı oranıyla
 // çarpılır. Şablondan yalnızca 9 sayı geçtiği için onun kişisine ait hiçbir
 // ayrıntı (gözlük camı, parlama, sakal) taşınamaz; burun gölgesi ise çıktının
-// kendi burnunun yanına düşer. Ortalama korunur — yüz parlaklığı
-// faceLight.matchFaceExposure'ın işi.
+// kendi burnunun yanına düşer. Ortalama korunur.
+//
+// 2026-10-16'dan beri ZİNCİRDE DEĞİL: tek geçişte farkın ~%10'unu kapattı
+// (c29a2b31 c7), yerine faceRelight.js geldi. Buradaki kanonik yüz, üçgenleme,
+// poz ve maske yardımcıları faceRelight'ta kullanılıyor.
 
 const sharp = require("sharp");
 
