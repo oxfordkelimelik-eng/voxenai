@@ -16,8 +16,8 @@ test("usageCostUsd: gpt-image-2 ana üretim ve low dolgu ölçülen değerlerle"
   assert.ok(Math.abs(usageCostUsd("bilinmeyen", { prompt_tokens: 1000, completion_tokens: 100 }) - 0.0035) < 1e-9);
 });
 
-test("costLimitFor: 10 kare 1.50 $, tek kare tabanı", () => {
-  assert.equal(costLimitFor(10), 1.5);
+test("costLimitFor: 10 kare 1.65 $, tek kare tabanı", () => {
+  assert.ok(Math.abs(costLimitFor(10) - 1.65) < 1e-9);
   assert.equal(costLimitFor(1), 0.2);
 });
 
@@ -48,7 +48,7 @@ test("defter: bağlam yoksa sınırsız (test/başka fonksiyon)", () => {
   assert.ok(recordUsage("gpt-4o", { prompt_tokens: 10, completion_tokens: 1 }) > 0);
 });
 
-test("defter: 10 karelik tipik iş 1.50 $ altında kalır, en kötü durumda isteğe bağlı adımlar kesilir", async () => {
+test("defter: 10 karelik tipik iş 1.65 $ altında kalır, en kötü durumda isteğe bağlı adımlar kesilir", async () => {
   const L = createLedger(10);
   const gen = { input_tokens: 6900, input_tokens_details: { text_tokens: 800, image_tokens: 6100 }, output_tokens: 1630 };
   const vis = { prompt_tokens: 3900, completion_tokens: 150 };
@@ -70,4 +70,32 @@ test("defter: 10 karelik tipik iş 1.50 $ altında kalır, en kötü durumda ist
   })));
   assert.ok(L.spentUsd <= L.limitUsd + 1e-9, `harcanan ${L.spentUsd}`);
   assert.ok(Math.abs(L.reservedUsd) < 1e-9);
+});
+
+test("waitReserveOptional: yer yoksa bekler, başka adım bitince ayırır (dd788c00)", async () => {
+  const { waitReserveOptional } = require("../jobContext");
+  const L = createLedger(1, 0.3); // pay 0.13
+  await jobClock.run(chunkContext(0, L), async () => {
+    const other = tryReserveOptional(0.12); // 0.25 dolu
+    assert.ok(other);
+    setTimeout(() => other.release(), 30);
+    const r = await waitReserveOptional(0.1, { maxWaitMs: 1000, stepMs: 10 });
+    assert.ok(r.slot, "yer açılınca ayrılmalı");
+    assert.ok(r.waitedMs >= 20);
+    assert.equal(L.skipped, 0);
+  });
+});
+
+test("waitReserveOptional: süre dolar ya da keepWaiting false ise null, bir kez sayılır", async () => {
+  const { waitReserveOptional } = require("../jobContext");
+  const L = createLedger(1, 0.2);
+  await jobClock.run(chunkContext(0, L), async () => {
+    const r = await waitReserveOptional(0.1, { maxWaitMs: 50, stepMs: 10 });
+    assert.equal(r.slot, null);
+    assert.equal(L.skipped, 1);
+    const q = await waitReserveOptional(0.1, { maxWaitMs: 1000, stepMs: 10, keepWaiting: () => false });
+    assert.equal(q.slot, null);
+    assert.ok(q.waitedMs < 100);
+    assert.equal(L.skipped, 2);
+  });
 });

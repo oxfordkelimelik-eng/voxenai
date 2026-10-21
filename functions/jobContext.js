@@ -28,7 +28,10 @@ const PRICES = {
 };
 const FALLBACK_CHAT = PRICES["gpt-4o"];
 
-const COST_LIMIT_PER_FRAME_USD = 0.15; // 10 kare = 1.50 $
+// 2026-10-19 kullanıcı kararları: 1.50 → 1.55 $ (yön sapan karede ikinci
+// üretim, bkz. falPhotos resampleIfYawDrifts), aynı gün → 1.65 $ (ilk canlı
+// işte dd788c00 sapan kareler bütçeye sığmadı).
+const COST_LIMIT_PER_FRAME_USD = 0.165; // 10 kare = 1.65 $
 const COST_LIMIT_MIN_USD = 0.2; // tek karelik işlerde (ücretsiz deneme) gözlük+dolguya yer kalsın
 // Chunk başına zorunlu pay: ana üretim (~0.100) + iki Vision çağrısı (~0.015)
 // + kalıntı yargısı (~0.004), üstüne küçük güvenlik payı.
@@ -101,14 +104,40 @@ function releaseMandatoryReserve() {
 function tryReserveOptional(estUsd) {
   const st = jobClock.getStore();
   if (!st || !st.ledger) return { release() {} };
-  const L = st.ledger;
-  if (L.spentUsd + L.reservedUsd + estUsd > L.limitUsd + 1e-9) {
-    L.skipped++;
-    return null;
-  }
+  const slot = takeSlot(st.ledger, estUsd);
+  if (!slot) st.ledger.skipped++;
+  return slot;
+}
+
+function takeSlot(L, estUsd) {
+  if (L.spentUsd + L.reservedUsd + estUsd > L.limitUsd + 1e-9) return null;
   L.reservedUsd += estUsd;
   let done = false;
   return { release() { if (!done) { done = true; L.reservedUsd -= estUsd; } } };
+}
+
+/**
+ * tryReserveOptional gibi, ama yer yoksa hemen vazgeçmez: paralel karelerin
+ * zorunlu payları (ayrılan ama harcanmayan) ve diğer isteğe bağlı adımlar
+ * bittikçe yer açılır. stepMs aralıkla yeniden dener; maxWaitMs dolunca ya da
+ * keepWaiting() false dönünce null (atlanan adım bir kez sayılır). Dönüşte
+ * waitedMs: beklenen süre (log için). İlk canlı işte (dd788c00) sapan
+ * kareler aynı saniyelerde geldi, ilki yeri kaptı, ötekiler atlandı; iş
+ * sonunda bütçe yine de dolmamıştı.
+ */
+async function waitReserveOptional(estUsd, { maxWaitMs = 120000, stepMs = 3000, keepWaiting = () => true } = {}) {
+  const st = jobClock.getStore();
+  if (!st || !st.ledger) return { slot: { release() {} }, waitedMs: 0 };
+  const t0 = Date.now();
+  for (;;) {
+    const slot = takeSlot(st.ledger, estUsd);
+    if (slot) return { slot, waitedMs: Date.now() - t0 };
+    if (Date.now() - t0 + stepMs > maxWaitMs || !keepWaiting()) {
+      st.ledger.skipped++;
+      return { slot: null, waitedMs: Date.now() - t0 };
+    }
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
 }
 
 function ledgerSummary() {
@@ -125,6 +154,7 @@ module.exports = {
   recordUsage,
   releaseMandatoryReserve,
   tryReserveOptional,
+  waitReserveOptional,
   ledgerSummary,
   PRICES,
   COST_LIMIT_PER_FRAME_USD,

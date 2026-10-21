@@ -76,7 +76,24 @@ const FACE_ALIGNED_SHIFT = 0.35;
 // 0.96'ya çekip kareyi "tolerans içi" yaptı; kullanıcı "kafa çok büyük".
 // Küçültme kararı yalnızca yüzle verilir; aşırı küçültmeyi artık
 // MIN_SCALE sınırlar (taban bu yüzden kaldırıldı). Hacim yalnızca büyütmede.
+// 2026-10-16: hacim kesitte ölçülüyor ve İKİ yönde de kullanılıyor (gözlüklü
+// şablonda da) — bkz. perceivedHeadRatio, headVolumeRatio.
 const VOLUME_TRUST_MAX_DIFF = 0.2;
+// GENİŞ KAFA (2026-10-20, 017dbe34 c0, kullanıcı: "kafa yüksekliği okey ama
+// omuzlara göre çok geniş"). Yüz noktaları dikey, hacim saçı da sayar:
+// şablonun kabarık saçı çıktının geniş yanağını dengeledi (yüz 0.994, hacim
+// 1.011, omuz 0.998 → "tolerans içi") ama yanak hizasında genişlik %8-10
+// fazlaydı. Üç genişlik ölçüsü (saç+yüz, yüz derisi, çene noktaları 2-14)
+// BİRLİKTE büyükse ve algılanan orandan belirgin fazlaysa küçültme genişliğe
+// göre yapılır. 90 arşiv karesinde yalnız 3'ünü tetikledi (017dbe34 c0,
+// 0eeb75c8 c0 — küçültülmüş hâli de geniş —, ca61076a c9).
+// Önden bakış genişliği gerçekten artırır: çıktı şablondan önden ise ya da
+// profildeyse (çene noktaları güvenilmez) ölçü kullanılmaz. Gözlüklü
+// şablonda cam yanak bandını keser — orada da kullanılmaz.
+const WIDTH_MIN_RATIO = 1.05;
+const WIDTH_OVER_PERCEIVED_MIN = 0.05;
+const WIDTH_MAX_YAW = 0.8;
+const WIDTH_FRONTAL_SLACK = 0.05;
 // Büyütme toplam kafa hacmini şablonun bu oranının üstüne çıkaramaz.
 const VOLUME_CEIL = 1.03;
 
@@ -345,34 +362,36 @@ async function faceAreaRatio(oRgb, tRgb, W, H, box) {
 function perceivedHeadRatio(faceRatio, volRatio) {
   if (!(faceRatio > 0)) return { ratio: null, volUsed: false };
   if (!(volRatio > 0) || Math.abs(volRatio - faceRatio) > VOLUME_TRUST_MAX_DIFF) return { ratio: faceRatio, volUsed: false };
-  // TERS YÖN (2026-10-09, iş f9f3b5c0 c1/c4): yüz büyük derken hacim küçük
-  // diyorsa (şablonun gür/kıvırcık saçı ya da karanlık sahne) hacim kararı
-  // çeviriyordu — c4 yüz 1.056 / hacim 0.863 kafayı BÜYÜTTÜ, c1 yüz 1.099 /
-  // hacim 0.960 hiç küçültmedi; kullanıcı ikisinde de "küçülmeliydi" dedi.
-  // Hacim yalnızca yüzle aynı yönü gösterdiğinde kullanılır.
-  if ((faceRatio - 1) * (volRatio - 1) < 0) return { ratio: faceRatio, volUsed: false };
-  // Küçültme yönünde yalnızca yüz (bkz. VOLUME_CEIL üstündeki not).
-  if (faceRatio > 1) return { ratio: faceRatio, volUsed: false };
+  // İKİ YÖNDE GEOMETRİK ORTALAMA (2026-10-16, iş 6dd26e3e, kullanıcı: "kafa
+  // vücut/omuz şekline göre ayarlanmalı, gereksiz küçültme/büyütme olmamalı").
+  // Yalnız yüzle küçültmek c3'ü (yüz 1.075, kafa 0.95) ve c9'u (1.039 / 0.98)
+  // gereksiz küçülttü, c8'i (0.99 / 1.06) büyük bıraktı. 2026-10-09'daki
+  // "küçültmede hacim yok" ve "ters yönde hacim yok" kuralları tam kare
+  // segmentasyonun yanlış ölçtüğü hacimle kurulmuştu (f9f3b5c0 c4: 0.863);
+  // kesitte ölçülen hacimle eski 15 etiketli karede ortalama yüz noktasından
+  // iyi (11/15'e 9/15).
   return { ratio: Math.sqrt(faceRatio * volRatio), volUsed: true };
 }
 
 /**
  * Ölçekleme kararı. SAF. s = gövdeÖlçeği / kafaOranı; s<1 küçült, s>1 büyüt.
  */
-function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRatio = null } = {}) {
+function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRatio = null, widthRatio = null } = {}) {
   if (!(faceRatio > 0)) return { apply: false, reason: "no-measure" };
   const aligned = bodyIou >= BODY_ALIGNED_IOU || faceShift <= FACE_ALIGNED_SHIFT;
   const ph = perceivedHeadRatio(faceRatio, volRatio);
-  if (!aligned) return { apply: false, reason: "reframed", rawS: 1 / ph.ratio, volUsed: ph.volUsed };
-  let rawS = 1 / ph.ratio;
+  const widthUsed = widthRatio >= WIDTH_MIN_RATIO && widthRatio - ph.ratio >= WIDTH_OVER_PERCEIVED_MIN;
+  const ratio = widthUsed ? widthRatio : ph.ratio;
+  if (!aligned) return { apply: false, reason: "reframed", rawS: 1 / ratio, volUsed: ph.volUsed, widthUsed };
+  let rawS = 1 / ratio;
   // Hacim tavanı: büyütme toplam kafa hacmini şablondan belirgin büyük
   // bırakmasın.
   if (ph.volUsed && rawS > 1) rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
-  if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed };
+  if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed, widthUsed };
   const soft = rawS >= SOFT_MIN_SCALE ? rawS
     : rawS < RAMP_TRUST_MIN_RAW_S ? SOFT_MIN_SCALE
     : SOFT_MIN_SCALE - SCALE_RAMP * (SOFT_MIN_SCALE - rawS);
-  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, soft)), volUsed: ph.volUsed };
+  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, soft)), volUsed: ph.volUsed, widthUsed };
 }
 
 /**
@@ -380,38 +399,125 @@ function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRa
  * karekökü, yüz kutusunun çevresinde (gövde ve arka plandaki insanlar
  * hariç). Hata/ölçüsüzlükte null.
  */
-async function headVolumeRatio(oRgb, tRgb, W, H, boxO, boxT) {
+// KESİTTE SEGMENTASYON (2026-10-16, iş 6dd26e3e): sınıflandırma tam karede
+// küçük yüzü yanlış sınıflıyordu (faceRelight'ta da görüldü); hacim artık yüz
+// kutusunun 4 katı kare kesitte, 512 px'te ölçülür. Bu ölçü 6dd26e3e'nin dokuz
+// karesinde kullanıcı kararlarının hepsiyle uyuştu (c1 1.06/c3 0.95/c9 0.98
+// dokunulmamalı, c8 1.06 küçülmeli); yüz noktaları dördünde yanıldı.
+const VOLUME_CROP_FACE = 4;
+const VOLUME_SEG = 512;
+
+async function headVolumeRatio(oRgb, tRgb, W, H, boxO, boxT, { withAccessory = false } = {}) {
   const { classProbs, CLASSES } = require("./skinSeg");
   const area = async (rgb, box) => {
-    const P = await classProbs(rgb, W, H);
-    const x0 = Math.max(0, Math.round(box.x - 1.2 * box.width)), x1 = Math.min(W, Math.round(box.x + 2.2 * box.width));
-    const y0 = Math.max(0, Math.round(box.y - 1.4 * box.height)), y1 = Math.min(H, Math.round(box.y + 1.6 * box.height));
+    const side = Math.min(W, H, Math.round(Math.max(box.width, box.height) * VOLUME_CROP_FACE));
+    const left = Math.max(0, Math.min(W - side, Math.round(box.x + box.width / 2 - side / 2)));
+    const top = Math.max(0, Math.min(H - side, Math.round(box.y + box.height * 0.4 - side / 2)));
+    const S = VOLUME_SEG;
+    const raw = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
+      .extract({ left, top, width: side, height: side }).resize(S, S).raw().toBuffer();
+    const P = await classProbs(raw, S, S);
     let n = 0;
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const i = y * W + x;
-        if (P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] > 0.5) n++;
-      }
+    for (let i = 0; i < S * S; i++) {
+      // Gözlüklü şablonda cam "aksesuar" sınıfı — kafanın parçası sayılır.
+      const p = P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] + (withAccessory ? P[CLASSES.others][i] : 0);
+      if (p > 0.5) n++;
     }
-    return n;
+    return n * (side / S) ** 2;
   };
   const ao = await area(oRgb, boxO);
   const at = await area(tRgb, boxT);
   return ao > 0 && at > 0 ? Math.sqrt(ao / at) : null;
 }
 
-function bilinear(src, W, H, x, y, c) {
-  const x0 = Math.max(0, Math.min(W - 1, Math.floor(x)));
-  const y0 = Math.max(0, Math.min(H - 1, Math.floor(y)));
-  const x1 = Math.min(W - 1, x0 + 1);
-  const y1 = Math.min(H - 1, y0 + 1);
-  const fx = Math.max(0, Math.min(1, x - x0));
-  const fy = Math.max(0, Math.min(1, y - y0));
-  const i00 = (y0 * W + x0) * 3 + c;
-  const i10 = (y0 * W + x1) * 3 + c;
-  const i01 = (y1 * W + x0) * 3 + c;
-  const i11 = (y1 * W + x1) * 3 + c;
-  return (src[i00] * (1 - fx) + src[i10] * fx) * (1 - fy) + (src[i01] * (1 - fx) + src[i11] * fx) * fy;
+/**
+ * Yanak hizasında (göz–ağız satırları) kafa genişliği oranı (çıktı / şablon):
+ * saç+yüz derisi ve yalnız yüz derisi koşusu (burun ucundan iki yana), çene
+ * noktaları 2-14. Üçünün EN KÜÇÜĞÜ döner — biri sakal/saçla şişse de diğerleri
+ * tutmazsa oran yükselmez. Ölçülemezse null.
+ */
+async function headWidthRatio(oRgb, tRgb, W, H, lo, lt) {
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const S = VOLUME_SEG;
+  const widths = async (rgb, box, P) => {
+    const side = Math.min(W, H, Math.round(Math.max(box.width, box.height) * VOLUME_CROP_FACE));
+    const left = Math.max(0, Math.min(W - side, Math.round(box.x + box.width / 2 - side / 2)));
+    const top = Math.max(0, Math.min(H - side, Math.round(box.y + box.height * 0.4 - side / 2)));
+    const k = side / S;
+    const raw = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
+      .extract({ left, top, width: side, height: side }).resize(S, S).raw().toBuffer();
+    const Pr = await classProbs(raw, S, S);
+    const avgY = (a, b) => P.slice(a, b).reduce((q, p) => q + p.y, 0) / (b - a);
+    const y0 = Math.max(0, Math.round((avgY(36, 48) - top) / k));
+    const y1 = Math.min(S - 1, Math.round((avgY(48, 60) - top) / k));
+    const cx = Math.round((P[30].x - left) / k);
+    if (cx < 0 || cx >= S || y1 <= y0) return null;
+    let head = 0;
+    let face = 0;
+    for (let y = y0; y <= y1; y++) {
+      const run = (on) => {
+        if (!on(y * S + cx)) return 0;
+        let l = cx;
+        let r = cx;
+        while (l > 0 && on(y * S + l - 1)) l--;
+        while (r < S - 1 && on(y * S + r + 1)) r++;
+        return r - l + 1;
+      };
+      head = Math.max(head, run((i) => Pr[CLASSES.hair][i] + Pr[CLASSES.faceSkin][i] > 0.5));
+      face = Math.max(face, run((i) => Pr[CLASSES.faceSkin][i] > 0.5));
+    }
+    return { head: head * k, face: face * k, jaw: Math.hypot(P[2].x - P[14].x, P[2].y - P[14].y) };
+  };
+  const o = await widths(oRgb, lo.box, lo.pts);
+  const t = await widths(tRgb, lt.box, lt.pts);
+  if (!o || !t || !(t.head > 0) || !(t.face > 0) || !(t.jaw > 0)) return null;
+  const parts = { head: o.head / t.head, face: o.face / t.face, jaw: o.jaw / t.jaw };
+  return { ratio: Math.min(parts.head, parts.face, parts.jaw), parts };
+}
+
+/** Yüz noktalarından işaretsiz yaw (0 önden, 1 profil) — profileDegreeFromLandmarks ile aynı. SAF. */
+function landmarkYaw(P) {
+  const span = P[45].x - P[36].x;
+  if (!(Math.abs(span) > 1e-6)) return null;
+  return Math.min(1, Math.abs((P[30].x - P[36].x) / span - 0.5) * 2);
+}
+
+/** Genişlik ölçüsü bu pozda kullanılabilir mi? SAF. */
+function widthUsable(yawO, yawT) {
+  if (yawO == null || yawT == null) return false;
+  return Math.max(yawO, yawT) < WIDTH_MAX_YAW && yawO >= yawT - WIDTH_FRONTAL_SLACK;
+}
+
+// Keys kübik çekirdeği (a = -0.5, Catmull-Rom).
+function cubicW(t) {
+  const a = Math.abs(t);
+  if (a <= 1) return (1.5 * a - 2.5) * a * a + 1;
+  if (a < 2) return ((-0.5 * a + 2.5) * a - 4) * a + 2;
+  return 0;
+}
+
+// BİKÜBİK ÖRNEKLEME (2026-10-16, 629b45de c4): kafa taşınırken bilinear
+// kesirli konumlarda iki komşunun ortalamasını alıyor — 0.9 küçültmede yüzün
+// ince detayı %16 düştü (yüz/kıyafet 0.99 -> 0.83) ve YÜZ DETAYI adımı kafa
+// ölçeğinden ÖNCE koştuğu için telafi edilmedi. Kübik çekirdek kesirli
+// konumda yüksek frekansı korur. Sınır dışı komşular kenara kıstırılır.
+function bicubic(src, W, H, x, y, c) {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const fx = x - xi;
+  const fy = y - yi;
+  let v = 0;
+  for (let m = -1; m <= 2; m++) {
+    const yy = Math.max(0, Math.min(H - 1, yi + m));
+    const wy = cubicW(m - fy);
+    let row = 0;
+    for (let n = -1; n <= 2; n++) {
+      const xx = Math.max(0, Math.min(W - 1, xi + n));
+      row += src[(yy * W + xx) * 3 + c] * cubicW(n - fx);
+    }
+    v += row * wy;
+  }
+  return v;
 }
 
 // Ayrılabilir kutu bulanıklığı (yalnızca küçük bir pencere için): kenar
@@ -552,7 +658,7 @@ function headZone(Mo, W, bx0, by0, w, h, sx, sy, chin, r) {
   return out;
 }
 
-function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false } = {}) {
+function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false, touchMask = null } = {}) {
   const out = Buffer.from(O);
   const cx = sil.cx;
   const chin = sil.chin;
@@ -583,11 +689,15 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   const touchY1 = Math.round(Math.min(chin - 0.1 * faceH, sil.noseY ?? Infinity));
   let maxRun = 0;
   for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= touchY1; y++) {
-    if (y < 0 || y >= H || Mo[y * W + seedX] < 0.5) continue;
+    // Kişi maskesiyle (kafa sınıfıyla güçlendirilmiş değil, bkz.
+    // withHeadClasses): kulak/saç payı koşuyu uzatıp eli olmayan kafayı
+    // "dokunulmuş" saydırıyordu (99bacae0 c7).
+    const TM = touchMask || Mo;
+    if (y < 0 || y >= H || TM[y * W + seedX] < 0.5) continue;
     let l = seedX;
     let r = seedX;
-    while (l > 0 && Mo[y * W + l - 1] >= 0.5) l--;
-    while (r < W - 1 && Mo[y * W + r + 1] >= 0.5) r++;
+    while (l > 0 && TM[y * W + l - 1] >= 0.5) l--;
+    while (r < W - 1 && TM[y * W + r + 1] >= 0.5) r++;
     if (r - l + 1 > maxRun) maxRun = r - l + 1;
   }
   const touch = maxRun / faceH;
@@ -835,7 +945,7 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
       moved++;
       const edge = na > 0.003 && na < 0.997 && bgAt ? 1 - na : 0;
       for (let c = 0; c < 3; c++) {
-        let hv = bilinear(O, W, H, QX[i], QY[i], c);
+        let hv = bicubic(O, W, H, QX[i], QY[i], c);
         if (edge) hv += edge * (bgAt(x + bx0, y + by0, c) - bgAt(QX[i], QY[i], c));
         const v = F[gi + c] * (1 - na) + hv * na;
         out[gi + c] = Math.max(0, Math.min(255, Math.round(v)));
@@ -966,7 +1076,7 @@ async function encodeInpaint(job) {
  * Model çıktısını deliğe yerleştirir. Dönüş: { buf, shift, resid } ya da
  * kayma/fark sınırı aşılırsa { buf: null, reason, shift, resid }.
  */
-async function finishInpaint(job, aiBuf, baseJpeg) {
+async function finishInpaint(job, aiBuf, baseBuf) {
   const { side, W, left, top } = job;
   const N = side * side;
   const { data: ai } = await sharp(aiBuf).removeAlpha()
@@ -1089,7 +1199,7 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
     }
     pushPullField(FB, side, side, 3, known);
   }
-  const res = job.out ? Buffer.from(job.out) : await sharp(baseJpeg).removeAlpha().raw().toBuffer();
+  const res = job.out ? Buffer.from(job.out) : await sharp(baseBuf).removeAlpha().raw().toBuffer();
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
       const i = y * side + x;
@@ -1103,7 +1213,7 @@ async function finishInpaint(job, aiBuf, baseJpeg) {
       }
     }
   }
-  const buf = await sharp(res, { raw: { width: W, height: job.H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  const buf = await sharp(res, { raw: { width: W, height: job.H, channels: 3 } }).png().toBuffer();
   return { buf, shift, resid, person, fallback };
 }
 
@@ -1120,7 +1230,38 @@ async function rawRgb(buf, W = null, H = null) {
  *
  * @returns {{buf: Buffer|null, applied: boolean, reason: string|null, ...}}
  */
-async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, templateEyewear = false } = {}) {
+/**
+ * KULAK SİLİK KALIYORDU (2026-10-20, 99bacae0 c5, kullanıcı: "kulakta
+ * siliklik var"): küçültülen kafa katmanının alfası kişi maskesinden geliyor;
+ * siyah-beyaz karede gri zeminin önündeki kulak kişi maskesinde 0.2-0.6
+ * çıktı (sınıflandırıcıda açıkça kafa), kulak yarı saydam taşınıp arka planla
+ * karıştı. Çene hizasının üstünde, yüzün çevresinde maske = max(kişi, kafa
+ * sınıfı: saç + yüz + aksesuar). Şablonun hayalet saçı "arka plan", yüze
+ * değen el "vücut derisi" sınıfında — ikisi de güçlenmez. Yalnız küçültme
+ * katmanı için; ölçüler (gövde IoU, silüet) kişi maskesiyle kalır.
+ */
+async function withHeadClasses(Mo, rgb, W, H, box, chin) {
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const x0 = Math.max(0, Math.floor(box.x - 0.9 * box.width)), x1 = Math.min(W, Math.ceil(box.x + 1.9 * box.width));
+  const y0 = Math.max(0, Math.floor(box.y - 1.1 * box.height)), y1 = Math.min(H, Math.ceil(chin) + 1);
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 16 || h < 16) return Mo;
+  const crop = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) rgb.copy(crop, y * w * 3, ((y + y0) * W + x0) * 3, ((y + y0) * W + x1) * 3);
+  const P = await classProbs(crop, w, h);
+  const out = Float32Array.from(Mo);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const hp = P[CLASSES.faceSkin][i];
+      const g = (y + y0) * W + x + x0;
+      if (hp > out[g]) out[g] = Math.min(1, hp);
+    }
+  }
+  return out;
+}
+
+async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, templateEyewear = false, headClasses = true } = {}) {
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
@@ -1148,6 +1289,11 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
   const tplFaceW = Math.hypot(lt.pts[0].x - lt.pts[16].x, lt.pts[0].y - lt.pts[16].y);
   const faceShift = tplFaceW > 0 ? Math.hypot(co.x - ct.x, co.y - ct.y) / tplFaceW : Infinity;
   let volRatio = null;
+  try {
+    volRatio = await headVolumeRatio(o.data, t.data, o.W, o.H, lo.box, lt.box, { withAccessory: templateEyewear });
+  } catch (e) {
+    console.error("Kafa hacmi ölçülemedi (yalnızca yüz ölçüsü):", e.message || e);
+  }
   if (templateEyewear) {
     // Gözlüklü şablon: göz/kaş noktaları yok, hacim yok (bkz. eyewearFaceRatio).
     let faceArea = null;
@@ -1162,15 +1308,17 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
       boxW: lt.box.width > 0 ? lo.box.width / lt.box.width : null,
       boxH: lt.box.height > 0 ? lo.box.height / lt.box.height : null,
     });
-  } else {
+  }
+  let width = null;
+  if (!templateEyewear && widthUsable(landmarkYaw(lo.pts), landmarkYaw(lt.pts))) {
     try {
-      volRatio = await headVolumeRatio(o.data, t.data, o.W, o.H, lo.box, lt.box);
+      width = await headWidthRatio(o.data, t.data, o.W, o.H, lo, lt);
     } catch (e) {
-      console.error("Kafa hacmi ölçülemedi (yalnızca yüz ölçüsü):", e.message || e);
+      console.error("Kafa genişliği ölçülemedi (yalnız yüz/hacim):", e.message || e);
     }
   }
-  const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio });
-  const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, bodyIou, faceShift, eyewear: templateEyewear };
+  const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio, widthRatio: width ? width.ratio : null });
+  const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, widthRatio: width ? width.ratio : null, widthUsed: plan.widthUsed ?? false, bodyIou, faceShift, eyewear: templateEyewear };
   if (!plan.apply) return { buf: null, applied: false, reason: plan.reason, ...info };
   if (templateEyewear && plan.s > 1) return { buf: null, applied: false, reason: "eyewear-no-enlarge", ...info };
 
@@ -1183,10 +1331,16 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
   const cx = Math.round(P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17);
   const sil = { ...base, cx, seedX: Math.round(P[30].x), noseY: P[33].y, jaw: P.slice(0, 17), chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
   const faceH = Math.max(lo.box.height, chin - lo.box.y);
-  const r = scaleHeadPatch(o.data, t.data, Mo, Mt, o.W, o.H, sil, faceH, plan.s, { deferInpaint });
+  let MoHead = Mo;
+  try {
+    if (headClasses) MoHead = await withHeadClasses(Mo, o.data, o.W, o.H, lo.box, chin);
+  } catch (e) {
+    console.error("Kafa ölçeği: kafa sınıfları alınamadı (yalnız kişi maskesi):", e.message || e);
+  }
+  const r = scaleHeadPatch(o.data, t.data, MoHead, Mt, o.W, o.H, sil, faceH, plan.s, { deferInpaint, touchMask: Mo });
   if (r.skipped) return { buf: null, applied: false, reason: r.reason || "head-touched", touch: r.touch, sEff: r.sEff ?? null, ...info };
   const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
-    .jpeg({ quality: 95 })
+    .png()
     .toBuffer();
   const head = { cx: sil.cx, cy: (sil.top + sil.chin) / 2, rx: sil.headW / 2, ry: sil.headH / 2, chin: sil.chin, neck: r.neck };
   // deferInpaint: buf doku dolgulu hâl; çağıran deliği yerel modelle doldurur
@@ -1367,12 +1521,12 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
       job.allowAi[y * job.side + x] = near[ly * w + lx] > 0.001 ? 1 : 0;
     }
   }
-  const filledJpeg = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  const filledBuf = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   job.out = null;
   const { image, mask } = await encodeInpaint(job);
   return {
     applied: true, holePx, fringePx, ghostPx, bodyIou, faceW,
-    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: filledJpeg, finish: (aiBuf) => finishInpaint(job, aiBuf, filledJpeg) },
+    inpaint: { image, mask, rect: { left: job.left, top: job.top, side: job.side }, job, base: filledBuf, finish: (aiBuf) => finishInpaint(job, aiBuf, filledBuf) },
   };
 }
 
@@ -1387,6 +1541,7 @@ module.exports = {
   eyewearFaceRatio,
   perceivedHeadRatio,
   planLandmarkScale,
+  widthUsable,
   APPLY_MIN_DELTA,
   MIN_SCALE,
   MAX_SCALE,

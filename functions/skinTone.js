@@ -93,6 +93,14 @@ const CL_PIX_ZERO = 1.25;
 const OTHERS_RADIUS = 3;
 const OTHERS_FULL = 0.4;
 const OTHERS_ZERO = 0.7;
+// Uzuv ağırlığı için alan güveni rampası (bkz. analyzeSkin). 0.08/0.22 →
+// 0.03/0.12 (2026-10-18, 3b4f51cb c7, kullanıcı: "kollar siyahi base fotonun
+// kolları kalmış"): cebe giden koyu ön kolda vücut derisi olasılığı düşük,
+// çevre ten yoğunluğu 0.15 çıktı; ağırlık 0.25 kaldı, kol 24→24.2 (yüz 55).
+// Yeni rampayla 24→31, sol ön kol 42→47. 61 karede değişen pikseller boyun/
+// el/kolda; 11 karede önce "no-limb-skin" atlanan katman artık uygulanıyor.
+const LIMB_CONF_ZERO = 0.03;
+const LIMB_CONF_SPAN = 0.12;
 // Bu kadar az vücut derisi pikseli varsa (kişi giyinik) iş yok.
 const MIN_SKIN_PX = 400;
 
@@ -125,12 +133,20 @@ function labToRgb(L, a, b) {
   return [enc(R), enc(G), enc(B)];
 }
 
-/** Ten renk ailesi (YCbCr), LUMA TABANI YOK — gölgedeki koyu ten de girer. */
+/**
+ * Ten renk ailesi (YCbCr), LUMA TABANI YOK — gölgedeki koyu ten de girer.
+ * Cr ÜST SINIRI 180 (2026-10-18, d87c25b4 c1): model eli turuncu çizdi
+ * (kroma yüz 22 / el 42); el piksellerinin yarısı Cr 173'ü aşıp örneklenmedi,
+ * küçük elde alan güveni düştü ve katman "no-limb-skin" ile atlandı — en
+ * turuncu el hiç düzeltilmedi. Kumaş/çanta koruması açı ve kroma/açıklık
+ * rampalarında (HUE_PIX_*, CL_PIX_*); 47 karede 180 yalnız ten ekledi.
+ */
+const SKIN_CR_MAX = 180;
 function skinHue(r, g, b) {
   const y = 0.299 * r + 0.587 * g + 0.114 * b;
   const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
   const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  return y > 20 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173;
+  return y > 20 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= SKIN_CR_MAX;
 }
 
 const hueOf = (a, b) => Math.atan2(b, a) * 180 / Math.PI;
@@ -299,7 +315,7 @@ function bodyTargetL(faceL, bodyLightRatio) {
   return (faceL + 16) * Math.pow(r, 2.2 / 3) - 16;
 }
 
-function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null) {
+function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null, local = null) {
   const clamp = (v, lim) => (v > lim ? lim : v < -lim ? -lim : v);
   const limbL = [];
   for (let i = 0; i < N; i++) if (limbW[i] > 0.5) limbL.push(field.fL[i]);
@@ -311,12 +327,21 @@ function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null) {
   // (noktanın uzuv medyanından sapmasının OWN_KEEP kadarı). Kolun bir ucunun
   // koyu, öbür ucunun açık kalması (iki tonlu kol) bu sapmadır; çoğu
   // giderilir, ışık izi kalır.
+  // YEREL ŞABLON IŞIĞI (local, bkz. LOCAL_LIGHT): şablonda bu noktadaki
+  // deri yüze göre daha aydınlıksa hedef oraya YÜKSELİR, asla inmez.
   const dL = new Float32Array(N), dA = new Float32Array(N), dB = new Float32Array(N);
-  const beforeL = [], afterL = [], beforeC = [], afterC = [];
+  const beforeL = [], afterL = [], beforeC = [], afterC = [], baseT = [];
   for (let i = 0; i < N; i++) {
     if (limbW[i] <= 0) continue;
     const allowL = clamp((field.fL[i] - limbMedL) * OWN_KEEP, MAX_LIGHT_ALLOW);
-    dL[i] = clamp((targetL + allowL - field.fL[i]) * STRENGTH, MAX_SHIFT_L);
+    let t = targetL + allowL, tb = targetL;
+    if (local && local.w[i] > 0) {
+      const lt = bodyTargetL(faceTone[0], local.ratio[i]);
+      t = Math.max(t, t + (lt - t) * local.w[i]);
+      tb = Math.max(tb, tb + (lt - tb) * local.w[i]);
+    }
+    if (limbW[i] > 0.5) baseT.push(tb);
+    dL[i] = clamp((t - field.fL[i]) * STRENGTH, MAX_SHIFT_L);
     dA[i] = clamp((faceTone[1] - field.fA[i]) * STRENGTH, MAX_SHIFT_AB);
     dB[i] = clamp((faceTone[2] - field.fB[i]) * STRENGTH, MAX_SHIFT_AB);
     if (limbW[i] > 0.5) {
@@ -327,7 +352,7 @@ function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null) {
   }
   const stats = {
     // Yüz − uzuv açıklık farkı (medyan) ve kroma farkı.
-    deltaLBefore: targetL - median(beforeL), deltaLAfter: targetL - median(afterL),
+    deltaLBefore: median(baseT) - median(beforeL), deltaLAfter: median(baseT) - median(afterL),
     chromaBefore: median(beforeC), chromaAfter: median(afterC),
     // İKİ TONLU KOL ÖLÇÜSÜ: uzuv alanındaki açıklık yayılımı (p90 − p10).
     spreadBefore: pct(beforeL, 0.9) - pct(beforeL, 0.1),
@@ -342,57 +367,129 @@ function planCorrection(field, limbW, faceTone, N, bodyLightRatio = null) {
  * @param {{bodyLightRatio?: number|null}} [opts]  şablonda vücut/yüz derisi parlaklık oranı
  * @returns {{buf, applied, reason, deltaLBefore, deltaLAfter, chromaBefore, chromaAfter, spreadBefore, spreadAfter, skinPx, changedPx}}
  */
-async function correctSkinToneField(outputBuf, { bodyLightRatio = null } = {}) {
-  const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, ...extra });
+/**
+ * Yüz tonu, vücut derisi alanı ve uzuv ağırlığı (çalışma ölçeğinde). Hem
+ * çıktıda hem şablonda (vücut/yüz oranı için) kullanılır.
+ * @returns {{ok:true, W, H, N, sc, faceTone, field, limbW} | {ok:false, reason, skinPx?}}
+ */
+async function analyzeSkin(buf, { lowConf = false } = {}) {
+  const { detectMainFace } = require("./faceQuality");
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const meta = await sharp(buf).metadata();
+  const FW = meta.width, FH = meta.height;
+  if (!FW || !FH) return { ok: false, reason: "insufficient-input" };
+  const sc = Math.min(1, WORK_MAX_DIM / Math.max(FW, FH));
+  const W = Math.max(1, Math.round(FW * sc)), H = Math.max(1, Math.round(FH * sc));
+  const N = W * H;
+  const face = (await detectMainFace(buf)) || (lowConf ? await detectMainFace(buf, 0.1) : null);
+  if (!face) return { ok: false, reason: "no-face" };
+  const box = { x: face.box.x * sc, y: face.box.y * sc, width: face.box.width * sc, height: face.box.height * sc };
+  const work = await sharp(buf).rotate().removeAlpha().resize(W, H, { fit: "fill" }).raw().toBuffer();
+  const P = await classProbs(work, W, H);
+  const bodySkin = P[CLASSES.bodySkin], faceSkin = P[CLASSES.faceSkin];
+  const person = new Float32Array(N);
+  for (let i = 0; i < N; i++) person[i] = 1 - P[CLASSES.background][i];
+  const faceTone = faceToneOf(work, W, H, box, faceSkin) || faceToneOf(work, W, H, box);
+  if (!faceTone) return { ok: false, reason: "no-face-tone" };
+  const pc = mainPersonComponent(person, W, H, box);
+  if (!pc) return { ok: false, reason: "no-person" };
+  // Bölge = ana kişinin VÜCUT DERİSİ olasılığı (yüz derisi, saç, kıyafet,
+  // aksesuar zaten bu sınıfta değil).
+  const othersNear = blurField(P[CLASSES.others], W, H, OTHERS_RADIUS);
+  const region = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    if (!pc.comp[i]) continue;
+    region[i] = smooth01((bodySkin[i] - BODY_SKIN_ZERO) / (BODY_SKIN_FULL - BODY_SKIN_ZERO)) *
+      ramp(othersNear[i], OTHERS_FULL, OTHERS_ZERO);
+  }
+  const R = Math.max(4, box.height * FIELD_RADIUS_VS_FACE);
+  const faceHue = hueOf(faceTone[1], faceTone[2]);
+  const field = buildSkinField(work, W, H, region, R, faceHue);
+  if (field.count < MIN_SKIN_PX) return { ok: false, reason: "insufficient-skin", skinPx: field.count };
+  // Uzuv ağırlığı: bölge × alan güveni (çevrede yeterli ten yoksa alan
+  // güvenilmez). İkisi de sürekli.
+  const limbW = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    if (region[i] <= 0.02) continue;
+    limbW[i] = region[i] * smooth01((field.conf[i] - LIMB_CONF_ZERO) / LIMB_CONF_SPAN);
+  }
+  return { ok: true, W, H, N, sc, faceTone, field, limbW };
+}
+
+/**
+ * ŞABLONUN KOL/YÜZ IŞIK ORANI (2026-10-16, iş 629b45de c8, kullanıcı: "kolları
+ * gereksiz yere koyulaştırmış, base'deki ten ile çıktıdaki ten benzer").
+ * 2026-10-16 sabahı oran base'in BOYNUNDAN alınıyordu (faceRelight): boyun
+ * çenenin gölgesinde (yüz/boyun 1.75), güneşteki kollar 0.75'e karartıldı.
+ * Oran artık şablonun kendi KOLLARINDAN — aynı segmentasyon ve aynı uzuv
+ * ağırlığıyla. bodyTargetL'nin ölçeğinde döner; ölçülemezse null.
+ */
+function lightRatioOf(L, faceL) {
+  return Math.pow((L + 16) / (faceL + 16), 3 / 2.2);
+}
+
+async function templateSkin(templateBuf) {
+  const a = await analyzeSkin(templateBuf, { lowConf: true });
+  if (!a.ok) return null;
+  const limbL = [];
+  for (let i = 0; i < a.N; i++) if (a.limbW[i] > 0.5) limbL.push(a.field.fL[i]);
+  if (limbL.length < 20) return null;
+  return { a, ratio: lightRatioOf(median(limbL), a.faceTone[0]) };
+}
+
+async function templateBodyLightRatio(templateBuf) {
+  const t = await templateSkin(templateBuf);
+  return t ? t.ratio : null;
+}
+
+/**
+ * YEREL ŞABLON IŞIĞI (2026-10-18, iş 10ee6a46 c3, kullanıcı: "kollar siyah
+ * kalmış, siyahi biri taban fotoğrafta olunca"). Şablonda sağ ön kol yüzle
+ * aynı aydınlıktaydı (56.6 / yüz 57.3), çıktıda yüzden 7 L koyu kaldı. Tek
+ * oran (0.91) boyun/el gölgesini ve dövmeli kolu da içerdiğinden kolun
+ * kendisi "hedefte" sayıldı (fark 1.8) ve katman kolu neredeyse hiç açmadı.
+ * Çıktı şablonla aynı kadrajda (arka plan geri yüklemesi buna dayanır):
+ * şablonun düşük frekanslı ten alanı aynı noktada okunur.
+ * YALNIZ YUKARI: yerel oran yalnız hedefi yükseltir. Dövme ve gölge şablonu
+ * koyulaştırır, aydınlatmaz — 9496348c c9'da piksel payını çıkartan kusur
+ * (dövmeli kol taşındı) bu yönde oluşamaz. Oran BODY_LIGHT_* ile sınırlı.
+ */
+const LOCAL_LIGHT = true;
+function localTemplateLight(t, W, H) {
+  const { a } = t;
+  const N = W * H;
+  const ratio = new Float32Array(N), w = new Float32Array(N);
+  const kx = a.W / W, ky = a.H / H;
+  for (let y = 0; y < H; y++) {
+    const ty = (y + 0.5) * ky - 0.5;
+    for (let x = 0; x < W; x++) {
+      const tx = (x + 0.5) * kx - 0.5;
+      const conf = sampleBilinear(a.field.conf, a.W, a.H, tx, ty);
+      const i = y * W + x;
+      w[i] = smooth01((conf - 0.08) / 0.22);
+      if (w[i] > 0) ratio[i] = lightRatioOf(sampleBilinear(a.field.fL, a.W, a.H, tx, ty), a.faceTone[0]);
+    }
+  }
+  return { ratio, w };
+}
+
+async function correctSkinToneField(outputBuf, { bodyLightRatio = null, templateBuf = null, localLight = LOCAL_LIGHT } = {}) {
+  const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, bodyLightRatio, ...extra });
   try {
-    const { detectMainFace } = require("./faceQuality");
-    const { classProbs, CLASSES } = require("./skinSeg");
-
-    const meta = await sharp(outputBuf).metadata();
-    const FW = meta.width, FH = meta.height;
-    if (!FW || !FH) return skip("insufficient-input");
-    const sc = Math.min(1, WORK_MAX_DIM / Math.max(FW, FH));
-    const W = Math.max(1, Math.round(FW * sc)), H = Math.max(1, Math.round(FH * sc));
-    const N = W * H;
-
-    const face = await detectMainFace(outputBuf);
-    if (!face) return skip("no-face");
-    const box = { x: face.box.x * sc, y: face.box.y * sc, width: face.box.width * sc, height: face.box.height * sc };
-
-    const work = await sharp(outputBuf).rotate().removeAlpha().resize(W, H, { fit: "fill" }).raw().toBuffer();
-    const P = await classProbs(work, W, H);
-    const bodySkin = P[CLASSES.bodySkin], faceSkin = P[CLASSES.faceSkin];
-    const person = new Float32Array(N);
-    for (let i = 0; i < N; i++) person[i] = 1 - P[CLASSES.background][i];
-
-    const faceTone = faceToneOf(work, W, H, box, faceSkin) || faceToneOf(work, W, H, box);
-    if (!faceTone) return skip("no-face-tone");
-
-    const pc = mainPersonComponent(person, W, H, box);
-    if (!pc) return skip("no-person");
-
-    // Bölge = ana kişinin VÜCUT DERİSİ olasılığı (yüz derisi, saç, kıyafet,
-    // aksesuar zaten bu sınıfta değil).
-    const othersNear = blurField(P[CLASSES.others], W, H, OTHERS_RADIUS);
-    const region = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      if (!pc.comp[i]) continue;
-      region[i] = smooth01((bodySkin[i] - BODY_SKIN_ZERO) / (BODY_SKIN_FULL - BODY_SKIN_ZERO)) *
-        ramp(othersNear[i], OTHERS_FULL, OTHERS_ZERO);
+    let tSkin = null;
+    if (templateBuf && bodyLightRatio == null) {
+      try {
+        tSkin = await templateSkin(templateBuf);
+        bodyLightRatio = tSkin ? tSkin.ratio : null;
+      } catch (e) {
+        console.error("Ten alanı: şablon kol/yüz oranı ölçülemedi (yüz hedefi):", e.message || e);
+      }
     }
-    const R = Math.max(4, box.height * FIELD_RADIUS_VS_FACE);
-    const faceHue = hueOf(faceTone[1], faceTone[2]);
-    const field = buildSkinField(work, W, H, region, R, faceHue);
-    if (field.count < MIN_SKIN_PX) return skip("insufficient-skin", { skinPx: field.count });
-
-    // Uzuv ağırlığı: bölge × alan güveni (çevrede yeterli ten yoksa alan
-    // güvenilmez). İkisi de sürekli.
-    const limbW = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      if (region[i] <= 0.02) continue;
-      limbW[i] = region[i] * smooth01((field.conf[i] - 0.08) / 0.22);
-    }
-    const plan = planCorrection(field, limbW, faceTone, N, bodyLightRatio);
+    const an = await analyzeSkin(outputBuf);
+    if (!an.ok) return skip(an.reason, an.skinPx != null ? { skinPx: an.skinPx } : {});
+    const { W, H, N, faceTone, field, limbW } = an;
+    const local = localLight && tSkin ? localTemplateLight(tSkin, W, H) : null;
+    const plan = planCorrection(field, limbW, faceTone, N, bodyLightRatio, local);
     if (!plan) return skip("no-limb-skin", { skinPx: field.count });
     const stats = { ...plan.stats, skinPx: field.count };
     if (!plan.needed) return skip("tone-already-matches", stats);
@@ -423,8 +520,9 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null } = {}) {
       }
     }
     const buf = await sharp(data, { raw: { width: info.width, height: info.height, channels: 3 } })
-      .jpeg({ quality: 95 }).toBuffer();
-    return { buf, applied: true, reason: null, ...stats, changedPx: changed };
+      // Ara adım: kayıpsız (teslimde tek JPEG kodlaması, bkz. postProcess).
+      .png().toBuffer();
+    return { buf, applied: true, reason: null, ...stats, changedPx: changed, bodyLightRatio };
   } catch (e) {
     console.error("Ten tonu alan düzeltmesi hata verdi (fail-safe atlandı):", e.message || e);
     return skip("error");
@@ -435,5 +533,5 @@ module.exports = {
   correctSkinToneField,
   rgbToLab,
   labToRgb,
-  _testables: { blurField, mainPersonComponent, buildSkinField, planCorrection, bodyTargetL, faceToneOf, skinHue },
+  _testables: { analyzeSkin, templateBodyLightRatio, blurField, mainPersonComponent, buildSkinField, planCorrection, bodyTargetL, faceToneOf, skinHue },
 };

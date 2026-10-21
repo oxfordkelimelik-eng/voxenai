@@ -88,7 +88,7 @@ async function blur1(arr, W, H, r) {
  * dışı aynen. Renk kayması maskenin hemen dışındaki halkadan düzeltilir.
  * Saf fonksiyon (ağ yok) — test edilebilir.
  */
-async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb) {
+async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb, { keepEyes = false } = {}) {
   const { left, top, side } = rect;
   const N = side * side;
   const m = new Uint8Array(N);
@@ -172,7 +172,103 @@ async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb) {
       out[gi + c] = Math.max(0, Math.min(255, Math.round(baseRgb[gi + c] * (1 - w) + (aiRgb[i * 3 + c] + off[c]) * w)));
     }
   }
-  return { rgb: out, grown: useGrowth ? grownFrac : 0, grownRejected: useGrowth ? 0 : grownFrac };
+  const lens = keepEyes ? await keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, keepEyes) : 0;
+  return { rgb: out, grown: useGrowth ? grownFrac : 0, grownRejected: useGrowth ? 0 : grownFrac, lensPx: lens };
+}
+
+/**
+ * CAMIN ARKASINDA KENDİ GÖZLERİ (2026-10-18, 3b4f51cb c1, kullanıcı: "baş
+ * çıktısı base foto ile aynı yere bakmıyor"): ham karede gözler aşağı
+ * bakıyordu, gözlük düzenlemesi cam elipslerinin içinde gözleri açık ve
+ * kameraya bakar çizdi. Prompt'a "bakış yönü ve göz kapağı aynı kalsın"
+ * eklemek 4/4 denemede değiştirmedi. Koyu camın içi artık modelin çizdiği
+ * göz değil, kendi gözünün modelin cam tonuyla (geniş bulanıklıkta oran)
+ * karartılmış hâli; çerçeve kenarı, köprü ve saplar modelden. YALNIZ İÇİ
+ * GÖRÜNEN CAMDA ("own", şablon yargısı EYES_VISIBLE): opak siyah camda
+ * (10ee6a46 c5) kendi göz cam şeffaflaştırdı; parlaklık/doku oranı iki camı
+ * ayırmadı (0.44 / 0.43). Şablonda gözler görünmüyorsa ("hide", 3b4f51cb c1:
+ * koyu mor cam) camın içi modelin bulanık cam tonu — model camı şablondan açık
+ * çizip arkasına ileri bakan göz koymuştu. Açık (tonsuz) camda karartma yoktur,
+ * katman hiçbir şey yapmaz. Dönüş: değişen piksel.
+ */
+const LENS_TINT_MAX = 0.85; // cam sayılan karartma (bulanık açıklık oranı)
+const LENS_BLUR_IOD = 0.12;
+const LENS_RIM_IOD = 0.07; // çerçeve kenarı modelden kalır
+const LENS_REACH = 1.15; // modelin camı elipsten biraz kayabilir
+const LENS_HIDE_BLUR_IOD = 0.06; // gözsüz camda göz ayrıntısını silen bulanıklık
+const LENS_CORE = 0.7; // cam elipsinin bu oranı (göz bölgesi); çerçeve dışarıda
+async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
+  const { left, top, side } = rect;
+  const N = side * side;
+  const baseCrop = Buffer.alloc(N * 3), aiAdj = Buffer.alloc(N * 3);
+  for (let i = 0; i < N; i++) {
+    const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+    for (let c = 0; c < 3; c++) {
+      baseCrop[i * 3 + c] = baseRgb[gi + c];
+      aiAdj[i * 3 + c] = Math.max(0, Math.min(255, Math.round(aiRgb[i * 3 + c] + off[c])));
+    }
+  }
+  const sig = Math.max(1, LENS_BLUR_IOD * geom.iod);
+  const blur3 = (b) => sharp(b, { raw: { width: side, height: side, channels: 3 } }).blur(sig).raw().toBuffer();
+  const [bB, bA] = await Promise.all([blur3(baseCrop), blur3(aiAdj)]);
+  const RX = LENS_RX * geom.iod * LENS_REACH, RY = LENS_RY * geom.iod * LENS_REACH;
+  const cand = new Uint8Array(N);
+  const lum = (b, k) => 0.299 * b[k] + 0.587 * b[k + 1] + 0.114 * b[k + 2];
+  for (let i = 0; i < N; i++) {
+    const x = left + (i % side), y = top + Math.floor(i / side);
+    let inLens = false;
+    for (const e of [geom.eR, geom.eL]) {
+      const dx = (x - e.x) / RX, dy = (y - e.y - 0.04 * geom.iod) / RY;
+      if (dx * dx + dy * dy <= 1) inLens = true;
+    }
+    if (inLens && lum(bA, i * 3) < LENS_TINT_MAX * Math.max(1, lum(bB, i * 3))) cand[i] = 1;
+  }
+  // Kenardan içeri aşındır: çerçeve ve bulanıklığın kenar karışımı modelden kalır.
+  const rim = Math.max(2, LENS_RIM_IOD * geom.iod);
+  const { chamfer } = require("./headSurround");
+  const dOut = chamfer(Uint8Array.from(cand, (v) => (v ? 0 : 1)), side, side);
+  // Yalnız camın göz bulunan ortası: kalın siyah çerçeve de koyu olduğu için
+  // "cam" sayılıyor, kenarı bulanıklaşıyordu (10ee6a46 c5).
+  const inner = new Uint8Array(N);
+  const cx = LENS_RX * geom.iod * LENS_CORE, cy = LENS_RY * geom.iod * LENS_CORE;
+  for (let i = 0; i < N; i++) {
+    if (!(dOut[i] > rim)) continue;
+    const x = left + (i % side), y = top + Math.floor(i / side);
+    for (const e of [geom.eR, geom.eL]) {
+      const dx = (x - e.x) / cx, dy = (y - e.y) / cy;
+      if (dx * dx + dy * dy <= 1) inner[i] = 1;
+    }
+  }
+  let px = 0;
+  for (let i = 0; i < N; i++) px += inner[i];
+  if (px < 0.02 * geom.iod * geom.iod) return 0;
+  const wIn = await blur1(inner, side, side, Math.max(1, rim / 2));
+  // Gözsüz cam: modelin camı YALNIZ camın kendi pikselleriyle bulanıklaştırılır
+  // (maskeli ortalama) — bA dışarıdaki teni de karıştırıp siyah camı griye
+  // çekiyordu.
+  let glass = null;
+  if (mode === "hide") {
+    const masked = Buffer.alloc(N * 3);
+    for (let i = 0; i < N; i++) if (inner[i]) for (let c = 0; c < 3; c++) masked[i * 3 + c] = aiAdj[i * 3 + c];
+    const s2 = Math.max(1, LENS_HIDE_BLUR_IOD * geom.iod);
+    const [num, den] = await Promise.all([
+      sharp(masked, { raw: { width: side, height: side, channels: 3 } }).blur(s2).raw().toBuffer(),
+      blur1(inner, side, side, s2),
+    ]);
+    glass = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) for (let c = 0; c < 3; c++) glass[i * 3 + c] = den[i] > 2 ? (num[i * 3 + c] * 255) / den[i] : aiAdj[i * 3 + c];
+  }
+  for (let i = 0; i < N; i++) {
+    const w = wIn[i] / 255;
+    if (w <= 0) continue;
+    const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+    for (let c = 0; c < 3; c++) {
+      const k = i * 3 + c;
+      const tinted = glass ? glass[k] : baseCrop[k] * (bA[k] + 1) / (bB[k] + 1);
+      out[gi + c] = Math.max(0, Math.min(255, Math.round(out[gi + c] * (1 - w) + tinted * w)));
+    }
+  }
+  return px;
 }
 
 /**
@@ -212,12 +308,12 @@ async function prepareEyewear(outBuf, tplBuf) {
   const tb = Math.min(mt.height, Math.round(P[30].y + 0.15 * tfw));
   const refRaw = await sharp(tplBuf).extract({ left: tl, top: tt, width: tr - tl, height: tb - tt }).png().toBuffer();
   const ref = await sharp(refRaw).resize({ width: 768, kernel: "lanczos3" }).png().toBuffer();
-  const finish = async (aiBuf) => {
+  const finish = async (aiBuf, { keepEyes = false } = {}) => {
     const baseRgb = await sharp(outBuf).removeAlpha().raw().toBuffer();
     const aiRgb = await sharp(aiBuf).resize(side, side, { kernel: "lanczos3" }).removeAlpha().raw().toBuffer();
-    const { rgb, grown, grownRejected } = await compositeEyewear(baseRgb, W, H, rect, geom, aiRgb);
-    const buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
-    return { buf, grown, grownRejected };
+    const { rgb, grown, grownRejected, lensPx } = await compositeEyewear(baseRgb, W, H, rect, geom, aiRgb, { keepEyes });
+    const buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+    return { buf, grown, grownRejected, lensPx };
   };
   return { image, ref, mask, finish, rect, iod: geom.iod };
 }

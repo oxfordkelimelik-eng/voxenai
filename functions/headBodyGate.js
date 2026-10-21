@@ -19,6 +19,12 @@
 
 const YAW_UNDER_ROTATE_TEMPLATE_MIN = 0.95;
 const YAW_UNDER_ROTATE_DROP_MIN = 0.12;
+// İKİNCİ KADEME (2026-10-16, 6dd26e3e c4, kullanıcı: "base kafasını sola tam
+// döndürmüş, çıktıda tam dönmemiş"): şablon 0.90, çıktı 0.63 (−0.27). Neredeyse
+// profil şablonda daha büyük kayıp istenir — teslim c4 (0.88→0.71, −0.17)
+// kabul edilmişti, geçmeye devam eder.
+const YAW_UNDER_ROTATE_NEAR_TEMPLATE_MIN = 0.85;
+const YAW_UNDER_ROTATE_NEAR_DROP_MIN = 0.2;
 
 function isPulledToCameraNumeric(templateYaw, outYaw) {
   if (outYaw == null || templateYaw == null) return false;
@@ -27,8 +33,9 @@ function isPulledToCameraNumeric(templateYaw, outYaw) {
 
 function isUnderRotated(templateYaw, outYaw) {
   if (templateYaw == null || outYaw == null) return false;
-  return templateYaw >= YAW_UNDER_ROTATE_TEMPLATE_MIN &&
-    (templateYaw - outYaw) >= YAW_UNDER_ROTATE_DROP_MIN;
+  const drop = templateYaw - outYaw;
+  return (templateYaw >= YAW_UNDER_ROTATE_TEMPLATE_MIN && drop >= YAW_UNDER_ROTATE_DROP_MIN) ||
+    (templateYaw >= YAW_UNDER_ROTATE_NEAR_TEMPLATE_MIN && drop >= YAW_UNDER_ROTATE_NEAR_DROP_MIN);
 }
 
 module.exports = {

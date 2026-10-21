@@ -277,7 +277,10 @@ test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   const joined = m[0].replace(/"\s*\+\s*"/g, "");
   assert.match(joined, /From the selfies take only facial identity/);
   assert.match(joined, /A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
-  assert.match(joined, /never turn it toward the camera or further away/);
+  // 2026-10-21: kulak/bakış tekrarı tek cümleye indirilirken "it" → "the head".
+  assert.match(joined, /[Nn]ever turn (it|the head) toward the camera or further away/);
+  // 2026-10-16 (6dd26e3e c4): tam profil base üç çeyrek çıkıyordu.
+  assert.match(joined, /A full profile stays a full profile/);
   assert.match(joined, /look at exactly the same point as the BASE eyes/);
   assert.match(joined, /If the BASE is black and white, the whole output is black and white/);
   assert.match(joined, /C\) LIGHT ON THE FACE — FROM THE BASE, NEVER FROM THE SELFIES/);

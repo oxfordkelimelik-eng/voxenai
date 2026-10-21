@@ -55,6 +55,25 @@ test("şablonda gölgedeki vücut yüz kadar açılmaz (vücut/yüz ışık oran
   assert.equal(T.bodyTargetL(66, null), 66);
 });
 
+test("yerel şablon ışığı: şablonda aydınlık kol açılır, koyu (dövmeli) kol hedefi indirmez", () => {
+  const N = 100;
+  // Kol: ilk yarı boyun/el (L 56), ikinci yarı ön kol (L 49). Yüz 58.
+  // Tek oran 0.91 → hedef ~53.4, medyan 52.5 civarı: tek başına "uyumlu".
+  const field = fieldOf(N, (i) => [i < 50 ? 56 : 49, 20, 18]);
+  const limbW = new Float32Array(N).fill(1);
+  const ratio = new Float32Array(N), w = new Float32Array(N).fill(1);
+  // Şablonda ön kol yüzle aynı aydınlık (1.0); boyun/el bölgesi koyu (0.6, dövme).
+  for (let i = 0; i < N; i++) ratio[i] = i < 50 ? 0.6 : 1.0;
+  const g = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91);
+  const l = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91, { ratio, w });
+  assert.ok(l.dL[99] > g.dL[99] + 3, `ön kol yerel=${l.dL[99]} global=${g.dL[99]}`);
+  // Koyu şablon bölgesi hedefi aşağı çekmez.
+  assert.equal(l.dL[0], g.dL[0]);
+  // Ağırlık 0 (şablonda o noktada ten yok) → global plan.
+  const z = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91, { ratio, w: new Float32Array(N) });
+  assert.equal(z.dL[99], g.dL[99]);
+});
+
 test("uzuv yoksa plan kurulmaz", () => {
   const N = 100;
   const field = fieldOf(N, () => [40, 20, 18]);

@@ -240,9 +240,9 @@ test("inpaint: arka planı sürdüren dolgu yalnızca deliğe yazılır", async 
   // Düz arka plan dolgusunda delikte kişi yok (bkz. INPAINT_PERSON_MAX).
   assert.ok(fin.person >= 0 && fin.person < 0.05, `person=${fin.person}`);
   const out = await rawOf(fin.buf);
-  // Çıktı JPEG: karşılaştırma aynı kodlamayla, deliğe değen 16 px'lik
-  // bloklar (renk alt örneklemesi) hariç.
-  const before = await rawOf(await sharp(base).jpeg({ quality: 95 }).toBuffer());
+  // Çıktı kayıpsız (2026-10-16, ara adımlar PNG): taban birebir korunur.
+  // Deliğe değen 16 px'lik bloklar hariç tutulmaya devam ediyor.
+  const before = await rawOf(base);
   const holeAt = (x, y) => {
     const lx = x - job.left;
     const ly = y - job.top;
@@ -342,13 +342,23 @@ test("algılanan kafa: hacim yüzden çok saparsa (karanlık sahne) yalnızca y�
   assert.equal(r.ratio, 1.14);
 });
 
-// 2026-10-09, 61079257 c5: şablonun kabarık saçı hacmi şişirdi, ortalama +
-// taban kareyi "tolerans içi" yapmıştı; kullanıcı "kafa çok büyük".
-test("plan: küçültmede hacim kullanılmaz (c5 atlanmıştı)", () => {
+// 2026-10-09, 61079257 c5: kullanıcı "kafa çok büyük" (yüz 1.103, hacim 1.01).
+// Ortalama 1.055 eşiği (0.03) aşar → küçültülür.
+test("plan: küçültmede de yüz ve hacmin ortalaması (61079257 c5 küçülür)", () => {
   const p = planLandmarkScale(1.103, { bodyIou: 0.86, volRatio: 1.01 });
   assert.equal(p.apply, true);
-  assert.equal(p.volUsed, false);
-  assert.ok(Math.abs(p.rawS - 1 / 1.103) < 1e-9, `rawS=${p.rawS}`);
+  assert.equal(p.volUsed, true);
+  assert.ok(Math.abs(p.rawS - 1 / Math.sqrt(1.103 * 1.01)) < 1e-9, `rawS=${p.rawS}`);
+});
+
+// 2026-10-16, 6dd26e3e (kesitte hacim): c9 yüz 1.039 / hacim 0.978 ve c3
+// (gözlüklü) 1.075 / 0.946 gereksiz küçültülmüştü; c8 0.992 / 1.055 büyük kaldı.
+test("plan: 6dd26e3e — c9 ve c3 dokunulmaz, c8 küçülür", () => {
+  assert.equal(planLandmarkScale(1.039, { bodyIou: 0.96, volRatio: 0.978 }).apply, false);
+  assert.equal(planLandmarkScale(1.075, { bodyIou: 0.98, volRatio: 0.946 }).apply, false);
+  const c8 = planLandmarkScale(1.022, { bodyIou: 0.93, volRatio: 1.055 });
+  assert.equal(c8.apply, true);
+  assert.ok(c8.s < 1, `s=${c8.s}`);
 });
 
 // 9d9507f0 c8: 0.886 "çok küçültmüşsün"; 61079257 c2: 0.9 "çok küçülmüş".
@@ -372,18 +382,40 @@ test("plan: inanılmaz büyük ölçü kademeyle en dibe itilmez, 0.93'te kalır
   assert.ok(real.s < 0.9, `gerçek büyüme 1.22 hâlâ kademeyle küçülür: s=${real.s}`);
 });
 
-// 2026-10-09, f9f3b5c0 c1/c4: hacim yüzle ters yönü gösterince karar çevrilmez.
-test("algılanan kafa: hacim yüzün tersini söylüyorsa yalnızca yüz (c4 büyütmüştü)", () => {
-  const r = perceivedHeadRatio(1.056, 0.863);
-  assert.equal(r.volUsed, false);
-  assert.equal(r.ratio, 1.056);
-  const p = planLandmarkScale(1.056, { bodyIou: 0.274, faceShift: 0.147, volRatio: 0.863 });
+// 2026-10-09, f9f3b5c0 c4: tam kare hacmi 0.863 (yanlış ölçü) — yüzden 0.2'den
+// fazla saptığı için kullanılmaz, kafa büyütülmez.
+test("algılanan kafa: yüzden çok sapan hacim kullanılmaz (f9f3b5c0 c4)", () => {
+  const p = planLandmarkScale(1.056, { bodyIou: 0.274, faceShift: 0.147, volRatio: 0.83 });
   assert.equal(p.apply, true);
   assert.ok(p.s < 1, `s=${p.s}`);
 });
 
-test("plan: c1 — yüz büyük, hacim biraz küçük → küçültülür (taban engellemez)", () => {
-  const p = planLandmarkScale(1.099, { bodyIou: 0.98, volRatio: 0.96 });
+test("plan: f9f3b5c0 c1 — yüz 1.22, hacim 0.955 → yine küçültülür", () => {
+  const p = planLandmarkScale(1.22, { bodyIou: 0.98, volRatio: 0.955 });
   assert.equal(p.apply, true);
-  assert.ok(Math.abs(p.rawS - 1 / 1.099) < 1e-9, `rawS=${p.rawS}`);
+  assert.ok(p.s < 0.97, `s=${p.s}`);
+});
+
+test("planLandmarkScale: yükseklik tutuyor ama kafa geniş — genişliğe göre küçülür (017dbe34 c0)", () => {
+  const { planLandmarkScale } = require("../headScale");
+  const p = planLandmarkScale(0.994, { bodyIou: 0.97, faceShift: 0.1, volRatio: 1.011, widthRatio: 1.076 });
+  assert.equal(p.apply, true);
+  assert.equal(p.widthUsed, true);
+  assert.ok(p.s > 0.92 && p.s < 0.94, `s=${p.s}`);
+});
+
+test("planLandmarkScale: genişlik algılanan orandan az farklıysa karar değişmez", () => {
+  const { planLandmarkScale } = require("../headScale");
+  const a = planLandmarkScale(1.067, { bodyIou: 0.97, faceShift: 0.1, volRatio: 1.05, widthRatio: 1.095 });
+  const b = planLandmarkScale(1.067, { bodyIou: 0.97, faceShift: 0.1, volRatio: 1.05 });
+  assert.equal(a.widthUsed, false);
+  assert.equal(a.s, b.s);
+});
+
+test("widthUsable: profil ve önden dönmüş çıktıda genişlik kullanılmaz", () => {
+  const { widthUsable } = require("../headScale");
+  assert.equal(widthUsable(0.62, 0.55), true);
+  assert.equal(widthUsable(0.59, 0.68), false);
+  assert.equal(widthUsable(0.85, 0.80), false);
+  assert.equal(widthUsable(null, 0.2), false);
 });

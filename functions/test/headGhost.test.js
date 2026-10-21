@@ -27,8 +27,10 @@ test("kalıntı promptu: örnek gerekçe cümlesi içermez, önce betimletir", (
 });
 
 test("gözlük cevabı", () => {
-  assert.deepEqual(parseEyewearReply("EYEWEAR: YES"), { ok: true, eyewear: true });
-  assert.deepEqual(parseEyewearReply("eyewear: no"), { ok: true, eyewear: false });
+  assert.deepEqual(parseEyewearReply("EYEWEAR: YES"), { ok: true, eyewear: true, eyesVisible: false });
+  assert.deepEqual(parseEyewearReply("eyewear: no"), { ok: true, eyewear: false, eyesVisible: false });
+  assert.deepEqual(parseEyewearReply("EYEWEAR: YES\nEYES_VISIBLE: YES"), { ok: true, eyewear: true, eyesVisible: true });
+  assert.deepEqual(parseEyewearReply("EYEWEAR: YES\nEYES_VISIBLE: NO"), { ok: true, eyewear: true, eyesVisible: false });
   assert.equal(parseEyewearReply("maybe").ok, false);
 });
 

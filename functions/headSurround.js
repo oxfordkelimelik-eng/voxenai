@@ -51,12 +51,41 @@ const MIN_DEFECT_FACE2 = 0.05;
 // olsa dolguyu tetikler.
 const GHOST_FAR_FACE = 0.08;
 const GHOST_FAR_MIN_FACE2 = 0.004;
+// SAYDAM HAYALETTEKİ ADACIKLAR (2026-10-18, d87c25b4 c0): hayaletin içindeki
+// birkaç piksellik koyu benekler "kafaya bağlı olmayan nesne" (şemsiye
+// kuralı) ya da saçın üstüne yapışık "kullanıcının dolu saçı" sayılıp
+// korundu; dolgudan sonra saçın üstünde leke ve benek olarak kaldı. Saydam
+// hayalet varsa, kaş üstünde hayalete değen ve bu kadardan (yüz alanına
+// oranla) küçük korunan parçalar korunmaz (c3: 0.009 yüz²lük koyu tel tek
+// başına kaldı; c1/c2 parçaları <= 0.0025). Perçem/tutam bundan büyüktür.
+const SPECK_MAX_FACE2 = 0.012;
+// Şablonda kafa sınıfı olmayan pikselde çıktı şablondan kanal başına en çok
+// bu kadar farklıysa sahnenin kendisidir, hayalet değil (bkz. ŞABLONUN SAHNESİ).
+const SCENE_MATCH_MAX = 24;
+// Bundan (yüz genişliğine oranla) ince sahne parçası saç telidir, hayalet kalır.
+const SCENE_OPEN_FACE = 0.03;
+// Kaş altında kişi maskesinde dolu ve rengi kullanıcının yüz derisine yakın
+// piksel (a*b* uzaklığı, açıklık aralığı) kullanıcının derisidir, hayalet
+// değil — sınıf olasılığı boyunda kararsız (3d1d2a71 c4: aynı boyun ham
+// karede deri 0.03, katman sonrası 0.86). Silinen gerçek hayaletler
+// grimsi/koyu (Lab 19/−1/0, 24/1/4, 57/−1/1); boyun 58/8/13, yüz 52/14/16.
+const SKIN_LIKE_AB = 9;
+const SKIN_LIKE_L_BELOW = 25;
+const SKIN_LIKE_L_ABOVE = 12;
 // Küçültme deliğinde yeni kafanın korunan yumuşak kenarı, yüz genişliğine oranla.
 const HEAD_SOFT_EDGE_FACE = 0.03;
 // Yerel dolgu modeline kafa da maskeli verilir (saçı deliğe uzatmasın):
 // kafa bileşeninin bu kadar (yüz genişliğine oranla) çevresindeki korunan
 // pikseller.
 const LAMA_HEAD_REACH_FACE = 0.1;
+// Şablon kafası halkası (bkz. prepareHeadSurroundFill): hayalete bu kadar (yüz
+// genişliğine oranla) yakın kısmı dolar; şablon kafasının bu kadar dışındaki
+// arka planın ortalama parlaklık gradyanı TPL_TEX_MAX'ı aşarsa hiç dolmaz
+// (ölçülen: düz duvar/çizgili panel 0.3-4.7 temiz; 3b4f51cb c3 lambalı duvar
+// 5.7 lambayı lekeye uzattı; ca61076a c8 demir kapı 7.0 kapıyı taşla boyadı).
+const TPL_GHOST_REACH_FACE = 0.2;
+const TPL_TEX_REACH_FACE = 0.3;
+const TPL_TEX_MAX = 5;
 
 /**
  * Chamfer (3-4) uzaklık dönüşümü: her piksel için en yakın mask=1 pikseline
@@ -134,6 +163,18 @@ async function templateHeadMask(t, Mt, W, H, box) {
       const hp = P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] + P[CLASSES.others][i];
       headP[i] = hp >= 0.5 || hp > P[CLASSES.bodySkin][i] + P[CLASSES.clothes][i] ? hp : 0;
     }
+    // Şablonda kişi maskesinin gördüğü ama kafa olmayan nesne pikselleri +
+    // şablonun rengi (bkz. ŞABLONUN SAHNESİ). Gökyüzü/duvar dahil değil:
+    // hayaletin soluk kenarı oranın rengine yakın kalıyor.
+    const notHead = new Uint8Array(W * H);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const g = (y + y0) * W + x + x0;
+        if (headP[y * w + x] < TPL_HEAD_CLASS_MIN && Mt[g] >= TPL_STRAND_MIN) notHead[g] = 1;
+      }
+    }
+    out.notHead = notHead;
+    out.rgb = t;
   } catch (e) {
     console.error("Şablon kafa silüeti: sınıflandırma başarısız (yalnız kişi maskesi):", e.message || e);
   }
@@ -196,6 +237,65 @@ const SHEER_MIN_CONTRAST = 50;
 const SHEER_EDGE_FACE = 0.04;
 const SHEER_MIN_FACE2 = 0.003;
 const SHEER_GROW_FACE = 0.1;
+// KOYU HAYALET GÖVDESİ (2026-10-18, d87c25b4 c0): hayaletin yalnız açık
+// kısmı (opaklık < 0.5) alındı; daha yoğun gövdesi (0.5-0.8) "kullanıcının
+// dolu saçı" sayılıp korundu ve teslim edildi. Hayalet tespit edildiyse,
+// alınan kümeye bağlı ve gerçekten dolu saçtan (opaklık >= 0.8) en az
+// SHEER_EXT_EDGE_FACE uzaktaki 0.8'in altındaki saç pikselleri de hayalettir.
+// Kullanıcının kendi saç kenarı dolu saça yapışık olduğu için girmez.
+// Dolu saça yapışık hayalet gövdesi (c0 sol üst tümsek) mesafeyle ayrılmaz;
+// kalınlıkla ayrılır: kullanıcının saç kenarındaki geçiş 1-3 px, hayalet
+// gövdesi kalın bir orta-ton blok. Orta opaklık bölgesinin SHEER_THICK_FACE
+// yarıçaplı açmasından geçen kısmı da hayalettir.
+const SHEER_ALPHA_EXT = 0.8;
+const SHEER_EXT_EDGE_FACE = 0.06;
+const SHEER_THICK_FACE = 0.02;
+// Genişletme yalnız tespit edilen hayaletin bu kadar (yüz genişliğine oranla)
+// yakınında: sınırsızken saç kenarı boyunca yayılıp c3'te kullanıcının açık
+// renkli saç uçlarını sildi.
+const SHEER_EXT_REACH_FACE = 0.12;
+// YEREL ARKA PLAN (2026-10-20, 3d1d2a71 c3/c8, kullanıcı: "saçı silmişsin
+// sağ üst kısmından"): opaklık tek bir arka plan ortancasına göre ölçülünce
+// güneş alan açık kahve saç uçları (çalı/bej duvar önünde, saç-zemin farkı
+// 53-75) "yarı saydam" sayıldı ve kullanıcının kendi saçının üstü dolguyla
+// silindi; 34 karelik sette saydam sayılan kümelerin çoğu da kullanıcının
+// saç kenarıydı (ca61076a c1, 10ee6a46 c8). Yarı saydam koyu saç, ARKASINDAKİ
+// zeminden daha koyu ve saçtan daha açık olmalıdır: opaklık o pikselin yerel
+// arka planına (kafa dışı arka plan pikselleri, SHEER_LOCAL_BG_FACE
+// yarıçapında) göre ölçülür; yerel zeminden açık ya da ona çok yakın
+// (opaklık < SHEER_ALPHA_MIN) piksel saydam değildir, yerel zemin saçtan
+// SHEER_MIN_LOCAL_CONTRAST kadar açık değilse o yerde karar verilmez.
+// Gerçek hayaletler (d87c25b4 c0, 3b4f51cb c1, d87c25b4 c3) açık zeminde
+// (fark 114-128).
+const SHEER_LOCAL_BG_FACE = 0.25;
+const SHEER_ALPHA_MIN = 0.1;
+const SHEER_MIN_LOCAL_CONTRAST = 90;
+
+// Ayrılabilir kutu bulanıklığı (Float32Array, aynı boyut). SAF.
+function boxBlur(a, w, h, r) {
+  if (r < 1) return a;
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const n = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += a[y * w + Math.max(0, Math.min(w - 1, x))];
+    for (let x = 0; x < w; x++) {
+      tmp[y * w + x] = sum / n;
+      sum += a[y * w + Math.min(w - 1, x + r + 1)] - a[y * w + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[Math.max(0, Math.min(h - 1, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / n;
+      sum += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+    }
+  }
+  return out;
+}
+
 function sheerHairMask(rgb, W, Mo, Po, CLASSES, { w, hc, bx0, by0, browY, faceW }) {
   const out = new Uint8Array(w * hc);
   const yb = Math.min(hc, Math.round(browY) - by0);
@@ -217,37 +317,151 @@ function sheerHairMask(rgb, W, Mo, Po, CLASSES, { w, hc, bx0, by0, browY, faceW 
   const med = (a) => a.sort((p, q) => p - q)[a.length >> 1];
   const Lh = med(hairL);
   const Lb = med(bgL);
+  out.Lh = Lh; out.Lb = Lb;
   if (Math.abs(Lb - Lh) < SHEER_MIN_CONTRAST) return out;
+  // Yerel arka plan parlaklığı (bkz. SHEER_LOCAL_BG_FACE): kafa dışı arka
+  // plan piksellerinin normalize kutu bulanıklığı (3 geçiş ≈ Gauss).
+  const bgW = new Float32Array(w * yb);
+  const bgV = new Float32Array(w * yb);
+  for (let y = 0; y < yb; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (Po[CLASSES.background][i] >= 0.8 && Mo[(y + by0) * W + x + bx0] < 0.05) { bgW[i] = 1; bgV[i] = L[i]; }
+    }
+  }
+  // Kalın hayaletin ortası zeminden uzak: yakın ölçekte zemin pikseli yoksa
+  // iki kat geniş ölçeğe düşülür (ağırlık oranı, yalnız zemin piksellerinin
+  // ortalaması — ağırlık küçük olsa da değer doğru).
+  const scales = [];
+  for (let k = 0, r = Math.max(1, Math.round((SHEER_LOCAL_BG_FACE * faceW) / 3)); k < 3; k++, r *= 2) {
+    let sW = bgW, sV = bgV;
+    for (let p = 0; p < 3; p++) { sW = boxBlur(sW, w, yb, r); sV = boxBlur(sV, w, yb, r); }
+    scales.push([sW, sV]);
+  }
+  // Opaklık: 1 = dolu saç, 0 = yerel zemin. Yerel zemin yoksa ya da saçtan
+  // yeterince açık değilse NaN (karar yok — saydam sayılmaz).
+  const alphaAt = new Float32Array(w * yb);
+  for (let i = 0; i < w * yb; i++) {
+    let lb = NaN;
+    for (const [sW, sV] of scales) if (sW[i] > 1e-3) { lb = sV[i] / sW[i]; break; }
+    alphaAt[i] = lb - Lh >= SHEER_MIN_LOCAL_CONTRAST ? (L[i] - lb) / (Lh - lb) : NaN;
+    // Yerel zeminden AÇIK saç pikseli: kullanıcının koyu saçı olamaz, şablonun
+    // gri/gümüş telidir (d87c25b4 c3 ahşap önünde, 10ee6a46 c7) — opaklık
+    // genel zemine göre ölçülür.
+    if (alphaAt[i] < SHEER_ALPHA_MIN) alphaAt[i] = (L[i] - Lb) / (Lh - Lb);
+  }
   const cand = new Uint8Array(w * yb);
   const open = new Uint8Array(w * yb);
   const dense = new Uint8Array(w * yb);
   for (let i = 0; i < w * yb; i++) {
     const hair = Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i];
-    const alpha = (L[i] - Lb) / (Lh - Lb);
-    if (hair && alpha < SHEER_ALPHA_MAX) cand[i] = 1;
+    const alpha = alphaAt[i];
+    if (hair && alpha >= SHEER_ALPHA_MIN && alpha < SHEER_ALPHA_MAX) cand[i] = 1;
     else if (hair) dense[i] = 1;
     const x = i % w;
     const y = (i - x) / w;
     const head = Po[CLASSES.hair][i] + Po[CLASSES.faceSkin][i] + Po[CLASSES.others][i] >= 0.5;
     if (!head && Mo[(y + by0) * W + x + bx0] < 0.5) open[i] = 1;
   }
-  const dDense = chamfer(dense, w, yb);
+  // TESPİT MESAFESİ KALIN DOLU SAÇTAN (2026-10-18, 3b4f51cb c1): hayalet
+  // kubbenin içindeki ince koyu teller (opaklık >= 0.5) "dolu saç" sayılınca
+  // kubbenin açık kısmı onlara yakın kaldı; uzak piksel 46 < 106, hayalet hiç
+  // tespit edilmedi ve teslim edildi (ham karede 172 idi — yüz detayı
+  // keskinleştirmesi telleri koyulaştırdı). Mesafe dolu saçın açmasından
+  // ölçülür; maske kuralları değişmez.
+  const rDense = Math.max(2, SHEER_THICK_FACE * faceW);
   const edgeR = Math.max(2, SHEER_EDGE_FACE * faceW);
-  // Dışarıdan (arka plan) aday piksellere doğru taşma.
-  const stack = [];
-  for (let i = 0; i < w * yb; i++) if (open[i]) stack.push(i);
-  const seen = new Uint8Array(w * yb);
-  for (const i of stack) seen[i] = 1;
-  let farPx = 0;
-  while (stack.length) {
-    const i = stack.pop();
+  // Dışarıdan (arka plan) aday piksellere doğru taşma; dolu saçtan uzak
+  // alınan piksel sayısı hayaletin tespitidir.
+  const floodFar = (cnd, dns, into) => {
+    const dNotDense = chamfer(Uint8Array.from(dns, (v) => (v ? 0 : 1)), w, yb);
+    const denseEr = Uint8Array.from(dNotDense, (v) => (v > rDense ? 1 : 0));
+    const dDenseEr = chamfer(denseEr, w, yb);
+    const dD = chamfer(Uint8Array.from(dDenseEr, (v, i) => (dns[i] && v <= rDense + 1 ? 1 : 0)), w, yb);
+    const stack = [];
+    for (let i = 0; i < w * yb; i++) if (open[i]) stack.push(i);
+    const seen = new Uint8Array(w * yb);
+    for (const i of stack) seen[i] = 1;
+    let far = 0;
+    while (stack.length) {
+      const i = stack.pop();
+      const x = i % w;
+      const y = (i - x) / w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < yb - 1 ? i + w : -1]) {
+        if (j >= 0 && !seen[j] && cnd[j]) { seen[j] = 1; if (into) into[j] = 1; if (dD[j] > edgeR) far++; stack.push(j); }
+      }
+    }
+    return far;
+  };
+  const farPx = floodFar(cand, dense, out);
+  // ESKİ (GENEL ZEMİN) TESPİTİ YALNIZ İŞARET (2026-10-20): genel zemine göre
+  // hayalet görünen ama yerel kuralın almadığı kare (ca61076a c6: beyaz
+  // duvar önünde şablon kafasının gri kubbesi) — piksel silinmez, yalnız
+  // şablon kafası halkasının dolgusu açılır (halka kullanıcının korunan
+  // saçına girmez, bkz. prepareHeadSurroundFill).
+  {
+    const candG = new Uint8Array(w * yb);
+    const denseG = new Uint8Array(w * yb);
+    for (let i = 0; i < w * yb; i++) {
+      if (!(Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i])) continue;
+      if ((L[i] - Lb) / (Lh - Lb) < SHEER_ALPHA_MAX) candG[i] = 1;
+      else denseG[i] = 1;
+    }
+    out.globalGhost = floodFar(candG, denseG, null) >= SHEER_MIN_FACE2 * faceW * faceW;
+  }
+  // Genel zemine göre tespit edilen hayalette yerel kuralın aldığı pikseller
+  // de alınır (d87c25b4 c3: gri teller dolu saça yakın, yerel uzak piksel
+  // eşiğin altında kaldı).
+  if (farPx < SHEER_MIN_FACE2 * faceW * faceW && !out.globalGhost) {
+    out.fill(0);
+    out.farRel = farPx / (faceW * faceW);
+    return out;
+  }
+  out.farRel = farPx / (faceW * faceW);
+  // Koyu hayalet gövdesi: alınan kümeden, dolu saçtan uzak orta yoğunluktaki
+  // saç piksellerine doğru büyüt.
+  const core = new Uint8Array(w * yb);
+  for (let i = 0; i < w * yb; i++) {
+    const hair = Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i];
+    if (hair && !(alphaAt[i] < SHEER_ALPHA_EXT)) core[i] = 1;
+  }
+  const dCore = chamfer(core, w, yb);
+  const extR = Math.max(edgeR, SHEER_EXT_EDGE_FACE * faceW);
+  // Kalın orta-ton: orta opaklık bölgesinin açması.
+  const notMid = new Uint8Array(w * yb);
+  for (let i = 0; i < w * yb; i++) {
+    const hair = Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i];
+    notMid[i] = hair && !core[i] && alphaAt[i] >= SHEER_ALPHA_MAX ? 0 : 1;
+  }
+  const rT = Math.max(2, SHEER_THICK_FACE * faceW);
+  const dMid = chamfer(notMid, w, yb);
+  const midEr = new Uint8Array(w * yb);
+  for (let i = 0; i < w * yb; i++) midEr[i] = dMid[i] > rT ? 1 : 0;
+  const dEr = chamfer(midEr, w, yb);
+  const dSeed = chamfer(out, w, yb);
+  const reach = SHEER_EXT_REACH_FACE * faceW;
+  const grow = [];
+  for (let i = 0; i < w * yb; i++) if (out[i]) grow.push(i);
+  while (grow.length) {
+    const i = grow.pop();
     const x = i % w;
     const y = (i - x) / w;
     for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < yb - 1 ? i + w : -1]) {
-      if (j >= 0 && !seen[j] && cand[j]) { seen[j] = 1; out[j] = 1; if (dDense[j] > edgeR) farPx++; stack.push(j); }
+      if (j < 0 || out[j] || core[j] || dSeed[j] > reach) continue;
+      // Açık (opaklık < SHEER_ALPHA_MAX) piksel hayalete bağlıysa her zaman
+      // hayalettir (c0 sol üst tümsek: L≈94, dolu saça yapışık; 1492 px
+      // korunmuştu). Saçın içindeki parlama dolu saçla çevrili, erişilmez.
+      // DOLU SAÇI AÇMA denendi (hayaletteki koyu çizgiler düşsün diye):
+      // d87c25b4 c1/c2'de kıvırcık saçın tellerini silip topak bıraktı.
+      // Karar verilemeyen (NaN) ya da yerel zeminden açık piksel büyümeye girmez.
+      if (!(alphaAt[j] >= SHEER_ALPHA_MIN)) continue;
+      const light = alphaAt[j] < SHEER_ALPHA_MAX;
+      if (!light && dCore[j] <= extR && !(dEr[j] <= rT + 1)) continue;
+      if (!(Po[CLASSES.hair][j] >= 0.5 && Po[CLASSES.hair][j] > Po[CLASSES.faceSkin][j])) continue;
+      out[j] = 1;
+      grow.push(j);
     }
   }
-  if (farPx < SHEER_MIN_FACE2 * faceW * faceW) out.fill(0);
   return out;
 }
 
@@ -255,11 +469,12 @@ function sheerHairMask(rgb, W, Mo, Po, CLASSES, { w, hc, bx0, by0, browY, faceW 
  * Kafa çevresi şeridinin dolgusunu hazırlar. buf: arka planı geri
  * yüklenmiş (ve varsa kafası ölçeklenmiş) kare; extraHole: kafa küçültmenin
  * açtığı delik (Uint8Array W*H); newHead: küçültülmüş kafanın kendisi
- * (Uint8Array W*H, headScale headMask) — delikte yalnız o korunur.
+ * (Uint8Array W*H, headScale headMask) — delikte yalnız o korunur;
+ * tplHead: şablon kafasının silüeti (Uint8Array W*H, templateHeadMaskFor).
  * Dönüş { applied, reason, bandPx, ghostPx, fringePx, inpaint{rect,job,base} };
  * dolgu lamaFill.finishInpaintLama(job, base) ile tamamlanır.
  */
-async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null } = {}) {
+async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, tplHead = null, debug = null } = {}) {
   const { personMask, _rawRgb: rawRgb, _prepareInpaint: prepareInpaint } = require("./headScale");
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(buf);
@@ -290,25 +505,87 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null }
   const hc = Math.max(16, Math.min(h, Math.round(chin) - by0 + 1));
   const core = new Uint8Array(w * h);
   const ghost = new Uint8Array(w * h);
+  const scene = new Uint8Array(w * h);
+  const sceneOf = (g) => {
+    if (!tplHead || !tplHead.notHead || !tplHead.notHead[g]) return false;
+    for (let c = 0; c < 3; c++) if (Math.abs(o.data[g * 3 + c] - tplHead.rgb[g * 3 + c]) > SCENE_MATCH_MAX) return false;
+    return true;
+  };
   // Kullanıcının kendi dolu saçı (saç sınıfı, saydam hayalet değil).
   const hairDense = new Uint8Array(w * h);
   let classified = false;
+  let sheerGlobal = false;
   try {
     const { classProbs, CLASSES } = require("./skinSeg");
     const Po = await classProbs(await cropRgb(o.data, W, H, bx0, by0, w, hc), w, hc);
     const sheer = sheerHairMask(o.data, W, Mo, Po, CLASSES, { w, hc, bx0, by0, browY, faceW });
+    sheerGlobal = !!sheer.globalGhost;
+    if (debug) { debug.Lh = sheer.Lh; debug.Lb = sheer.Lb; debug.farRel = sheer.farRel; debug.sheerGlobal = sheerGlobal; }
+    // Kullanıcının yüz derisi rengi (ortanca Lab), deri benzeri piksel için.
+    const { rgbToLab } = require("./skinTone");
+    const fL = [], fA = [], fB = [];
+    for (let y = 0; y < hc; y++) {
+      for (let x = 0; x < w; x++) {
+        if (Po[CLASSES.faceSkin][y * w + x] < 0.7) continue;
+        const g = G(x, y), l = rgbToLab(o.data[g * 3], o.data[g * 3 + 1], o.data[g * 3 + 2]);
+        fL.push(l[0]); fA.push(l[1]); fB.push(l[2]);
+      }
+    }
+    const medOf = (a) => Float64Array.from(a).sort()[Math.floor(a.length / 2)];
+    const faceLab = fL.length >= 50 ? [medOf(fL), medOf(fA), medOf(fB)] : null;
+    const skinLike = (g) => {
+      if (!faceLab) return false;
+      const l = rgbToLab(o.data[g * 3], o.data[g * 3 + 1], o.data[g * 3 + 2]);
+      return l[0] >= faceLab[0] - SKIN_LIKE_L_BELOW && l[0] <= faceLab[0] + SKIN_LIKE_L_ABOVE &&
+        Math.hypot(l[1] - faceLab[1], l[2] - faceLab[2]) <= SKIN_LIKE_AB;
+    };
     for (let y = 0; y < hc; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         const m = Mo[G(x, y)];
         const head = Po[CLASSES.hair][i] + Po[CLASSES.faceSkin][i] + Po[CLASSES.others][i] >= 0.5;
-        if ((!head && y + by0 < browY && m >= 0.15 && Po[CLASSES.background][i] >= 0.5) || sheer[i]) {
+        // ŞABLON KAFASININ İÇİ (2026-10-19, ca61076a c0): kaş altında, kulağın
+        // yanında kalan hayalet kişi maskesinde "yumuşak kenar" sayılıp
+        // korunuyordu. Şablon kafasının durduğu yerde arka plan sınıfı kişi
+        // pikseli kaş altında da hayalettir.
+        const inTplHead = !!(tplHead && tplHead[G(x, y)]);
+        // ŞABLONUN SAHNESİ (2026-10-19, 9c8f2cb5 c1, kullanıcı: "kafanın hemen
+        // yanındaki şablonda eğilme"): kafaya bitişik şemsiyenin tepesi kaş
+        // üstünde, arka plan sınıfında ve kişi maskesinde soluktu; hayalet
+        // sayılıp silindi, tepesi kesildi. Şablonda orası kafa değilse ve çıktı
+        // şablonla aynı renkteyse sahnenin kendisidir: hayalet değil, korunur.
+        // Hayalet saç şablonda saç sınıfındadır; şablon kafasının dışındaki
+        // gri pus şablonun gökyüzünden farklı renktedir — ikisi de etkilenmez.
+        // KULLANICININ BOYNU HAYALET DEĞİL (2026-10-20, 3d1d2a71 c4): sınıflar
+        // çok etiketli; kulak altındaki boyun hem arka plan (0.97) hem vücut
+        // derisi (0.86) çıktı, şablonun sakalının durduğu yerde olduğu için
+        // hayalet sayılıp silindi — kulakla sakal arasında koyu boşluk kaldı.
+        // Şablon kafasının hayaleti saç/arka plan sınıfındadır, deri değil;
+        // sınıf kararsızsa renk (bkz. SKIN_LIKE_AB).
+        const skin = Po[CLASSES.bodySkin][i] >= 0.5 || (y + by0 >= browY && m >= 0.5 && skinLike(G(x, y)));
+        const ghostLike = !head && !skin && (y + by0 < browY || inTplHead) && m >= 0.15 && Po[CLASSES.background][i] >= 0.5;
+        if (ghostLike && !sheer[i] && sceneOf(G(x, y))) scene[i] = 1;
+        if (ghostLike || sheer[i]) {
           ghost[i] = sheer[i] ? 2 : 1;
           continue;
         }
         if (head || m >= 0.5) core[i] = 1;
         if (Po[CLASSES.hair][i] >= 0.5 && Po[CLASSES.hair][i] > Po[CLASSES.faceSkin][i]) hairDense[i] = 1;
       }
+    }
+    // Yalnız kalın parçalar sahnedir (açma): şablonun ince saç telleri de
+    // şablonda kafa sınıfı dışında ve çıktıda aynı renkte — onlar hayalettir.
+    const rS = Math.max(2, SCENE_OPEN_FACE * faceW);
+    const notS = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) notS[i] = scene[i] ? 0 : 1;
+    const dS = chamfer(notS, w, h);
+    const er = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) er[i] = dS[i] > rS ? 1 : 0;
+    const dEr = chamfer(er, w, h);
+    for (let i = 0; i < w * h; i++) {
+      if (!scene[i]) continue;
+      if (dEr[i] <= rS + 1) ghost[i] = 0;
+      else scene[i] = 0;
     }
     classified = true;
   } catch (e) {
@@ -401,14 +678,46 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null }
   // dolgusunu sınıflandırıcı saç/kişi sanabiliyor (c4 denemesi: saçın
   // üstünde açık leke korunup kaldı).
   const softR = Math.max(2, HEAD_SOFT_EDGE_FACE * faceW);
+  const speck = new Uint8Array(w * h);
+  if (sheerPx) {
+    const dG = chamfer(ghost, w, h);
+    const yBrow = Math.min(h, Math.max(0, Math.round(browY - by0)));
+    const isCand = (i) => otherCore[i] || (headComp[i] && hairDense[i] && !solid[i]);
+    const seen = new Uint8Array(w * h);
+    const maxA = SPECK_MAX_FACE2 * faceW * faceW;
+    for (let s0 = 0; s0 < yBrow * w; s0++) {
+      if (seen[s0] || !isCand(s0)) continue;
+      const comp = [s0];
+      seen[s0] = 1;
+      let touches = false;
+      for (let k = 0; k < comp.length; k++) {
+        const i = comp[k];
+        if (dG[i] <= 2) touches = true;
+        const x = i % w;
+        const y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < yBrow - 1 ? i + w : -1]) {
+          if (j >= 0 && !seen[j] && isCand(j)) { seen[j] = 1; comp.push(j); }
+        }
+      }
+      if (touches && comp.length <= maxA) for (const i of comp) speck[i] = 1;
+    }
+  }
   const prot = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const g = G(x, y);
       const inHole = !!(extraHole && extraHole[g]);
-      const soft = y + by0 >= browY && Mo[g] >= 0.25 && (!inHole || dHead[i] <= softR);
+      const soft = y + by0 >= browY && Mo[g] >= 0.25 && !ghost[i] && (!inHole || dHead[i] <= softR);
       const headPx = inHole && newHead ? newHead[g] === 1 : solid[i] || (headComp[i] && hairDense[i]);
+      // KÜÇÜLTÜLEN KAFA DOKUNULMAZ (2026-10-19, ca61076a c1, kullanıcı: "saçın
+      // eksilmesi"): saçın gri parlak telleri saydam hayalet, onlara değen
+      // koyu tutam "benek" sayıldı; dolgu saçın sol üstünü silip arkadaki
+      // beyaz pervazı çizgi olarak içine koydu. Küçültme katmanı kafayı
+      // kesin biliyor: onun pikselleri (alfa >= 0.5) her yerde korunur.
+      if (newHead && newHead[g] === 1) { prot[i] = 1; continue; }
+      if (scene[i]) { prot[i] = 1; continue; }
+      if (speck[i]) continue;
       if (headPx || (otherCore[i] && !inHole) || soft) prot[i] = 1;
     }
   }
@@ -421,6 +730,7 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null }
   let fringePx = 0;
   let holePx = 0;
   let farGhostPx = 0;
+  let tplPx = 0;
   const farR = GHOST_FAR_FACE * faceW;
   // Saydam hayalet varsa en dıştaki ince teller (kişi maskesi bile görmüyor)
   // kümenin hemen dışında kalır: kaş üstünde hayaletin çevresi de şeride girer.
@@ -447,8 +757,54 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null }
       }
     }
   }
-  const farGhost = sheerPx > 0 || farGhostPx >= GHOST_FAR_MIN_FACE2 * faceW * faceW;
-  if (!holePx && !farGhost && bandPx < MIN_DEFECT_FACE2 * faceW * faceW) return { applied: false, reason: "clean", bandPx, ghostPx, fringePx, farGhostPx, sheerPx, faceW };
+  const farGhost = sheerPx > 0 || sheerGlobal || farGhostPx >= GHOST_FAR_MIN_FACE2 * faceW * faceW;
+  // ŞABLON KAFASI ∖ YENİ KAFA (2026-10-19, ca61076a c6, kullanıcı: "silüet
+  // problemi"): hayaletin tespit edilen kısmı doldu, dışında kalan soluk kubbe
+  // açık gri leke olarak kaldı. Hayalet tanım gereği şablon kafasının durduğu
+  // yerdedir. Hayalet bulunduysa, şablon kafasının yeni kafanın örtmediği ve
+  // hayalete bağlı kısmı da dolar. Hayalet yoksa dokunulmaz: c8'de şablon
+  // kafası koyu demir kapının önündeydi, modelin oraya çizdiği kemer temizdi;
+  // bütün alan dolunca kemer silindi (bkz. aşağıdaki YALNIZ KUSUR notu).
+  // DESENLİ ZEMİNDE DOKUNULMAZ: yerel dolgu düz duvarı iyi kuruyor, desenli
+  // zemini (c8 demir kapı, kemer) taş dokusuyla boyadı. Halka yalnız tespit
+  // edilen hayaletin yakınında (d87c25b4 c3: bütün halka dolunca kapı köşesi
+  // yuvarlaklaştı) ve şablon kafasının çevresindeki gerçek arka plan düzse dolar.
+  let tplTex = null;
+  if (tplHead && farGhost) {
+    let gs = 0;
+    let gn = 0;
+    const dT = chamfer(Uint8Array.from({ length: w * h }, (_, i) => tplHead[G(i % w, (i - (i % w)) / w)]), w, h);
+    const lum = (g) => 0.299 * o.data[g * 3] + 0.587 * o.data[g * 3 + 1] + 0.114 * o.data[g * 3 + 2];
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!(dT[i] > 0 && dT[i] <= TPL_TEX_REACH_FACE * faceW) || dProt[i] <= 1.5) continue;
+        const g = G(x, y);
+        gs += Math.hypot(lum(g + 1) - lum(g - 1), lum(g + W) - lum(g - W)) / 2;
+        gn++;
+      }
+    }
+    tplTex = gn ? gs / gn : null;
+  }
+  const ringDbg = debug ? new Uint8Array(w * h) : null;
+  if (tplHead && farGhost && tplTex != null && tplTex <= TPL_TEX_MAX) {
+    const stack = [];
+    const seen = new Uint8Array(w * h);
+    const dG = chamfer(ghost, w, h);
+    const reachG = TPL_GHOST_REACH_FACE * faceW;
+    const inRing = (i) => tplHead[G(i % w, (i - (i % w)) / w)] === 1 && dProt[i] > 1.5 && dG[i] <= reachG;
+    for (let i = 0; i < w * h; i++) if (ghost[i] && band[i] && inRing(i)) { seen[i] = 1; stack.push(i); }
+    while (stack.length) {
+      const i = stack.pop();
+      if (!band[i]) { band[i] = 1; bandPx++; tplPx++; if (ringDbg) ringDbg[i] = 1; }
+      const x = i % w;
+      const y = (i - x) / w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+        if (j >= 0 && !seen[j] && inRing(j)) { seen[j] = 1; stack.push(j); }
+      }
+    }
+  }
+  if (!holePx && !farGhost && bandPx < MIN_DEFECT_FACE2 * faceW * faceW) return { applied: false, reason: "clean", bandPx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW };
 
   // Yumuşak kenar: dolgu şeridin dışına (şablon arka planına) azalarak
   // taşar; korunan kafaya hiç girmez. DIŞ GEÇİŞ GENİŞ (2026-10-12, e0eb8dd5
@@ -486,12 +842,39 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null }
       if (prot[i] && !otherCore[i] && dHead[i] <= reachR) head[G(x, y)] = 1;
     }
   }
+  if (debug) Object.assign(debug, { W, H, bx0, by0, w, h, ghost, speck, band, prot, solid, hairDense, browY, ringDbg, Mo, G });
   const job = prepareInpaint(o.data, o.data, W, H, hole, banned, wgt, head);
   job.out = null;
+  // Küçültme deliği yoksa yerel dolgu geniş bağlamla (bkz. lamaFill CONTEXT_RATIO).
+  job.wide = !holePx;
   return {
-    applied: true, bandPx, holePx, ghostPx, fringePx, farGhostPx, sheerPx, faceW,
+    applied: true, bandPx, holePx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW,
     inpaint: { rect: { left: job.left, top: job.top, side: job.side }, job, base: buf },
   };
 }
 
-module.exports = { templateHeadMask, prepareHeadSurroundFill, chamfer, sheerHairMask };
+/**
+ * Şablon kafası silüeti çıktı karesinin boyutunda (arka plan geri yüklemesinin
+ * dışarıda bıraktığı alanın aynısı, bkz. sceneRestore). Bulunamazsa null.
+ */
+async function templateHeadMaskFor(outBuf, tplBuf) {
+  const { personMask } = require("./headScale");
+  const { detectMainFace } = require("./faceQuality");
+  const m = await sharp(outBuf).rotate().metadata();
+  const swapO = (m.orientation || 1) >= 5;
+  const W = swapO ? m.height : m.width;
+  const H = swapO ? m.width : m.height;
+  const tm = await sharp(tplBuf).metadata();
+  const swapT = (tm.orientation || 1) >= 5;
+  const tw = swapT ? tm.height : tm.width;
+  const th = swapT ? tm.width : tm.height;
+  if (Math.abs(W / H - tw / th) > 0.01 * (W / H)) return null;
+  const t = await sharp(tplBuf).rotate().removeAlpha().resize(W, H, { fit: "fill" }).raw().toBuffer();
+  const tJpeg = await sharp(t, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 92 }).toBuffer();
+  const f = (await detectMainFace(tJpeg)) || (await detectMainFace(tJpeg, 0.1));
+  if (!f) return null;
+  const Mt = await personMask(t, W, H);
+  return templateHeadMask(t, Mt, W, H, f.box);
+}
+
+module.exports = { templateHeadMask, templateHeadMaskFor, prepareHeadSurroundFill, chamfer, sheerHairMask };

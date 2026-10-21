@@ -435,6 +435,32 @@ function profileDegreeFromLandmarks(landmarks) {
 }
 
 /**
+ * İŞARETLİ YÖN (2026-10-19, ca61076a, kullanıcı: "düz bakan base'de çıktı
+ * dönüyor"): profileDegreeFromLandmarks işaretsiz — baş şablonun TERSİNE
+ * döndüğünde fark küçük görünüyordu (canlıda şablon -0.07 → çıktı +0.33:
+ * gerçek fark 0.40, kapı 0.26 gördü). Burun ayrıca göz çizgisi DOĞRULTUSUNDA
+ * ölçülür: yatık başta burun gözlerin altında yatay kayar, yatay ölçü bunu
+ * dönme sanar. -1..1; >0 burun görüntünün sağına dönük. Ölçülemezse null.
+ */
+function signedYawFromLandmarks(landmarks) {
+  try {
+    const lm = landmarks && landmarks.positions;
+    if (!lm || lm.length < 46) return null;
+    const a = lm[36];
+    const c = lm[45];
+    const n = lm[30];
+    const ex = c.x - a.x;
+    const ey = c.y - a.y;
+    const L2 = ex * ex + ey * ey;
+    if (!isFinite(L2) || L2 < 1e-6) return null;
+    const rel = ((n.x - a.x) * ex + (n.y - a.y) * ey) / L2;
+    return Math.max(-1, Math.min(1, (rel - 0.5) * 2));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Referans fotoğrafları analiz eder.
  * Akış: [ön, sağ, sol] — hepsi yüz karesi (bkz. göğüs-üstü referansın
  * kaldırılması, dosyanın başındaki not). Kimlik vektörü bu karelerden
@@ -2016,6 +2042,7 @@ async function detectPlacement(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
       wNorm: b.width / w,
       pitch: pitchRatioFromLandmarks(result.landmarks),
       yaw: profileDegreeFromLandmarks(result.landmarks),
+      yawSigned: signedYawFromLandmarks(result.landmarks),
     };
   } finally {
     tensor.dispose();
@@ -2031,6 +2058,21 @@ async function headYawOf(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
     if (!buf) return null;
     const p = await detectPlacement(buf, minConfidence);
     return p ? p.yaw : null;
+  } catch (e) {
+    console.error("Yaw ölçümü hata verdi (atlanıyor):", e.message || e);
+    return null;
+  }
+}
+
+/**
+ * Tek tespitte { yaw (işaretsiz, 0..1), yawSigned (bkz. signedYawFromLandmarks) }.
+ * Ölçülemezse null.
+ */
+async function headPoseOf(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
+  try {
+    if (!buf) return null;
+    const p = await detectPlacement(buf, minConfidence);
+    return p && p.yaw != null ? { yaw: p.yaw, yawSigned: p.yawSigned } : null;
   } catch (e) {
     console.error("Yaw ölçümü hata verdi (atlanıyor):", e.message || e);
     return null;
@@ -2426,6 +2468,8 @@ module.exports = {
   measureLimbSharpness,
   measureIrisGaze,
   headYawOf,
+  headPoseOf,
+  signedYawFromLandmarks,
   eyesLookClosedVsReference,
   CLOSED_EYE_MAX,
   matchesIdentity,

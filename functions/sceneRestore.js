@@ -46,6 +46,8 @@ const MIN_PERSON_IOU = 0.5;
 // Genişletme ve yumuşatma, uzun kenarın oranı olarak. Segmentasyon 256px'te
 // çalışıyor; büyütülmüş maske kenarı ~1 hücre (~%0.5) belirsiz.
 const DILATE_FRAC = 0.012;
+// Çıktı kişisinin çevresi: ~1 segmentasyon hücresi (bkz. personAlpha).
+const OUT_DILATE_FRAC = 0.005;
 // Kafa ölçeklendiyse şablon-kafa bandının arandığı bölge ve bandın
 // çevresindeki yumuşak geçiş genişliği (kafa yarıçapı cinsinden).
 const HEAD_BLEND_R = 1.8;
@@ -106,19 +108,38 @@ async function personAlpha(Mo, Mt, W, H, tplHead = null, tplHeadMask = null) {
   }
   // IoU kişilerin örtüşmesini ölçer (yeniden kadraj testi) — eski eşikle.
   const iou = uni ? inter / uni : 0;
-  const r = Math.max(4, Math.round(DILATE_FRAC * Math.max(W, H)));
-  const dil = dilate(union, W, H, r);
-  const m8 = Buffer.alloc(W * H);
-  for (let i = 0; i < m8.length; i++) m8[i] = dil[i] ? 255 : 0;
-  // TEK KANAL TUZAĞI (hafıza: sharp-mask-channel-trap): blur sonrası
-  // extractChannel(0) şart.
-  const soft = await sharp(m8, { raw: { width: W, height: H, channels: 1 } })
-    .blur(Math.max(1, r / 2))
-    .extractChannel(0)
-    .raw()
-    .toBuffer();
+  // İKİ GENİŞLETME (2026-10-16, 6dd26e3e c9): şablon kişisinin kalıntısı
+  // sızmasın diye şablon tarafı geniş genişletilir. Çıktı kişisinin çevresinde
+  // ise şablon arka planı geçerli — orada geniş bant modelin KAYDIRDIĞI arka
+  // planı bırakıyordu ve tablo çerçevesi bandın kenarında basamak yaptı. Çıktı
+  // tarafı yalnız maske belirsizliği kadar (OUT_DILATE_FRAC) genişletilir.
+  const L = Math.max(W, H);
+  const r = Math.max(4, Math.round(DILATE_FRAC * L));
+  const rOut = Math.max(2, Math.round(OUT_DILATE_FRAC * L));
+  // Şablon kafa silüeti (headSurround) zaten yüz genişliğine oranla
+  // büyütülmüş; üstüne geniş pay çenenin yanında yine kaymış bant bırakıyordu
+  // (c9). Kafa silüeti dar, şablonun geri kalanı (gövde telleri) geniş pay.
+  const tplPart = new Uint8Array(W * H), outPart = new Uint8Array(W * H);
+  for (let i = 0; i < union.length; i++) {
+    if (!union[i]) continue;
+    if (Mo[i] >= MASK_THRESHOLD || (tplHeadMask && tplHeadMask[i])) outPart[i] = 1;
+    else tplPart[i] = 1;
+  }
+  const softOf = async (bin, rad) => {
+    const dil = dilate(bin, W, H, rad);
+    const m8 = Buffer.alloc(W * H);
+    for (let i = 0; i < m8.length; i++) m8[i] = dil[i] ? 255 : 0;
+    // TEK KANAL TUZAĞI (hafıza: sharp-mask-channel-trap): blur sonrası
+    // extractChannel(0) şart.
+    return sharp(m8, { raw: { width: W, height: H, channels: 1 } })
+      .blur(Math.max(1, rad / 2))
+      .extractChannel(0)
+      .raw()
+      .toBuffer();
+  };
+  const [softT, softO] = await Promise.all([softOf(tplPart, r), softOf(outPart, rOut)]);
   const alpha = new Float32Array(W * H);
-  for (let i = 0; i < alpha.length; i++) alpha[i] = union[i] ? 1 : soft[i] / 255;
+  for (let i = 0; i < alpha.length; i++) alpha[i] = union[i] ? 1 : Math.max(softT[i], softO[i]) / 255;
   return { alpha, iou, unionFrac: uni / (W * H) };
 }
 
@@ -223,6 +244,131 @@ async function harmonizeBand(O, T, W, H, band, known) {
   return n;
 }
 
+// BANT HİZALAMA (2026-10-16, iş 6dd26e3e c9, kullanıcı: "arkadaki tablo
+// oynamış — arka plan hiçbir zaman bozulmamalı"). Model kafanın çevresindeki
+// arka planı yerel olarak KAYDIRARAK yeniden çiziyor (c9: tablo çerçevesi
+// 8-9 px yukarıda; c5/c8 0-1 px). Kişinin çevresindeki bant çıktıdan
+// kaldığı için, şablondan geri konan alanla birleştiği yerde düz çizgiler
+// basamak yapıyordu. Bant çevresindeki şablon arka planında blok eşlemeyle
+// yerel kayma ölçülür; bandın (çıktı kişisi olmayan) pikselleri o kadar
+// geri kaydırılır — çizgiler şablondaki yerine oturur.
+const ALIGN_BLOCK_FRAC = 0.024; // blok kenarı, uzun kenarın oranı
+const ALIGN_SEARCH_FRAC = 0.016; // arama yarıçapı
+const ALIGN_MIN_STD = 6; // dokusuz blok ölçülmez
+const ALIGN_GAIN_MIN = 0.2; // kaymanın (0,0)'a göre en az bu kadar iyi olması
+// Eşleşme belirginliği: (ortalama maliyet − en iyi) / ortalama. Model bloğu
+// farklı çizdiyse (c9: çerçevenin içi, dy +18/−1 oyları) belirginlik düşük —
+// oy vermez; verenler belirginlikle ağırlıklanır.
+const ALIGN_DISTINCT_MIN = 0.3;
+const ALIGN_TIE = 0.05; // en iyiye bu kadar yakın adaylardan en küçük kayma (açıklık sorunu: düz çizgi)
+const ALIGN_MIN_SHIFT = 2; // daha küçük kayma görünmez
+const ALIGN_PERSON_LO = 0.25; // bu kişi olasılığına kadar tam taşınır
+const ALIGN_PERSON_HI = 0.5; // bundan sonra hiç taşınmaz
+
+/**
+ * Bant pikselleri (alfa>0, çıktıda kişi değil) şablon arka planına hizalanır.
+ * O yerinde değişir. Döner: { blocks, moved, maxShift } ya da null.
+ */
+function alignBandToTemplate(O, T, W, H, alpha, Mo, Mt) {
+  const L = Math.max(W, H);
+  const B = Math.max(12, Math.round(ALIGN_BLOCK_FRAC * L)), R = Math.max(4, Math.round(ALIGN_SEARCH_FRAC * L));
+  const toGray = (A) => { const g = new Float32Array(W * H); for (let i = 0; i < W * H; i++) g[i] = 0.299 * A[i * 3] + 0.587 * A[i * 3 + 1] + 0.114 * A[i * 3 + 2]; return g; };
+  const gO = toGray(O), gT = toGray(T);
+  let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (alpha[i] > 0 && Mo[i] < MASK_THRESHOLD) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y); }
+  }
+  if (bx1 < 0) return null;
+  const pts = [];
+  const step = B;
+  for (let y = Math.max(R, by0 - 3 * B); y + B + R < Math.min(H, by1 + 3 * B); y += step) {
+    for (let x = Math.max(R, bx0 - 3 * B); x + B + R < Math.min(W, bx1 + 3 * B); x += step) {
+      let ok = true, m = 0;
+      for (let yy = y - R; yy < y + B + R && ok; yy += 2) for (let xx = x - R; xx < x + B + R; xx += 2) {
+        const i = yy * W + xx;
+        if (Mo[i] >= MASK_THRESHOLD || Mt[i] >= TEMPLATE_MASK_THRESHOLD) { ok = false; break; }
+      }
+      if (!ok) continue;
+      for (let yy = y; yy < y + B; yy++) for (let xx = x; xx < x + B; xx++) if (alpha[yy * W + xx] > 0) ok = false;
+      if (!ok) continue;
+      const tb = new Float32Array(B * B);
+      for (let yy = 0; yy < B; yy++) for (let xx = 0; xx < B; xx++) { const v = gT[(y + yy) * W + x + xx]; tb[yy * B + xx] = v; m += v; }
+      m /= B * B;
+      let v2 = 0;
+      for (let k = 0; k < B * B; k++) { tb[k] -= m; v2 += tb[k] * tb[k]; }
+      if (Math.sqrt(v2 / (B * B)) < ALIGN_MIN_STD) continue;
+      const cost = new Map();
+      let best = Infinity, sum = 0;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        let om = 0;
+        for (let yy = 0; yy < B; yy += 2) for (let xx = 0; xx < B; xx += 2) om += gO[(y + yy + dy) * W + x + xx + dx];
+        om /= Math.ceil(B / 2) ** 2;
+        let s = 0;
+        for (let yy = 0; yy < B; yy += 2) for (let xx = 0; xx < B; xx += 2) s += Math.abs(tb[yy * B + xx] - (gO[(y + yy + dy) * W + x + xx + dx] - om));
+        cost.set(dy * 1000 + dx, s);
+        sum += s;
+        if (s < best) best = s;
+      }
+      // Kaymasız eşleşme en iyiye yakınsa kayma yok (kanıtlı sıfır). Değilse
+      // kayma ancak belirgin iyiyse sayılır; model bloğu farklı çizdiyse
+      // (c9: çerçevenin içi) blok hiç oy vermez — "sıfır" sayılsaydı gerçek
+      // kaymayı sulandırıyordu.
+      const q = 1 - best / (sum / cost.size);
+      if (q < ALIGN_DISTINCT_MIN) continue;
+      const c0 = cost.get(0);
+      let d = null;
+      if (c0 <= best * (1 + ALIGN_TIE)) d = [0, 0];
+      else if (c0 - best > ALIGN_GAIN_MIN * c0) {
+        let bestMag = Infinity;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          if (cost.get(dy * 1000 + dx) > best * (1 + ALIGN_TIE)) continue;
+          const mag = Math.hypot(dx, dy);
+          if (mag < bestMag) { bestMag = mag; d = [dx, dy]; }
+        }
+      }
+      if (d) pts.push({ x: x + B / 2, y: y + B / 2, dx: d[0], dy: d[1], q });
+    }
+  }
+  if (!pts.some((p) => Math.hypot(p.dx, p.dy) >= ALIGN_MIN_SHIFT)) return { blocks: pts.length, moved: 0, maxShift: 0 };
+  // Alan: Gauss ağırlıklı ortalama; ölçü uzaksa kayma sıfıra söner.
+  const sig = 2 * B, w0 = 0.1;
+  const src = Buffer.from(O);
+  const sample = (x, y, c) => {
+    const x0 = Math.max(0, Math.min(W - 1, Math.floor(x))), y0 = Math.max(0, Math.min(H - 1, Math.floor(y)));
+    const x1 = Math.min(W - 1, x0 + 1), y1 = Math.min(H - 1, y0 + 1), fx = x - Math.floor(x), fy = y - Math.floor(y);
+    return (src[(y0 * W + x0) * 3 + c] * (1 - fx) + src[(y0 * W + x1) * 3 + c] * fx) * (1 - fy) + (src[(y1 * W + x0) * 3 + c] * (1 - fx) + src[(y1 * W + x1) * 3 + c] * fx) * fy;
+  };
+  let moved = 0, maxShift = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (!(alpha[i] > 0) || Mo[i] >= ALIGN_PERSON_HI) continue;
+    let sw = 0, sx = 0, sy = 0;
+    for (const p of pts) {
+      const g = Math.exp(-((p.x - x) ** 2 + (p.y - y) ** 2) / (2 * sig * sig));
+      const gq = g * p.q;
+      sw += gq; sx += gq * p.dx; sy += gq * p.dy;
+    }
+    if (sw < 1e-3) continue;
+    const conf = sw / (sw + w0);
+    const dx = (sx / sw) * conf, dy = (sy / sw) * conf;
+    if (Math.hypot(dx, dy) < 0.5) continue;
+    const xs = x + dx, ys = y + dy;
+    const si = Math.max(0, Math.min(H - 1, Math.round(ys))) * W + Math.max(0, Math.min(W - 1, Math.round(xs)));
+    // Kaynak da kişi olmamalı (saç tutamı arka plana kopyalanmasın).
+    // Maske 256 px'ten büyütüldüğü için kenarı yumuşak; 0.25 civarı hâlâ arka
+    // plan (c9: çeneye bitişik şeritte yarım taşıma çift çizgi yaptı). Tam
+    // taşıma ALIGN_PERSON_LO'ya kadar, ALIGN_PERSON_HI'da sıfır.
+    const fadeP = (p) => Math.max(0, Math.min(1, (ALIGN_PERSON_HI - p) / (ALIGN_PERSON_HI - ALIGN_PERSON_LO)));
+    const wgt = fadeP(Mo[i]) * fadeP(Mo[si]);
+    if (wgt <= 0) continue;
+    for (let c = 0; c < 3; c++) O[i * 3 + c] = Math.round(wgt * sample(xs, ys, c) + (1 - wgt) * src[i * 3 + c]);
+    moved++;
+    maxShift = Math.max(maxShift, Math.hypot(dx, dy));
+  }
+  return { blocks: pts.length, moved, maxShift, pts };
+}
+
 /**
  * outputBuf ve templateBuf AYNI kadraj uzayında olmalı (bkz. falPhotos.js
  * KAFA ÖLÇEK ile aynı eşleme kuralı). Şablon çıktı boyutuna ölçeklenir.
@@ -303,6 +449,15 @@ async function restoreTemplateBackground(outputBuf, templateBuf, { head = null }
     }
   }
 
+  // Bant çıktının kaydırdığı arka planı taşıyor — önce şablona hizalanır
+  // (bkz. alignBandToTemplate), sonra tonu eşitlenir.
+  let align = null;
+  try {
+    align = alignBandToTemplate(o.data, t, W, H, alpha, Mo, Mt);
+  } catch (e) {
+    console.error("Arka plan: bant hizalama hata verdi (atlanıyor):", e.message || e);
+  }
+
   // Kişinin çevresindeki çıktı arka planını şablon tonuna eşitle (bkz.
   // harmonizeBand). Bant ağırlığı: çıktıda kişi olmama olasılığı × alfa.
   const known = Buffer.alloc(W * H);
@@ -332,7 +487,7 @@ async function restoreTemplateBackground(outputBuf, templateBuf, { head = null }
   const buf = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   return {
     buf, applied: true, reason: null, iou, unionFrac, tplHeadMask, W, H,
-    bgDiff: diffN ? diffSum / diffN : 0, restoredPx: restored, harmonizedPx,
+    bgDiff: diffN ? diffSum / diffN : 0, restoredPx: restored, harmonizedPx, align,
   };
 }
 
@@ -379,4 +534,4 @@ async function mainPersonBox(buf, faceBox) {
   return { x0: x0 * S, y0: y0 * S, x1: Math.min(W, (x1 + 1) * S), y1: Math.min(H, (y1 + 1) * S) };
 }
 
-module.exports = { restoreTemplateBackground, mainPersonBox, pushPullField, dilate, MIN_PERSON_IOU };
+module.exports = { restoreTemplateBackground, mainPersonBox, pushPullField, dilate, alignBandToTemplate, MIN_PERSON_IOU };

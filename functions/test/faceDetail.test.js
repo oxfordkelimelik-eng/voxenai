@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { planDetailGain, hfRms, APPLY_MIN_GAIN, MAX_GAIN } = require("../faceDetail");
+const { planDetailGain, hfRms, APPLY_MIN_GAIN, MAX_GAIN, planGrain, fineNoise, grainField, GRAIN_MAX_ADD } = require("../faceDetail");
 const { pushPullField } = require("../sceneRestore");
 
 // bb2cc441 c7: şablon yüz/kıyafet 6.89/4.80, çıktı 3.97/4.60 → yüz %40 eksik.
@@ -40,4 +40,29 @@ test("pushPullField: bilinen değerleri korur, boşluğu komşulardan doldurur",
   pushPullField(F, W, H, 1, k);
   assert.equal(F[0], 10);
   for (let i = 1; i < 7; i++) assert.ok(Math.abs(F[i] - 10) < 1e-6, `F[${i}]=${F[i]}`);
+});
+
+// 629b45de c3: şablon yüz greni 1.86, çıktı 0.61 → eksik pay eklenir.
+test("gren: şablon yüzü belirgin grenliyse eksik pay eklenir", () => {
+  const p = planGrain(1.86, 0.61);
+  assert.equal(p.apply, true);
+  assert.ok(Math.abs(p.add - Math.sqrt(1.86 ** 2 - 0.61 ** 2)) < 1e-9);
+});
+
+test("gren: çıktı zaten grenliyse dokunulmaz (asla gren silinmez)", () => {
+  assert.equal(planGrain(1.68, 2.55).reason, "grainy-enough"); // 629b45de c8
+  assert.equal(planGrain(1.47, 1.42).reason, "grainy-enough"); // 629b45de c6
+});
+
+test("gren: eksik pay sınırlanır, ölçü yoksa uygulanmaz", () => {
+  assert.equal(planGrain(5.71, 0.5).add, GRAIN_MAX_ADD);
+  assert.equal(planGrain(null, 1).reason, "no-measure");
+});
+
+test("gren alanı: birim ölçülü ve tekrarlanabilir", () => {
+  const W = 96, H = 96;
+  const a = grainField(W, H, 7), b = grainField(W, H, 7);
+  assert.deepEqual(a, b);
+  const u = fineNoise(a, W, H, null, 0);
+  assert.ok(Math.abs(u - 1) < 0.05, `birim=${u}`);
 });

@@ -38,6 +38,18 @@ const LAMA_SHA256 = "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4e
 const MIN_FIT_SCALE = 0.75;
 // Kafa maskesinin genişletilmesi (px, kırpım çözünürlüğünde).
 const HEAD_MASK_GROW = 4;
+// GENİŞ BAĞLAM (2026-10-18, d87c25b4 c0): delik (kafa + çevresi) 512'lik
+// pencerenin %73'ünü kaplıyordu; model çevrede yeterince arka plan görmeyince
+// kafa biçimli boşluğu gri bir kubbeyle tamamladı — saydam hayalet maskeye
+// girdiği hâlde teslimde aynen kaldı. Pencere kenarı deliğin açıklığının
+// CONTEXT_RATIO katı alınır; bu WIDE_MIN_SCALE'den fazla küçültme
+// gerektiriyorsa (büyük delik) eski yol (bkz. fillCrop). 32 karede eski/yeni:
+// c0 ve 0eeb75c8 c12'de gri kubbe kalktı, diğerlerinde fark yok; 0.45-0.6
+// küçültmede hale görülmedi. YALNIZ KÜÇÜLTMESİZ KAFA ÇEVRESİNDE (job.wide,
+// headSurround): küçültme deliğinde 12 karede karışık — 0eeb75c8 c12/c13'te
+// eski kafanın izi biraz belirginleşti.
+const CONTEXT_RATIO = 2;
+const WIDE_MIN_SCALE = 0.45;
 
 let modelP = null;
 function modelPath() {
@@ -154,6 +166,68 @@ async function fillCrop(rgb, side, mask) {
 }
 
 /**
+ * Geniş bağlamla dolgu: maskenin açıklığının CONTEXT_RATIO katı kenarlı kare
+ * tam kareden (baseRgb, job kırpımı job.rgb ile) alınır, 512'ye indirilir.
+ * Dönüş { rgb (job kırpımı side*side*3), runs, scale } | null (sığmıyor).
+ */
+async function fillWide(job, baseRgb, mask) {
+  const { side, W, H, left, top } = job;
+  let x0 = side, x1 = -1, y0 = side, y1 = -1;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      if (!mask[y * side + x]) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  const span = Math.max(x1 - x0, y1 - y0) + 1;
+  const ws = Math.min(W, H, Math.round(span * CONTEXT_RATIO));
+  const f = S / ws;
+  if (f < WIDE_MIN_SCALE) return null;
+  const L = Math.max(0, Math.min(W - ws, Math.round(left + (x0 + x1) / 2 - ws / 2)));
+  const T = Math.max(0, Math.min(H - ws, Math.round(top + (y0 + y1) / 2 - ws / 2)));
+  const big = Buffer.alloc(ws * ws * 3);
+  const m8 = Buffer.alloc(ws * ws);
+  for (let y = 0; y < ws; y++) {
+    for (let x = 0; x < ws; x++) {
+      const X = x + L, Y = y + T, b = y * ws + x;
+      const cx = X - left, cy = Y - top;
+      const inJob = cx >= 0 && cy >= 0 && cx < side && cy < side;
+      const src = inJob ? job.rgb : baseRgb, si = inJob ? cy * side + cx : Y * W + X;
+      for (let c = 0; c < 3; c++) big[b * 3 + c] = src[si * 3 + c];
+      if (inJob && mask[cy * side + cx]) m8[b] = 255;
+    }
+  }
+  const small = f < 1
+    ? await sharp(big, { raw: { width: ws, height: ws, channels: 3 } }).resize(S, S, { kernel: "lanczos3" }).raw().toBuffer()
+    : big;
+  const n = f < 1 ? S : ws;
+  // TEK KANAL TUZAĞI (hafıza sharp-mask-channel-trap): extractChannel(0) şart.
+  const ms = f < 1
+    ? await sharp(m8, { raw: { width: ws, height: ws, channels: 1 } }).resize(S, S, { kernel: "linear" }).extractChannel(0).raw().toBuffer()
+    : m8;
+  const sm = new Uint8Array(n * n);
+  for (let i = 0; i < sm.length; i++) sm[i] = ms[i] > 8 ? 1 : 0;
+  const r = await fillCrop(small, n, sm);
+  const back = f < 1
+    ? await sharp(r.rgb, { raw: { width: S, height: S, channels: 3 } }).resize(ws, ws, { kernel: "lanczos3" }).raw().toBuffer()
+    : r.rgb;
+  const out = Buffer.from(job.rgb);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const bx = x + left - L, by = y + top - T;
+      if (bx < 0 || by < 0 || bx >= ws || by >= ws) continue;
+      const b = by * ws + bx, i = y * side + x;
+      for (let c = 0; c < 3; c++) out[i * 3 + c] = back[b * 3 + c];
+    }
+  }
+  return { rgb: out, runs: r.runs, scale: f * r.scale };
+}
+
+/**
  * Kafa ölçeği/çevresi işini (headScale.prepareInpaint biçimi) yerel modelle
  * tamamlar. Maske = delik ∪ kafa (job.headC; bağlam olarak verilmez). Delik
  * pikseline bileşim ağırlığıyla yazılır: res = base + wC (L - PC) — OpenAI
@@ -161,7 +235,7 @@ async function fillCrop(rgb, side, mask) {
  * için renk düzeltmesi ve kayma kapısı gerekmez.
  * Dönüş { buf, runs, scale, ms }.
  */
-async function finishInpaintLama(job, baseJpeg) {
+async function finishInpaintLama(job, baseBuf, opts = {}) {
   const t0 = Date.now();
   const { side, W, H, left, top } = job;
   const N = side * side;
@@ -182,8 +256,9 @@ async function finishInpaintLama(job, baseJpeg) {
     }
   }
   for (let i = 0; i < N; i++) if (job.holeC[i]) mask[i] = 1;
-  const filled = await fillCrop(job.rgb, side, mask);
-  const res = await sharp(baseJpeg).removeAlpha().raw().toBuffer();
+  const res = await sharp(baseBuf).removeAlpha().raw().toBuffer();
+  const wide = opts.wide ?? !!job.wide;
+  const filled = (wide && (await fillWide(job, res, mask))) || (await fillCrop(job.rgb, side, mask));
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
       const i = y * side + x;
@@ -196,7 +271,7 @@ async function finishInpaintLama(job, baseJpeg) {
       }
     }
   }
-  const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 95 }).toBuffer();
+  const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   return { buf, runs: filled.runs, scale: filled.scale, ms: Date.now() - t0 };
 }
 

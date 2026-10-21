@@ -30,6 +30,11 @@ test("teslim c4: şablon 0.88 < 0.95 olduğu için susar", () => {
   assert.equal(isUnderRotated(0.88, 0.71), false);
 });
 
+test("6dd26e3e c4: neredeyse profil 0.90, çıktı 0.63 → eksik dönüş", () => {
+  assert.equal(isUnderRotated(0.90, 0.63), true);
+  assert.equal(isUnderRotated(0.86, 0.70), false);
+});
+
 test("şablon profil değilse eksik dönüş yok", () => {
   assert.equal(isUnderRotated(0.12, 0.37), false);
   assert.equal(isUnderRotated(null, 0.87), false);

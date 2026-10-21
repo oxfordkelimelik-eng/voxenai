@@ -217,12 +217,16 @@ function headTopCropRect(faceBox, W, H) {
 const EYEWEAR_PROMPT =
   "Is the person in this photo wearing glasses or sunglasses ON THEIR EYES right now " +
   "(not pushed up on the head, not held in the hand)?\n" +
-  "Reply on one line: EYEWEAR: <YES | NO>";
+  "If yes: can you see their eyes through the lenses (clear or tinted lenses), or are the lenses opaque/dark?\n" +
+  "Reply on two lines:\nEYEWEAR: <YES | NO>\nEYES_VISIBLE: <YES | NO>";
 
-/** SAF. Döner { ok, eyewear } | { ok:false, reason }. */
+/** SAF. Döner { ok, eyewear, eyesVisible } | { ok:false, reason }. */
 function parseEyewearReply(raw) {
   const m = /EYEWEAR\s*:\s*(YES|NO)/i.exec(raw || "");
-  return m ? { ok: true, eyewear: m[1].toUpperCase() === "YES" } : { ok: false, reason: "unparsable" };
+  if (!m) return { ok: false, reason: "unparsable" };
+  // Gözler camdan görünüyor mu (eyewear.keepOwnEyes); okunamazsa false — eski davranış.
+  const v = /EYES_VISIBLE\s*:\s*(YES|NO)/i.exec(raw || "");
+  return { ok: true, eyewear: m[1].toUpperCase() === "YES", eyesVisible: !!v && v[1].toUpperCase() === "YES" };
 }
 
 /**
@@ -247,7 +251,7 @@ async function judgeEyewear(templateBuf, faceBox, apiKey) {
       body: JSON.stringify({
         model: HEAD_GHOST_MODEL,
         temperature: 0,
-        max_tokens: 10,
+        max_tokens: 24,
         messages: [
           { role: "system", content: SYSTEM_MSG },
           { role: "user", content: [{ type: "text", text: EYEWEAR_PROMPT }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${crop.toString("base64")}`, detail: "low" } }] },

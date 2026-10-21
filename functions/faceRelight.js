@@ -22,6 +22,33 @@
 // 2026-10-08'deki serbest harita hatası (gözlük camı alında turuncu leke)
 // burada üç yolla önlenir: gözlüklü şablon atlanır, desen iki yüzün ortak
 // deri bölgesinden ve geniş alçak geçirgenle gelir, kazanç sınırlıdır.
+//
+// YALNIZ IŞIK (2026-10-16, iş 6dd26e3e, kullanıcı: "yüzü boyamayacağız,
+// sadece base'deki gibi ışık vereceğiz"). İlk sürüm canlıda yüzü boyadı:
+// - Desen (0.045 yüz genişliği alçak geçirgen) base mankenin kendi yüzünü de
+//   taşıdı: c9'da kaş arasında/burunda parlak, şakakta koyu lekeler; c8'de
+//   alın ve yanak lekeleri. Ham kare her üçünde de daha doğaldı.
+// - Doygunluk 1.22 dudakları pembeye boyadı (segmentasyon dudağı yüz derisi
+//   sayıyor); c5'te boyun (sakal gölgesi) yüzü 0.70'e karartıp çamurlaştırdı.
+// Şimdi: desen yerine iki yüzün log-parlaklık farkına yüz koordinatlarında
+// İKİNCİ DERECE YÜZEY oturtulur (yan ışık, üst/alt ışık, ortası parlak) —
+// leke taşıyamaz. Renk ve doygunluğa dokunulmaz (RGB eşit kazanç = ışık).
+// Boyuna göre parlaklık ±%15 ile sınırlı.
+//
+// L1 — YÜZÜN KENDİ ŞEKLİ (2026-10-16 akşam). Teşhis (33 kare, çapraz
+// doğrulamalı): base-çıktı farkının 2. derece yüzey 0.27'sini, çıktının yoğun
+// yüz ağı (faceMesh.js, 468 nokta) normalleriyle küresel harmonik 0.36'sını,
+// ikisi birlikte 0.42'sini açıklıyor (esnek 4. derece yüzey 0.40). Eski
+// faceShading'in "iki tarafı ayrı oturt, farkı taşı" yöntemi 0.125 — canlıdaki
+// ~%10'un nedeni yöntem. Şimdi farka yüzey + ÇIKTININ normallerinden 8 SH
+// terimi BİRLİKTE oturtulur: burun yanı/elmacık ışığı kişinin kendi yüzüne
+// düşer, base mankenin ayrıntısı taşınamaz. 34 karede desen benzerliği
+// 0.566 → 0.587 (12 iyi, 1 kötü), gözle boyama yok. Ağ yoksa/68 noktayla
+// uyuşmazsa (güçlü profil) eski yüzey aynen.
+//
+// L2 — ORTAM IŞIK RENGİ (aynı gün, bkz. sceneLight.js): selfie'lerden kişinin
+// ışıksız teni × base sahnesinin ışığı = hedef yüz rengi; yalnız renk, kısmen,
+// sınırlı. Selfie ölçüsü yoksa (eski işler) uygulanmaz.
 
 const sharp = require("sharp");
 const { _testables: SH } = require("./faceShading");
@@ -33,13 +60,33 @@ const WORK_FACE_PX = 256;
 // Desen alçak geçirgeni (yüz genişliği cinsinden). Burun yanı gölgesi
 // ~0.1 genişlik; daha geniş olursa yapı kaybolur, daha dar olursa kişinin
 // ayrıntısı geçer.
+// (Yalnız desen uyumu teşhisinde kullanılır.)
 const LP_SIGMA = 0.045;
 // Kazanç sınırları (log). Desen ve ortalama ayrı sınırlanır.
-const PATTERN_MIN = Math.log(0.5);
-const PATTERN_MAX = Math.log(1.7);
-// Ortalama kayması: 0.6'ya kadar karartma yüzü gri gösterdi (cbdbef13 13/20).
-const LEVEL_MIN = Math.log(0.7);
-const LEVEL_MAX = Math.log(1.3);
+const PATTERN_MIN = Math.log(0.7);
+const PATTERN_MAX = Math.log(1.4);
+// Işık yüzeyi: aykırı piksellere (sakal, ben, parlama) Huber eşiği (log) ve
+// yineleme sayısı.
+const SURFACE_HUBER = 0.15;
+const SURFACE_ITERS = 4;
+// 3. derece daha güçlü desen verdi ama 6dd26e3e c9’da dudak/yanak yine kızardı.
+const SURFACE_DEGREE = 2;
+// Işık renginin yüz üzerindeki değişimi: kanal başına en fazla bu kadar (log);
+// base'in kanallar arası farkı bundan küçükse siyah-beyaz sayılır.
+// KAPALI (2026-10-19, 9c8f2cb5): base yüzünün renk değişimi ışık değil çoğu
+// zaman mankenin kendi teni/sakal gölgesi — c1'de göz altı ve yanakta makyaj
+// gibi lekeler, c7'de (koyu tenli manken) yüzü turuncu-kahveye boyadı. Aynı
+// işte 8 karede kapalı hâl hiçbir yerde kötü değildi; ortalama ışık rengi
+// L2'de (sceneLight) kalıyor.
+const COLOR_ON = false;
+const COLOR_MAX = 0.12;
+const COLOR_BW_MIN = 0.03;
+// Renk değişiminin ortalaması bundan küçükse uygulanmaz.
+const COLOR_APPLY_MIN = 0.01;
+// Ortalama kayması: 0.6'ya kadar karartma yüzü gri gösterdi (cbdbef13 13/20);
+// 0.70 c5'i (6dd26e3e) çamurlaştırdı — boyun ölçüsü sakalla gürültülü.
+const LEVEL_MIN = Math.log(0.85);
+const LEVEL_MAX = Math.log(1.15);
 // Deri olasılığı eşiği, en az piksel, profil sınırı, kenar yumuşatması.
 const SKIN_P = 0.5;
 // Yanak/alın bölgesinin en az bu payı deri görünmüyorsa segmentasyon yok sayılır.
@@ -47,6 +94,10 @@ const SKIN_USABLE_SHARE = 0.15;
 const MIN_PX = 400;
 const MAX_YAW = 0.8;
 const PROFILE_STRENGTH = 0.7;
+// Profilde kulak, çenenin altı gibi yüz ağının (map.valid) kenarından cepheye
+// göre daha uzağa düşer; ton halkası (bkz. relightCore "near") bu kadar
+// genişletilir ki kulak de yüz tonuna çekilsin (2026-10-20, a4433ad1 c7).
+const EAR_NEAR_PROFILE_SCALE = 2.2;
 const EDGE_SIGMA = 0.035;
 const EYEWEAR_RATIO_MAX = 0.55;
 // Boyun ölçümü: tam karede 512 ızgara, sınıf olasılığı, en az piksel.
@@ -60,12 +111,6 @@ const DEFAULT_TPL_FACE_NECK = 1.1;
 // 0.25-2.4; uçlar beyaz gömlek ya da gölgede boyun).
 const TPL_RATIO_MIN = 0.55;
 const TPL_RATIO_MAX = 2.5;
-// Renk: ton açısı en çok bu kadar döner; doygunluk bu aralıkta ölçeklenir;
-// base'deki yüz/boyun renk ilişkisinin payı.
-const HUE_MAX = 5;
-const CHROMA_MIN = 0.8;
-const CHROMA_MAX = 1.3;
-const TPL_SHARE = 0.5;
 // Boyun ölçüsü gürültülü (yaka, sakal, gölge): ton düzeltmesinin bu kadarı
 // uygulanır — yanlış ölçümde zarar küçük, doğru ölçümde fark yine kapanır.
 const TONE_SHARE = 0.7;
@@ -79,6 +124,11 @@ const NECK_MIN_L = 12;
 // (base mankenin teni kalmış) — yüz ona bağlanmaz.
 const BODY_UNCHANGED_DE = 5;
 const FACE_DIFFERENT_DE = 12;
+// Boyun base'inkine bu kadardan (Lab dE) yakın, yüz base yüzünden hem bu
+// kadardan hem boyun farkının bu katından uzaksa boyun mankenindir.
+const NECK_KEPT_DE = 4.5;
+const FACE_CHANGED_DE = 8;
+const NECK_KEPT_RATIO = 2.5;
 // Base saç gölgesi: saç olasılığının bu yarıçapta (yüz genişliği) ortalaması
 // eşiği aşan üst yüz pikseli öğrenilmez. Boşluklar bu yarıçapla doldurulur.
 const HAIR_SHADOW_SIGMA = 0.05;
@@ -86,6 +136,34 @@ const HAIR_SHADOW_P = 0.2;
 const FILL_SIGMA = 0.08;
 // Bu kadar küçük değişiklik uygulanmaz.
 const APPLY_MIN = 0.03;
+// L1: SH terimlerinin sırt cezası (yüzey terimleri 1e-3). 0.02 ve 0.002
+// denendi (34 kare 0.581 / 0.587), ikisinde de boyama yok.
+const SH_RIDGE = 0.002;
+// Ağ normalleri çalışma ızgarasında bu kadar (yüz genişliği) yumuşatılır.
+const MESH_NORMAL_SIGMA = 0.012;
+// L1 KAPALI (2026-10-20, 7c17ea3f c3/c8, kullanıcı: "yüzde lekeler",
+// "yüz doğal olmalı"): ağ normalleri üzerinden öğrenilen SH terimleri
+// burun yanı, göz çukuru, gülüş kıvrımı gibi YEREL şekillere bağlanıyor;
+// base mankenin yüz yapısı/ifadesi (gülen şablonun yanak ve burun deseni)
+// kullanıcının yüzüne leke olarak geçti. A/B'de (629b45de, 6dd26e3e,
+// 7c17ea3f) ağsız yalnız yüzey her karede aynı ya da daha temiz, ışığın ana
+// yönü kaldı.
+// Yerel testte opts.mesh === true ile açılabilir.
+const MESH_NORMALS_ON = false;
+// DESEN UYUMU (2026-10-20, 3d1d2a71 c3/c8, ağ kapalıyken de lekeli): model
+// base'in ışığını çoğunlukla zaten taklit ediyor — 50 karede uyum (iki
+// yüzün alçak geçiren parlaklık korelasyonu) çoğunlukla 0.5-0.93. Uyumun
+// düşük olduğu kareler (0.07, 0.16, 0.20, 0.21, 0.29) hep base'in IŞIK
+// değil yüz yapısı/ifadesiydi (gülen şablon, şakak gölgesi): yüzey kenarları
+// ağarttı, ortayı kararttı. Desen gücü uyumla ölçeklenir: FIT_ZERO altında
+// yok, FIT_FULL üstünde tam. R² denendi, ayırmadı (lekeli 0.51, temiz 0.58).
+const PATTERN_FIT_ZERO = 0.3;
+const PATTERN_FIT_FULL = 0.6;
+// L2: 2026-10-17 ilk canlı işte (0eeb75c8) kapatıldı — selfie'den çıkan
+// ışıksız ten fazla gri-mavi, c12 gün batımı arka plandan "serin" ölçüldü.
+// Yeniden tasarlandı (sceneLight.templateLight: selfie yok, ışık şablonun
+// arka planı + kişisi + yüzünden); 31 karelik kör testte 26/31 seçildi.
+const LIGHT_COLOR_ON = true;
 
 const SRGB2LIN = new Float32Array(256);
 for (let i = 0; i < 256; i++) { const c = i / 255; SRGB2LIN[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }
@@ -145,6 +223,69 @@ function weightedLowpass(val, wt, w, h, sigma) {
   return { lp: out, cov };
 }
 
+/**
+ * Işık yüzeyi: d = lt − lo (log parlaklık farkı) için kanonik koordinatta
+ * ağırlıklı, Huber dayanıklı ikinci derece yüzey. at(cx, cy, i) ortalaması
+ * çıkarılmış farkı verir (ortalama ton adımında). Koordinat öğrenilen
+ * aralığa kıstırılır. extra(i) verilirse piksel başı ek terimler (L1: çıktı
+ * normallerinin SH tabanı; extra(-1) uzunluğu verir), extraRidge cezasıyla.
+ * Yeterli veri yoksa null. SAF.
+ */
+function fitLightSurface(lt, lo, wt, CX, CY, n, degree = SURFACE_DEGREE, extra = null, extraRidge = 0) {
+  const poly = degree >= 3
+    ? (x, y) => [1, x, y, x * x, x * y, y * y, x * x * x, x * x * y, x * y * y, y * y * y]
+    : (x, y) => [1, x, y, x * x, x * y, y * y];
+  const KB = poly(0, 0).length;
+  const basis = (x, y, i) => (extra ? poly(x, y).concat(extra(i)) : poly(x, y));
+  const K = KB + (extra ? extra(-1).length : 0);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, cnt = 0;
+  for (let i = 0; i < n; i++) {
+    if (!wt[i]) continue;
+    cnt++;
+    x0 = Math.min(x0, CX[i]); x1 = Math.max(x1, CX[i]); y0 = Math.min(y0, CY[i]); y1 = Math.max(y1, CY[i]);
+  }
+  if (cnt < MIN_PX) return null;
+  let coef = null;
+  for (let it = 0; it < SURFACE_ITERS; it++) {
+    const A = Array.from({ length: K }, () => new Float64Array(K)), b = new Float64Array(K);
+    for (let i = 0; i < n; i++) {
+      if (!wt[i]) continue;
+      const f = basis(CX[i], CY[i], i), d = lt[i] - lo[i];
+      let w = wt[i];
+      if (coef) {
+        const r = Math.abs(d - f.reduce((s, v, k) => s + v * coef[k], 0));
+        if (r > SURFACE_HUBER) w *= SURFACE_HUBER / r;
+      }
+      for (let p = 0; p < K; p++) { b[p] += w * f[p] * d; for (let q = 0; q < K; q++) A[p][q] += w * f[p] * f[q]; }
+    }
+    // Gauss eliminasyonu (küçük sırt terimi: tek yanlı yüzde x² belirsiz).
+    for (let p = 1; p < K; p++) A[p][p] += (p >= KB ? extraRidge : 1e-3) * A[0][0];
+    const M = A.map((row, p) => [...row, b[p]]);
+    for (let c = 0; c < K; c++) {
+      let piv = c;
+      for (let r = c + 1; r < K; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      [M[c], M[piv]] = [M[piv], M[c]];
+      if (Math.abs(M[c][c]) < 1e-12) return null;
+      for (let r = 0; r < K; r++) {
+        if (r === c) continue;
+        const k = M[r][c] / M[c][c];
+        for (let q = c; q <= K; q++) M[r][q] -= k * M[c][q];
+      }
+    }
+    coef = M.map((row, p) => row[K] / row[p]);
+  }
+  // Yüzeyin ağırlıklı ortalaması (sabit terim tek başına değil — kanonik
+  // koordinatlar sıfır merkezli değil).
+  let m = 0, ws = 0;
+  for (let i = 0; i < n; i++) if (wt[i]) { m += wt[i] * basis(CX[i], CY[i], i).reduce((s, v, k) => s + v * coef[k], 0); ws += wt[i]; }
+  m /= ws;
+  const at = (cx, cy, i = -1) => {
+    const f = basis(Math.max(x0, Math.min(x1, cx)), Math.max(y0, Math.min(y1, cy)), i);
+    return f.reduce((s, v, k) => s + v * coef[k], 0) - m;
+  };
+  return { coef, at };
+}
+
 function bilinear(arr, w, h, x, y) {
   const x0 = Math.max(0, Math.min(w - 1, Math.floor(x))), y0 = Math.max(0, Math.min(h - 1, Math.floor(y)));
   const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
@@ -157,6 +298,16 @@ function bilinear(arr, w, h, x, y) {
  * sakal/bıyık bölgesi zayıf (base mankenin sakalı "gölge" diye taşınmasın,
  * çene ışığı çevresindeki yanaktan gelsin). SAF.
  */
+// GÖZLÜK BÖLGESİ (2026-10-21, 017dbe34 c4, kullanıcı: "yüz düz, yapıştırma
+// gibi"): gözlüklü şablonda desen tümüyle kapalıydı — yan ışıklı base'in
+// yüzü düz kaldı. Kapatmak yerine cam, çerçeve ve camın yanağa düşürdüğü
+// yansıma/gölge (cbdbef13 16: yanakta açık yama) öğrenmeden çıkarılır;
+// orada desen alın/yanak altı/çeneden yayılır. Kanonik koordinat: göz
+// merkezleri cx=±0.5, cy=0; kaş cy≈-0.4; ağız cy≈1.
+function inGlasses(cx, cy) {
+  return Math.abs(cx) < 1.15 && cy > -0.5 && cy < 0.62;
+}
+
 function regionWeight(cx, cy) {
   if (((Math.abs(cx) - 0.5) / 0.32) ** 2 + (cy / 0.19) ** 2 < 1) return 0; // göz
   if (cy > -0.55 && cy < -0.18 && Math.abs(cx) > 0.12 && Math.abs(cx) < 1.02) return 0; // kaş
@@ -237,6 +388,58 @@ function correspond(vo, vt, cO, cT) {
     }
   }
   return { valid, TX, TY, CX, CY };
+}
+
+/**
+ * Yoğun ağın (faceMesh.denseMesh) normalleri çalışma ızgarasında: köşe
+ * normalleri üçgen içinde ara değerlenir, z-tampon, yumuşatılır. Kameraya
+ * bakan normal z<0 (faceShading ile aynı kural). Döner { N, ok }.
+ */
+function meshNormals(mesh, tri, cO) {
+  const { w, h } = cO;
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const VN = mesh.map(() => [0, 0, 0]);
+  for (let t = 0; t < tri.length; t += 3) {
+    const a = tri[t], b = tri[t + 1], c = tri[t + 2];
+    let n = cross([mesh[b][0] - mesh[a][0], mesh[b][1] - mesh[a][1], mesh[b][2] - mesh[a][2]], [mesh[c][0] - mesh[a][0], mesh[c][1] - mesh[a][1], mesh[c][2] - mesh[a][2]]);
+    if (n[2] > 0) n = [-n[0], -n[1], -n[2]];
+    for (const q of [a, b, c]) for (let j = 0; j < 3; j++) VN[q][j] += n[j];
+  }
+  const NV = VN.map(unit);
+  const q = mesh.map((p) => ({ x: (p[0] - cO.L0) * cO.sx - 0.5, y: (p[1] - cO.T0) * cO.sy - 0.5, z: p[2] }));
+  const C = [new Float32Array(w * h), new Float32Array(w * h), new Float32Array(w * h)];
+  const Z = new Float32Array(w * h).fill(Infinity);
+  const ok = new Uint8Array(w * h);
+  for (let t = 0; t < tri.length; t += 3) {
+    const a = tri[t], b = tri[t + 1], c = tri[t + 2];
+    const A = q[a], B = q[b], Cc = q[c];
+    const area = (B.x - A.x) * (Cc.y - A.y) - (B.y - A.y) * (Cc.x - A.x);
+    if (Math.abs(area) < 1e-6) continue;
+    const bx0 = Math.max(0, Math.floor(Math.min(A.x, B.x, Cc.x))), bx1 = Math.min(w - 1, Math.ceil(Math.max(A.x, B.x, Cc.x)));
+    const by0 = Math.max(0, Math.floor(Math.min(A.y, B.y, Cc.y))), by1 = Math.min(h - 1, Math.ceil(Math.max(A.y, B.y, Cc.y)));
+    for (let y = by0; y <= by1; y++) {
+      for (let x = bx0; x <= bx1; x++) {
+        const w0 = ((B.x - x) * (Cc.y - y) - (B.y - y) * (Cc.x - x)) / area;
+        const w1 = ((Cc.x - x) * (A.y - y) - (Cc.y - y) * (A.x - x)) / area;
+        const w2 = 1 - w0 - w1;
+        if (w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4) continue;
+        const i = y * w + x, z = w0 * A.z + w1 * B.z + w2 * Cc.z;
+        if (z >= Z[i]) continue;
+        Z[i] = z;
+        ok[i] = 1;
+        for (let j = 0; j < 3; j++) C[j][i] = w0 * NV[a][j] + w1 * NV[b][j] + w2 * NV[c][j];
+      }
+    }
+  }
+  const okF = Float32Array.from(ok);
+  const sm = C.map((ch) => weightedLowpass(ch, okF, w, h, MESH_NORMAL_SIGMA * cO.faceW).lp);
+  const N = new Float32Array(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    const n = unit([sm[0][i], sm[1][i], sm[2][i]]);
+    N[i * 3] = n[0]; N[i * 3 + 1] = n[1]; N[i * 3 + 2] = n[2];
+  }
+  return { N, ok };
 }
 
 /** Şablon gözlüğü: göz bölgesi yanak derisinden belirgin koyuysa. */
@@ -321,11 +524,24 @@ async function faceNeckStats(rgb, W, H, P) {
 const dE = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 
 /**
- * Yüzün ortalama parlaklık (log) ve renk (Lab a*b*) kayması — kişinin kendi
- * boynuna göre. SAF (ölçülerden karar).
+ * Yüzün ortalama parlaklık (log) kayması — kişinin kendi boynuna göre.
+ * SAF (ölçülerden karar).
+ *
+ * TEN DEĞİL IŞIK (2026-10-19, 9c8f2cb5 c7, kullanıcı: "base foto esmer selfie
+ * bembeyaz tenli veya tersi olabilir, bu tür sorunları çözmeli ve ışık ve
+ * gölgeleri atlamamalıyız"): base'ten yalnız AYNI KİŞİNİN derisi içindeki
+ * oran alınır (base yüz/boyun ↔ çıktı yüz/boyun) — ten rengi oranda
+ * sadeleşir, gölge kalır. Genel ten düzeyi ham çıktıdan (model kullanıcının
+ * boynunu kullanıcının teniyle çiziyor). Önceki "ikinci kanıt" (base yüzünün
+ * mutlak parlaklığı ↔ çıktı yüzü) mankenin tenini ölçüyordu: 79 karede
+ * neredeyse hep "karart" dedi; koyu tenli mankende beyaz kullanıcıyı
+ * karartıyor (c7 0.85), açık tenli mankende esmer kullanıcıyı ağartırdı.
+ * Kaldırıldı; yalnız log için döner. Sakallı boyun (6dd26e3e c5, ilk
+ * kanıtın sebebi) artık LEVEL_MIN sınırında kalıyor — o kare eski kuralla da
+ * 0.85'ti.
  */
-function tonePlan(so, st, { grayscale = false } = {}) {
-  const none = { level: 0, hueShift: 0, chromaGain: 1 };
+function tonePlan(so, st) {
+  const none = { level: 0 };
   if (!so.face.n || !so.neck.n) return { ...none, reason: "no-neck" };
   // Boyun base'inkiyle aynı VE yüzün açıklığı base yüzünden çok farklıysa
   // (başka ten) boyun base mankenin derisidir. Yalnız renk farkı yetmez:
@@ -333,6 +549,14 @@ function tonePlan(so, st, { grayscale = false } = {}) {
   if (st.neck.n && st.face.n && dE(so.neck.lab, st.neck.lab) < BODY_UNCHANGED_DE &&
       Math.abs(so.face.lab[0] - st.face.lab[0]) > FACE_DIFFERENT_DE && Math.abs(so.neck.lab[0] - so.face.lab[0]) > FACE_DIFFERENT_DE) {
     return { ...none, reason: "body-unchanged" };
+  }
+  // MANKENİN BOYNU KALMIŞ (genel hâli): çıktı boynu base boynuna çok yakın,
+  // çıktı yüzü base yüzünden çok uzak — model boynu değiştirmemiş; oran
+  // kullanıcının yüzünü mankenin derisine bağlar (79 karede 3b4 c3/c7,
+  // ca6 c9, 0ee c7). Ton atlanır, desen yine uygulanır.
+  if (st.neck.n && st.face.n) {
+    const nn = dE(so.neck.lab, st.neck.lab), ff = dE(so.face.lab, st.face.lab);
+    if (nn < NECK_KEPT_DE && ff > FACE_CHANGED_DE && ff > NECK_KEPT_RATIO * nn) return { ...none, reason: "neck-kept" };
   }
   // Base'in boyun ölçüsü: boyun yüzden çok AÇIKSA (oran < 0.55) ölçülen şey
   // çoğu zaman beyaz gömlek (c29a2b31 c3 0.25) — tipik oran alınır. Boyun
@@ -344,29 +568,16 @@ function tonePlan(so, st, { grayscale = false } = {}) {
   const tplOk = rTraw != null && rTraw >= TPL_RATIO_MIN;
   const rT = tplOk ? Math.min(TPL_RATIO_MAX, rTraw) : DEFAULT_TPL_FACE_NECK;
   const rO = so.face.Y / so.neck.Y;
-  const level = tplOk ? Math.max(LEVEL_MIN, Math.min(LEVEL_MAX, TONE_SHARE * (Math.log(rT) - Math.log(rO)))) : 0;
-  // Renk: TON AÇISI boyuna doğru döner (sınırlı), DOYGUNLUK boyunla ölçeklenir.
-  // Toplamalı a*b* kayması yüzü griye/pembeye itiyordu (cbdbef13 27/13).
-  // c29a2b31 c4'te yüz ile boyun aynı açıdaydı (54°/53°), fark doygunluktu
-  // (24/32). Doğrusal kazanç g kromayı g^(1/3) ölçekler; hedef ona göre.
-  let hueShift = 0, chromaGain = 1;
-  if (!grayscale) {
-    const hue = (l) => (Math.atan2(l[2], l[1]) * 180) / Math.PI;
-    const chroma = (l) => Math.hypot(l[1], l[2]);
-    const share = tplOk ? TPL_SHARE : 0;
-    const wrap = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
-    const hT = hue(so.neck.lab) + (tplOk ? share * wrap(hue(st.face.lab) - hue(st.neck.lab)) : 0);
-    hueShift = Math.max(-HUE_MAX, Math.min(HUE_MAX, TONE_SHARE * wrap(hT - hue(so.face.lab))));
-    const cRelT = tplOk ? (chroma(st.face.lab) / Math.max(1, chroma(st.neck.lab))) ** share : 1;
-    const cTarget = chroma(so.neck.lab) * Math.cbrt(tplOk ? rT : rO) * cRelT;
-    const cAfterLevel = chroma(so.face.lab) * Math.cbrt(Math.exp(level));
-    chromaGain = Math.max(CHROMA_MIN, Math.min(CHROMA_MAX, (cTarget / Math.max(1, cAfterLevel)) ** TONE_SHARE));
-  }
-  return { level, hueShift, chromaGain, reason: null, rT, rO, tplOk };
+  const byNeck = TONE_SHARE * (Math.log(rT) - Math.log(rO));
+  const byFace = st.face.n ? TONE_SHARE * (Math.log(st.face.Y) - Math.log(so.face.Y)) : 0;
+  const level = tplOk ? Math.max(LEVEL_MIN, Math.min(LEVEL_MAX, byNeck)) : 0;
+  // Renge (ton açısı, doygunluk) dokunulmaz: 6dd26e3e c9'da doygunluk 1.22
+  // dudakları boyadı. Yüz-vücut ten uyumu TEN ALANI'nda vücut yüze çekilerek.
+  return { level, reason: null, rT, rO, tplOk, byNeck, byFace };
 }
 
 /** Yüz noktaları hazırken çekirdek (yerel testler de bunu çağırır). */
-async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = true, pattern: patternOpt = true } = {}) {
+async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = true, pattern: patternOpt = true, mesh = null, tplBox = null, sceneColor = true, lightPlan = null, color: colorOpt = true, prof = false, eyewear = false } = {}) {
   let pattern = patternOpt;
   const vo = projectVerts(ptsO), vt = projectVerts(ptsT);
   if (!vo || !vt) return { buf: null, applied: false, reason: "no-geometry" };
@@ -375,7 +586,7 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
   const map = correspond(vo, vt, cO, cT);
   const { w, h } = cO;
   const ew = eyewearRatio(map, cT);
-  if (ew < EYEWEAR_RATIO_MAX) pattern = false;
+  const glasses = eyewear || ew < EYEWEAR_RATIO_MAX;
 
   // Base'de saçın gölgesi (c29a2b31 c7: kakül alına düşüyor) ışık değil,
   // o kişinin saçı — saçın yakınındaki üst yüz derisi öğrenmeye girmez.
@@ -401,6 +612,7 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
     if (!map.valid[i]) continue;
     const rw = regionWeight(map.CX[i], map.CY[i]);
     if (!rw) continue;
+    if (glasses && inGlasses(map.CX[i], map.CY[i])) continue;
     if (hairNear && skinT && map.CY[i] < 0 && hairNear[i] > HAIR_SHADOW_P) continue;
     const po = skinO ? skinO[i] : 1, pt = skinT ? bilinear(skinT, cT.w, cT.h, map.TX[i], map.TY[i]) : 1;
     if (po < SKIN_P || pt < SKIN_P) continue;
@@ -429,31 +641,99 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
     sab += wt[i] * a * b; saa += wt[i] * a * a; sbb += wt[i] * b * b;
   }
   const corrBefore = sab / Math.sqrt(saa * sbb || 1);
+  const fitGain = Math.max(0, Math.min(1, (corrBefore - PATTERN_FIT_ZERO) / (PATTERN_FIT_FULL - PATTERN_FIT_ZERO)));
+  if (fitGain <= 0) pattern = false;
 
-  // Ton: yüz ↔ kendi boynu.
-  let tp = { level: 0, hueShift: 0, chromaGain: 1, reason: "off" };
+  // Ton: yüz ↔ kendi boynu (yalnız parlaklık).
+  let tp = { level: 0, reason: "off" };
   let stats = null;
   if (tone) {
     const [so, st] = await Promise.all([faceNeckStats(oRgb, W, H, ptsO), faceNeckStats(tRgb, W, H, ptsT)]);
-    tp = tonePlan(so, st, { grayscale: !!st.bw });
+    tp = tonePlan(so, st);
     stats = { so, st };
   }
 
-  // Log kazanç alanı: desen farkı (geçerli bölgede) + ortalama kayması.
+  // Işık yüzeyi: iki yüzün log-parlaklık farkına kanonik koordinatta ikinci
+  // derece yüzey (bkz. dosya başı YALNIZ IŞIK). Kanonik aralığın dışına
+  // taşmasın diye koordinat öğrenilen aralığa kıstırılır.
+  // L1: çıktının yoğun ağ normalleri (yoksa yalnız yüzey). Ağın kapsamadığı
+  // piksel öğrenilmez, desen orada komşudan yayılır.
+  const dn = mesh && pattern ? meshNormals(mesh.mesh, mesh.tri, cO) : null;
+  if (dn) for (let i = 0; i < w * h; i++) if (!dn.ok[i]) wt[i] = 0;
+  const shAt = dn ? (i) => (i < 0 ? new Array(8).fill(0) : SH.shBasis([dn.N[i * 3], dn.N[i * 3 + 1], dn.N[i * 3 + 2]]).slice(1)) : null;
+  const surf = pattern ? fitLightSurface(lt, lo, wt, map.CX, map.CY, w * h, SURFACE_DEGREE, shAt, SH_RIDGE) : null;
+
+  // L2: ortam ışık rengi (bkz. sceneLight.templateLight). Yüzün şu anki rengi
+  // öğrenme piksellerinden; ışık şablonun arka planı + kişisi + yüzünden.
+  let light = { lc: null, reason: "off" };
+  if (LIGHT_COLOR_ON && sceneColor && !lightPlan) {
+    try {
+      const { templateLight, planSceneColor, medianColor } = require("./sceneLight");
+      let box = tplBox;
+      if (!box) {
+        let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
+        for (const p of ptsT) { fx0 = Math.min(fx0, p.x); fy0 = Math.min(fy0, p.y); fx1 = Math.max(fx1, p.x); fy1 = Math.max(fy1, p.y); }
+        box = { x: fx0, y: fy0, width: fx1 - fx0, height: fy1 - fy0 };
+      }
+      const tl = await templateLight(tRgb, W, H, box);
+      const vals = [];
+      for (let i = 0; i < w * h; i++) if (wt[i] > 0.5) vals.push([SRGB2LIN[cO.crop[i * 3]], SRGB2LIN[cO.crop[i * 3 + 1]], SRGB2LIN[cO.crop[i * 3 + 2]]]);
+      const face = vals.length >= MIN_PX ? medianColor(vals) : null;
+      light = { ...planSceneColor(tl.light, face), ...tl, face };
+    } catch (e) {
+      console.error("Yüz ışığı: ortam ışık rengi ölçülemedi (atlanıyor):", e.message || e);
+      light = { lc: null, reason: "error" };
+    }
+  }
+  // Yerel deneme kancası: lightPlan(yüzRengi) → log kazanç × 3 (canlıda yok).
+  if (lightPlan) {
+    const { medianColor } = require("./sceneLight");
+    const vals = [];
+    for (let i = 0; i < w * h; i++) if (wt[i] > 0.5) vals.push([SRGB2LIN[cO.crop[i * 3]], SRGB2LIN[cO.crop[i * 3 + 1]], SRGB2LIN[cO.crop[i * 3 + 2]]]);
+    const face = vals.length >= MIN_PX ? medianColor(vals) : null;
+    light = { lc: face ? lightPlan(face) : null, face, reason: face ? "test" : "no-measure" };
+  }
+  const lightOn = !!(light.lc && Math.max(...light.lc.map(Math.abs)) > 0.01);
   const Dp = new Float32Array(w * h), have = new Float32Array(w * h);
   let patAbs = 0, patN = 0;
   for (let i = 0; i < w * h; i++) {
-    if (!map.valid[i] || LT.cov[i] < 0.02 || LO.cov[i] < 0.02) continue;
-    let d = pattern ? strength * ((LT.lp[i] - mt) - (LO.lp[i] - mo)) : 0;
+    if (!map.valid[i]) continue;
+    if (dn && !dn.ok[i]) continue;
+    let d = surf ? strength * fitGain * surf.at(map.CX[i], map.CY[i], i) : 0;
     d = Math.max(PATTERN_MIN, Math.min(PATTERN_MAX, d));
     Dp[i] = d; have[i] = 1;
     if (wt[i]) { patAbs += Math.abs(d); patN++; }
   }
   const patternMean = patN ? patAbs / patN : 0;
+  // IŞIK RENGİNİN YÜZDEKİ DEĞİŞİMİ (2026-10-16, c29a2b31 c5/c7 yeniden: yalnız
+  // parlaklıkla sıcak lamba/mum ışığı neredeyse hiç görünmedi). Her kanalın
+  // parlaklığa göre log oranı için aynı yüzey; ORTALAMASI ATILIR — yalnız
+  // aydınlık yanın sıcak, gölge yanın serin olması gibi değişim taşınır,
+  // kişinin ortalama teni base mankeninkine boyanmaz (matchFaceExposure hatası).
+  let colorSurf = null;
+  if (pattern && surf && COLOR_ON && colorOpt) {
+    const chan = (crop, n) => [0, 1, 2].map((c) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = SRGB2LIN[crop[i * 3 + c]]; return a; });
+    const tC = chan(cT.crop, cT.w * cT.h), oC = chan(cO.crop, w * h);
+    let chroma = 0, cn = 0;
+    const lct = [0, 1, 2].map(() => new Float32Array(w * h)), lco = [0, 1, 2].map(() => new Float32Array(w * h));
+    for (let i = 0; i < w * h; i++) {
+      if (!wt[i]) continue;
+      const v = [0, 1, 2].map((c) => Math.max(1e-4, bilinear(tC[c], cT.w, cT.h, map.TX[i], map.TY[i])));
+      for (let c = 0; c < 3; c++) { lct[c][i] = Math.log(v[c]) - lt[i]; lco[c][i] = Math.log(Math.max(1e-4, oC[c][i])) - lo[i]; }
+      chroma += Math.abs(lct[0][i] - lct[2][i]); cn++;
+    }
+    // Siyah-beyaz base: renk değişimi yok.
+    if (cn && chroma / cn > COLOR_BW_MIN) colorSurf = [0, 1, 2].map((c) => fitLightSurface(lct[c], lco[c], wt, map.CX, map.CY, w * h));
+    if (colorSurf && colorSurf.some((s) => !s)) colorSurf = null;
+    if (colorSurf) {
+      let cm = 0, ck = 0;
+      for (let i = 0; i < w * h; i++) if (wt[i]) { for (const s of colorSurf) cm += Math.abs(s.at(map.CX[i], map.CY[i])); ck += 3; }
+      if (cm / ck < COLOR_APPLY_MIN) colorSurf = null;
+    }
+  }
   const levelAbs = Math.abs(tp.level);
-  const useColor = Math.abs(tp.hueShift) >= 1 || Math.abs(tp.chromaGain - 1) >= 0.03;
-  if (patternMean < APPLY_MIN && levelAbs < APPLY_MIN && !useColor) {
-    return { buf: null, applied: false, reason: "similar-light", patternMean, corrBefore, tone: tp };
+  if (patternMean < APPLY_MIN && levelAbs < APPLY_MIN && !colorSurf && !lightOn) {
+    return { buf: null, applied: false, reason: "similar-light", patternMean, corrBefore, tone: tp, toneStats: stats, mesh: !!dn, light };
   }
   // Öğrenilmeyen yerlerde (yüz kenarı, saç gölgeli alın) desen komşulardan.
   const ext = weightedLowpass(Dp, have, w, h, FILL_SIGMA * cO.faceW);
@@ -465,54 +745,61 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
   // hale yok — f9f3b5c0).
   const { insideSoft } = SH;
   const alpha = await insideSoft(map.valid, w, h, EDGE_SIGMA * cO.faceW);
-  // Ton maskesi: yüz + kulaklar. Yalnız yüze uygulanınca kulak eski tonda
-  // kalıp yüz maske gibi duruyordu (cbdbef13 13/20/27). Yüz bölgesinin biraz
-  // dışına taşar ama orada yalnız deriye; çenenin altında söner (boyun ölçünün
-  // referansı, dokunulmaz).
+  // Parlaklık maskesi: yüz + kulaklar. Yalnız yüze uygulanınca kulak eski
+  // tonda kalıp yüz maske gibi duruyordu (cbdbef13 13/20/27). Yüz bölgesinin
+  // biraz dışına taşar ama orada yalnız deriye; çenenin altında söner (boyun
+  // ölçünün referansı, dokunulmaz).
   const vf = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) vf[i] = map.valid[i];
-  const near = gauss(vf, w, h, 0.08 * cO.faceW);
+  // Profilde kulak yüz ağından çok daha uzakta kalır (a4433ad1 c7: yaw 0.78
+  // kaydında kulak bu halkanın dışında kalıp eski tonda görünmüştü) — halka
+  // profilde genişletilir, cepheden dokunulmaz.
+  const near = gauss(vf, w, h, (prof ? EAR_NEAR_PROFILE_SCALE : 1) * 0.08 * cO.faceW);
   const skinAll = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) skinAll[i] = Math.min(1, (cO.skin ? cO.skin[i] : 1) + (cO.body ? cO.body[i] : 0));
   const skinSoft = gauss(skinAll, w, h, 0.01 * cO.faceW);
   const chinY = (vo[8].y - cO.T0) * cO.sy, fadeLen = 0.12 * cO.faceW;
   const toneMask = (fx, fy, a) => {
     const fade = fy <= chinY ? 1 : Math.max(0, 1 - (fy - chinY) / fadeLen);
-    if (!fade) return { lv: 0, ch: 0 };
+    if (!fade) return 0;
     const reg = Math.max(0, Math.min(1, (bilinear(near, w, h, fx, fy) - 0.1) / 0.3));
     const sk = Math.max(0, Math.min(1, (bilinear(skinSoft, w, h, fx, fy) - 0.3) / 0.4));
-    // Açıklık: yüzün içinde her şeye (göz, kaş, sakal da aynı ışıkta), dışında
-    // yalnız deriye. Renk: yalnız deriye.
-    return { lv: fade * Math.max(a, reg * sk), ch: fade * reg * sk };
+    // Yüzün içinde her şeye (göz, kaş, sakal da aynı ışıkta), dışında yalnız deriye.
+    return fade * Math.max(a, reg * sk);
   };
+  // Renk değişimi alanı (çalışma ızgarasında, yüz dışına komşudan yayılmış).
+  let Cs = null;
+  if (colorSurf) {
+    Cs = colorSurf.map((s) => {
+      const Dc = new Float32Array(w * h);
+      for (let i = 0; i < w * h; i++) if (map.valid[i]) Dc[i] = Math.max(-COLOR_MAX, Math.min(COLOR_MAX, strength * s.at(map.CX[i], map.CY[i])));
+      const e = weightedLowpass(Dc, have, w, h, FILL_SIGMA * cO.faceW);
+      for (let i = 0; i < w * h; i++) if (!have[i]) Dc[i] = e.lp[i];
+      return gauss(Dc, w, h, 0.012 * cO.faceW);
+    });
+  }
+  // Kazanç doğrusal RGB'de: parlaklık üç kanala eşit; ışık renginin değişimi
+  // kanal başına (ortalaması sıfır).
   const out = Buffer.from(oRgb);
-  const { rgbToLab, labToRgb } = require("./skinTone");
-  const rad = (tp.hueShift * Math.PI) / 180;
   for (let y = cO.T0; y < cO.B0; y++) {
     for (let x = cO.L0; x < cO.R0; x++) {
       const fx = (x - cO.L0 + 0.5) * cO.sx - 0.5, fy = (y - cO.T0 + 0.5) * cO.sy - 0.5;
       const a = bilinear(alpha, w, h, fx, fy) / 255;
-      const tm = toneMask(fx, fy, a);
-      if (a <= 0.01 && tm.lv <= 0.01) continue;
-      const g = Math.exp(a * bilinear(Ds, w, h, fx, fy) + tm.lv * tp.level);
+      const lv = toneMask(fx, fy, a);
+      if (a <= 0.01 && lv <= 0.01) continue;
+      const lg = a * bilinear(Ds, w, h, fx, fy) + lv * tp.level;
       const i = y * W + x;
-      let r = linToSrgb8(SRGB2LIN[oRgb[i * 3]] * g), gg = linToSrgb8(SRGB2LIN[oRgb[i * 3 + 1]] * g), b = linToSrgb8(SRGB2LIN[oRgb[i * 3 + 2]] * g);
-      if (useColor && tm.ch > 0.01) {
-        const cx = bilinear(map.CX, w, h, fx, fy), cy = bilinear(map.CY, w, h, fx, fy);
-        const eye = a > 0.5 && ((Math.abs(cx) - 0.5) / 0.3) ** 2 + (cy / 0.14) ** 2 < 1;
-        if (!eye) {
-          const lab = rgbToLab(r, gg, b);
-          const k = 1 + tm.ch * (tp.chromaGain - 1), cs = Math.cos(rad * tm.ch), sn = Math.sin(rad * tm.ch);
-          [r, gg, b] = labToRgb(lab[0], k * (lab[1] * cs - lab[2] * sn), k * (lab[1] * sn + lab[2] * cs));
-        }
+      for (let c = 0; c < 3; c++) {
+        // L2 rengi yüz + kulaklara (parlaklık maskesiyle aynı yer).
+        const g = Math.exp(lg + (Cs ? a * bilinear(Cs[c], w, h, fx, fy) : 0) + (lightOn ? Math.max(a, lv) * light.lc[c] : 0));
+        out[i * 3 + c] = linToSrgb8(SRGB2LIN[oRgb[i * 3 + c]] * g);
       }
-      out[i * 3] = r; out[i * 3 + 1] = gg; out[i * 3 + 2] = b;
     }
   }
   const buf = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   return {
-    buf, applied: true, reason: null, pattern, eyeRatio: ew, patternMean, corrBefore, n: tVals.length,
-    tone: tp, neckO: stats?.so.neck.n ?? null, neckT: stats?.st.neck.n ?? null,
+    buf, applied: true, reason: null, mesh: !!dn, light, pattern, eyeRatio: ew, patternMean, corrBefore, n: tVals.length, surface: surf ? surf.coef : null, color: !!colorSurf,
+    tone: tp, toneStats: stats, neckO: stats?.so.neck.n ?? null, neckT: stats?.st.neck.n ?? null,
   };
 }
 
@@ -532,17 +819,27 @@ async function relightFace(outputBuf, templateBuf, opts = {}) {
   const yo = await headYawOf(outputBuf, 0.1), yt = await headYawOf(tJpeg, 0.1);
   // Profilde eşleme yalnız görünen yarıda — desen azaltılmış güçle (c29a2b31
   // c6: kapalıyken base'in yan ışığı hiç gelmedi, 0.7 güçle bozulma yok).
-  // Gözlüklü base'de cam ve gölgesi ışık sanılır (cbdbef13 16: yanakta açık
-  // yama) — desen kapalı, ton yine boyuna bağlanır.
+  // Gözlüklü base'de cam bölgesi öğrenmeden çıkarılır (bkz. inGlasses).
   const prof = (yo != null && yo > MAX_YAW) || (yt != null && yt > MAX_YAW);
-  const pattern = !opts.templateEyewear && opts.pattern !== false;
+  const pattern = opts.pattern !== false;
   const strength = (opts.strength ?? 1) * (prof ? PROFILE_STRENGTH : 1);
-  const r = await relightCore(o.data, t, W, H, lo.pts, lt.pts, { ...opts, pattern, strength });
+  // L1: çıktının yoğun yüz ağı. Hata/uyuşmazlıkta null — eski yüzey aynen.
+  let mesh = null;
+  if (pattern && (opts.mesh === true || (MESH_NORMALS_ON && opts.mesh !== false))) {
+    try {
+      const FM = require("./faceMesh");
+      const m = await FM.denseMesh(o.data, W, H, lo.pts);
+      if (m) mesh = { mesh: m.mesh, tri: FM.triangles() };
+    } catch (e) {
+      console.error("Yüz ışığı: yoğun yüz ağı hata verdi (yalnız yüzey):", e.message || e);
+    }
+  }
+  const r = await relightCore(o.data, t, W, H, lo.pts, lt.pts, { ...opts, pattern, strength, mesh, tplBox: lt.box || null, lightPlan: opts.lightPlan || null, prof, eyewear: !!opts.templateEyewear });
   return { ...r, profile: prof, yawO: yo, yawT: yt };
 }
 
 module.exports = {
   relightFace,
   relightCore,
-  _testables: { gauss, weightedLowpass, regionWeight, tonePlan, projectVerts, correspond, faceNeckStats, DEFAULT_TPL_FACE_NECK },
+  _testables: { meshNormals, gauss, weightedLowpass, fitLightSurface, regionWeight, tonePlan, projectVerts, correspond, faceNeckStats, DEFAULT_TPL_FACE_NECK },
 };
