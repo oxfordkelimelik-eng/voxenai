@@ -8,9 +8,43 @@ const {
   aggregateGateCounts,
   buildPurchaseSummary,
   buildJobSummary,
+  buildCostSummary,
   safeString,
   buildDailyBreakdown,
 } = require("../opsPanel")._testables;
+
+// MALİYET / GEÇİŞ ORANI (2026-11-04): iş dokümanındaki kalıcı ölçümlerden
+// (costUsd, generatedCount, deliverableCount, approvedCount) panel özeti.
+test("buildCostSummary: onaylı kare başına maliyet yalnız done işlerden", () => {
+  const jobs = [
+    { status: "done", styles: ["elegance"], costUsd: 1.2, generatedCount: 10, deliverableCount: 8, approvedCount: 5 },
+    { status: "done", styles: ["elegance"], costUsd: 0.8, generatedCount: 10, deliverableCount: 6, approvedCount: 5 },
+    { status: "pendingApproval", styles: ["street"], costUsd: 1.0, generatedCount: 10, deliverableCount: 9, approvedCount: 0 },
+    { status: "failed", styles: ["street"], generatedCount: 10, deliverableCount: 0, approvedCount: 0 },
+  ];
+  const s = buildCostSummary(jobs);
+  assert.equal(s.costedJobs, 3);
+  assert.equal(s.totalCostUsd, 3);
+  assert.equal(s.costPerApprovedUsd, 0.2); // (1.2+0.8)/10
+  assert.equal(s.passRate, 0.575); // 23/40
+  assert.equal(s.styleStats.elegance.passRate, 0.7);
+  assert.equal(s.styleStats.street.passRate, 0.45);
+  assert.equal(s.styleStats.street.jobs, 2);
+});
+
+test("buildCostSummary: maliyetsiz eski işlerde oranlar null", () => {
+  const s = buildCostSummary([{ status: "done", styles: ["a"] }]);
+  assert.equal(s.costedJobs, 0);
+  assert.equal(s.costPerApprovedUsd, null);
+  assert.equal(s.passRate, null);
+  assert.deepEqual(s.styleStats, {});
+});
+
+test("buildJobSummary: maliyet özeti alanlarını da içerir", () => {
+  const s = buildJobSummary([{ status: "done", uid: "u", deliveredCount: 1, rejectedCount: 0, costUsd: 0.5, generatedCount: 2, deliverableCount: 1, approvedCount: 1, styles: ["x"] }]);
+  assert.equal(s.costPerApprovedUsd, 0.5);
+  assert.equal(s.passRate, 0.5);
+});
 
 test("isAuthorizedOpsEmail: doğru email + doğrulanmış -> true", () => {
   assert.equal(isAuthorizedOpsEmail("destek@voxenai.com.tr", true), true);

@@ -239,7 +239,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const { matchFaceToScene } = require("./faceTone");
     const ft = await matchFaceToScene(out, tpl, { mstUser, mstTpl });
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"}`;
+    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} şablonBoyunYüz=${n(ft.neckDeltaTpl)}`;
     if (ft.applied && ft.buf) out = ft.buf;
     console.log(`YÜZ SAHNE IŞIĞI (${tag}): ${ft.applied ? "UYGULANDI" : `ATLANDI[${ft.reason}]`} ${ölçü}${ft.ms != null ? ` ${ft.ms}ms` : ""}`);
   } catch (e) {

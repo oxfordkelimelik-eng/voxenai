@@ -677,9 +677,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   /// Kalite kapılarından geçemeyip elenen kareler (bkz. functions/falPhotos.js
   /// saveRejectedFrame'in Firestore yazımı) — "gerçek çıktı" sayısına dahil
   /// DEĞİL, yalnızca "Elenen Kareler" panelinde gösterilir.
-  List<Map<String, dynamic>> get _rejectedFrames =>
-      (_jobData?['rejectedFrames'] as List?)?.cast<Map<String, dynamic>>() ??
-      const [];
+  ///
+  /// KULLANICIYA KAPATILDI (2026-11-04): kareler artık ops onayından geçiyor;
+  /// elenen kareler ham (bitirme adımı uygulanmamış) hâlde ve kullanıcıya
+  /// gösterilmesi onay akışının amacını bozuyordu. Sunucu tarafında
+  /// dating_rejected okuma izni de kapatıldı (storage.rules), yani eski
+  /// işlerde bile görsel yüklenemezdi. Liste hep boş döner; geçiş pili ve
+  /// panel hiç görünmez. Veri ops panelinde (opsGetJobDetail) duruyor.
+  List<Map<String, dynamic>> get _rejectedFrames => const [];
 
   void _reset() {
     _jobSub?.cancel();

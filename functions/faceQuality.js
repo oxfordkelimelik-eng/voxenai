@@ -240,6 +240,43 @@ function euclideanDistanceLocal(a, b) {
   return Math.sqrt(sum);
 }
 
+// SELFIE'LER ARASI KİMLİK TUTARLILIĞI (2026-11-04). Beş selfie'nin aynı
+// kişiye ait olduğu hiç kontrol edilmiyordu: refDescriptor beş vektörün
+// ortalaması, araya başka kişi girerse ortalama ikisinin arasına düşer ve
+// math-identity kapısı her kareyi yanlış reddeder ya da yanlış kabul eder.
+// KURAL: bir selfie, DİĞER selfie'lerin HEPSİNE bu mesafeden uzaksa aykırı
+// sayılır. Aynı kişinin beş açısında her karenin en az bir komşusu (bitişik
+// açı) yakındır; profil karenin cepheye uzaklığı yüksek olabilir ama hafif
+// dönük kareye uzaklığı düşüktür. Yabancı kişi herkese uzaktır. Çıktı kapısı
+// eşiği (FACE_MATCH_THRESHOLD, 0.50) burada kullanılmadı: o üretilen yüz için
+// kalibre edildi; selfie-selfie farkında açı payı daha büyük. 0.72 face-api
+// recognition ağında farklı kişilerin tipik alt sınırının (0.75+) hemen altı.
+// Gerçek veriyle KALİBRE EDİLMEDİ; ilk işlerde `HAZIRLIK KİMLİK` satırına bak.
+const SELFIE_IDENTITY_MAX = 0.72;
+
+/** Aykırı selfie indeksleri: [{idx, d}] listesinde her birinin diğerlerine en
+ *  küçük mesafesi > maxDist ise aykırı. En az 3 vektör gerekir (ikide hangisi
+ *  yabancı belli olmaz). SAF. Döner { outliers:number[], minDist:number[] }. */
+function identityOutliers(faceDescriptors, maxDist = SELFIE_IDENTITY_MAX) {
+  const n = faceDescriptors.length;
+  const minDist = new Array(n).fill(null);
+  if (n < 3) return { outliers: [], minDist };
+  for (let a = 0; a < n; a++) {
+    let m = Infinity;
+    for (let b = 0; b < n; b++) {
+      if (a === b) continue;
+      m = Math.min(m, euclideanDistanceLocal(faceDescriptors[a].d, faceDescriptors[b].d));
+    }
+    minDist[a] = m;
+  }
+  const outliers = [];
+  for (let a = 0; a < n; a++) if (minDist[a] > maxDist) outliers.push(faceDescriptors[a].idx);
+  // Çoğunluk aykırıysa ölçüm güvenilmez (ör. hepsi farklı kişi ya da vektörler
+  // bozuk): karar verilmez, çağıran yalnız loglar.
+  if (outliers.length * 2 > n) return { outliers: [], minDist, unreliable: true };
+  return { outliers, minDist };
+}
+
 /**
  * Laplacian varyansı (bulanıklık ölçütü — düşük = bulanık) ve aşırı pozlama
  * (neredeyse-beyaz piksel oranı) hesaplar. Yalnızca referans SEÇİMİNDE
@@ -592,12 +629,23 @@ async function analyzeReferences(buffers, { dedup = true } = {}) {
     }
   }
 
+  // Selfie'ler arası kimlik tutarlılığı (bkz. identityOutliers). Aykırı
+  // selfie varsa ortalamaya KATILMAZ: çağıran kullanıcıya hata döndürse bile
+  // refDescriptor temiz kalsın.
+  const identity = identityOutliers(faceDescriptors);
+  const identityOutlierIndices = identity.outliers;
+  const identityMinDist = identity.minDist;
+  const identityUnreliable = identity.unreliable === true;
+  const cleanDescriptors = faceDescriptors
+    .filter((f) => !identityOutlierIndices.includes(f.idx))
+    .map((f) => f.d);
+
   let refDescriptor = null;
-  if (descriptors.length > 0) {
-    const len = descriptors[0].length;
+  if (cleanDescriptors.length > 0) {
+    const len = cleanDescriptors[0].length;
     const avg = new Float32Array(len);
-    for (const d of descriptors) {
-      for (let i = 0; i < len; i++) avg[i] += d[i] / descriptors.length;
+    for (const d of cleanDescriptors) {
+      for (let i = 0; i < len; i++) avg[i] += d[i] / cleanDescriptors.length;
     }
     refDescriptor = avg;
   }
@@ -621,6 +669,9 @@ async function analyzeReferences(buffers, { dedup = true } = {}) {
   return {
     unclearIndices,
     duplicateIndices,
+    identityOutlierIndices,
+    identityMinDist,
+    identityUnreliable,
     closedEyeIndices,
     refEyeOpenness,
     refSkinTone,
@@ -2496,4 +2547,6 @@ module.exports = {
   faceLandmarks,
   FACE_MATCH_THRESHOLD,
   PROFILE_UNRELIABLE_MIN,
+  SELFIE_IDENTITY_MAX,
+  _testables: { identityOutliers, euclideanDistanceLocal },
 };

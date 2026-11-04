@@ -66,12 +66,16 @@ service firebase.storage {
       allow write: if false;
     }
 
-    // Reddedilen kareler: teşhis + kullanıcıya "Elenen Kareler" panelinde
-    // gösterim (2026-08-15, bkz. functions/falPhotos.js saveRejectedFrame).
-    // dating_results ile aynı kural: yalnızca Cloud Functions yazar, sahibi
-    // okur.
+    // Reddedilen kareler: yalnızca teşhis ve ops onay ızgarası (bkz.
+    // functions/falPhotos.js saveRejectedFrame, opsPanel.opsGetJobDetail).
+    // KAPATILDI (2026-11-04): eskiden sahibi okuyabiliyordu ("Elenen Kareler"
+    // paneli). Onay akışında bu kareler ham, bitirme adımı uygulanmamış
+    // hâlde; kullanıcıya hiçbir ham kare gösterilmemesi onay akışının
+    // gerekçesi. Ops paneli sunucu imzalı URL kullandığı için etkilenmez.
+    // Eski doğrudan-teslim işlerinde istemci bu yolu okumaya çalışırsa tile
+    // hata görseli gösterir; o akış artık kullanılmıyor.
     match /dating_rejected/{userId}/{allPaths=**} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if false;
       allow write: if false;
     }
 

@@ -3519,9 +3519,15 @@ function visionRejectionOverridden(visionReason, distance) {
 
 // Reddedilen kareler Storage'a yazılır. Başlangıçta yalnızca A/B teşhisi
 // içindi ("Vision haklı mı?" sorusu gözle doğrulanabilsin diye); 2026-08-15
-// itibariyle AYRICA kullanıcıya gösteriliyor (bkz. saveRejectedFrame'in
-// Firestore yazımı + module_flows.dart'taki "Elenen Kareler" paneli) — artık
-// yalnızca teşhis değil, ürün özelliğinin bir parçası, false yapılamaz.
+// ile 2026-11-04 arasında kullanıcıya da gösterildi ("Elenen Kareler").
+// 2026-11-04: kullanıcı erişimi kapatıldı (storage.rules + istemci); kareler
+// artık yalnız ops onay ızgarasında (opsGetJobDetail, imzalı URL) görünür —
+// onay akışında reddedilen son kare bitirilip panelde seçilebildiği için
+// (FINISH_REJECTED_FRAMES) hâlâ ürünün parçası, false yapılamaz.
+// SAKLAMA: kova yaşam döngüsü (bucket lifecycle, 2026-11-04) dating_debug/ ve
+// dating_rejected/ altını 30 gün, dating_staging/ altını 60 gün,
+// dating_training/ altını 7 gün sonra siler. Kural kovada tanımlı (repo'da
+// dosya yok); okumak için admin SDK bucket.getMetadata().lifecycle.
 const SAVE_REJECTED_FRAMES = true;
 const DEBUG_ROOT = "dating_rejected";
 
@@ -3692,6 +3698,15 @@ const FINISH_REJECTED_FRAMES = true;
 // Modele saçı silinmiş taban giden chunk'lar (bkz. TEMPLATE_HAIR_ERASE):
 // model şablonun buklesini görmediği için BUKLE KALINTISI atlanır.
 const CHUNK_HAIR_ERASED = new Set();
+// Bitirme adımları yüzü bozduğu için HAM kareyle teslim edilen chunk'lar
+// (bkz. "BİTİRME KİMLİK" ölçümü). İş dokümanına chunkFinishRegressed olarak
+// yazılır; panelde "bu kare bitirilmeden gitti" bilgisi için.
+const CHUNK_FINISH_REGRESSED = new Set();
+// Bitirme sonrası kimlik mesafesinin hamdan en fazla ne kadar artabileceği.
+// face-api mesafesinde 0.05, aynı karede ışık/keskinlik farkından gelen
+// doğal oynamanın (gözlemlenen 0.01-0.03) üstünde; birlikte eşik (0.50)
+// şartı da arandığı için iyi karelerdeki küçük artış geri alma üretmez.
+const FINISH_REGRESS_DELTA = 0.05;
 
 async function saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, meta) {
   if (!SAVE_REJECTED_FRAMES) return;
@@ -4886,6 +4901,7 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     CHUNK_RESTORE.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
     CHUNK_LAST_REJECTED.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
     CHUNK_HAIR_ERASED.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
+    CHUNK_FINISH_REGRESSED.delete(chunkTemplateKey(jobId, styleId, chunkIdx));
   }
 }
 
@@ -5548,11 +5564,17 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         } catch { /* teşhis ölçümü kareyi etkilemez */ }
         console.log(
           `TEN ÖLÇÜM (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-          `${skinVsFace.ok ? (skinVsFace.reason ? `ÖLÇÜLEMEDİ[${skinVsFace.reason}]` : "GEÇTİ") : "RED[skin]"} ` +
+          `${skinVsFace.ok ? (skinVsFace.reason ? `ÖLÇÜLEMEDİ[${skinVsFace.reason}]` : "GEÇTİ") : (SIMPLE_PIPELINE ? "UYARI[skin, sade akışta eleme yok]" : "RED[skin]")} ` +
           `yüzeGöreOran=${rt} örnek=${skinVsFace.sampled ?? "null"} ` +
           `(teşhis selfieHedef=${selfieRatio} yüzSelfieFarkı=${faceVsSelfie})`
         );
-        if (!skinVsFace.ok) {
+        // SADE AKIŞTA YALNIZ LOG (2026-11-04): bu kapı "uzuvlar yüzden farklı
+        // tonda mı" sorusunu ham karede soruyor; sade akışın bitirme adımı
+        // (postTasks.simpleFinish → skinTone yüz-kilitli düzeltme) tam olarak
+        // bu farkı kapatıyor. 30 Ekim sonrası loglarda 4 kare bu kapıda
+        // elendi, hepsi bitirme adımının düzelteceği türdendi; kare başı
+        // ~0.13 $ boşa gidiyordu. Ölçüm kalıyor, karar kalkıyor.
+        if (!skinVsFace.ok && !SIMPLE_PIPELINE) {
           lastRejectGate = "skin-tone";
           await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
             mode, gate: "skin-tone", distance: mathDist,
@@ -6401,6 +6423,21 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         } catch (e) {
           console.error("OpenAI yolu: LaMa modeli indirilemedi (şablon izi temizliği atlanabilir):", e.message || e);
         }
+        // BİTİRME SONRASI KİMLİK ÖLÇÜMÜ (2026-11-04): kapılar ham kareyi
+        // ölçüyor, teslim edilen kare ise bitirme adımlarından (kafa bükme,
+        // yüz tonu, ten, yüz detayı, gözlük) geçmiş hâli. Bu adımların yüzü
+        // bozup bozmadığı hiç ölçülmüyordu. Önce/sonra aynı ölçümle (face-api
+        // mesafesi) karşılaştırılır; her karede loglanır. GERİ ALMA yalnız
+        // açık gerilemede: mesafe hem eşiğin üstüne çıkmış hem de hamdan
+        // FINISH_REGRESS_DELTA'dan fazla artmışsa, ya da bitirme sonrası yüz
+        // artık bulunamıyorsa ham kare teslim edilir. Ölçüm hatası akışı
+        // durdurmaz.
+        const rawBeforeFinish = deliverBuf;
+        let dBefore = null;
+        if (refDescriptor) try {
+          const q0 = await require("./faceQuality").assessOutputFace(deliverBuf, refDescriptor);
+          dBefore = q0.distance;
+        } catch { /* ölçüm yoksa geri alma kararı verilmez */ }
         const r = await runPostTask("simpleFinish", {
           buf: deliverBuf, tpl: Buffer.isBuffer(tplForEyewear) ? tplForEyewear : null, styleId, chunkIdx,
           templateEyewear: tplHasEyewear, mstUser: refSkinMst, mstTpl: tplSkinMst,
@@ -6409,6 +6446,23 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           hairErased: CHUNK_HAIR_ERASED.has(chunkTemplateKey(jobId, styleId, chunkIdx)),
         });
         if (r && r.buf) deliverBuf = Buffer.isBuffer(r.buf) ? r.buf : Buffer.from(r.buf);
+        if (refDescriptor && r && r.buf) try {
+          const fq = require("./faceQuality");
+          const q1 = await fq.assessOutputFace(deliverBuf, refDescriptor);
+          const dAfter = q1.distance;
+          const delta = dBefore != null && dAfter != null ? dAfter - dBefore : null;
+          const lostFace = dBefore != null && q1.reason === "no-face";
+          const regressed = delta != null && delta > FINISH_REGRESS_DELTA && dAfter > fq.FACE_MATCH_THRESHOLD;
+          const f3 = (v) => (v != null ? v.toFixed(3) : "null");
+          const verdict = lostFace ? "GERİ ALINDI[yüz-kayboldu]" : regressed ? "GERİ ALINDI[kimlik-geriledi]" : (delta == null ? "ÖLÇÜLEMEDİ" : "GEÇTİ");
+          console.log(`BİTİRME KİMLİK (style=${styleId}, chunk=${chunkIdx}): ${verdict} önce=${f3(dBefore)} sonra=${f3(dAfter)} fark=${f3(delta)} eşik=${fq.FACE_MATCH_THRESHOLD} izinliArtış=${FINISH_REGRESS_DELTA}`);
+          if (lostFace || regressed) {
+            deliverBuf = rawBeforeFinish;
+            CHUNK_FINISH_REGRESSED.add(chunkTemplateKey(jobId, styleId, chunkIdx));
+          }
+        } catch (e) {
+          console.error("Bitirme sonrası kimlik ölçümü hata verdi (kare bitirilmiş hâliyle kalıyor):", e.message || e);
+        }
       } catch (e) {
         console.error("OpenAI yolu: sade akış son adımları hata verdi (atlanıyor):", e);
       }
@@ -6853,8 +6907,12 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // Teslim edilen karenin GERÇEK şablonu (yedeğe geçildiyse yedek) — admin
     // paneli çıktıyı yanında gösteriyor. Hata üretimi etkilemez.
     const usedTemplate = CHUNK_TEMPLATE.get(chunkTemplateKey(jobId, styleId, chunkIdx));
-    if (usedTemplate) {
-      await jobRef.set({ chunkTemplates: { [String(chunkIdx)]: usedTemplate } }, { merge: true })
+    const finishRegressed = CHUNK_FINISH_REGRESSED.has(chunkTemplateKey(jobId, styleId, chunkIdx));
+    if (usedTemplate || finishRegressed) {
+      await jobRef.set({
+        ...(usedTemplate ? { chunkTemplates: { [String(chunkIdx)]: usedTemplate } } : {}),
+        ...(finishRegressed ? { chunkFinishRegressed: { [String(chunkIdx)]: true } } : {}),
+      }, { merge: true })
         .catch((e) => console.error("Şablon kaydı yazılamadı (panelde görünmeyecek):", e.message || e));
     }
     await finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls: [`gs://${bucket().name}/${path}`] });
@@ -7009,6 +7067,26 @@ exports.prepareReferencePhotos = onCall(
           `yana dönük) çekip tekrar dene.`,
           { duplicatePhotoIndices: analysis.duplicateIndices }
         );
+      }
+      // SELFIE'LER ARASI KİMLİK (2026-11-04, bkz. faceQuality.identityOutliers):
+      // beş karenin aynı kişiye ait olduğu daha önce hiç kontrol edilmiyordu.
+      // Ölçüm her işte loglanır (eşik kalibrasyonu için), ret yalnız aykırı
+      // kare bulunduğunda ve ölçüm güvenilirse.
+      {
+        const md = Array.isArray(analysis.identityMinDist) ? analysis.identityMinDist : [];
+        const out = analysis.identityOutlierIndices || [];
+        console.log(`HAZIRLIK KİMLİK: ${analysis.identityUnreliable ? "ÖLÇÜLEMEDİ[çoğunluk-aykırı]" : (out.length ? "AYKIRI[" + out.map((i) => i + 1).join(",") + "]" : "TUTARLI")} enYakın=[${md.map((v) => (v != null ? v.toFixed(3) : "null")).join(",")}] eşik=${require("./faceQuality").SELFIE_IDENTITY_MAX}`);
+        if (out.length > 0) {
+          const { label, many } = posLabel(out);
+          throw new HttpsError(
+            "invalid-argument",
+            `${label} diğer karelerdeki kişiyle eşleşmiyor gibi görünüyor. ` +
+            `Üretilen fotoğrafların sana benzemesi için beş karede de aynı ` +
+            `kişi olmalı; ${many ? "bunları" : "bunu"} kendi yüzünün net ` +
+            `göründüğü bir kareyle değiştirip tekrar dene.`,
+            { identityMismatchPhotoIndices: out }
+          );
+        }
       }
       // Gözü APAÇIK kapalı kare (kırpma anı). Kısık/dar göz buraya GİRMEZ —
       // eşik bilinçli olarak çok düşük (bkz. faceQuality CLOSED_EYE_MAX).
@@ -7656,6 +7734,19 @@ exports.startPhotoGeneration = onCall(
             `MALIYET İŞ (${jobId}): harcanan=$${costLedger.spentUsd.toFixed(3)} sınır=$${costLedger.limitUsd.toFixed(2)} ` +
             `kare=${picked.length} bütçedenAtlananAdım=${costLedger.skipped}`
           );
+          // KALICI MALİYET (2026-11-04): defter yalnız log'daydı; panelin
+          // "onaylı kare başına maliyet" gösterebilmesi için dokümana
+          // yazılıyor. Tahmini API maliyeti (üretim + Vision + isteğe bağlı
+          // AI adımları); iş durumunu değiştirmez, yazılamazsa akış bozulmaz.
+          try {
+            await jobRef.set({
+              costUsd: Number(costLedger.spentUsd.toFixed(4)),
+              costLimitUsd: Number(costLedger.limitUsd.toFixed(2)),
+              costSkippedSteps: costLedger.skipped,
+            }, { merge: true });
+          } catch (e) {
+            console.error("Maliyet dokümana yazılamadı (akış etkilenmez):", e.message || e);
+          }
         }
       } else {
         // fal.ai YOLU — submit hızlı döner, webhook sonuçlandırıyor.
@@ -8151,6 +8242,28 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
       const missingPhotos = Math.max(0, promisedCount - deliverableCount);
       const incompleteCount = missingPhotos > 0 ? 1 : 0;
 
+      // KALICI ÖLÇÜM (2026-11-04): kapı sayaçları ve teslim edilebilir kare
+      // sayısı şimdiye kadar yalnız log'da ve panelin anlık hesabındaydı
+      // (opsPanel.extractGateCounts). İş dokümanına yazılınca stil bazlı
+      // geçiş oranı ve "onaylı kare başına maliyet" sorgulanabilir olur.
+      // rejectedFrames dizisi saveRejectedFrame ile kare kare birikiyor;
+      // burada iş kapanırken bir kez özetleniyor.
+      {
+        const gateCounts = {};
+        for (const f of Array.isArray(j.rejectedFrames) ? j.rejectedFrames : []) {
+          const g = f && typeof f.gate === "string" && f.gate ? f.gate : "?";
+          gateCounts[g] = (gateCounts[g] || 0) + 1;
+        }
+        update.gateCounts = gateCounts;
+        update.rejectedCount = Array.isArray(j.rejectedFrames) ? j.rejectedFrames.length : 0;
+        update.deliverableCount = deliverableCount;
+        update.generatedCount = j.generateCount || expectedChunkCount(styleId) || 0;
+      }
+      // İş uç duruma geliyor: biyometrik alanlar dokümandan silinir (bkz.
+      // JOB_BIOMETRIC_FIELDS). Aşağıdaki dallar status'u pendingApproval /
+      // done / failed yapar; üçünde de üretim bitmiştir.
+      Object.assign(update, biometricFieldDeletes());
+
       if (successCount > 0) {
         // Kısmi başarı: üretilenleri göster, TESLİM EDİLMEYEN HER FOTO için
         // hak iade et.
@@ -8237,6 +8350,23 @@ async function keepSelfiesForReview(uid, jobId) {
   }
 }
 
+// İŞ DOKÜMANINDAKİ BİYOMETRİK ALANLAR (2026-11-04, KVKK). Selfie'ler
+// Storage'dan üretim başlar başlamaz siliniyordu ama prepareReferencePhotos'un
+// dokümana yazdığı 128 boyutlu yüz vektörü (refDescriptor), ten ölçümleri ve
+// selfie adresleri süresiz kalıyordu. Bunların hepsi yalnız üretim SIRASINDA
+// gerekir (startPhotoGeneration başta belleğe alır, bkz. ~7356-7367); iş
+// uç duruma gelince (pendingApproval/done/failed/expired) silinir. Ops paneli
+// ve onay akışı bu alanları kullanmaz.
+const JOB_BIOMETRIC_FIELDS = [
+  "refDescriptor", "refSkinTone", "refSkinMst", "refSkinLight",
+  "refEyeOpenness", "refHasFaceShine", "falRefUrls", "primaryFaceUrl",
+];
+function biometricFieldDeletes() {
+  const o = {};
+  for (const k of JOB_BIOMETRIC_FIELDS) o[k] = admin.firestore.FieldValue.delete();
+  return o;
+}
+
 // Referans selfie'lerini Firebase Storage'dan siler (KVKK). Zaten silinmişse
 // no-op. startPhotoGeneration üretim başlar başlamaz çağırır.
 async function deleteTrainingPhotos(uid, jobId) {
@@ -8285,6 +8415,7 @@ async function refundAndFail(uid, jobId, unitsToRefund, errorMessage) {
       status: "failed",
       errorMessage,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...biometricFieldDeletes(),
     }, { merge: true });
   });
   await deleteTrainingPhotos(uid, jobId);
@@ -8349,6 +8480,7 @@ exports.cleanupExpiredReadyJobs = onSchedule(
       await doc.ref.set({
         status: "expired",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...biometricFieldDeletes(),
       }, { merge: true });
       await deleteTrainingPhotos(uid, doc.id);
     }

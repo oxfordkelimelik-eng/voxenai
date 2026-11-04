@@ -219,9 +219,49 @@ function buildDailyBreakdown(purchases) {
   return Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? 1 : -1));
 }
 
+/**
+ * Maliyet ve geçiş oranı (2026-11-04). costUsd, iş dokümanına
+ * startPhotoGeneration'ın maliyet defterinden yazılır; eski işlerde yoktur ve
+ * yalnız maliyeti olan işler toplama girer. "Onaylı kare" = approvedCount
+ * (opsApprovePhotos yazar); onay bekleyen işlerde henüz 0 olduğundan oran
+ * yalnız done işlerle hesaplanır. Stil bazlı geçiş = teslim edilebilir kare /
+ * üretilen kare (generatedCount). SAF — test edilebilir.
+ */
+function buildCostSummary(jobs) {
+  const costed = jobs.filter((j) => typeof j.costUsd === "number" && j.costUsd > 0);
+  const totalCostUsd = costed.reduce((n, j) => n + j.costUsd, 0);
+  const doneCosted = costed.filter((j) => j.status === "done");
+  const approvedInDone = doneCosted.reduce((n, j) => n + (j.approvedCount || 0), 0);
+  const costInDone = doneCosted.reduce((n, j) => n + j.costUsd, 0);
+  const generated = jobs.reduce((n, j) => n + (j.generatedCount || 0), 0);
+  const deliverable = jobs.reduce((n, j) => n + (j.deliverableCount || 0), 0);
+  const byStyle = {};
+  for (const j of jobs) {
+    if (!j.generatedCount) continue;
+    for (const s of Array.isArray(j.styles) ? j.styles : ["?"]) {
+      const b = byStyle[s] || (byStyle[s] = { jobs: 0, generated: 0, deliverable: 0, approved: 0 });
+      b.jobs += 1;
+      b.generated += j.generatedCount || 0;
+      b.deliverable += j.deliverableCount || 0;
+      b.approved += j.approvedCount || 0;
+    }
+  }
+  for (const b of Object.values(byStyle)) {
+    b.passRate = b.generated > 0 ? Number((b.deliverable / b.generated).toFixed(3)) : null;
+  }
+  return {
+    costedJobs: costed.length,
+    totalCostUsd: Number(totalCostUsd.toFixed(3)),
+    costPerApprovedUsd: approvedInDone > 0 ? Number((costInDone / approvedInDone).toFixed(3)) : null,
+    passRate: generated > 0 ? Number((deliverable / generated).toFixed(3)) : null,
+    styleStats: byStyle,
+  };
+}
+
 /** genJobs doküman listesinden özet — kapı dağılımı ve iş türü sayaçları dahil. */
 function buildJobSummary(jobs) {
   return {
+    ...buildCostSummary(jobs),
     totalJobs: jobs.length,
     uniqueProducers: new Set(jobs.map((j) => j.uid)).size,
     statusCounts: jobs.reduce((acc, j) => {
@@ -309,6 +349,12 @@ exports.opsGetOverview = onCall(
         deliveredCount,
         rejectedCount: rejectedFrames.length,
         gateCounts: extractGateCounts(rejectedFrames),
+        // Kalıcı ölçüm alanları (2026-11-04, bkz. falPhotos finalizeChunk /
+        // MALİYET İŞ). Eski işlerde yok → null/0.
+        costUsd: typeof d.costUsd === "number" ? d.costUsd : null,
+        generatedCount: d.generatedCount || d.generateCount || 0,
+        deliverableCount: d.deliverableCount || deliveredCount,
+        approvedCount: Array.isArray(d.approvedPhotoUrls) ? d.approvedPhotoUrls.length : 0,
         createdAt: d.createdAt ? d.createdAt.toMillis() : null,
         updatedAt: d.updatedAt ? d.updatedAt.toMillis() : null,
       };
@@ -821,6 +867,7 @@ exports._testables = {
   aggregateGateCounts,
   buildPurchaseSummary,
   buildJobSummary,
+  buildCostSummary,
   safeString,
   buildDailyBreakdown,
   priceForProduct,

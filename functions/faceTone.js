@@ -179,6 +179,36 @@ function bodyRatioOf(So, St) {
   return o > 0 && t > 0 ? { ratio: o / t, n: Yo.length } : null;
 }
 
+/**
+ * Boyun–yüz parlaklık farkı (L*, boyun − yüz). Boyun = çenenin altında yarım
+ * yüz boyu, yüz genişliğinde şeritteki vücut derisi; yüz = kutudaki yüz
+ * derisi. Kazanç boyunda sönümlendiği için (bkz. headAlpha) yüz açılıp boyun
+ * yerinde kalırsa fark büyür — "yapıştırılmış kafa" görüntüsünün ölçüsü.
+ * Yalnız ÖLÇÜM (2026-11-04): karar vermez, önce/sonra loglanır. rgbAt(i)
+ * çalışma çözünürlüğü indeksinden [r,g,b] döndürür. SAF.
+ */
+function neckFaceDelta(S, rgbAt) {
+  const { P, CLASSES, W, H, box } = S;
+  const chin = box.y + box.height * 1.05;
+  const nx0 = box.x - 0.15 * box.width, nx1 = box.x + 1.15 * box.width, ny1 = chin + 0.5 * box.height;
+  const Lf = [], Ln = [];
+  const lum = (c) => {
+    const Y = 0.2126 * SRGB2LIN[c[0]] + 0.7152 * SRGB2LIN[c[1]] + 0.0722 * SRGB2LIN[c[2]];
+    return Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y;
+  };
+  for (let y = Math.max(0, Math.floor(box.y)); y < Math.min(H, Math.ceil(ny1)); y++) {
+    for (let x = Math.max(0, Math.floor(nx0)); x < Math.min(W, Math.ceil(nx1)); x++) {
+      const i = y * W + x;
+      if (P[CLASSES.clothes][i] >= 0.3) continue;
+      if (y <= chin) { if (P[CLASSES.faceSkin][i] > 0.7) Lf.push(lum(rgbAt(i))); }
+      else if (P[CLASSES.bodySkin][i] > 0.7) Ln.push(lum(rgbAt(i)));
+    }
+  }
+  if (Lf.length < 50 || Ln.length < 50) return null;
+  const face = trimmedMean(Lf), neck = trimmedMean(Ln);
+  return { face, neck, delta: neck - face, nNeck: Ln.length };
+}
+
 /** Şablon yüz hedefini karedeki vücudun şablona oranıyla düzeltir. SAF. */
 function bodyAdjustedTarget(tpl, body) {
   if (!tpl || !body || !(body.ratio > 0)) return { tpl, bodyRatio: null };
@@ -392,7 +422,9 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   const plan = planTone(adj.tpl, out, albedo);
   const L = (Y) => (Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y);
   const sl = (q) => (q.slope ? `${q.slope.gu.toFixed(2)}/${q.slope.gv.toFixed(2)}` : "null");
-  const info2 = { outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, tplSlope: sl(tpl), outSlope: sl(out), ...plan };
+  const neckBefore = neckFaceDelta(So, (i) => [So.work[i * 3], So.work[i * 3 + 1], So.work[i * 3 + 2]]);
+  const neckTpl = neckFaceDelta(St, (i) => [St.work[i * 3], St.work[i * 3 + 1], St.work[i * 3 + 2]]);
+  const info2 = { outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, ...plan };
   if (!plan.ok) return { buf: null, applied: false, reason: plan.reason, ...info2 };
   if (!plan.logGain && !plan.da && !plan.db && !plan.gu && !plan.gv) return { buf: null, applied: false, reason: "already-matched", ...info2 };
   // Kesin pikseller tohum: kafa/boyun (değer = alfa), vücut derisi (eğim için
@@ -497,8 +529,15 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
     res[i * 3] = r; res[i * 3 + 1] = g; res[i * 3 + 2] = b;
     changed++;
   }
+  // Sonrası: aynı maskeler (deri yer değiştirmedi), renk tam çözünürlükten.
+  const neckAfter = neckFaceDelta(So, (i) => {
+    const x = i % w0, y = (i - x) / w0;
+    const X = Math.min(FW - 1, Math.floor((x + 0.5) / sx0)), Y = Math.min(FH - 1, Math.floor((y + 0.5) / sy0));
+    const j = (Y * FW + X) * 3;
+    return [res[j], res[j + 1], res[j + 2]];
+  });
   const buf = await sharp(res, { raw: { width: FW, height: FH, channels: 3 } }).png().toBuffer();
-  return { buf, applied: true, reason: null, changed, matted, ms: Date.now() - t0, ...info2 };
+  return { buf, applied: true, reason: null, changed, matted, ms: Date.now() - t0, ...info2, neckDeltaAfter: neckAfter ? neckAfter.delta : null };
 }
 
-module.exports = { matchFaceToScene, _testables: { probsOf, skinStats, soften, upsample, planTone, trimmedMean, bodyAdjustedTarget, propagate, boxBlur, edgeMatteFields, matteAlpha, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX } };
+module.exports = { matchFaceToScene, _testables: { probsOf, skinStats, soften, upsample, planTone, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX } };
