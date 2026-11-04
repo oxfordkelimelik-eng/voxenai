@@ -216,3 +216,53 @@ test("poz: ölçülemeyen selfie atlanır", () => {
   const p = poseMatchedOrder([0.6, null, 0.1], 0.05);
   assert.deepEqual(p.order, [2, 0, 1]);
 });
+
+test("zıt iris: d0d4c001 c7 — şablon 0.82, çıktı 0.36 → red", () => {
+  const { isIrisGazeOpposite } = require("../gazeGate");
+  const g = (x, extra = {}) => ({ irisX: x, eyes: 2, eyeWidth: 15, eyeCheek: 0.7, ...extra });
+  assert.equal(isIrisGazeOpposite(g(0.82), g(0.36)), true);
+  // Aynı yana daha az bakış (017dbe34 c7: 0.82 → 0.62) kaba hata değil.
+  assert.equal(isIrisGazeOpposite(g(0.82), g(0.62)), false);
+  // Şablon merkeze yakınsa (yön belirsiz) susar.
+  assert.equal(isIrisGazeOpposite(g(0.58), g(0.30)), false);
+});
+
+test("zıt iris: güneş gözlüğü, tek göz, küçük göz → susar", () => {
+  const { isIrisGazeOpposite } = require("../gazeGate");
+  const g = (x, extra = {}) => ({ irisX: x, eyes: 2, eyeWidth: 15, eyeCheek: 0.7, ...extra });
+  assert.equal(isIrisGazeOpposite(g(0.82, { eyeCheek: 0.2 }), g(0.3)), false);
+  assert.equal(isIrisGazeOpposite(g(0.82, { eyes: 1 }), g(0.3)), false);
+  assert.equal(isIrisGazeOpposite(g(0.82), g(0.3, { eyeWidth: 9 })), false);
+  assert.equal(isIrisGazeOpposite(null, g(0.3)), false);
+});
+
+// PROFİL SELFIE FİLTRESİ (2026-10-26, e25dc241): düz şablona tam profil selfie gitmez.
+test("poseFilteredRefs: düz şablonda tam profiller çıkar, en az 2 selfie kalır, dönük şablonda dokunulmaz", () => {
+  const { poseFilteredRefs } = require("../gazeGate");
+  // e25dc241'in seti
+  const e25 = [1.0, 1.0, 0.17, 1.0, 0.17];
+  assert.deepEqual(poseFilteredRefs(e25, 0.06).keep, [2, 4]);
+  assert.deepEqual(poseFilteredRefs(e25, 0.06).dropped, [0, 1, 3]);
+  // dönük şablon: hepsi kalır
+  assert.deepEqual(poseFilteredRefs(e25, 0.82).keep, [0, 1, 2, 3, 4]);
+  // profil yoksa değişmez
+  assert.equal(poseFilteredRefs([0.1, 0.3, 0.6, 0.2, 0.05], 0.1).dropped.length, 0);
+  // tek düz selfie: şablona en yakın profil geri alınır (en az 2)
+  const one = poseFilteredRefs([0.95, 0.85, 0.1, 1.0, 0.9], 0.2);
+  assert.deepEqual(one.keep, [1, 2]);
+  // ölçülemeyen selfie tutulur; yön yoksa dokunulmaz
+  assert.deepEqual(poseFilteredRefs([1.0, null, 0.2, 1.0, 0.1], 0.1).keep, [1, 2, 4]);
+  assert.deepEqual(poseFilteredRefs(e25, null).keep, [0, 1, 2, 3, 4]);
+});
+
+// 546b514b (2026-10-28): üç çeyrek şablona şablondan ≥0.2 daha dönük selfie gitmez.
+test("poseFilteredRefs: dönük şablonda şablondan çok daha dönük selfie çıkar", () => {
+  const { poseFilteredRefs } = require("../gazeGate");
+  const s546 = [0.86, 0.03, 0.41, 1.0, 1.0];
+  assert.deepEqual(poseFilteredRefs(s546, 0.78).keep, [0, 1, 2]);
+  assert.deepEqual(poseFilteredRefs(s546, 0.57).keep, [1, 2]);
+  // tam profil şablonda profiller kalır
+  assert.deepEqual(poseFilteredRefs(s546, 0.94).keep, [0, 1, 2, 3, 4]);
+  // en az 2: şablona en yakın dönük selfie geri alınır
+  assert.deepEqual(poseFilteredRefs([1.0, 0.95, 0.1, 1.0, 1.0], 0.6).keep, [1, 2]);
+});

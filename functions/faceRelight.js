@@ -63,8 +63,13 @@ const WORK_FACE_PX = 256;
 // (Yalnız desen uyumu teşhisinde kullanılır.)
 const LP_SIGMA = 0.045;
 // Kazanç sınırları (log). Desen ve ortalama ayrı sınırlanır.
-const PATTERN_MIN = Math.log(0.7);
-const PATTERN_MAX = Math.log(1.4);
+// 0.7/1.4 → 0.55/1.8 (2026-10-28, 546b514b, kullanıcı: "base'deki gölgeler ve
+// ışık çıktıya tam yansıyamamış"): yan ışığı güçlü şablonda yüzey sınıra
+// takılıyordu — c9'da şablonun 15 L yan ışığından çıktıya 3.7 kalıyordu,
+// genişletince 5.1; c0/c2/c3'te gerileme yok. Yüzey ikinci derece (leke
+// taşıyamaz), uyum kapısı aynı.
+const PATTERN_MIN = Math.log(0.55);
+const PATTERN_MAX = Math.log(1.8);
 // Işık yüzeyi: aykırı piksellere (sakal, ben, parlama) Huber eşiği (log) ve
 // yineleme sayısı.
 const SURFACE_HUBER = 0.15;
@@ -87,6 +92,9 @@ const COLOR_APPLY_MIN = 0.01;
 // 0.70 c5'i (6dd26e3e) çamurlaştırdı — boyun ölçüsü sakalla gürültülü.
 const LEVEL_MIN = Math.log(0.85);
 const LEVEL_MAX = Math.log(1.15);
+// 0.80 → 0.92 (2026-10-25, d0d4c001 c3 "yüz canlı değil"): çıktı boynu açık
+// yakanın gölgesinde ölçülünce güneşteki yüz 0.80'e kararıp donuklaştı.
+const LEVEL_MIN_ENV = Math.log(0.92);
 // Deri olasılığı eşiği, en az piksel, profil sınırı, kenar yumuşatması.
 const SKIN_P = 0.5;
 // Yanak/alın bölgesinin en az bu payı deri görünmüyorsa segmentasyon yok sayılır.
@@ -164,6 +172,49 @@ const PATTERN_FIT_FULL = 0.6;
 // Yeniden tasarlandı (sceneLight.templateLight: selfie yok, ışık şablonun
 // arka planı + kişisi + yüzünden); 31 karelik kör testte 26/31 seçildi.
 const LIGHT_COLOR_ON = true;
+// TABANDAN IŞIK YOK (2026-10-22, kullanıcı, b2a9537d c11: "gereksiz ışık
+// vurmuş, ışıkları base fotolardan almayalım, ortama uygun ışığı kendimiz
+// üretelim"). c11'de şablon mankeninin yüzü güneşte, boynu gölgede (oran
+// 2.50) — yüz ×1.15 açıldı, desen alına parlama koydu; 25 teslim karesinin
+// çoğunda yüz vücut derisinden 5-21 L açıktı. false: desen (mankenin yüz
+// ışığı) kapalı, yüz kendi boynuna doğal oranla (DEFAULT_TPL_FACE_NECK)
+// bağlanır; L2 sahne ışık rengi (arka plandan) kalır.
+const BASE_LIGHT_ON = false;
+// IŞIK YÖNÜ YİNE TABANDAN (2026-10-25, d0d4c001, kullanıcı: "yüzde tutarlı
+// ışık yok, olduğu gibi koymuşsun, base'deki ışığı baz almalıyız"). Yalnız
+// DESEN (ikinci derece yüzey, uyum kapılı) açılır; parlaklık kişinin kendi
+// boynunda kalır (BASE_LIGHT_ON false) — şablon yüz/boyun oranı c6 çimen
+// karesinde güneşteki yüzü 0.85'e kararttı. 15 eski ham karede leke yok;
+// c2 pencere, c6 güneş, c7 stüdyo yan ışığı şablona yaklaştı.
+const BASE_PATTERN_ON = true;
+
+// POZLAMA (2026-10-29). Önceki denemeler (c3'te yüzü şablona göre karart)
+// reddedildi çünkü ölçüm ışık ile pigmenti ayıramıyordu (bkz.
+// [[face-exposure-hue]] 10-22/10-28). Çözüm: pigment artık piksel ölçümünden
+// değil, VİZYON MODELİNDEN (skinPigment.js, gpt-4.1-mini — selfie ve şablon
+// için ayrı ayrı, ışıktan bağımsız Monk Skin Tone tahmini) geliyor. Varsayılan
+// KAPALI — mstUser/mstTpl her ikisi de verilmedikçe hiçbir şey hesaplanmaz,
+// açık olsa bile. 64+5 tarihî karede ölçüldü (yerel, scratchpad/j546/lx);
+// deploy onayı bekliyor.
+const EXPOSURE_ON = false;
+// Düzeltmenin gücü (1 = tam eşitleme); ölçüm gürültüsü ve "yarı gerçekçi"
+// tercih için 1'in altında.
+const EXPOSURE_BETA = 0.75;
+// Üretimin yüzü şablondan en çok bu kadar koyu/açık kalabilir (log).
+const EXPOSURE_MIN = Math.log(0.5);
+const EXPOSURE_MAX = Math.log(1.25);
+// Monk ölçeğinde (1-10) normal pozlamada tipik yüz açıklığı (L*); ardışık
+// seviye farkı ~6 L. 64 kare üzerinde kalibre edildi.
+const MST_L = [null, 75, 72, 69, 65, 60, 54, 47, 40, 33, 27];
+/** Kullanıcı/şablon ten oranı (doğrusal ışık uzayında). ±1 seviye fark yok sayılır. */
+function albedoRatio(mstUser, mstTpl, deadZone = 1) {
+  if (!mstUser || !mstTpl) return 1;
+  const toY = (L) => (L > 8 ? ((L + 16) / 116) ** 3 : L / 903.3);
+  const d = mstUser - mstTpl;
+  if (Math.abs(d) <= deadZone) return 1;
+  const eff = Math.max(1, Math.min(10, mstTpl + Math.sign(d) * (Math.abs(d) - deadZone)));
+  return toY(MST_L[Math.round(eff)]) / toY(MST_L[mstTpl]);
+}
 
 const SRGB2LIN = new Float32Array(256);
 for (let i = 0; i < 256; i++) { const c = i / 255; SRGB2LIN[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }
@@ -540,7 +591,7 @@ const dE = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
  * kanıtın sebebi) artık LEVEL_MIN sınırında kalıyor — o kare eski kuralla da
  * 0.85'ti.
  */
-function tonePlan(so, st) {
+function tonePlan(so, st, { env = false } = {}) {
   const none = { level: 0 };
   if (!so.face.n || !so.neck.n) return { ...none, reason: "no-neck" };
   // Boyun base'inkiyle aynı VE yüzün açıklığı base yüzünden çok farklıysa
@@ -565,19 +616,23 @@ function tonePlan(so, st) {
   // Base ölçüsü yoksa parlaklığa dokunulmaz: tipik oran sert üst ışıkta
   // (boyun gölgede) yüzü yanlışlıkla karartıyordu (c29a2b31 c3).
   const rTraw = st.neck.n && st.face.n ? st.face.Y / st.neck.Y : null;
-  const tplOk = rTraw != null && rTraw >= TPL_RATIO_MIN;
-  const rT = tplOk ? Math.min(TPL_RATIO_MAX, rTraw) : DEFAULT_TPL_FACE_NECK;
+  // ORTAM (env): hedef oran şablon mankeninin yüz/boyun oranı DEĞİL, doğal
+  // tipik oran — yüz kişinin kendi boynuyla aynı sahne ışığında kalır.
+  const tplOk = env || (rTraw != null && rTraw >= TPL_RATIO_MIN);
+  const rT = env ? DEFAULT_TPL_FACE_NECK : tplOk ? Math.min(TPL_RATIO_MAX, rTraw) : DEFAULT_TPL_FACE_NECK;
   const rO = so.face.Y / so.neck.Y;
   const byNeck = TONE_SHARE * (Math.log(rT) - Math.log(rO));
   const byFace = st.face.n ? TONE_SHARE * (Math.log(st.face.Y) - Math.log(so.face.Y)) : 0;
-  const level = tplOk ? Math.max(LEVEL_MIN, Math.min(LEVEL_MAX, byNeck)) : 0;
+  // Ortam modunda kişinin kendi boynu referans; karartma 0.80'e kadar (yüz
+  // vücuttan çok açık kalıyordu — b2a9537d c2/c11, 29cf877a c2).
+  const level = tplOk ? Math.max(env ? LEVEL_MIN_ENV : LEVEL_MIN, Math.min(LEVEL_MAX, byNeck)) : 0;
   // Renge (ton açısı, doygunluk) dokunulmaz: 6dd26e3e c9'da doygunluk 1.22
   // dudakları boyadı. Yüz-vücut ten uyumu TEN ALANI'nda vücut yüze çekilerek.
   return { level, reason: null, rT, rO, tplOk, byNeck, byFace };
 }
 
 /** Yüz noktaları hazırken çekirdek (yerel testler de bunu çağırır). */
-async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = true, pattern: patternOpt = true, mesh = null, tplBox = null, sceneColor = true, lightPlan = null, color: colorOpt = true, prof = false, eyewear = false } = {}) {
+async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = true, pattern: patternOpt = true, mesh = null, tplBox = null, sceneColor = true, lightPlan = null, color: colorOpt = true, prof = false, eyewear = false, mstUser = null, mstTpl = null } = {}) {
   let pattern = patternOpt;
   const vo = projectVerts(ptsO), vt = projectVerts(ptsT);
   if (!vo || !vt) return { buf: null, applied: false, reason: "no-geometry" };
@@ -644,12 +699,27 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
   const fitGain = Math.max(0, Math.min(1, (corrBefore - PATTERN_FIT_ZERO) / (PATTERN_FIT_FULL - PATTERN_FIT_ZERO)));
   if (fitGain <= 0) pattern = false;
 
+  // POZLAMA (2026-10-29, 546b514b devamı, kullanıcı: "detaylı çalışalım").
+  // mt-mo yukarıda zaten hesaplı: öğrenme bölgesindeki (göz/kaş/ağız dışı yüz
+  // derisi) ortalama log-parlaklık FARKI — ışık + pigment karışık. Pattern
+  // yüzeyi (surf) bu ortalamayı kendi içinde ÇIKARIYOR (bkz. fitLightSurface
+  // `m`), yani şu ana kadar hiçbir yerde kullanılmıyordu. Pigmenti ayırmak
+  // için VİZYON MODELİNDEN (gpt-4.1-mini, skinPigment.js) alınan Monk Skin
+  // Tone (MST) tahminiyle "ten oranı" (albedoRatio) hesaplanır; yalnız geri
+  // kalan kısım (ışık farkı) uygulanır. Kapalı: şablon MST'siz çalışır
+  // (mstUser/mstTpl opsiyonel), EXPOSURE_ON false iken hiç hesaplanmaz.
+  let expLevel = 0;
+  if (EXPOSURE_ON && mstUser && mstTpl) {
+    const ratio = albedoRatio(mstUser, mstTpl);
+    expLevel = Math.max(EXPOSURE_MIN, Math.min(EXPOSURE_MAX, EXPOSURE_BETA * (Math.log(ratio) + (mt - mo))));
+  }
+
   // Ton: yüz ↔ kendi boynu (yalnız parlaklık).
   let tp = { level: 0, reason: "off" };
   let stats = null;
   if (tone) {
     const [so, st] = await Promise.all([faceNeckStats(oRgb, W, H, ptsO), faceNeckStats(tRgb, W, H, ptsT)]);
-    tp = tonePlan(so, st);
+    tp = tonePlan(so, st, { env: !BASE_LIGHT_ON });
     stats = { so, st };
   }
 
@@ -732,8 +802,8 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
     }
   }
   const levelAbs = Math.abs(tp.level);
-  if (patternMean < APPLY_MIN && levelAbs < APPLY_MIN && !colorSurf && !lightOn) {
-    return { buf: null, applied: false, reason: "similar-light", patternMean, corrBefore, tone: tp, toneStats: stats, mesh: !!dn, light };
+  if (patternMean < APPLY_MIN && levelAbs < APPLY_MIN && !colorSurf && !lightOn && Math.abs(expLevel) < APPLY_MIN) {
+    return { buf: null, applied: false, reason: "similar-light", patternMean, corrBefore, tone: tp, toneStats: stats, mesh: !!dn, light, expLevel, expOn: EXPOSURE_ON };
   }
   // Öğrenilmeyen yerlerde (yüz kenarı, saç gölgeli alın) desen komşulardan.
   const ext = weightedLowpass(Dp, have, w, h, FILL_SIGMA * cO.faceW);
@@ -787,7 +857,7 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
       const a = bilinear(alpha, w, h, fx, fy) / 255;
       const lv = toneMask(fx, fy, a);
       if (a <= 0.01 && lv <= 0.01) continue;
-      const lg = a * bilinear(Ds, w, h, fx, fy) + lv * tp.level;
+      const lg = a * (bilinear(Ds, w, h, fx, fy) + expLevel) + lv * tp.level;
       const i = y * W + x;
       for (let c = 0; c < 3; c++) {
         // L2 rengi yüz + kulaklara (parlaklık maskesiyle aynı yer).
@@ -799,7 +869,7 @@ async function relightCore(oRgb, tRgb, W, H, ptsO, ptsT, { strength = 1, tone = 
   const buf = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
   return {
     buf, applied: true, reason: null, mesh: !!dn, light, pattern, eyeRatio: ew, patternMean, corrBefore, n: tVals.length, surface: surf ? surf.coef : null, color: !!colorSurf,
-    tone: tp, toneStats: stats, neckO: stats?.so.neck.n ?? null, neckT: stats?.st.neck.n ?? null,
+    tone: tp, toneStats: stats, neckO: stats?.so.neck.n ?? null, neckT: stats?.st.neck.n ?? null, expLevel, expOn: EXPOSURE_ON,
   };
 }
 
@@ -821,7 +891,7 @@ async function relightFace(outputBuf, templateBuf, opts = {}) {
   // c6: kapalıyken base'in yan ışığı hiç gelmedi, 0.7 güçle bozulma yok).
   // Gözlüklü base'de cam bölgesi öğrenmeden çıkarılır (bkz. inGlasses).
   const prof = (yo != null && yo > MAX_YAW) || (yt != null && yt > MAX_YAW);
-  const pattern = opts.pattern !== false;
+  const pattern = opts.pattern === true || ((BASE_LIGHT_ON || BASE_PATTERN_ON) && opts.pattern !== false);
   const strength = (opts.strength ?? 1) * (prof ? PROFILE_STRENGTH : 1);
   // L1: çıktının yoğun yüz ağı. Hata/uyuşmazlıkta null — eski yüzey aynen.
   let mesh = null;
@@ -841,5 +911,7 @@ async function relightFace(outputBuf, templateBuf, opts = {}) {
 module.exports = {
   relightFace,
   relightCore,
-  _testables: { meshNormals, gauss, weightedLowpass, fitLightSurface, regionWeight, tonePlan, projectVerts, correspond, faceNeckStats, DEFAULT_TPL_FACE_NECK },
+  albedoRatio,
+  EXPOSURE_ON,
+  _testables: { meshNormals, gauss, weightedLowpass, fitLightSurface, regionWeight, tonePlan, projectVerts, correspond, faceNeckStats, DEFAULT_TPL_FACE_NECK, albedoRatio, MST_L, EXPOSURE_MIN, EXPOSURE_MAX },
 };

@@ -271,21 +271,47 @@ test("atlama sebebi loglanabilir olarak dönüyor (kalibrasyon verisi)", () => {
 // 2026-10-08: P800 — kafa yönü + bakış EN ÜSTTE ve "en önemli kural"
 // (kullanıcı: "bakış açısı tamamen aynı olmalı"), ardından kafa/boyun,
 // yüz ışığı, kimlik, saç, ten.
+// 2026-10-29 SADE AKIŞ (60d42504): A/B/C tek HEAD bölümünde, kimlik ve saç
+// paragrafları birebir eski metin.
 test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   const m = /function buildEditPromptP800[\s\S]*?\n}\r?\n/.exec(FAL);
   assert.ok(m, "buildEditPromptP800 bulunamadı");
   const joined = m[0].replace(/"\s*\+\s*"/g, "");
   assert.match(joined, /From the selfies take only facial identity/);
-  assert.match(joined, /A\) HEAD DIRECTION AND GAZE — THE MOST IMPORTANT RULE[\s\S]*B\) HEAD ON THE BODY[\s\S]*C\) LIGHT ON THE FACE[\s\S]*1\) IDENTITY/);
-  // 2026-10-21: kulak/bakış tekrarı tek cümleye indirilirken "it" → "the head".
-  assert.match(joined, /[Nn]ever turn (it|the head) toward the camera or further away/);
+  assert.match(joined, /never their head angle, gaze, expression or light/);
+  assert.match(joined, /HEAD: The new head takes the exact place of the BASE head[\s\S]*IDENTITY \(highest priority after HEAD\)[\s\S]*HAIR:/);
+  assert.match(joined, /keeps the BASE head's size against the shoulders/);
+  assert.match(joined, /Never turn the head toward the camera, straighten, enlarge or shrink it/);
+  // 2026-10-30 akşam (kullanıcı: "kafa büyük ve önde, geride ve dik durmalı"):
+  // duruş, selfie boyu, boyun ve "pushed forward" eski uzun sürümlerden.
+  assert.match(joined, /held as upright and as far back over the shoulders as the BASE head/);
+  assert.match(joined, /the selfies are zoomed-in close-ups, so never take size from them/);
+  assert.match(joined, /The new face is no larger than the BASE face/);
+  assert.match(joined, /never oversized, pushed forward or pasted on/);
+  // Yüz alanı/çene çapası yazılmaz: saç çizgisi ve çene kimliktir.
+  assert.doesNotMatch(joined, /chin to hairline/);
   // 2026-10-16 (6dd26e3e c4): tam profil base üç çeyrek çıkıyordu.
-  assert.match(joined, /A full profile stays a full profile/);
-  assert.match(joined, /look at exactly the same point as the BASE eyes/);
-  assert.match(joined, /If the BASE is black and white, the whole output is black and white/);
-  assert.match(joined, /C\) LIGHT ON THE FACE — FROM THE BASE, NEVER FROM THE SELFIES/);
-  assert.match(joined, /brighter and darker side and colour of light as on the BASE face/);
-  assert.match(joined, /not a face swap/);
+  assert.match(joined, /a full profile stays a full profile/);
+  // 2026-10-30: kafa boyu/yeri için somut çapa — göz yeri ve göz arası.
+  // Akşam: "aynı göz aralığı" yerine tüm kafa ölçeği (göz anatomisi değişmesin).
+  assert.match(joined, /scale the whole head, never single features, so that the TARGET's eyes land where the BASE eyes were and look exactly where the BASE eyes looked/);
+  assert.match(joined, /the chin tip lands no lower than the BASE chin tip, with the same strip of neck or collar showing below it/);
+  assert.match(joined, /if anything slightly smaller/);
+  assert.match(joined, /A longer face is scaled down as a whole, never squashed/);
+  assert.doesNotMatch(joined, /the same distance apart/);
+  // 2026-10-19 kullanıcı kuralı (ca61076a c1).
+  assert.match(joined, /If both ears show in the BASE, both show in the result/);
+  // Siyah-beyaz faceLight.matchGrayscale'de; prompt'ta tekrar yok (2026-10-30).
+  assert.doesNotMatch(joined, /black and white/);
+  // Işığın GÜCÜ, yüzün parlaklığı değil: koyu ten açılmasın (2026-10-30).
+  // Yüz vücuttaki ışığı alır; sahne yeniden ışıklanmaz (2026-10-30 akşam).
+  assert.match(joined, /Light the face with the same BASE light that falls on the body: same direction, colour and strength, no extra shadows\./);
+  assert.doesNotMatch(joined, /brightness/);
+  // Güzelleştirme talimatı yok: yüzde boyama yapılmaz (2026-10-30).
+  assert.doesNotMatch(joined, /blemish/);
+  // Şapka kuralı hem değişmeyenler listesinde hem saç paragrafında (0eeb75c8).
+  assert.match(joined, /Everything else stays exactly as in the BASE: [^.]*any hat or cap\./);
+  assert.match(joined, /If the BASE wears a hat or cap, keep that exact hat/);
   // "Göz kapakları selfie'den" bölümü selfie'nin merceğe bakışını da
   // getirdi (c29a2b31 c3/c6) — 2026-10-16 geri alındı, geri gelmemeli.
   assert.doesNotMatch(joined, /most open selfie/);
@@ -293,6 +319,24 @@ test("kafa geometrisi, bakış ve yüz ışığı tabandan korunuyor", () => {
   // Eski "yüzü yeniden aydınlatma" talimatı sahne ışığını yüze vermeyi
   // yasaklıyordu (9d9507f0 c9 gün batımı) — geri gelmemeli.
   assert.doesNotMatch(joined, /Do not relight the face/);
+  // TASK "eller BASE'deki gibi" SKIN "ellere TARGET teni" ile çelişiyordu
+  // (2026-10-29): yalnız el pozisyonu korunur, ten SKIN'den.
+  assert.doesNotMatch(joined, /body, hands/);
+  assert.match(joined, /body shape, hand positions/);
+  // 2026-10-30: kol ve el yeni yüzün tonunda (model şablonun elini bırakıyordu).
+  assert.match(joined, /One body, one skin tone/);
+  assert.match(joined, /the face, ears, neck, chest, arms and hands all get the TARGET's tone/);
+  assert.match(joined, /The arms and hands keep their BASE position, light and shadows, but match the new face's tone exactly/);
+  assert.doesNotMatch(joined, /His own hair/);
+  // Saç izi (saç silme kapalı): BASE saç modeli kurulmaz, kendi saçı opak,
+  // taşan yerde zemin katı (017dbe34 yarı saydam kubbe).
+  // "its" = BASE'in: kıvırcık saçlı kullanıcının kendi buklesi yasak değil.
+  assert.match(joined, /Keep nothing of the BASE hairstyle: not its shape, height, volume, quiff, fringe or curls\./);
+  assert.match(joined, /solid and opaque at its own density, never thinned, faded or see-through/);
+  assert.match(joined, /continue the surrounding background there, solid, with no trace of hair/);
+  // Kimlik ve saç kaynağı cümleleri birebir (629b45de).
+  assert.match(joined, /face outline and length-to-width ratio\. Do not beautify, symmetrise, average, round, puff, widen or stretch\./);
+  assert.match(joined, /never from the BASE person and never invented/);
 });
 
 test("eski salt-yasak metni yerinde kalmamış (iki kural çakışmasın)", () => {

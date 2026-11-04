@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const sharp = require("sharp");
 const FR = require("../faceRelight");
 const FS = require("../faceShading");
-const { gauss, weightedLowpass, regionWeight, tonePlan } = FR._testables;
+const { gauss, weightedLowpass, regionWeight, tonePlan, albedoRatio, MST_L } = FR._testables;
 
 const lab = (L, C, hue) => [L, C * Math.cos((hue * Math.PI) / 180), C * Math.sin((hue * Math.PI) / 180)];
 const st = (faceY, faceLab, neckY, neckLab) => ({ face: { n: 5000, Y: faceY, lab: faceLab }, neck: { n: 5000, Y: neckY, lab: neckLab } });
@@ -165,4 +165,46 @@ test("sentetik: aynı ışıkta dokunulmaz", async () => {
   const r = await FR.relightCore(a.rgb, a.rgb, a.W, a.H, a.pts, a.pts, { tone: false, sceneColor: false });
   assert.equal(r.applied, false);
   assert.equal(r.reason, "similar-light");
+});
+
+// POZLAMA — TEN ORANI (2026-10-29, 546b514b devamı). skinPigment.js'ten gelen
+// Monk Skin Tone (MST) tahminiyle "bu fark ışık mı pigment mi" ayrımı.
+test("ten oranı: aynı MST'de (ya da ölçülemezse) oran 1", () => {
+  assert.equal(albedoRatio(5, 5), 1);
+  assert.equal(albedoRatio(null, 5), 1);
+  assert.equal(albedoRatio(5, null), 1);
+});
+
+test("ten oranı: ±1 seviye fark yok sayılır (ölçüm gürültüsü)", () => {
+  assert.equal(albedoRatio(6, 5), 1);
+  assert.equal(albedoRatio(4, 5), 1);
+});
+
+test("ten oranı: kullanıcı şablondan koyuysa oran 1'in altında (karartma değil, ten farkı payı)", () => {
+  const r = albedoRatio(8, 3);
+  assert.ok(r > 0 && r < 1, `${r}`);
+  // Eşik gerisindeki (deadZone sonrası) MST farkıyla tutarlı
+  const expect = ((MST_L[3 + (8 - 3 - 1)] + 16) / 116) ** 3 / ((MST_L[3] + 16) / 116) ** 3;
+  assert.ok(Math.abs(r - expect) < 1e-9, `${r} vs ${expect}`);
+});
+
+test("ten oranı: kullanıcı şablondan açıksa oran 1'in üstünde", () => {
+  const r = albedoRatio(2, 7);
+  assert.ok(r > 1, `${r}`);
+});
+
+test("ten oranı: tek yönlü monotondur (MST tablosu azalan L*)", () => {
+  for (let i = 1; i < MST_L.length - 1; i++) assert.ok(MST_L[i] > MST_L[i + 1], `MST_L[${i}]=${MST_L[i]} MST_L[${i + 1}]=${MST_L[i + 1]}`);
+});
+
+// POZLAMA varsayılan KAPALI: mstUser/mstTpl verilse bile EXPOSURE_ON false
+// iken sonuç değişmemeli (deploy onayı bekleyen özellik, canlıda inert).
+test("pozlama: varsayılan kapalı — mstUser/mstTpl verilse de çıktı aynı", async () => {
+  const tpl = await syntheticFace(unitV([0.8, 0.1, 0.6]));
+  const out = await syntheticFace(unitV([0.8, 0.1, 0.6]));
+  const r1 = await FR.relightCore(out.rgb, tpl.rgb, out.W, out.H, out.pts, tpl.pts, { tone: false, sceneColor: false });
+  const r2 = await FR.relightCore(out.rgb, tpl.rgb, out.W, out.H, out.pts, tpl.pts, { tone: false, sceneColor: false, mstUser: 9, mstTpl: 2 });
+  assert.equal(r1.applied, false);
+  assert.equal(r2.applied, false);
+  assert.equal(r1.expOn, false);
 });

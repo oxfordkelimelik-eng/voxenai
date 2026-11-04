@@ -2419,14 +2419,14 @@ async function measureLimbRegion(outputBuf, boxes) {
  * Taban/çıktı iris konumu. Gözbebeğinin göz açıklığındaki 0..1 yeri.
  * Ölçülemezse null (fail-safe: bakış kapısı susar).
  */
-async function measureIrisGaze(buf) {
+async function measureIrisGaze(buf, minConfidence = MIN_DETECTION_CONFIDENCE) {
   try {
     const faceapi = await ensureModelsLoaded();
     const { tensor } = await bufferToTensorScaled(buf);
     try {
       const result = await faceapi
         .detectSingleFace(tensor, new faceapi.SsdMobilenetv1Options({
-          minConfidence: MIN_DETECTION_CONFIDENCE,
+          minConfidence,
         }))
         .withFaceLandmarks();
       if (!result) return null;
@@ -2442,11 +2442,25 @@ async function measureIrisGaze(buf) {
       const right = irisOffsetFromGray(data, w, h, p.slice(42, 48));
       const parts = [left, right].filter(Boolean);
       if (!parts.length) return null;
+      // GÖZ/YANAK KOYULUĞU (2026-10-25): güneş gözlüğünde göz kutusu yanağın
+      // çok altında (41 şablonda gözlüklüler 0.18-0.34, açık gözler 0.42+);
+      // camın içindeki "iris" anlamsızdır (bkz. gazeGate.isIrisGazeOpposite).
+      const boxMean = (P) => {
+        const xs = P.map((q) => q.x), ys = P.map((q) => q.y);
+        let s = 0, n = 0;
+        for (let y = Math.max(0, Math.floor(Math.min(...ys))); y <= Math.min(h - 1, Math.ceil(Math.max(...ys))); y++) {
+          for (let x = Math.max(0, Math.floor(Math.min(...xs))); x <= Math.min(w - 1, Math.ceil(Math.max(...xs))); x++) { s += data[y * w + x]; n++; }
+        }
+        return n ? s / n : null;
+      };
+      const eyeMean = (boxMean(p.slice(36, 42)) + boxMean(p.slice(42, 48))) / 2;
+      const cheekMean = (boxMean([{ x: p[36].x, y: p[29].y }, { x: p[39].x, y: p[33].y }]) + boxMean([{ x: p[42].x, y: p[29].y }, { x: p[45].x, y: p[33].y }])) / 2;
       return {
         irisX: parts.reduce((a, q) => a + q.x, 0) / parts.length,
         irisY: parts.reduce((a, q) => a + q.y, 0) / parts.length,
         eyeWidth: parts.reduce((a, q) => a + q.width, 0) / parts.length,
         eyes: parts.length,
+        eyeCheek: cheekMean > 0 ? eyeMean / cheekMean : null,
       };
     } finally {
       tensor.dispose();

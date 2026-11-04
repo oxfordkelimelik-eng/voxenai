@@ -398,6 +398,10 @@ class OpsJobDetail {
   /// Kare adresi (gs://) -> üretildiği şablon. Bilinmiyorsa anahtar yoktur.
   final Map<String, OpsTemplate> templates;
 
+  /// Kullanıcının bu işte yüklediği selfie'ler (imzalı URL). Yalnız inceleme
+  /// için kaydedilmiş işlerde dolu (2026-11-01, falPhotos keepSelfiesForReview).
+  final List<String> selfies;
+
   OpsJobDetail({
     required this.uid,
     required this.email,
@@ -420,6 +424,7 @@ class OpsJobDetail {
     required this.approvedAtMillis,
     required this.approvedBy,
     this.templates = const {},
+    this.selfies = const [],
   });
 
   OpsTemplate? templateFor(String? ref) => ref == null ? null : templates[ref];
@@ -469,5 +474,9 @@ class OpsJobDetail {
             if (OpsTemplate.fromJson(e.value) != null)
               e.key.toString(): OpsTemplate.fromJson(e.value)!,
         },
+        selfies: ((j['selfies'] as List?) ?? [])
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList(),
       );
 }

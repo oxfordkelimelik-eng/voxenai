@@ -498,6 +498,19 @@ exports.opsGetJobDetail = onCall(
       if (url) templates[r] = { url, exact: t.exact, name: t.name.slice(t.name.lastIndexOf("/") + 1) };
     }
 
+    // SELFIE'LER (2026-11-01): yalnız inceleme için kopyalanmış işlerde var
+    // (bkz. falPhotos.js keepSelfiesForReview); diğer işlerde boş liste.
+    let selfies = [];
+    try {
+      const [files] = await bucket().getFiles({ prefix: `dating_debug/selfies/${uid}/${jobId}/` });
+      selfies = (await Promise.all(files
+        .filter((f) => !f.name.endsWith("/"))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((f) => signedDownloadUrl(f).catch(() => null)))).filter(Boolean);
+    } catch (e) {
+      console.error("ops: selfie listesi alınamadı (atlanıyor):", e.message || e);
+    }
+
     let email = null;
     try {
       const userRecord = await admin.auth().getUser(uid);
@@ -528,6 +541,7 @@ exports.opsGetJobDetail = onCall(
       results,
       rejectedFrames,
       templates,
+      selfies,
     };
   }
 );

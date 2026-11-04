@@ -74,6 +74,43 @@ const SKIN_LIKE_L_BELOW = 25;
 const SKIN_LIKE_L_ABOVE = 12;
 // Küçültme deliğinde yeni kafanın korunan yumuşak kenarı, yüz genişliğine oranla.
 const HEAD_SOFT_EDGE_FACE = 0.03;
+// YÜZ OVALİ DOLMAZ (2026-10-26, 9987f742 c1, kullanıcı: "alında leke var"):
+// siyah-beyaz karede parlak kemerin önündeki açık alın çok sınıflı modelde
+// arka plan, kişi maskesinde dolu çıktı; kaş üstü olduğu için deri koruması
+// (SKIN_LIKE_*) devreye girmedi, alın "hayalet" sayılıp duvar dokusuyla
+// boyandı (canlıda hayalet 18-27 bin px, teslimde keskin kenarlı açık yama).
+// Yüz ovalinin içi kafanın kendisidir; oraya arka plan hiçbir durumda
+// girmez. Oval: çene çizgisi (0-16) + kaşlar, (çene - kaş) yüksekliğinin
+// FACE_OVAL_FOREHEAD katı yukarı, yüz merkezine FACE_OVAL_INSET kadar
+// çekilmiş (yan bakışta alın geriye eğik; saç çizgisinin altında kalsın).
+const FACE_OVAL_FOREHEAD = 0.4;
+const FACE_OVAL_INSET = 0.15;
+// Tam profilde 68 nokta yüze oturmuyor (c1: oval göz-yanak çevresinde küçük
+// bir şekil kaldı, alındaki yamayı kaplamadı). Yüz tespit kutusu profilde de
+// alından çeneye sarıyor: kutuya çizilen elips da korunur. Yatay yarıçap
+// dar: profilde kutu yüzün önündeki zemine taşıyor.
+const FACE_BOX_RX = 0.35;
+const FACE_BOX_RY = 0.45;
+
+/** Nokta çokgenin içinde mi (çift-tek kuralı). SAF. */
+function inPolygon(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** 68 noktadan alın dahil yüz ovali çokgeni (bkz. FACE_OVAL_FOREHEAD). SAF. */
+function faceOval(P) {
+  const browY = Math.min(...P.slice(17, 27).map((p) => p.y));
+  const lift = FACE_OVAL_FOREHEAD * Math.max(0, P[8].y - browY);
+  const cx = P.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17;
+  const brows = [];
+  for (let k = 26; k >= 17; k--) brows.push({ x: P[k].x + (cx - P[k].x) * FACE_OVAL_INSET, y: P[k].y - lift });
+  return [...P.slice(0, 17).map((p) => ({ x: p.x, y: p.y })), ...brows];
+}
 // Yerel dolgu modeline kafa da maskeli verilir (saçı deliğe uzatmasın):
 // kafa bileşeninin bu kadar (yüz genişliğine oranla) çevresindeki korunan
 // pikseller.
@@ -86,6 +123,17 @@ const LAMA_HEAD_REACH_FACE = 0.1;
 const TPL_GHOST_REACH_FACE = 0.2;
 const TPL_TEX_REACH_FACE = 0.3;
 const TPL_TEX_MAX = 5;
+// KULLANICININ SAÇI ŞABLON KAFASININ DIŞINDA (2026-10-27, e25dc241 c1/c2/c9,
+// kullanıcı: "selfienin saçı neyse çıktının da o olacak"): kıvırcık, hacimli
+// saçın şablonun kısa saç silüetinden taşan dış bukleleri kaş üstünde arka
+// plan sınıfı / soluk kişi pikseliydi; hayalet ve saçak sayılıp LaMa ile
+// silindi (c1 ilk geçişte hayalet 12.308 px). Hayalet tanım gereği şablon
+// kişisinin kalıntısıdır: şablon kafasının (zaten genişletilmiş) silüetinden
+// bu kadar (yüz genişliğine oranla) uzaktaki piksel hayalet, saydam hayalet
+// ya da saçak sayılmaz. Küçültme deliği (extraHole) bundan bağımsız dolar.
+const USER_HAIR_TPL_REACH_FACE = 0.05;
+// Kural kaşların bu kadar (kaş–çene yüksekliğinin payı) altına kadar geçerli.
+const USER_HAIR_BELOW_BROW = 0.5;
 
 /**
  * Chamfer (3-4) uzaklık dönüşümü: her piksel için en yakın mask=1 pikseline
@@ -495,6 +543,35 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
   const h = by1 - by0 + 1;
   if (w < 16 || h < 16) return { applied: false, reason: "tiny" };
   const G = (x, y) => (y + by0) * W + x + bx0;
+  // Yüz ovali (bkz. FACE_OVAL_FOREHEAD): içi kafadır, hayalet sayılmaz, dolmaz.
+  const inOval = new Uint8Array(w * h);
+  {
+    const oval = faceOval(P);
+    const y0 = clampI(Math.min(...oval.map((p) => p.y)) - by0, 0, h - 1), y1 = clampI(Math.max(...oval.map((p) => p.y)) - by0, 0, h - 1);
+    const x0 = clampI(Math.min(...oval.map((p) => p.x)) - bx0, 0, w - 1), x1 = clampI(Math.max(...oval.map((p) => p.x)) - bx0, 0, w - 1);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (inPolygon(oval, x + bx0, y + by0)) inOval[y * w + x] = 1;
+    const b = lo.box;
+    const ecx = b.x + b.width / 2, ecy = b.y + b.height / 2, erx = FACE_BOX_RX * b.width, ery = FACE_BOX_RY * b.height;
+    for (let y = clampI(ecy - ery - by0, 0, h - 1); y <= clampI(ecy + ery - by0, 0, h - 1); y++) {
+      for (let x = clampI(ecx - erx - bx0, 0, w - 1); x <= clampI(ecx + erx - bx0, 0, w - 1); x++) {
+        if (((x + bx0 - ecx) / erx) ** 2 + ((y + by0 - ecy) / ery) ** 2 <= 1) inOval[y * w + x] = 1;
+      }
+    }
+  }
+  let ovalPx = 0;
+  // Şablon kafasına yakınlık (bkz. USER_HAIR_TPL_REACH_FACE); şablon yoksa kısıt yok.
+  let nearTpl = null;
+  let userHairPx = 0;
+  if (tplHead) {
+    const tC = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) tC[y * w + x] = tplHead[G(x, y)] ? 1 : 0;
+    const dT = chamfer(tC, w, h);
+    const reachT = Math.max(2, USER_HAIR_TPL_REACH_FACE * faceW);
+    // Yalnız saç bölgesinde: daha aşağıdaki boyun/omuz kenarı çizgileri
+    // (3b4f51cb c1/c3) eskisi gibi saçak sayılır.
+    const yHair = browY + USER_HAIR_BELOW_BROW * Math.max(0, chin - browY) - by0;
+    nearTpl = Uint8Array.from(dT, (v, i) => (v <= reachT || Math.floor(i / w) >= yHair ? 1 : 0));
+  }
 
   // Yeni kafa: kişi maskesi YA DA çok sınıflı modelde kafa sınıfı (karanlık
   // siyah-beyaz karede koyu saç kişi maskesinden düşüyordu — d44b63e8 c4).
@@ -563,7 +640,17 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
         // Şablon kafasının hayaleti saç/arka plan sınıfındadır, deri değil;
         // sınıf kararsızsa renk (bkz. SKIN_LIKE_AB).
         const skin = Po[CLASSES.bodySkin][i] >= 0.5 || (y + by0 >= browY && m >= 0.5 && skinLike(G(x, y)));
-        const ghostLike = !head && !skin && (y + by0 < browY || inTplHead) && m >= 0.15 && Po[CLASSES.background][i] >= 0.5;
+        let ghostLike = !head && !skin && (y + by0 < browY || inTplHead) && m >= 0.15 && Po[CLASSES.background][i] >= 0.5;
+        if (nearTpl && !nearTpl[i] && (ghostLike || sheer[i])) {
+          ghostLike = false;
+          sheer[i] = 0;
+          userHairPx++;
+        }
+        if (inOval[i]) {
+          if (ghostLike || sheer[i]) ovalPx++;
+          core[i] = 1;
+          continue;
+        }
         if (ghostLike && !sheer[i] && sceneOf(G(x, y))) scene[i] = 1;
         if (ghostLike || sheer[i]) {
           ghost[i] = sheer[i] ? 2 : 1;
@@ -707,6 +794,7 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const g = G(x, y);
+      if (inOval[i]) { prot[i] = 1; continue; }
       const inHole = !!(extraHole && extraHole[g]);
       const soft = y + by0 >= browY && Mo[g] >= 0.25 && !ghost[i] && (!inHole || dHead[i] <= softR);
       const headPx = inHole && newHead ? newHead[g] === 1 : solid[i] || (headComp[i] && hairDense[i]);
@@ -741,13 +829,13 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
       const i = y * w + x;
       if (dProt[i] <= 1.5) continue;
       const g = G(x, y);
-      const fringe = y + by0 < chin && Mo[g] >= 0.15 && dSolid[i] <= ringR;
+      const fringe = y + by0 < chin && Mo[g] >= 0.15 && dSolid[i] <= ringR && (!nearTpl || nearTpl[i]);
       // YALNIZ KUSUR (2026-10-11, d44b63e8 yerel deneme): şablon kafasının
       // bütün silüeti AI'ye verilince model maskeyi farklı tonda/bulanıklıkta
       // doldurdu, şablon saçı şeklinde koyu yay kaldı (c6) — oysa geri
       // yüklemeden sonra modelin orada çizdiği arka plan temizdi. AI yalnız
       // hayalet saça, saçak tellerine ve küçültmenin açtığı deliğe girer.
-      const nearSheer = dGhost && y + by0 < browY && dGhost[i] <= growR;
+      const nearSheer = dGhost && y + by0 < browY && dGhost[i] <= growR && (!nearTpl || nearTpl[i]);
       if (ghost[i] || fringe || nearSheer || (extraHole && extraHole[g])) {
         band[i] = 1;
         bandPx++;
@@ -804,7 +892,7 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
       }
     }
   }
-  if (!holePx && !farGhost && bandPx < MIN_DEFECT_FACE2 * faceW * faceW) return { applied: false, reason: "clean", bandPx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW };
+  if (!holePx && !farGhost && bandPx < MIN_DEFECT_FACE2 * faceW * faceW) return { applied: false, reason: "clean", bandPx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW, ovalPx, userHairPx };
 
   // Yumuşak kenar: dolgu şeridin dışına (şablon arka planına) azalarak
   // taşar; korunan kafaya hiç girmez. DIŞ GEÇİŞ GENİŞ (2026-10-12, e0eb8dd5
@@ -848,7 +936,7 @@ async function prepareHeadSurroundFill(buf, { extraHole = null, newHead = null, 
   // Küçültme deliği yoksa yerel dolgu geniş bağlamla (bkz. lamaFill CONTEXT_RATIO).
   job.wide = !holePx;
   return {
-    applied: true, bandPx, holePx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW,
+    applied: true, bandPx, holePx, ghostPx, fringePx, farGhostPx, sheerPx, tplPx, tplTex, faceW, ovalPx, userHairPx,
     inpaint: { rect: { left: job.left, top: job.top, side: job.side }, job, base: buf },
   };
 }
@@ -877,4 +965,4 @@ async function templateHeadMaskFor(outBuf, tplBuf) {
   return templateHeadMask(t, Mt, W, H, f.box);
 }
 
-module.exports = { templateHeadMask, templateHeadMaskFor, prepareHeadSurroundFill, chamfer, sheerHairMask };
+module.exports = { templateHeadMask, templateHeadMaskFor, prepareHeadSurroundFill, chamfer, sheerHairMask, faceOval, inPolygon, FACE_BOX_RX, FACE_BOX_RY };

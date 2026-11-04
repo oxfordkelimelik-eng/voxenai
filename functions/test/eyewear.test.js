@@ -105,3 +105,27 @@ test("taşma çok büyükse hiç alınmaz", async () => {
   assert.equal(grown, 0);
   assert.ok(grownRejected > 0.15);
 });
+
+// Çerçeve gölgesi (2026-10-30, c2e8eff1 "gözlük yapay"): modelin çizdiği yumuşak
+// gölge atılıyordu; artık oran olarak tabana uygulanır.
+test("gölge: maskenin yanında modelin koyulaştırdığı aynı renkli ten gölge sayılır, başka renk sayılmaz", async () => {
+  const { castShadow } = require("../eyewear");
+  const side = 60, W = 60, N = side * side;
+  const base = Buffer.alloc(N * 3), ai = Buffer.alloc(N * 3), m = new Uint8Array(N);
+  for (let i = 0; i < N; i++) { base[i * 3] = 180; base[i * 3 + 1] = 140; base[i * 3 + 2] = 120; }
+  for (let y = 20; y < 26; y++) for (let x = 10; x < 50; x++) m[y * side + x] = 1;
+  for (let i = 0; i < N; i++) {
+    const y = Math.floor(i / side), x = i % side;
+    let k = 1, green = false;
+    if (y >= 26 && y < 30 && x < 30) k = 0.8; // gölge
+    if (y >= 26 && y < 30 && x >= 30) green = true; // başka şey çizilmiş
+    ai[i * 3] = green ? 90 : Math.round(180 * k); ai[i * 3 + 1] = green ? 160 : Math.round(140 * k); ai[i * 3 + 2] = green ? 90 : Math.round(120 * k);
+  }
+  const geom = { iod: 100 };
+  const s = await castShadow(base, W, { left: 0, top: 0, side }, geom, ai, [0, 0, 0], m);
+  assert.ok(s, "gölge bulunmalı");
+  assert.ok(s[27 * side + 15] > 0.05, "gölge pikseli koyulaşır");
+  assert.ok(s[27 * side + 45] < 0.02, "yeşil (gölge değil) alınmaz");
+  assert.strictEqual(s[22 * side + 20], 0, "maskenin içi bileştirmede");
+  assert.ok(s[55 * side + 15] < 0.01, "uzakta gölge yok");
+});

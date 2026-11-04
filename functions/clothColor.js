@@ -37,6 +37,14 @@ const SOFT = 10;
 const MASK_BLUR = 0.006;
 // Şablonun kıyafet kroması bundan azsa siyah-beyaz sayılır.
 const BW_CHROMA = 3;
+// ŞABLONA ZATEN YAKIN PİKSEL KAYMAZ (2026-10-28, 546b514b c3, kullanıcı:
+// "pantolonu boyamışsın"): ten adımı pantolonun bir kısmını tene boyayınca
+// küme ortancası kızardı, kümenin tamamına −12 a* uygulandı — boyanmamış
+// pantolon ve kişi maskesine karışan kaya turkuaza döndü. Kayma, şablonun
+// aynı noktadaki (çalışma çözünürlüğünde, hizalama payıyla) renginden bu
+// kadar (Lab dE) uzak piksele tam, yakın piksele hiç uygulanmaz.
+const TPL_NEAR_FULL = 10;
+const TPL_NEAR_ZERO = 5;
 
 function median(arr) {
   if (!arr.length) return null;
@@ -144,12 +152,35 @@ async function restoreClothColor(outBuf, tplBuf) {
     .resize(W, H, { fit: "fill", kernel: "linear" }).extractChannel(0).raw().toBuffer();
   const out = Buffer.from(o.data);
   const ramp = (v) => (v <= 0.2 ? 0 : v >= 0.6 ? 1 : (v - 0.2) / 0.4);
+  // Şablonun çalışma çözünürlüğünde Lab'ı, küçük hizalama payıyla yumuşatılmış.
+  const tLab = [new Float32Array(w * h), new Float32Array(w * h), new Float32Array(w * h)];
+  for (let i = 0; i < w * h; i++) {
+    const q = rgbToLab(ts[i * 3], ts[i * 3 + 1], ts[i * 3 + 2]);
+    tLab[0][i] = q[0]; tLab[1][i] = q[1]; tLab[2][i] = q[2];
+  }
+  const tAt = (c, x, y) => {
+    const fx = Math.max(0, Math.min(w - 1, x)), fy = Math.max(0, Math.min(h - 1, y));
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+    const ax = fx - x0, ay = fy - y0, A = tLab[c];
+    return (A[y0 * w + x0] * (1 - ax) + A[y0 * w + x1] * ax) * (1 - ay) + (A[y1 * w + x0] * (1 - ax) + A[y1 * w + x1] * ax) * ay;
+  };
+  const sx = w / W, sy = h / H;
   let changed = 0;
   for (let i = 0; i < W * H; i++) {
     const m = ramp(big[i] / 255);
     if (m <= 0) continue;
     const p = i * 3;
     const lab = rgbToLab(out[p], out[p + 1], out[p + 2]);
+    // Şablona zaten yakınsa kaydırma (bkz. TPL_NEAR_*); en yakın komşu
+    // (±1 çalışma pikseli) alınır, hizalama payı.
+    const X = ((i % W) + 0.5) * sx - 0.5, Y = (Math.floor(i / W) + 0.5) * sy - 0.5;
+    let near = Infinity;
+    for (const [ox, oy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const d = Math.hypot(lab[0] - tAt(0, X + ox, Y + oy), lab[1] - tAt(1, X + ox, Y + oy), lab[2] - tAt(2, X + ox, Y + oy));
+      if (d < near) near = d;
+    }
+    const tg = near >= TPL_NEAR_FULL ? 1 : near <= TPL_NEAR_ZERO ? 0 : (near - TPL_NEAR_ZERO) / (TPL_NEAR_FULL - TPL_NEAR_ZERO);
+    if (tg <= 0) continue;
     let ws = 0, sL = 0, sA = 0, sB = 0, dmin = Infinity;
     for (let j = 0; j < plan.centers.length; j++) {
       const c = plan.centers[j];
@@ -163,7 +194,7 @@ async function restoreClothColor(outBuf, tplBuf) {
     if (ws < 1e-6) continue;
     // Hiçbir kümeye benzemeyen renk (aksesuar, desen) az kayar.
     const far = Math.exp(-dmin / (2 * (3 * SOFT) ** 2));
-    const k = (m * far) / ws;
+    const k = (m * far * tg) / ws;
     if (k * Math.hypot(sL, sA, sB) < 0.5) continue;
     const rgb = labToRgb(lab[0] + k * sL, lab[1] + k * sA, lab[2] + k * sB);
     out[p] = rgb[0]; out[p + 1] = rgb[1]; out[p + 2] = rgb[2];

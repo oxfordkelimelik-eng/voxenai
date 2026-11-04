@@ -3,7 +3,7 @@
   "description": "Rise Up Cloud Functions — Gemini proxy + satın alma doğrulama",
   "main": "index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "@google-cloud/vision": "^4.3.0",

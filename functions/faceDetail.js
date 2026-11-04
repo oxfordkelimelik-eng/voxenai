@@ -16,9 +16,10 @@ const sharp = require("sharp");
 
 const SIGMA = 1.2;
 // Bu kazancın altı gözle fark edilmez.
-const APPLY_MIN_GAIN = 1.1;
-// Daha fazlası JPEG blok/gürültüsünü de büyütür.
-const MAX_GAIN = 1.8;
+const APPLY_MIN_GAIN = 1.08;
+// Daha fazlası JPEG blok/gürültüsünü de büyütür. 1.8 → 1.45 (2026-10-30,
+// 922f1371 c4: koyulaştırılan yüzde 1.72 kazanç sakal dokusunu sertleştirdi).
+const MAX_GAIN = 1.45;
 const MASK_THR = 0.6;
 
 // YÜZ GRENİ (2026-10-16, kullanıcı: "base fotodaki netlik yok"). Ölçüldü

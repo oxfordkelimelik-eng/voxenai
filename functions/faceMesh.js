@@ -148,7 +148,7 @@ async function runOnce(rgb, W, H, box) {
  * { mesh: [[x, y, z]] × 468 (görüntü pikseli, z kameraya doğru negatif), score, agree } | null
  * (ağ bulunamadı ya da 68 noktayla uyuşmuyor).
  */
-async function denseMesh(rgb, W, H, pts) {
+async function denseMesh(rgb, W, H, pts, { agreeMax = AGREE_MAX, minScoreLoose = 1.01 } = {}) {
   const mean = (i0, i1) => { let x = 0, y = 0; for (let i = i0; i <= i1; i++) { x += pts[i].x; y += pts[i].y; } return [x / (i1 - i0 + 1), y / (i1 - i0 + 1)]; };
   const [lx, ly] = mean(36, 41), [rx, ry] = mean(42, 47);
   const ang = Math.atan2(ry - ly, rx - lx);
@@ -162,7 +162,10 @@ async function denseMesh(rgb, W, H, pts) {
   const second = await runOnce(rgb, W, H, squareBox(first.mesh, ang, SECOND_SCALE));
   const best = second && second.score >= MIN_SCORE ? second : first;
   const agree = agreement(best.mesh, pts);
-  return agree <= AGREE_MAX ? { ...best, agree } : null;
+  if (agree <= AGREE_MAX) return { ...best, agree };
+  // POZ ÖLÇÜMÜ İÇİN GEVŞEK (2026-10-31, bkz. headPose3d): güneş gözlüğü ve
+  // aşağı eğik başta 68 nokta kayıyor, ağ doğru; güveni yüksekse kabul.
+  return agree <= agreeMax && best.score >= minScoreLoose ? { ...best, agree } : null;
 }
 
 module.exports = { denseMesh, triangles, _testables: { sampleCrop, squareBox, toImage, agreement, AGREE_MAX } };

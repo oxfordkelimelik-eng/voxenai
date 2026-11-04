@@ -19,6 +19,20 @@ test("bulanıklık sabit alanı korur", () => {
   for (const v of out) assert.ok(Math.abs(v - 3) < 1e-4);
 });
 
+test("en büyük süzgeci tek noktayı kare olarak genişletir", () => {
+  const W = 9, H = 7;
+  const src = new Float32Array(W * H);
+  src[3 * W + 4] = 0.8;
+  const out = T.maxField(src, W, H, 2);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const inside = Math.abs(x - 4) <= 2 && Math.abs(y - 3) <= 2;
+      assert.ok(Math.abs(out[y * W + x] - (inside ? 0.8 : 0)) < 1e-6, `(${x},${y})=${out[y * W + x]}`);
+    }
+  }
+  assert.equal(src[0], 0);
+});
+
 test("iki tonlu kol: yayılım ve yüz farkı birlikte küçülür", () => {
   const N = 100;
   // Kolun yarısı şablon teni (koyu, L 40), yarısı açık (L 62). Yüz L 66.
@@ -40,38 +54,66 @@ test("uzuv zaten yüz tonundaysa düzeltme gerekmez", () => {
   assert.equal(p.needed, false);
 });
 
-test("şablonda gölgedeki vücut yüz kadar açılmaz (vücut/yüz ışık oranı)", () => {
+// TAM UYUŞMA (2026-10-26, e25dc241, kullanıcı: "yüzün cilt tonu vücudun diğer
+// tüm yerleri ile tam uyuşma içerisinde olmalı"): şablonun vücut/yüz ışık
+// oranı payı kalktı, hedef yüzün kendisi.
+test("şablonda gölgedeki vücut da yüz tonuna çekilir (oran payı yok)", () => {
   const N = 100;
-  const field = fieldOf(N, () => [52, 20, 18]);
+  const field = fieldOf(N, () => [57, 20, 18]);
   const limbW = new Float32Array(N).fill(1);
-  // Oran yokken uzuv yüze (66) çekilir.
-  assert.equal(T.planCorrection(field, limbW, [66, 20, 18], N).needed, true);
-  // Şablonda vücut yüzden %23 koyu (parlaklık) → Lab hedefi ~52, uzuv zaten orada.
-  const p = T.planCorrection(field, limbW, [66, 20, 18], N, 0.77);
-  assert.equal(p.needed, false);
-  assert.ok(Math.abs(T.bodyTargetL(66, 0.77) - 52) < 1, `${T.bodyTargetL(66, 0.77)}`);
-  // Oran sınırlı: dövmeli/koyu şablon kolu 0.75'in altına itmez.
-  assert.equal(T.bodyTargetL(66, 0.4), T.bodyTargetL(66, 0.75));
-  assert.equal(T.bodyTargetL(66, null), 66);
+  const p = T.planCorrection(field, limbW, [66, 20, 18], N, 0.85);
+  assert.equal(p.needed, true);
+  assert.ok(Math.abs(p.dL[0] - 9) < 0.01, `dL=${p.dL[0]}`);
+  for (const r of [0.4, 0.85, 1, 1.3, null]) assert.equal(T.bodyTargetL(66, r), 66);
 });
 
-test("yerel şablon ışığı: şablonda aydınlık kol açılır, koyu (dövmeli) kol hedefi indirmez", () => {
+test("gölgedeki el yüzden en çok ışık izi tavanı kadar koyu kalır", () => {
   const N = 100;
-  // Kol: ilk yarı boyun/el (L 56), ikinci yarı ön kol (L 49). Yüz 58.
-  // Tek oran 0.91 → hedef ~53.4, medyan 52.5 civarı: tek başına "uyumlu".
-  const field = fieldOf(N, (i) => [i < 50 ? 56 : 49, 20, 18]);
+  // Uzuv: yarısı boyun (L 56), yarısı gölgedeki el (L 30). Yüz 58.
+  const field = fieldOf(N, (i) => [i < 50 ? 56 : 30, 20, 18]);
   const limbW = new Float32Array(N).fill(1);
-  const ratio = new Float32Array(N), w = new Float32Array(N).fill(1);
-  // Şablonda ön kol yüzle aynı aydınlık (1.0); boyun/el bölgesi koyu (0.6, dövme).
-  for (let i = 0; i < N; i++) ratio[i] = i < 50 ? 0.6 : 1.0;
-  const g = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91);
-  const l = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91, { ratio, w });
-  assert.ok(l.dL[99] > g.dL[99] + 3, `ön kol yerel=${l.dL[99]} global=${g.dL[99]}`);
-  // Koyu şablon bölgesi hedefi aşağı çekmez.
-  assert.equal(l.dL[0], g.dL[0]);
-  // Ağırlık 0 (şablonda o noktada ten yok) → global plan.
-  const z = T.planCorrection(field, limbW, [58, 20, 18], N, 0.91, { ratio, w: new Float32Array(N) });
-  assert.equal(z.dL[99], g.dL[99]);
+  const p = T.planCorrection(field, limbW, [58, 20, 18], N);
+  const handAfter = 30 + p.dL[99], neckAfter = 56 + p.dL[0];
+  assert.ok(handAfter >= 58 - 6 - 0.01, `el ${handAfter}`);
+  assert.ok(Math.abs(neckAfter - 58) <= 6, `boyun ${neckAfter}`);
+});
+
+// RENK SELFIE'DEN, IŞIK SAHNEDEN (2026-10-28, 546b514b c0: çene altı gölgedeki
+// boyun yüz parlaklığına çekilip tişörte taştı).
+test("şablon gölgeli plan: gölgedeki boyun yüz eksi şablon gölgesine gider, yüze eşitlenmez", () => {
+  const N = 100;
+  const field = fieldOf(N, () => [40, 14, 12]);
+  const limbW = new Float32Array(N).fill(1);
+  const local = { shade: new Float32Array(N).fill(-12), w: new Float32Array(N).fill(1) };
+  const p = T.planShadeCorrection(field, limbW, [58, 20, 18], N, local, 0.5);
+  // hedef 58 − 12 = 46 → +6 L (yüze, +18'e değil); kroma yüze
+  assert.ok(Math.abs(p.dL[0] - 6) < 0.01, `dL=${p.dL[0]}`);
+  assert.ok(Math.abs(p.dA[0] - 6) < 0.01 && Math.abs(p.dB[0] - 6) < 0.01);
+  assert.equal(p.stats.shaded, true);
+});
+
+test("şablon gölgeli plan: şablonda ışık farkı güçlüyse vücut karartılmaz, ılımlıysa kararır", () => {
+  const N = 100;
+  const field = fieldOf(N, () => [55, 20, 18]);
+  const limbW = new Float32Array(N).fill(1);
+  // şablonda yüz çok parlak, vücut gölgede (ab c8): gölge −20 → karartma yok
+  const strong = T.planShadeCorrection(field, limbW, [63, 20, 18], N, { shade: new Float32Array(N).fill(-20), w: new Float32Array(N).fill(1) }, 0.5);
+  assert.ok(strong.dL[0] >= -0.01, `dL=${strong.dL[0]}`);
+  // ılımlı gölge (−2): vücut yüzden açıksa tenine göre kararır
+  const mild = T.planShadeCorrection(field, limbW, [45, 20, 18], N, { shade: new Float32Array(N).fill(-2), w: new Float32Array(N).fill(1) }, 0.5);
+  assert.ok(mild.dL[0] < -10, `dL=${mild.dL[0]}`);
+});
+
+test("şablon gölgeli plan: şablonda karşılığı olmayan noktada ortanca ten farkı, kendi ışığı korunur", () => {
+  const N = 100;
+  // yarısı şablonda deri (w=1, gölge 0), yarısı karşılıksız (w=0); karşılıksız yarı 10 L daha koyu (gölge)
+  const field = fieldOf(N, (i) => [i < 50 ? 50 : 40, 20, 18]);
+  const limbW = new Float32Array(N).fill(1);
+  const w = new Float32Array(N); for (let i = 0; i < 50; i++) w[i] = 1;
+  const p = T.planShadeCorrection(field, limbW, [56, 20, 18], N, { shade: new Float32Array(N), w }, 0.5);
+  assert.ok(Math.abs(p.dL[0] - 6) < 0.01, `karşılıklı dL=${p.dL[0]}`);
+  // karşılıksız: kendi 40 + ortanca fark 6 = 46 (gölgesi korunur, yüze çekilmez)
+  assert.ok(Math.abs(p.dL[99] - 6) < 0.01, `karşılıksız dL=${p.dL[99]}`);
 });
 
 test("uzuv yoksa plan kurulmaz", () => {
@@ -119,4 +161,24 @@ test("segmentasyon modeli 6 sınıf döndürür ve olasılıklar toplanır", asy
   const sum = P.reduce((a, p) => a + p[i], 0);
   // 8 bitlik nicemleme yüzünden tam 1 değil.
   assert.ok(Math.abs(sum - 1) < 0.05, `toplam=${sum}`);
+});
+
+test("planFaceMatch: yüz vücuttan koyuysa açılır, karartılmaz", () => {
+  const N = 80;
+  const field = fieldOf(N, () => [55, 18, 20]);
+  const limbW = new Float32Array(N).fill(0.8);
+  const p = T.planFaceMatch([42, 18, 20], limbW, field, N);
+  assert.equal(p.needed, true);
+  assert.ok(p.dL > 5 && p.dL <= 12, `dL=${p.dL}`);
+  const bright = T.planFaceMatch([70, 18, 20], limbW, field, N);
+  assert.equal(bright.needed, false);
+});
+
+test("planFaceMatch: yüz-kol kroma farkı varsa kaydırır", () => {
+  const N = 80;
+  const field = fieldOf(N, () => [50, 22, 24]);
+  const limbW = new Float32Array(N).fill(0.8);
+  const p = T.planFaceMatch([50, 10, 8], limbW, field, N);
+  assert.equal(p.needed, true);
+  assert.ok(p.dA > 0 && p.dB > 0);
 });

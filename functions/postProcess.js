@@ -368,10 +368,18 @@ async function computeFaceCropGeometry(buf, box, currentRatio, targetRatio, pers
  * çağıran taraf bu durumda kırpılmış (dar kadrajlı) sonucu kullanmaya devam
  * edebilir, üretim asla bloklanmaz).
  */
-async function recompositeIntoOriginal(outputBuf, originalBuf, geo) {
+async function recompositeIntoOriginal(outputBuf, originalBuf, geo, { scale = 1 } = {}) {
   try {
     if (!geo) return null;
-    const { left, top, cropW, cropH, imgW, imgH } = geo;
+    // scale > 1 (bkz. recompositeScale): orijinal tuval büyütülür, yama kendi
+    // çözünürlüğüne yakın kalır.
+    const imgW = Math.round(geo.imgW * scale);
+    const imgH = Math.round(geo.imgH * scale);
+    const cropW = Math.min(imgW, Math.round(geo.cropW * scale));
+    const cropH = Math.min(imgH, Math.round(geo.cropH * scale));
+    const left = Math.min(imgW - cropW, Math.round(geo.left * scale));
+    const top = Math.min(imgH - cropH, Math.round(geo.top * scale));
+    const base = scale === 1 ? originalBuf : await sharp(originalBuf).resize(imgW, imgH, { fit: "fill", kernel: "lanczos3" }).png().toBuffer();
 
     // 1) TEK RESAMPLE: OpenAI çıktısını (büyütülmüş tuval) doğrudan orijinal
     // kırpma boyutuna küçült — ara adım yok.
@@ -408,7 +416,7 @@ async function recompositeIntoOriginal(outputBuf, originalBuf, geo) {
     // 92 kalite + varsayılan 4:2:0 kullanmak, yüzde iki kez sıkıştırma kaybı
     // demekti ("piksel piksel / pürüzlü yüz" bildirimi). Ara ürün artık
     // kayıpsız PNG; tek gerçek sıkıştırma son adımda yapılıyor.
-    const result = await sharp(originalBuf)
+    const result = await sharp(base)
       .composite([{ input: patchWithAlpha, left, top }])
       .png()
       .toBuffer();
@@ -424,7 +432,24 @@ async function recompositeIntoOriginal(outputBuf, originalBuf, geo) {
   }
 }
 
+// YÜZ DETAYI KÜÇÜLMESİN (2026-10-22, kullanıcı: "yüzdeki detayları
+// göstermek"): üretim 1.5 kat çözünürlükte (bkz. falPhotos hiResSize), ama
+// küçük şablonda (1170x1560) yama kırpma boyutuna küçültülünce yüz yine
+// ~100 px'e iniyordu. Yama küçülecekse orijinal tuval büyütülür; uzun kenar
+// RECOMPOSITE_LONG_MAX ile sınırlı (son katmanların süresi/belleği). Büyük
+// şablonda (3072) yama zaten büyütülüyor — tuvale dokunulmaz.
+const RECOMPOSITE_LONG_MAX = 2600;
+
+/** Geri yerleştirmede orijinal tuvalin ölçeği (≥ 1). SAF. */
+function recompositeScale(patchW, geo) {
+  if (!geo || !(patchW > 0) || !(geo.cropW > 0)) return 1;
+  const f = Math.min(patchW / geo.cropW, RECOMPOSITE_LONG_MAX / Math.max(geo.imgW, geo.imgH));
+  return f > 1.02 ? f : 1;
+}
+
 module.exports = {
+  recompositeScale,
+  RECOMPOSITE_LONG_MAX,
   addPhoneCameraTexture,
   cropFaceRegion,
   normalizeExifOrientation,

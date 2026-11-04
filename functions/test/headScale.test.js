@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { measureSilhouette, approxSilFromFaceBox, landmarkSizeRatio, eyeFreeLandmarkRatio, eyewearFaceRatio, planLandmarkScale, MIN_SCALE, MAX_SCALE, BODY_ALIGNED_IOU, FACE_ALIGNED_SHIFT, perceivedHeadRatio, _scaleHeadPatch, _encodeInpaint, _finishInpaint } = require("../headScale");
+const { measureSilhouette, approxSilFromFaceBox, landmarkSizeRatio, eyeFreeLandmarkRatio, eyewearFaceRatio, planLandmarkScale, MIN_SCALE, MIN_SCALE_EXTREME, SOFT_MIN_SCALE, MAX_SCALE, BODY_ALIGNED_IOU, FACE_ALIGNED_SHIFT, perceivedHeadRatio, _scaleHeadPatch, _encodeInpaint, _finishInpaint } = require("../headScale");
 const sharp = require("sharp");
 const { dilate } = require("../sceneRestore");
 
@@ -118,7 +118,7 @@ test("plan: gövde örtüşmüyor ve yüz kaymışsa (yeniden kadraj) dokunulmaz
 test("plan: ölçek sınırları", () => {
   assert.equal(planLandmarkScale(1.25, { bodyIou: 0.95 }).s, MIN_SCALE);
   // 2× ölçü tespit hatasıdır; kademe uygulanmaz (bkz. RAMP_TRUST_MIN_RAW_S).
-  assert.equal(planLandmarkScale(2, { bodyIou: 0.95 }).s, 0.93);
+  assert.equal(planLandmarkScale(2, { bodyIou: 0.95 }).s, SOFT_MIN_SCALE);
   assert.equal(planLandmarkScale(0.5, { bodyIou: 0.95 }).s, MAX_SCALE);
 });
 
@@ -202,6 +202,38 @@ test("scaleHeadPatch: kafaya bağlı olmayan nesne küçültülmez, silinmez", (
   assert.ok(r.inpaint && r.inpaint.headC && r.inpaint.headC.some((v) => v));
 });
 
+// 2026-10-26 (9987f742 c6, ca61076a c6): kafanın tepesine yapışık hayalet
+// (kişi maskesinde, sınıfı arka plan) kafayla birlikte aşağı taşınıp yeni
+// saçın üstünde şekil olarak kalıyordu. notHead pikselleri taşınmaz.
+test("scaleHeadPatch: kafaya yapışık hayalet (notHead) kafayla taşınmaz", () => {
+  const BLUE = [40, 40, 210];
+  const run = (useNotHead) => {
+    const sc = headScene(30, 40);
+    const t = sc.mk(30, 40, 70, RED);
+    const notHead = new Float32Array(sc.W * sc.H);
+    for (let y = 18; y < 31; y++) {
+      for (let x = 70; x < 90; x++) {
+        const g = y * sc.W + x;
+        sc.o.m[g] = 1;
+        sc.o.buf[g * 3] = BLUE[0]; sc.o.buf[g * 3 + 1] = BLUE[1]; sc.o.buf[g * 3 + 2] = BLUE[2];
+        notHead[g] = 1;
+      }
+    }
+    const sil = { cx: 80, top: 18, chin: 110, headW: 60, headH: 92, seedX: 80 };
+    const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 0.9, useNotHead ? { notHead } : {});
+    assert.notEqual(r.skipped, true);
+    let blue = 0;
+    for (let i = 0; i < sc.W * sc.H; i++) if (r.buf[i * 3 + 2] - r.buf[i * 3] > 100) blue++;
+    return { blue, r };
+  };
+  const before = run(false);
+  assert.ok(before.blue > 50, `hayalet taşınmadı (eski davranış): ${before.blue}`);
+  const after = run(true);
+  assert.equal(after.blue, 0, "hayalet kafayla taşındı");
+  // kafa yine küçüldü
+  assert.ok(after.r.holePx > 0);
+});
+
 // AI dolgusu (2026-10-09): yalnızca delik pikselleri değişir; model arka
 // planı değiştirdiyse sonuç kullanılmaz.
 async function inpaintJob() {
@@ -281,13 +313,109 @@ test("scaleHeadPatch: büyütmede kafa büyür", () => {
   assert.ok(dark(r.buf) > dark(sc.o.buf) * 1.05);
 });
 
-test("scaleHeadPatch: kafaya el/nesne bitişikse hiç dokunmaz (c6 eğilmesi)", () => {
+// 2026-10-22: çene şablonunkinden aşağıdaysa kafa ölçeksiz de kaldırılır.
+test("scaleHeadPatch: kaldırma (liftPx) kafayı yukarı alır, omuzlar değişmez", () => {
+  const sc = headScene(30, 40);
+  const t = sc.mk(30, 40, 60);
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80 };
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 1, { liftPx: 10 });
+  const top = (B) => { for (let y = 0; y < sc.H; y++) if (B[(y * sc.W + 80) * 3] < 128) return y; return -1; };
+  assert.ok(!r.skipped && top(r.buf) <= top(sc.o.buf) - 8, `tepe ${top(sc.o.buf)} -> ${top(r.buf)}`);
+  for (let y = 135; y < sc.H; y++) for (let x = 0; x < sc.W; x++) assert.equal(r.buf[(y * sc.W + x) * 3], sc.o.buf[(y * sc.W + x) * 3]);
+});
+
+// 23579e24 c0: küçültmede de dokunan nesne (ön cam direği) kafayla çekildi.
+test("scaleHeadPatch: küçültmede kafaya el/nesne bitişikse hiç dokunmaz (c6 eğilmesi)", () => {
   const sc = headScene(30, 40);
   const t = sc.mk(25, 34);
   // kulak hizasında kafadan yana uzanan kol/el
   for (let y = 60; y < 80; y++) for (let x = 110; x < 150; x++) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(40, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
   const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
   const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30);
+  assert.equal(r.skipped, true);
+  assert.equal(r.moved, 0);
+});
+
+// 29cf877a c2 (2026-10-22): kıyafet/kol derisi sınıfındaki uzuv korunur,
+// kafa küçülür; sınıflanmamış nesne (ön cam direği) yine atlatır.
+const limbMaps = (sc, isLimb, isHead) => {
+  const n = sc.W * sc.H;
+  const L = { cloth: new Float32Array(n), skin: new Float32Array(n), head: new Float32Array(n) };
+  for (let y = 0; y < sc.H; y++) for (let x = 0; x < sc.W; x++) {
+    const g = y * sc.W + x;
+    if (isLimb(x, y)) L.cloth[g] = 1;
+    else if (isHead(x, y)) L.head[g] = 1;
+  }
+  return L;
+};
+const armScene = () => {
+  const sc = headScene(30, 40);
+  for (let y = 60; y < 80; y++) for (let x = 110; x < 150; x++) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(40, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
+  return sc;
+};
+const inHead = (x, y) => ((x - 80) / 30) ** 2 + ((y - 70) / 40) ** 2 <= 1;
+
+test("scaleHeadPatch: uzuv koruması — kafaya değen kol yerinde kalır, kafa küçülür", () => {
+  const sc = armScene();
+  const t = sc.mk(25, 34);
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const limbs = limbMaps(sc, (x, y) => y >= 60 && y < 80 && x >= 110 && !inHead(x, y), inHead);
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30, { limbs });
+  assert.notEqual(r.skipped, true);
+  assert.equal(r.limbProtected, true);
+  const dark = (B) => { let n = 0; for (let y = 0; y < 95; y++) for (let x = 0; x < 110; x++) if (B[(y * sc.W + x) * 3] < 128) n++; return n; };
+  assert.ok(dark(r.buf) < dark(sc.o.buf) * 0.95, "kafa küçülmedi");
+  for (let y = 62; y < 78; y++) for (let x = 116; x < 150; x++) assert.ok(r.buf[(y * sc.W + x) * 3] <= 45, `kol değişti (${x},${y})`);
+});
+
+// Zoom A/B b2 c8, 23579e24 c0: maskeye taşan arka plan (ağaç, kemer) sabit kalır.
+test("scaleHeadPatch: uzuv koruması — kafadan uzak arka plan sınıfı yerinde kalır", () => {
+  const sc = armScene();
+  const t = sc.mk(25, 34);
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const limbs = limbMaps(sc, () => false, inHead);
+  limbs.bg = new Float32Array(sc.W * sc.H);
+  for (let y = 60; y < 80; y++) for (let x = 110; x < 150; x++) if (!inHead(x, y)) limbs.bg[y * sc.W + x] = 1;
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30, { limbs });
+  assert.notEqual(r.skipped, true);
+  assert.equal(r.limbProtected, true);
+  // Saç teli payı (8 px) + yumuşak geçiş (8 px) ötesi tam korunur.
+  for (let y = 62; y < 78; y++) for (let x = 130; x < 150; x++) assert.ok(r.buf[(y * sc.W + x) * 3] <= 45, `nesne değişti (${x},${y})`);
+});
+
+// e25dc241 c0 (2026-10-27): çeneye kaldırılmış el boyun sütununun içinde
+// kafayla taşınıyordu; kafadan ayrık deri bileşeni korunur, hiza da yapılır.
+test("scaleHeadPatch: uzuv koruması — sütundaki kopuk deri (el) yerinde kalır, kafa hizalanır", () => {
+  const sc = armScene();
+  const t = sc.mk(25, 34);
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const hand = (x, y) => y >= 114 && y < 126 && x >= 84 && x < 100;
+  for (let y = 0; y < sc.H; y++) for (let x = 0; x < sc.W; x++) if (hand(x, y)) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(40, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
+  const limbs = limbMaps(sc, (x, y) => y >= 60 && y < 80 && x >= 110 && !inHead(x, y), inHead);
+  for (let y = 0; y < sc.H; y++) for (let x = 0; x < sc.W; x++) if (hand(x, y)) limbs.skin[y * sc.W + x] = 1;
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30, { limbs, shiftPx: 6 });
+  assert.notEqual(r.skipped, true);
+  assert.equal(r.limbProtected, true);
+  assert.equal(r.shiftEff, 6);
+  for (let y = 116; y < 124; y++) for (let x = 86; x < 98; x++) assert.ok(r.buf[(y * sc.W + x) * 3] <= 45, `el değişti (${x},${y})`);
+});
+
+test("scaleHeadPatch: uzuv koruması — sınıflanmamış nesne yine atlatır", () => {
+  const sc = armScene();
+  const t = sc.mk(25, 34);
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const limbs = limbMaps(sc, () => false, inHead);
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 25 / 30, { limbs });
+  assert.equal(r.skipped, true);
+  assert.equal(r.moved, 0);
+});
+
+test("scaleHeadPatch: büyütmede kafaya el/nesne bitişikse hiç dokunmaz", () => {
+  const sc = headScene(30, 40);
+  const t = sc.mk(33, 44);
+  for (let y = 60; y < 80; y++) for (let x = 110; x < 150; x++) { sc.o.m[y * sc.W + x] = 1; sc.o.buf.fill(40, (y * sc.W + x) * 3, (y * sc.W + x) * 3 + 3); }
+  const sil = { cx: 80, top: 30, chin: 110, headW: 60, headH: 80, seedX: 80 };
+  const r = _scaleHeadPatch(sc.o.buf, t.buf, sc.o.m, t.m, sc.W, sc.H, sil, 70, 1.05);
   assert.equal(r.skipped, true);
   assert.equal(r.moved, 0);
 });
@@ -363,6 +491,12 @@ test("plan: 6dd26e3e — c9 ve c3 dokunulmaz, c8 küçülür", () => {
 
 // 9d9507f0 c8: 0.886 "çok küçültmüşsün"; 61079257 c2: 0.9 "çok küçülmüş".
 // cbdbef13: 1.12-1.89 ölçülen kareler 0.93'te büyük kaldı → kademeli genişleme.
+test("plan: %36 büyük kafa aşırı tabana iner (29cf877a c2)", () => {
+  const p = planLandmarkScale(1.36, { bodyIou: 0.95 });
+  assert.equal(p.apply, true);
+  assert.ok(p.s <= 0.81 && p.s >= MIN_SCALE_EXTREME, `s=${p.s}`);
+});
+
 test("plan: 0.93 ötesi küçültme kademeli, 1.14 ölçüde 0.9'un altına inmez", () => {
   const p = planLandmarkScale(1.14, { bodyIou: 0.98, volRatio: 1.07 });
   assert.ok(p.s > 0.9 && p.s < 0.93, `s=${p.s}`);
@@ -373,10 +507,10 @@ test("plan: 0.93 ötesi küçültme kademeli, 1.14 ölçüde 0.9'un altına inme
 });
 
 // cbdbef13 c17/c24: yüz oranı 1.83-1.89 tespit hatası — kademe uygulanmaz.
-test("plan: inanılmaz büyük ölçü kademeyle en dibe itilmez, 0.93'te kalır", () => {
+test("plan: inanılmaz büyük ölçü kademeyle en dibe itilmez, SOFT_MIN'de kalır", () => {
   for (const r of [1.83, 1.89, 1.4]) {
     const p = planLandmarkScale(r, { bodyIou: 0.98 });
-    assert.ok(Math.abs(p.s - 0.93) < 1e-9, `oran=${r} s=${p.s}`);
+    assert.ok(Math.abs(p.s - SOFT_MIN_SCALE) < 1e-9, `oran=${r} s=${p.s}`);
   }
   const real = planLandmarkScale(1.22, { bodyIou: 0.98 });
   assert.ok(real.s < 0.9, `gerçek büyüme 1.22 hâlâ kademeyle küçülür: s=${real.s}`);

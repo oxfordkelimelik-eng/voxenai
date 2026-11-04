@@ -50,6 +50,120 @@ const HEAD_MASK_GROW = 4;
 // eski kafanın izi biraz belirginleşti.
 const CONTEXT_RATIO = 2;
 const WIDE_MIN_SCALE = 0.45;
+// KABA-İNCE (2026-10-26, 9987f742 c6, kullanıcı: "saçın üstünde şekil
+// kayması"): büyük kafada küçültme deliği + kafa tek parçaya sığmıyor, doğal
+// çözünürlükte 512'lik parçalarla doluyordu (canlı: parça=5 ölçek=1.00). Her
+// parçanın çoğu maske (kafa da maskede) — model kafa biçimli boşluğu gri pusla
+// tamamladı, saçın sol üstünde sivri gri leke kaldı. Önce maskenin tamamı
+// geniş bağlamla küçük ölçekte (fillWide, alt sınırsız) doldurulur; kafanın
+// yeri bu kaba arka planla doldurulup BAĞLAM olur (saç değil), yalnız delik
+// doğal çözünürlükte yeniden doldurulur. Model artık ince bir şerit görüyor.
+// Yalnız parçalanacak işlerde: tek parçaya sığanlarda kubbe görülmedi.
+// 25 karelik yerel tekrarda 7 kare bu yola girdi, +1 parça (0-3 sn).
+// KENAR TON UYUMU (2026-10-26, 9987f742 c0, kullanıcı: "yüzün sağ tarafında
+// anlamsız bir çizgi"): kafa %9 küçülünce eski yüz profiliyle yeni yüz
+// arasında hilal delik açıldı. Kafa da maskede olduğu için (bağlam değil)
+// model hilali çevredeki koyu takım/saçla dengeleyip açık duvardan koyu
+// doldurdu; dolgunun dış sınırı eski yüzün profili olarak çizgi kaldı.
+// Düzeltme: delik kenarında, bilinen arka plan (job.ringOk, kafa maskesi
+// dışı) ile dolgunun pencere ortalamaları arasındaki fark ölçülür, deliğe
+// itme-çekme (push-pull) ile düzgün yayılır ve dolguya eklenir (Poisson
+// klonlamanın düşük frekanslı karşılığı). Doku modelin, ton çevrenin olur.
+const TONE_WIN = 3; // kenar penceresi yarıçapı (px)
+const TONE_MIN_N = 4; // pencerede en az bilinen/dolgu pikseli
+const TONE_MAX = 48; // düzeltme sınırı (0-255)
+
+/**
+ * Dolgunun düşük frekanslı tonunu delik kenarındaki bilinen arka plana
+ * eşitler. filled/ref: side*side*3 RGB; hole: doldurulan pikseller; refOk:
+ * ton referansı olabilecek bilinen pikseller. Yeni Buffer döner. SAF.
+ */
+function harmonizeFill(filled, ref, hole, refOk, side) {
+  const N = side * side;
+  const S1 = side + 1;
+  // İntegral görüntüler: bilinen (sayı + 3 kanal toplam), delik (sayı + 3 kanal).
+  const kc = new Float64Array(S1 * S1), hc = new Float64Array(S1 * S1);
+  const ks = [0, 1, 2].map(() => new Float64Array(S1 * S1)), hs = [0, 1, 2].map(() => new Float64Array(S1 * S1));
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const i = y * side + x, j = (y + 1) * S1 + x + 1, up = y * S1 + x + 1, lf = (y + 1) * S1 + x, ul = y * S1 + x;
+      const k = refOk[i] ? 1 : 0, hh = hole[i] ? 1 : 0;
+      kc[j] = k + kc[up] + kc[lf] - kc[ul];
+      hc[j] = hh + hc[up] + hc[lf] - hc[ul];
+      for (let c = 0; c < 3; c++) {
+        ks[c][j] = k * ref[i * 3 + c] + ks[c][up] + ks[c][lf] - ks[c][ul];
+        hs[c][j] = hh * filled[i * 3 + c] + hs[c][up] + hs[c][lf] - hs[c][ul];
+      }
+    }
+  }
+  const box = (A, x0, y0, x1, y1) => A[(y1 + 1) * S1 + x1 + 1] - A[y0 * S1 + x1 + 1] - A[(y1 + 1) * S1 + x0] + A[y0 * S1 + x0];
+  // Kenar örnekleri: deliğin bilinen arka plana komşu pikselleri.
+  const v0 = new Float32Array(N * 3), w0 = new Float32Array(N);
+  let samples = 0;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const i = y * side + x;
+      if (!hole[i]) continue;
+      const x0 = Math.max(0, x - TONE_WIN), x1 = Math.min(side - 1, x + TONE_WIN);
+      const y0 = Math.max(0, y - TONE_WIN), y1 = Math.min(side - 1, y + TONE_WIN);
+      const nk = box(kc, x0, y0, x1, y1), nh = box(hc, x0, y0, x1, y1);
+      if (nk < TONE_MIN_N || nh < TONE_MIN_N) continue;
+      for (let c = 0; c < 3; c++) v0[i * 3 + c] = box(ks[c], x0, y0, x1, y1) / nk - box(hs[c], x0, y0, x1, y1) / nh;
+      w0[i] = 1;
+      samples++;
+    }
+  }
+  const out = Buffer.from(filled);
+  if (!samples) return out;
+  // Çekme: ağırlıklı ortalamayla yarıya indir; itme: kaba seviyeden doldur.
+  const levels = [{ n: side, v: v0, w: w0 }];
+  while (levels[levels.length - 1].n > 1) {
+    const { n, v, w } = levels[levels.length - 1];
+    const m = Math.ceil(n / 2);
+    const V = new Float32Array(m * m * 3), Wt = new Float32Array(m * m);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const a = y * n + x, b = (y >> 1) * m + (x >> 1);
+        if (!w[a]) continue;
+        Wt[b] += w[a];
+        for (let c = 0; c < 3; c++) V[b * 3 + c] += w[a] * v[a * 3 + c];
+      }
+    }
+    for (let b = 0; b < m * m; b++) {
+      if (Wt[b] > 0) for (let c = 0; c < 3; c++) V[b * 3 + c] /= Wt[b];
+      Wt[b] = Math.min(1, Wt[b]);
+    }
+    levels.push({ n: m, v: V, w: Wt });
+  }
+  for (let l = levels.length - 2; l >= 0; l--) {
+    const { n, v, w } = levels[l];
+    const P = levels[l + 1];
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const a = y * n + x;
+        if (w[a] >= 1) continue;
+        // Kaba seviyeden çift doğrusal örnek.
+        const fx = Math.min(P.n - 1, Math.max(0, (x - 0.5) / 2)), fy = Math.min(P.n - 1, Math.max(0, (y - 0.5) / 2));
+        const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(P.n - 1, x0 + 1), y1 = Math.min(P.n - 1, y0 + 1);
+        const tx = fx - x0, ty = fy - y0;
+        for (let c = 0; c < 3; c++) {
+          const q = (P.v[(y0 * P.n + x0) * 3 + c] * (1 - tx) + P.v[(y0 * P.n + x1) * 3 + c] * tx) * (1 - ty) +
+            (P.v[(y1 * P.n + x0) * 3 + c] * (1 - tx) + P.v[(y1 * P.n + x1) * 3 + c] * tx) * ty;
+          v[a * 3 + c] = w[a] * v[a * 3 + c] + (1 - w[a]) * q;
+        }
+      }
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    if (!hole[i]) continue;
+    for (let c = 0; c < 3; c++) {
+      const d = Math.max(-TONE_MAX, Math.min(TONE_MAX, v0[i * 3 + c]));
+      const val = filled[i * 3 + c] + d;
+      out[i * 3 + c] = val < 0 ? 0 : val > 255 ? 255 : Math.round(val);
+    }
+  }
+  return out;
+}
 
 let modelP = null;
 function modelPath() {
@@ -170,7 +284,7 @@ async function fillCrop(rgb, side, mask) {
  * tam kareden (baseRgb, job kırpımı job.rgb ile) alınır, 512'ye indirilir.
  * Dönüş { rgb (job kırpımı side*side*3), runs, scale } | null (sığmıyor).
  */
-async function fillWide(job, baseRgb, mask) {
+async function fillWide(job, baseRgb, mask, minScale = WIDE_MIN_SCALE) {
   const { side, W, H, left, top } = job;
   let x0 = side, x1 = -1, y0 = side, y1 = -1;
   for (let y = 0; y < side; y++) {
@@ -186,7 +300,7 @@ async function fillWide(job, baseRgb, mask) {
   const span = Math.max(x1 - x0, y1 - y0) + 1;
   const ws = Math.min(W, H, Math.round(span * CONTEXT_RATIO));
   const f = S / ws;
-  if (f < WIDE_MIN_SCALE) return null;
+  if (f < minScale) return null;
   const L = Math.max(0, Math.min(W - ws, Math.round(left + (x0 + x1) / 2 - ws / 2)));
   const T = Math.max(0, Math.min(H - ws, Math.round(top + (y0 + y1) / 2 - ws / 2)));
   const big = Buffer.alloc(ws * ws * 3);
@@ -227,6 +341,41 @@ async function fillWide(job, baseRgb, mask) {
   return { rgb: out, runs: r.runs, scale: f * r.scale };
 }
 
+/** Maske tek parçaya MIN_FIT_SCALE ile sığmıyor mu (fillCrop doğal çözünürlükte parçalar). SAF. */
+function needsTiles(mask, side) {
+  if (side < S) return false;
+  let x0 = side, x1 = -1, y0 = side, y1 = -1;
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      if (!mask[y * side + x]) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return false;
+  return (S - 2 * MARGIN - 8) / Math.max(x1 - x0 + 1, y1 - y0 + 1) < MIN_FIT_SCALE;
+}
+
+/**
+ * KABA-İNCE dolgu (bkz. yukarıdaki not). mask = delik ∪ kafa; yalnız
+ * job.holeC yeniden doğal çözünürlükte dolar. Dönüş fillCrop biçimi + coarse
+ * (kaba geçişin ölçeği).
+ */
+async function fillTwoScale(job, baseRgb, mask) {
+  const coarse = await fillWide(job, baseRgb, mask, 0);
+  if (!coarse) return null;
+  const { side } = job;
+  const rgb = Buffer.from(job.rgb);
+  for (let i = 0; i < side * side; i++) {
+    if (!mask[i] || job.holeC[i]) continue;
+    for (let c = 0; c < 3; c++) rgb[i * 3 + c] = coarse.rgb[i * 3 + c];
+  }
+  const fine = await fillCrop(rgb, side, job.holeC);
+  return { rgb: fine.rgb, runs: coarse.runs + fine.runs, scale: fine.scale, coarse: coarse.scale };
+}
+
 /**
  * Kafa ölçeği/çevresi işini (headScale.prepareInpaint biçimi) yerel modelle
  * tamamlar. Maske = delik ∪ kafa (job.headC; bağlam olarak verilmez). Delik
@@ -258,7 +407,16 @@ async function finishInpaintLama(job, baseBuf, opts = {}) {
   for (let i = 0; i < N; i++) if (job.holeC[i]) mask[i] = 1;
   const res = await sharp(baseBuf).removeAlpha().raw().toBuffer();
   const wide = opts.wide ?? !!job.wide;
-  const filled = (wide && (await fillWide(job, res, mask))) || (await fillCrop(job.rgb, side, mask));
+  const twoScale = !wide && !!job.headC && needsTiles(mask, side);
+  const filled = (wide && (await fillWide(job, res, mask))) ||
+    (twoScale && (await fillTwoScale(job, res, mask))) ||
+    (await fillCrop(job.rgb, side, mask));
+  // Ton referansı: maske dışındaki bilinen arka plan (kafa/kişi değil).
+  if (job.ringOk && opts.tone !== false) {
+    const refOk = new Uint8Array(N);
+    for (let i = 0; i < N; i++) refOk[i] = job.ringOk[i] && !mask[i] ? 1 : 0;
+    filled.rgb = harmonizeFill(filled.rgb, job.rgb, job.holeC, refOk, side);
+  }
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
       const i = y * side + x;
@@ -272,7 +430,7 @@ async function finishInpaintLama(job, baseBuf, opts = {}) {
     }
   }
   const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
-  return { buf, runs: filled.runs, scale: filled.scale, ms: Date.now() - t0 };
+  return { buf, runs: filled.runs, scale: filled.scale, coarse: filled.coarse ?? null, ms: Date.now() - t0 };
 }
 
 /** Modeli indirir ve worker'da oturumu açar (iş başında, beklemeden). */
@@ -291,4 +449,10 @@ async function shutdown() {
   if (w) await w.terminate();
 }
 
-module.exports = { finishInpaintLama, fillCrop, warmup, shutdown, LAMA_GCS_PATH, LAMA_SHA256 };
+// Modeli yalnız indirir (oturum açmaz). Sade akışta şablon izi temizliği
+// (ghostClean) worker havuzunda çalışır; dosya ana iş parçacığında bir kez
+// iner — iş parçacıkları aynı pid'i paylaştığı için eşzamanlı indirmede
+// .part dosyası çakışırdı.
+const ensureModel = () => modelPath();
+
+module.exports = { finishInpaintLama, fillCrop, harmonizeFill, needsTiles, warmup, shutdown, ensureModel, LAMA_GCS_PATH, LAMA_SHA256 };

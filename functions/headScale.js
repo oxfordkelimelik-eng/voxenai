@@ -47,14 +47,19 @@ const APPLY_MIN_DELTA = 0.03;
 // testte (aynı şablonlar) 0.88 c8 (1.18) ve c17 (1.22) için doğal göründü.
 // 0.93'e kadar eskisi gibi; ötesinde istenen ek küçültmenin RAMP kadarı
 // uygulanır — ölçünün algıdan fazla dediği sakallı şablonlar çok küçülmesin.
-const SOFT_MIN_SCALE = 0.93;
-const MIN_SCALE = 0.88;
-const SCALE_RAMP = 0.5;
-// Kademe yalnız inanılır ölçüye: cbdbef13 c17/c24 ham 0.546/0.529 (yüz oranı
-// 1.83-1.89) tespit hatasıydı ama kademe onları en dibe (0.88) itiyordu.
-// Gerçek büyümeler 1.12-1.23 ölçüldü; bu sınırın altı eski 0.93'te kalır.
-const RAMP_TRUST_MIN_RAW_S = 0.77;
-const MAX_SCALE = 1.05;
+// 0.93/0.88 (2026-10-21, 29cf877a c2 ham=0.735 → s=0.93): %36 büyük kafa
+// yalnız %7 küçüldü; kullanıcı "kafa çok büyük". Gerçek büyümeler 1.12-1.39
+// (ham 0.72-0.89); 1.4+ hâlâ tespit hatası sayılır ve kademeye girmez.
+const SOFT_MIN_SCALE = 0.90;
+const MIN_SCALE = 0.85;
+const MIN_SCALE_EXTREME = 0.80;
+const EXTREME_RAW_S = 0.80;
+const SCALE_RAMP = 0.65;
+const RAMP_TRUST_MIN_RAW_S = 0.72;
+// 1.05 → 1.10 (2026-10-28, 546b514b c9, kullanıcı: "kafayı çok küçültmüşsün"):
+// göz–çene 0.918, kaş–burun 0.921, hacim 0.845 (ham 1.144) iken yalnız %5
+// büyüyebiliyordu; o da yaka değdiği için hiç uygulanmadı.
+const MAX_SCALE = 1.10;
 // Gövdeler bu kadar örtüşüyorsa çıktı şablonla aynı kadrajda ve aynı
 // omuzlara sahiptir; gövde ölçeği 1 alınır. Silüet omuz ölçümü tek başına
 // gürültülüydü (bb2cc441 c3 1.12, c9 2.36 — ikisi de aynı gövde).
@@ -391,7 +396,8 @@ function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRa
   const soft = rawS >= SOFT_MIN_SCALE ? rawS
     : rawS < RAMP_TRUST_MIN_RAW_S ? SOFT_MIN_SCALE
     : SOFT_MIN_SCALE - SCALE_RAMP * (SOFT_MIN_SCALE - rawS);
-  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(MIN_SCALE, soft)), volUsed: ph.volUsed, widthUsed };
+  const floor = rawS < EXTREME_RAW_S ? MIN_SCALE_EXTREME : MIN_SCALE;
+  return { apply: true, reason: null, rawS, s: Math.min(MAX_SCALE, Math.max(floor, soft)), volUsed: ph.volUsed, widthUsed };
 }
 
 /**
@@ -569,6 +575,95 @@ function boxBlur(a, w, h, r) {
  * O/T: çıktı ve şablon RGB raw (aynı boyut). Mo/Mt: kişi olasılıkları.
  */
 const TOUCH_MAX = 1.05;
+// Uzuv korumasında kafa koşusundaki kafa-dışı (sınıflanmamış) pikseller.
+const TOUCH_FOREIGN_MAX = 0.25;
+// Çene hizası (yüz boyu cinsinden, bkz. correctHeadScale): ölü bölge, en az
+// ve en çok kaldırma, yüz kayması sınırı.
+const LIFT_DEADBAND = 0.04;
+const LIFT_MIN = 0.04;
+const LIFT_MAX = 0.2;
+const LIFT_MAX_SHIFT = 0.35;
+// Üç çeyrek kafada (b2a9537d c7 şablon 0.81) çene noktası hâlâ güvenilir.
+const LIFT_MAX_YAW = 0.9;
+// Uzuv korumalı karede en çok kaldırma (yüz boyu cinsinden, bkz. scaleHeadPatch).
+const LIFT_PROTECTED_MAX = 0.05;
+// KAFA HİZASI (bkz. planHeadAlign): yatay kayma (şablon yüz genişliği
+// cinsinden) bundan küçükse dokunulmaz, düzeltmede bu kadarı bırakılır, en
+// çok bu kadar taşınır; yandan bakış sınırı (işaretsiz yaw).
+const ALIGN_MIN = 0.06;
+const ALIGN_KEEP = 0.02;
+const ALIGN_MAX = 0.25;
+const ALIGN_SIDE_YAW = 0.3;
+// Tren şablonunda (0.63) model kafayı 0.77-0.92'ye çeviriyor; arka çene
+// noktası orada da görünür. Şablonun sınırı kaldırmadakiyle aynı (0.9).
+const ALIGN_MAX_YAW_OUT = 0.95;
+// Eğim (derece): fark bundan küçükse dokunulmaz, bu kadarı bırakılır, en çok.
+const ROLL_MIN_DEG = 3;
+const ROLL_KEEP_DEG = 1;
+const ROLL_MAX_DEG = 8;
+// İKİ YÖNLÜ EĞİM (2026-10-28, 546b514b c1, kullanıcı: "kafa base foto gibi
+// çapraz bakmalı ... x ve y koordinatlarıyla birebir"). Şablon −9.5° yatık,
+// çıktı +4.7°: çıktı daha dik olduğu için hiç döndürülmüyordu. İki yüz de
+// cepheye/üç çeyreğe yakınken (göz çizgisi güvenilir; profilde göz çizgisi
+// eğilmeyi ölçer, c2 iki ölçümde −21.6° ve −4.3° verdi) eğim her iki yönde
+// şablonunkine getirilir; sınır daha geniş.
+const ROLL_TWO_WAY_YAW = 0.6;
+const ROLL_TWO_WAY_MAX_DEG = 12;
+
+/**
+ * KAFA HİZASI (2026-10-26, d0d4c001 c2/c3, kullanıcı: "kafa önde kalıyor.
+ * kafa arkada ve dik ... tüm çıktılar için geçerli"). Arşivde (13 iş, 93
+ * kare) gövde şablondakiyle aynı yerde (MoveNet omuz kayması medyan 0.001
+ * omuz genişliği), ama model bazı şablonlarda kafayı kaydırıyor: tren
+ * şablonunda (c2) 6 işte yüz genişliğinin 0.13-0.27'si öne, bahçe şablonunda
+ * (c3) 4 işte 0.13-0.16 yana; eğim farkı medyan 3.2°, p90 8°. Gerçek
+ * fotoğrafta şablon kafası boynun üstündedir: kafa oraya taşınır.
+ *  - Yatay, yandan bakışta: arka çene noktası (kulak yanı, 0/16) — yüz
+ *    noktaları yaw farkıyla öne kayar, arka nokta kafatasına bağlı. Yalnız
+ *    ÖNE kayma düzeltilir (kullanıcı: "kafa arkada").
+ *  - Yatay, önden bakışta: çene çizgisinin ortası (0-16), iki yön.
+ *  - Eğim: göz çizgisi; yalnız çıktı şablondan daha eğikse, şablonunkine.
+ *    Yandan bakışta göz çizgisinin eğimi başın öne eğilmesidir ("dik değil").
+ *  - Dönüş çene ortası çevresindedir (bkz. scaleHeadPatch); dayanak noktasını
+ *    da kaydırır. Kayma o yer değiştirmeyi düşer: dayanak hedefinde kalır
+ *    (b7cd18da c3 denemesi: 8° dönüş + kayma hedefi 0.08 aştı). Yandan
+ *    bakışta bu, başın kulak çevresinde kalkmasıdır.
+ * Döner: shiftPx (içeriğin yatay kayması, + sağa), rollRad (içeriğin dönüşü,
+ * + saat yönü), ölçüler. SAF.
+ */
+function planHeadAlign(po, pt) {
+  const tplFaceW = Math.hypot(pt[16].x - pt[0].x, pt[16].y - pt[0].y);
+  const yawT = landmarkYaw(pt);
+  const span = pt[45].x - pt[36].x;
+  if (!(tplFaceW > 0) || yawT == null || !(Math.abs(span) > 1e-6)) return { shiftPx: 0, rollRad: 0, reason: "no-geometry" };
+  // + : burun görüntünün sağına bakıyor; kafanın arkası solda (nokta 0).
+  const dir = Math.sign((pt[30].x - pt[36].x) / span - 0.5) || 1;
+  const side = yawT >= ALIGN_SIDE_YAW;
+  const anchor = (P) => (side ? (dir > 0 ? P[0] : P[16]) : { x: (P[0].x + P[16].x) / 2, y: (P[0].y + P[16].y) / 2 });
+  const ao = anchor(po);
+  const dx = (ao.x - anchor(pt).x) / tplFaceW;
+  const off = side ? dx * dir : Math.abs(dx);
+  // Dayanağın istenen yatay yer değiştirmesi (px).
+  const want = off >= ALIGN_MIN ? -Math.sign(dx) * (off - ALIGN_KEEP) * tplFaceW : 0;
+  const roll = (P) => (Math.atan2(P[45].y - P[36].y, P[45].x - P[36].x) * 180) / Math.PI;
+  const rollO = roll(po);
+  const rollT = roll(pt);
+  const dr = rollO - rollT;
+  let rollDeg = 0;
+  const yawO = landmarkYaw(po);
+  const twoWay = yawT < ROLL_TWO_WAY_YAW && yawO != null && yawO < ROLL_TWO_WAY_YAW;
+  if (Math.abs(dr) >= ROLL_MIN_DEG && (twoWay || Math.abs(rollO) > Math.abs(rollT))) {
+    rollDeg = -Math.sign(dr) * Math.min(twoWay ? ROLL_TWO_WAY_MAX_DEG : ROLL_MAX_DEG, Math.abs(dr) - ROLL_KEEP_DEG);
+  }
+  const rollRad = (rollDeg * Math.PI) / 180;
+  // Dönüşün dayanağı taşıdığı yatay mesafe (merkez: çene çizgisi ortası, çene ucu).
+  const px = po.slice(0, 17).reduce((q, p) => q + p.x, 0) / 17;
+  const py = po[8].y;
+  const byRoll = (ao.x - px) * (Math.cos(rollRad) - 1) - (ao.y - py) * Math.sin(rollRad);
+  const lim = ALIGN_MAX * tplFaceW;
+  const shiftPx = Math.max(-lim, Math.min(lim, want - byRoll));
+  return { shiftPx: Math.abs(shiftPx) >= 1 ? shiftPx : 0, rollRad, fwd: side ? off : null, dx, rollO, rollT, side, reason: null };
+}
 // Şablon kişisi eşiği (sceneRestore ile aynı: saç teli/gözlük düşük
 // olasılıkla görünür).
 const T_PERSON_MIN = 0.08;
@@ -577,6 +672,26 @@ const T_PERSON_MIN = 0.08;
 // yeni yüzün kendisini kapsar (03d6c1f6 c4: siyah-beyaz karanlık kare, AI
 // yüzü sildi).
 const FILL_DEPTH_MAX = 0.35;
+// KAFAYLA TAŞINAN HAYALET (2026-10-26, 9987f742 c6, kullanıcı: "saçın üstünde
+// şekil kayması"): kafa katmanı kişi maskesinden alınıyor; şablonun gri
+// hayalet saçı ve kafaya bitişik arka plan (ca61076a c6: demir kiriş) kişi
+// maskesinde dolu, sınıflandırıcıda "arka plan" (bkz. hafıza ghost-hair-is-
+// background-class). Küçültme bunları kafayla birlikte aşağı taşıyıp saçın
+// üstüne şekil olarak koyuyordu; "küçültülen kafa dokunulmaz" kuralı yüzünden
+// kafa çevresi temizliği de silemiyordu. Kaş hizasının üstünde arka plan
+// sınıfı baskın, saç/deri olmayan pikseller taşınmaz: eski yerleri eski iz
+// olarak deliğe girer ve dolar.
+const GHOST_LAYER_BG_MIN = 0.5; // arka plan olasılığı bu değerden itibaren...
+const GHOST_LAYER_BG_FULL = 0.8; // ...bu değerde tamamen taşınmaz
+const GHOST_LAYER_HEAD_MAX = 0.3; // saç ya da yüz derisi olasılığı bunu aşan piksel kafadır
+// Dolu kafaya (saç/yüz ≥ 0.5) bu kadar yakın piksel yine taşınır, ikinci bu
+// kadarda tamamen bırakılır (yüz kutusu yüksekliğine oranla): saçın kendi ince
+// uçları sınıflandırıcıda arka plan çıkıyor; taşınmayınca kenar sertleşip
+// gökyüzü benekleri kaldı (d87c25b4 c8). Hayalet kütleleri bundan kalın.
+// 0.04'te ca61076a c6'nın kiriş "kavanozu" geri geldi (uzaklık şablonun saç
+// sınıfındaki hayalet tellerinden ölçülüyor); 0.02'de küçük bir tümsek kalıyor,
+// d87 c8 kenarı doğal.
+const GHOST_LAYER_KEEP_FACE = 0.02;
 
 const BG_FIELD_CELL = 4;
 /**
@@ -658,7 +773,7 @@ function headZone(Mo, W, bx0, by0, w, h, sx, sy, chin, r) {
   return out;
 }
 
-function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false, touchMask = null } = {}) {
+function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = false, touchMask = null, liftPx = 0, limbs = null, shiftPx = 0, rollRad = 0, notHead = null } = {}) {
   const out = Buffer.from(O);
   const cx = sil.cx;
   const chin = sil.chin;
@@ -668,11 +783,14 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   const rb = sil.headH / 2;
   const EL = 1.3; // kafa bölgesi elips yarıçapı (saç dahil olsun)
 
-  // Pencere: ölçekli ve ölçeksiz kafayı, boynu ve geçiş bandını kapsar.
+  // Pencere: ölçekli ve ölçeksiz kafayı, boynu ve geçiş bandını kapsar;
+  // hizada (bkz. planHeadAlign) taşınan ve döndürülen kafayı da.
   const reach = Math.max(s, 1 / s);
-  const bx0 = Math.max(0, Math.floor(cx - (EL + 0.4) * ra * reach - 8));
-  const bx1 = Math.min(W - 1, Math.ceil(cx + (EL + 0.4) * ra * reach + 8));
-  const by0 = Math.max(0, Math.floor(chin - (chin - hy + EL * rb) * reach - 8));
+  const sweep = Math.abs(Math.sin(rollRad)) * (chin - hy + EL * rb) * reach;
+  const bx0 = Math.max(0, Math.floor(cx - (EL + 0.4) * ra * reach - 8 - Math.max(0, -shiftPx) - sweep));
+  const bx1 = Math.min(W - 1, Math.ceil(cx + (EL + 0.4) * ra * reach + 8 + Math.max(0, shiftPx) + sweep));
+  let lift = Math.max(0, liftPx);
+  const by0 = Math.max(0, Math.floor(chin - (chin - hy + EL * rb) * reach - 8 - lift - Math.abs(Math.sin(rollRad)) * ra));
   const by1 = Math.min(H - 1, neck + 2);
   const w = bx1 - bx0 + 1;
   const h = by1 - by0 + 1;
@@ -685,24 +803,6 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   // dokunma 1.55) ve kalkık palto yakası (c3, 1.15) kafaya değen el sayıldı,
   // ikisi de büyük kalan kafayı küçültmedi. Kulağa/şakağa değen el (c8)
   // burun hizasının üstünde de görünür.
-  const seedX = Math.round(sil.seedX ?? sil.cx);
-  const touchY1 = Math.round(Math.min(chin - 0.1 * faceH, sil.noseY ?? Infinity));
-  let maxRun = 0;
-  for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= touchY1; y++) {
-    // Kişi maskesiyle (kafa sınıfıyla güçlendirilmiş değil, bkz.
-    // withHeadClasses): kulak/saç payı koşuyu uzatıp eli olmayan kafayı
-    // "dokunulmuş" saydırıyordu (99bacae0 c7).
-    const TM = touchMask || Mo;
-    if (y < 0 || y >= H || TM[y * W + seedX] < 0.5) continue;
-    let l = seedX;
-    let r = seedX;
-    while (l > 0 && TM[y * W + l - 1] >= 0.5) l--;
-    while (r < W - 1 && TM[y * W + r + 1] >= 0.5) r++;
-    if (r - l + 1 > maxRun) maxRun = r - l + 1;
-  }
-  const touch = maxRun / faceH;
-  if (touch > TOUCH_MAX) return { buf: out, moved: 0, neck, touch, skipped: true };
-
   // Ölçek ağırlığı k(x, y): kafa bölgesinde 1, çene altında boyun boyunca
   // 1 -> 0; yanlarda geçiş bandında 1 -> 0. Ölçek = 1 - k(1 - s).
   const smooth = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
@@ -714,14 +814,162 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
     const e = Math.abs(t) < EL ? ra * Math.sqrt(EL * EL - t * t) : 0;
     return y >= hy ? Math.max(0.83 * ra, e) : e;
   };
+
+  const seedX = Math.round(sil.seedX ?? sil.cx);
+  const touchY1 = Math.round(Math.min(chin - 0.1 * faceH, sil.noseY ?? Infinity));
+  // foreign(x, y): yalnız bükülecek yabancı pikseller sayılır (bkz. UZUV KORUMASI).
+  const runOf = (TM, PRg, foreign = null) => {
+    let maxRun = 0;
+    const on = (g) => TM[g] >= 0.5 && (!PRg || PRg[g] < 0.5);
+    for (let y = Math.round(sil.top + 0.15 * (chin - sil.top)); y <= touchY1; y++) {
+      if (y < 0 || y >= H || !on(y * W + seedX)) continue;
+      let l = seedX;
+      let r = seedX;
+      while (l > 0 && on(y * W + l - 1)) l--;
+      while (r < W - 1 && on(y * W + r + 1)) r++;
+      let n = r - l + 1;
+      if (foreign) {
+        n = 0;
+        for (let x = l; x <= r; x++) if (foreign(x, y)) n++;
+      }
+      if (n > maxRun) maxRun = n;
+    }
+    return maxRun / faceH;
+  };
+  // Kişi maskesiyle (kafa sınıfıyla güçlendirilmiş değil, bkz.
+  // withHeadClasses): kulak/saç payı koşuyu uzatıp eli olmayan kafayı
+  // "dokunulmuş" saydırıyordu (99bacae0 c7).
+  let touch = runOf(touchMask || Mo, null);
+  // UZUV KORUMASI (2026-10-22, 29cf877a c2 yüz ×1.40, kullanıcı: "kafa
+  // nesneye değiyor, çok büyük — nasıl çözeriz"): dokunan kafada kişi
+  // katmanının tamamı bükülünce koltuğa uzanan kolun gömleği dalgalanıyordu.
+  // Kıyafet ve kol/el derisi (sınıflandırıcı) bükülmez, olduğu yerde en üstte
+  // kalır; yalnız saç + yüz (+ boyun sütunu) taşınır. Boyun: çekirdek kafa
+  // genişliği içinde burun hizasının altındaki vücut derisi. Yalnız
+  // küçültme/kaldırmada (büyüyen kafa yakanın altına girerdi) ve yalnız
+  // dokunan karede — dokunmayan karelerin davranışı değişmez. Kafadan uzak
+  // arka plan sınıfı da sabit kalır (aşağıda). Koruma çıkarıldıktan sonra
+  // koşuda kafa sınıfı olmayan pikseller yüz boyunun TOUCH_FOREIGN_MAX katını
+  // aşıyorsa (sınıflandırıcının tanımadığı bitişik şey) kare yine atlanır.
+  // 29cf877a c2'deki "dokunma" aslında kıvırcık saçın genişliğiydi (1.11).
+  let PRg = null;
+  // BÜYÜTMEDE DE (2026-10-28, c9 kürk yaka): korunan yaka/el üstte kalır,
+  // büyüyen kafa arkasından geçer (gerçekte de yaka boynun önünde).
+  if (touch > TOUCH_MAX && limbs) {
+    PRg = new Float32Array(W * H);
+    const noseY = sil.noseY ?? chin;
+    // KİŞİ MASKESİNE TAŞAN ARKA PLAN (2026-10-22, zoom A/B b2 c8: kafanın
+    // yanındaki koyu ağaç gövdesi ve sandalye maskede kişi, sınıflandırıcıda
+    // arka plan — dokunma 0.42 çıktı, kafa ×1.12 büyük kaldı; 23579e24 c0 ön
+    // cam direği de böyle): kafa sınıfından saç teli payından (strandR)
+    // uzaktaki arka plan sınıfı sabit kalır, yanındaki delik dolar. Payın
+    // içi (saçak, hayalet saç) eskisi gibi eski iz sayılıp doldurulur.
+    const wW = bx1 - bx0 + 1;
+    const wH = by1 - by0 + 1;
+    let headDist = null;
+    if (limbs.bg) {
+      const hm = new Uint8Array(wW * wH);
+      for (let y = 0; y < wH; y++) for (let x = 0; x < wW; x++) if ((limbs.face || limbs.head)[(y + by0) * W + x + bx0] >= 0.5) hm[y * wW + x] = 1;
+      headDist = require("./headSurround").chamfer(hm, wW, wH);
+    }
+    const strandPx = Math.max(8, Math.round(0.07 * faceH)); // chamfer piksel döner
+    // KOPUK DERİ (2026-10-27, e25dc241 c0): boyun sütununda yalnız kafaya
+    // bitişik deri boyundur. Çeneye kaldırılmış el (bardak tutan) sütunun
+    // içinde kalınca kafayla taşınıyor, elin ortasından dikey dikiş ve
+    // bardağın yarı saydam kopyası çıkıyordu (kalıntı yargıcı küçültmeyi geri
+    // aldırdı). Kafa sınıfına 2 px bitişik deriden büyüyen bileşen boyundur;
+    // gerisi sütunda da korunur. Kafadan uzak arka plan (bardak, cam) çene
+    // hizasının üstünde sütunda da korunur — çenenin altında korunsa taşınan
+    // boynun kenarını keserdi.
+    const neckSkin = new Uint8Array(wW * wH);
+    {
+      const q = [];
+      for (let y = 0; y < wH; y++) {
+        for (let x = 0; x < wW; x++) {
+          if (limbs.skin[(y + by0) * W + x + bx0] < 0.5) continue;
+          let near = false;
+          for (let dy = -2; dy <= 2 && !near; dy++) {
+            for (let dx = -2; dx <= 2; dx++) {
+              const yy = y + dy, xx = x + dx;
+              if (yy >= 0 && xx >= 0 && yy < wH && xx < wW && limbs.head[(yy + by0) * W + xx + bx0] >= 0.5) { near = true; break; }
+            }
+          }
+          if (near) { neckSkin[y * wW + x] = 1; q.push(y * wW + x); }
+        }
+      }
+      while (q.length) {
+        const i = q.pop();
+        const x = i % wW, y = (i - x) / wW;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= wW || yy >= wH) continue;
+          const j = yy * wW + xx;
+          if (!neckSkin[j] && limbs.skin[(yy + by0) * W + xx + bx0] >= 0.5) { neckSkin[j] = 1; q.push(j); }
+        }
+      }
+    }
+    for (let y = by0; y <= by1; y++) {
+      const core = inX(Math.min(y, chin));
+      for (let x = bx0; x <= bx1; x++) {
+        const g = y * W + x;
+        const li = (y - by0) * wW + x - bx0;
+        // Boyun sütununda (yaka dahil) koruma yok — dokunmayan karedeki gibi
+        // boyunla taşınır; sabit yakanın iç kenarı taşınan boyunla basamak
+        // yapıyordu (29cf877a c2 denemesi). Sütun kenarı yumuşak.
+        // Sütun dar (çekirdek): öne eğik kafada omuz geniş sütunun içine
+        // giriyor, gömlek yine dalgalanıyordu.
+        const dx = Math.abs(x - cx) - core;
+        const col = y >= noseY ? smooth(dx / (0.5 * band)) : 1;
+        // Saçın içinde "kıyafet" sanılan ince şerit eski yerinde kalıp yeni
+        // saçın üstüne çiziliyordu (aynı deneme): kafa sınıfı baskınsa
+        // korunmaz.
+        const v = limbs.cloth[g] + limbs.skin[g] - limbs.head[g];
+        const pc = smooth((v - 0.2) / 0.4);
+        const detached = limbs.skin[g] >= 0.5 && limbs.skin[g] > limbs.cloth[g] && !neckSkin[li];
+        let pb = 0;
+        let pbCol = col;
+        if (headDist && limbs.bg[g] > 0.5) {
+          const d = headDist[li];
+          pb = smooth((d - strandPx) / strandPx) * smooth((limbs.bg[g] - 0.5) / 0.3);
+          if (y < chin) pbCol = 1;
+        }
+        PRg[g] = Math.max((detached ? 1 : col) * pc, pbCol * pb);
+      }
+    }
+    // Yabancı: kafa penceresinde (dışı bükülmez), kafa sınıfı değil, korunmuyor
+    // ve saçak bandının (2 × strandR) dışında — bant eski iz sayılıp dolar.
+    touch = runOf(touchMask || Mo, PRg, (x, y) => {
+      if (x < bx0 || x > bx1 || y < by0 || y > by1) return false;
+      if (limbs.head[y * W + x] >= 0.5) return false;
+      return !headDist || headDist[(y - by0) * wW + x - bx0] > 2 * strandPx;
+    });
+  }
+  // Dokunan kafa ölçeklenmez (2026-10-22 iki kez denendi): 23579e24 c0'da
+  // kafaya değen ön cam direği yukarı çekilip kemerde koyu çizgi bıraktı;
+  // 29cf877a c2'de (yüz ×1.40) koltuğa uzanan kolun gömleği dalgalandı.
+  if (touch > (PRg ? TOUCH_FOREIGN_MAX : TOUCH_MAX)) return { buf: out, moved: 0, neck, touch, skipped: true };
+  // Korumalı karede kaldırma sınırlı: sabit yaka boyun sütunu kenarında
+  // kaldırılan boyundan kopuyordu (zoom A/B b2 c8, 33 px); korunan kıyafeti
+  // kaldırmayla kaydırmak da omuz üstünü tırtıklı yaptı (29cf877a c2).
+  if (PRg) lift = Math.min(lift, LIFT_PROTECTED_MAX * faceH);
+  // Korunan uzuvla da hiza yapılır (2026-10-27, kullanıcı: "kafa önde
+  // kalıyordu"): e25dc241'de 10 karenin 5'i korumalıydı ve hiza hiç
+  // uygulanmadı. Kayma boyun sütununda K ile söner; yerel tekrarda (c0 c3 c4
+  // c8) yakada/atkıda basamak görülmedi. Kaldırma sınırı yukarıda kalır.
+  const PR = (x, y) => (PRg ? PRg[(y + by0) * W + (x + bx0)] : 0);
+  // Hizada kafanın kaynak ve hedef konumu birlikte K=1 içinde kalmalı: merkez
+  // kaymanın yarısı kadar kayar, genişlik kaymanın yarısı ve dönüşün o
+  // yükseklikteki yatay yer değiştirmesi kadar artar.
+  const kcx = cx + shiftPx / 2;
+  const sinR = Math.sin(rollRad);
   const K = new Float32Array(w * h);
   for (let y = 0; y < h; y++) {
     const gy = y + by0;
     const kv = gy <= chin ? 1 : 1 - smooth((gy - chin) / Math.max(1, neck - chin));
     if (kv <= 0) continue;
-    const xi = inX(Math.min(gy, chin));
+    const xi = inX(Math.min(gy, chin)) + Math.abs(shiftPx) / 2 + Math.abs(sinR) * Math.max(0, chin - gy);
     for (let x = 0; x < w; x++) {
-      const dx = Math.abs(x + bx0 - cx);
+      const dx = Math.abs(x + bx0 - kcx);
       const kh = dx <= xi ? 1 : 1 - smooth((dx - xi) / band);
       K[y * w + x] = kv * kh;
     }
@@ -746,7 +994,13 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   {
     let hz = new Float32Array(w * h);
     for (let y = 0; y < h && y + by0 <= hy; y++) {
-      for (let x = 0; x < w; x++) if (Mo[(y + by0) * W + (x + bx0)] >= 0.04 && inZone(x, y)) hz[y * w + x] = 1;
+      // Hizada saç hem eski yerinde hem taşındığı yerde bölgeye girer.
+      const off = Math.round(shiftPx + sinR * (chin - (y + by0)));
+      for (let x = 0; x < w; x++) {
+        if (Mo[(y + by0) * W + (x + bx0)] < 0.04 || !inZone(x, y)) continue;
+        hz[y * w + x] = 1;
+        if (off && x + off >= 0 && x + off < w) hz[y * w + x + off] = 1;
+      }
     }
     const r = Math.max(3, Math.round(band / 4));
     hz = boxBlur(hz, w, h, r);
@@ -764,8 +1018,15 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
   }
 
   // Kişi katmanı alfası (kaynak uzayı): kişi maskesinden doğrusal rampa.
+  // notHead: kafayla taşınmayacak kişi pikselleri (bkz. GHOST_LAYER_BG_MIN).
   const pb = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inZone(x, y)) pb[y * w + x] = Math.max(0, Math.min(1, (Mo[(y + by0) * W + (x + bx0)] - 0.15) / 0.45));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!inZone(x, y)) continue;
+      const g = (y + by0) * W + (x + bx0);
+      pb[y * w + x] = Math.max(0, Math.min(1, (Mo[g] - 0.15) / 0.45)) * (1 - PR(x, y)) * (notHead ? 1 - notHead[g] : 1);
+    }
+  }
   const soft = pb;
   const sampleA = (qx, qy) => {
     const x = qx - bx0;
@@ -779,22 +1040,37 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
       (soft[(y0 + 1) * w + x0] * (1 - fx) + soft[(y0 + 1) * w + x0 + 1] * fx) * fy;
   };
   // Ters eşleme (hedef p -> kaynak q): ölçek çene ortasında sabit; çene
-  // altında yalnızca yatay. Yeni kişi alfası hedef uzayında.
+  // altında yalnızca yatay. KALDIRMA (liftPx, bkz. correctHeadScale): kafa
+  // ve boyun bandı K ağırlığıyla yukarı alınır — kafa şablon çenesinin
+  // hizasına çıkar, boyun bandı aşağıdan gerilir (K→0 sınırında süreklilik).
+  // HİZA (shiftPx, rollRad, bkz. planHeadAlign) bunların ARDINDAN uygulanır:
+  // hedef önce K ağırlıklı kaymadan, sonra kaldırılmış çene ortası çevresinde
+  // K ağırlıklı dönüşten geri alınır; ikisi de 0 iken eşleme eskisiyle aynı.
   const A = new Float32Array(w * h);
   const QX = new Float32Array(w * h);
   const QY = new Float32Array(w * h);
+  const pivotY = chin - lift;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       if (K[i] <= 0) continue;
       const sc = 1 - K[i] * (1 - s);
-      const gx = x + bx0;
-      const gy = y + by0;
+      let gx = x + bx0 - K[i] * shiftPx;
+      let gy = y + by0;
+      if (rollRad) {
+        const a = -K[i] * rollRad;
+        const ux = gx - cx, uy = gy - pivotY;
+        gx = cx + ux * Math.cos(a) - uy * Math.sin(a);
+        gy = pivotY + ux * Math.sin(a) + uy * Math.cos(a);
+      }
       QX[i] = cx + (gx - cx) / sc;
-      QY[i] = gy <= chin ? chin + (gy - chin) / sc : gy;
+      QY[i] = (gy <= chin ? chin + (gy - chin) / sc : gy) + K[i] * lift;
       A[i] = sampleA(QX[i], QY[i]);
     }
   }
+  // Hedefteki koruma (pencere uzayında).
+  const PDst = PRg ? new Float32Array(w * h) : null;
+  if (PRg) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) PDst[y * w + x] = PRg[(y + by0) * W + (x + bx0)];
 
   // Eski kişi izi (değişen bölgede, saç teli dahil biraz genişletilmiş).
   let old = new Float32Array(w * h);
@@ -840,6 +1116,8 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
       const os = oldSoft[i];
       if (os <= 0.003) continue;
       const g = (y + by0) * W + (x + bx0);
+      // Korunan uzuv olduğu yerde kalır: delik değil, dolguya bağlamdır.
+      if (PDst && PDst[i] >= 0.5) continue;
       if (tPer[i]) {
         // Yeni kişinin tamamen örttüğü yer doldurulmaz; bağlam da olamaz
         // (orada şablon kişisi ya da eski kafa durur).
@@ -948,7 +1226,8 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
         let hv = bicubic(O, W, H, QX[i], QY[i], c);
         if (edge) hv += edge * (bgAt(x + bx0, y + by0, c) - bgAt(QX[i], QY[i], c));
         const v = F[gi + c] * (1 - na) + hv * na;
-        out[gi + c] = Math.max(0, Math.min(255, Math.round(v)));
+        const p = PDst ? PDst[i] : 0;
+        out[gi + c] = Math.max(0, Math.min(255, Math.round(p ? v * (1 - p) + O[gi + c] * p : v)));
       }
     }
   }
@@ -973,12 +1252,12 @@ function scaleHeadPatch(O, T, Mo, Mt, W, H, sil, faceH, s, { deferInpaint = fals
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const g = (y + by0) * W + (x + bx0);
-        if (hole[g]) wgt[g] = oldSoft[y * w + x] * (1 - A[y * w + x]);
+        if (hole[g]) wgt[g] = oldSoft[y * w + x] * (1 - A[y * w + x]) * (1 - (PDst ? PDst[y * w + x] : 0));
       }
     }
     inpaint = prepareInpaint(out, Fpre, W, H, hole, banned, wgt, head);
   }
-  return { buf: out, moved, neck, touch, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint, holeMask: holePx ? hole : null, headMask: head };
+  return { buf: out, moved, neck, touch, limbProtected: !!PRg, liftEff: lift, shiftEff: shiftPx, rollEff: rollRad, sEff: s, anchorY: chin, exposed: holePx / Math.max(1, headArea), holePx, holeDepth, seam, seamHi, inpaint, holeMask: holePx ? hole : null, headMask: head };
 }
 
 // AI DOLGUSU (2026-10-09, kullanıcı kararı: "OpenAI maskeli düzenleme").
@@ -1240,12 +1519,12 @@ async function rawRgb(buf, W = null, H = null) {
  * değen el "vücut derisi" sınıfında — ikisi de güçlenmez. Yalnız küçültme
  * katmanı için; ölçüler (gövde IoU, silüet) kişi maskesiyle kalır.
  */
-async function withHeadClasses(Mo, rgb, W, H, box, chin) {
+async function withHeadClasses(Mo, rgb, W, H, box, chin, browY = null) {
   const { classProbs, CLASSES } = require("./skinSeg");
   const x0 = Math.max(0, Math.floor(box.x - 0.9 * box.width)), x1 = Math.min(W, Math.ceil(box.x + 1.9 * box.width));
   const y0 = Math.max(0, Math.floor(box.y - 1.1 * box.height)), y1 = Math.min(H, Math.ceil(chin) + 1);
   const w = x1 - x0, h = y1 - y0;
-  if (w < 16 || h < 16) return Mo;
+  if (w < 16 || h < 16) return { mo: Mo, notHead: null };
   const crop = Buffer.alloc(w * h * 3);
   for (let y = 0; y < h; y++) rgb.copy(crop, y * w * 3, ((y + y0) * W + x0) * 3, ((y + y0) * W + x1) * 3);
   const P = await classProbs(crop, w, h);
@@ -1258,10 +1537,61 @@ async function withHeadClasses(Mo, rgb, W, H, box, chin) {
       if (hp > out[g]) out[g] = Math.min(1, hp);
     }
   }
-  return out;
+  if (browY == null) return { mo: out, notHead: null };
+  // Kaş hizasının üstünde kişi maskesindeki arka plan (bkz. GHOST_LAYER_BG_MIN).
+  const solid = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) if (P[CLASSES.hair][i] >= 0.5 || P[CLASSES.faceSkin][i] >= 0.5) solid[i] = 1;
+  const dSolid = require("./headSurround").chamfer(solid, w, h);
+  const keep = Math.max(2, GHOST_LAYER_KEEP_FACE * box.height);
+  const notHead = new Float32Array(W * H);
+  const yGhost = Math.min(h, Math.max(0, Math.floor(browY) - y0));
+  const ramp = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t);
+  for (let y = 0; y < yGhost; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const g = (y + y0) * W + x + x0;
+      if (Mo[g] < 0.04 || Math.max(P[CLASSES.hair][i], P[CLASSES.faceSkin][i]) > GHOST_LAYER_HEAD_MAX) continue;
+      const bg = ramp((P[CLASSES.background][i] - GHOST_LAYER_BG_MIN) / (GHOST_LAYER_BG_FULL - GHOST_LAYER_BG_MIN));
+      notHead[g] = bg * ramp((dSolid[i] - keep) / keep);
+    }
+  }
+  return { mo: out, notHead };
 }
 
-async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, templateEyewear = false, headClasses = true } = {}) {
+// Uzuv koruması için kafa çevresinde kıyafet ve vücut derisi olasılıkları
+// (tam kare, kesit dışı 0; bkz. scaleHeadPatch UZUV KORUMASI).
+async function limbClasses(rgb, W, H, box, chin, faceH) {
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const x0 = Math.max(0, Math.floor(box.x - 1.6 * box.width)), x1 = Math.min(W, Math.ceil(box.x + 2.6 * box.width));
+  const y0 = Math.max(0, Math.floor(box.y - 1.2 * box.height)), y1 = Math.min(H, Math.ceil(chin + 0.6 * faceH) + 1);
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 16 || h < 16) return null;
+  const crop = Buffer.alloc(w * h * 3);
+  for (let y = 0; y < h; y++) rgb.copy(crop, y * w * 3, ((y + y0) * W + x0) * 3, ((y + y0) * W + x1) * 3);
+  const P = await classProbs(crop, w, h);
+  const cloth = new Float32Array(W * H);
+  const skin = new Float32Array(W * H);
+  const head = new Float32Array(W * H);
+  const bg = new Float32Array(W * H);
+  // Saç + yüz derisi (aksesuar yok): kafa uzaklığı bundan ölçülür — elde
+  // tutulan bardakta "aksesuar" sınıfı benekleri bardağı kafaya bitişik
+  // gösteriyordu (e25dc241 c0).
+  const face = new Float32Array(W * H);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const g = (y + y0) * W + x + x0;
+      const i = y * w + x;
+      cloth[g] = P[CLASSES.clothes][i];
+      skin[g] = P[CLASSES.bodySkin][i];
+      head[g] = P[CLASSES.hair][i] + P[CLASSES.faceSkin][i] + P[CLASSES.others][i];
+      bg[g] = P[CLASSES.background][i];
+      face[g] = P[CLASSES.hair][i] + P[CLASSES.faceSkin][i];
+    }
+  }
+  return { cloth, skin, head, bg, face };
+}
+
+async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, templateEyewear = false, headClasses = true, noShrink = false, measureOnly = false } = {}) {
   const { faceLandmarks } = require("./faceQuality");
   const o = await rawRgb(outputBuf);
   const t = await rawRgb(templateBuf, o.W, o.H);
@@ -1319,8 +1649,63 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
   }
   const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio, widthRatio: width ? width.ratio : null });
   const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, widthRatio: width ? width.ratio : null, widthUsed: plan.widthUsed ?? false, bodyIou, faceShift, eyewear: templateEyewear };
-  if (!plan.apply) return { buf: null, applied: false, reason: plan.reason, ...info };
-  if (templateEyewear && plan.s > 1) return { buf: null, applied: false, reason: "eyewear-no-enlarge", ...info };
+  // ÇENE HİZASI (2026-10-22, kullanıcı: "kafa önde, boyun gözükmeli"): 25
+  // teslim karesinin çoğunda model çeneyi şablonunkinden yüz boyunun
+  // 0.1-0.3'ü kadar aşağı çizdi (b2a9537d c7 +0.18, c14 +0.12, 29cf877a c1
+  // +0.29); kafa yakaya gömülüp boyun kayboldu. Kafa ölçüsü tolerans içinde
+  // olsa da (c14) kafa şablon çenesine doğru kaldırılır. Profil ve yeniden
+  // kadrajda ölçü güvenilmez — yapılmaz.
+  const tplFaceH = lt.pts[8].y - Math.min(...lt.pts.slice(17, 27).map((p) => p.y));
+  const chinDy = tplFaceH > 0 ? (lo.pts[8].y - lt.pts[8].y) / tplFaceH : 0;
+  const align = planHeadAlign(lo.pts, lt.pts);
+  const yawO = Math.abs(landmarkYaw(lo.pts));
+  const yawT = Math.abs(landmarkYaw(lt.pts));
+  const poseOk = yawO < LIFT_MAX_YAW && yawT < LIFT_MAX_YAW && faceShift < LIFT_MAX_SHIFT;
+  const alignPoseOk = yawO < ALIGN_MAX_YAW_OUT && yawT < LIFT_MAX_YAW && faceShift < LIFT_MAX_SHIFT;
+  // GÖVDE YERİNDE Mİ: kişi maskesi IoU'su ya da (o düşükse) omuz noktaları
+  // (bkz. poseNet.js — koyu kıyafet koyu zeminde IoU yanıltıyor).
+  let bodyAligned = bodyIou >= BODY_ALIGNED_IOU;
+  const wantsMove = (poseOk && chinDy - LIFT_DEADBAND >= LIFT_MIN) || (alignPoseOk && (align.shiftPx || align.rollRad));
+  if (!bodyAligned && wantsMove) {
+    try {
+      const sh = await require("./poseNet").shoulderAlignment(outputBuf, tJpeg);
+      info.shoulders = sh;
+      bodyAligned = sh.ok;
+    } catch (e) {
+      console.error("Kafa ölçeği: omuz noktaları alınamadı (yalnız IoU):", e.message || e);
+    }
+  }
+  const liftOk = bodyAligned && poseOk;
+  const liftFrac = liftOk ? Math.min(LIFT_MAX, chinDy - LIFT_DEADBAND) : 0;
+  const liftPx = liftFrac >= LIFT_MIN ? liftFrac * tplFaceH : 0;
+  const shiftPx = bodyAligned && alignPoseOk ? align.shiftPx : 0;
+  const rollRad = bodyAligned && alignPoseOk ? align.rollRad : 0;
+  info.chinDy = chinDy;
+  info.liftPx = liftPx;
+  info.align = { fwd: align.fwd ?? null, dx: align.dx ?? null, rollO: align.rollO ?? null, rollT: align.rollT ?? null, side: !!align.side };
+  info.shiftPx = shiftPx;
+  info.rollDeg = (rollRad * 180) / Math.PI;
+  const moves = !!(liftPx || shiftPx || rollRad);
+  let s = plan.s;
+  if (!plan.apply) {
+    if (plan.reason !== "within-tolerance" || !moves) return { buf: null, applied: false, reason: plan.reason, ...info };
+    s = 1;
+  }
+  // YALNIZ HİZA (2026-10-27, e25dc241 c0/c4): küçültmenin açtığı büyük
+  // delik dolguda iz bırakıp kalıntı yargıcına takılınca kafa geride/dik
+  // konuma da hiç taşınmıyordu. Çağıran ikinci denemede küçültmesiz ister:
+  // yalnız kayma, dönüş ve kaldırma (delik küçük, iki karede de temiz).
+  if (noShrink && s < 1) {
+    if (!moves) return { buf: null, applied: false, reason: "no-move", ...info };
+    s = 1;
+  }
+  if (templateEyewear && s > 1) {
+    if (!moves) return { buf: null, applied: false, reason: "eyewear-no-enlarge", ...info };
+    s = 1;
+  }
+  info.s = s;
+  // YALNIZ ÖLÇÜ (2026-10-30, bkz. headWarp.js): plan döner, piksel taşınmaz.
+  if (measureOnly) return { buf: null, applied: false, reason: "measure-only", ...info, s, rollRad, bodyAligned };
 
   // Dönüşüm geometrisi: silüetten kafa tepesi/genişliği; çene ve merkez
   // yüz noktalarından (kutu çeneyi sakalın üstünde bitiriyordu).
@@ -1332,12 +1717,33 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
   const sil = { ...base, cx, seedX: Math.round(P[30].x), noseY: P[33].y, jaw: P.slice(0, 17), chin: Math.max(base.chin, chin), headH: Math.max(base.chin, chin) - base.top };
   const faceH = Math.max(lo.box.height, chin - lo.box.y);
   let MoHead = Mo;
+  let notHead = null;
   try {
-    if (headClasses) MoHead = await withHeadClasses(Mo, o.data, o.W, o.H, lo.box, chin);
+    if (headClasses) {
+      const browY = Math.min(...P.slice(17, 27).map((p) => p.y));
+      ({ mo: MoHead, notHead } = await withHeadClasses(Mo, o.data, o.W, o.H, lo.box, chin, browY));
+      if (notHead) {
+        let n = 0;
+        for (let i = 0; i < notHead.length; i++) if (notHead[i] >= 0.5 && Mo[i] >= 0.5) n++;
+        info.ghostLayerPx = n;
+      }
+    }
   } catch (e) {
     console.error("Kafa ölçeği: kafa sınıfları alınamadı (yalnız kişi maskesi):", e.message || e);
   }
-  const r = scaleHeadPatch(o.data, t.data, MoHead, Mt, o.W, o.H, sil, faceH, plan.s, { deferInpaint, touchMask: Mo });
+  let limbs = null;
+  {
+    try {
+      limbs = await limbClasses(o.data, o.W, o.H, lo.box, chin, faceH);
+    } catch (e) {
+      console.error("Kafa ölçeği: uzuv sınıfları alınamadı (dokunan kafa atlanır):", e.message || e);
+    }
+  }
+  const r = scaleHeadPatch(o.data, t.data, MoHead, Mt, o.W, o.H, sil, faceH, s, { deferInpaint, touchMask: Mo, liftPx, limbs, shiftPx, rollRad, notHead });
+  info.limbProtected = !!r.limbProtected;
+  if (r.liftEff != null) info.liftPx = r.liftEff;
+  if (r.shiftEff != null) info.shiftPx = r.shiftEff;
+  if (r.rollEff != null) info.rollDeg = (r.rollEff * 180) / Math.PI;
   if (r.skipped) return { buf: null, applied: false, reason: r.reason || "head-touched", touch: r.touch, sEff: r.sEff ?? null, ...info };
   const buf = await sharp(r.buf, { raw: { width: o.W, height: o.H, channels: 3 } })
     .png()
@@ -1354,7 +1760,7 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
     // job/base: worker iş parçacığına taşınabilir hâl (bkz. postTasks.js).
     inpaint = { rect: { left: job.left, top: job.top, side: job.side }, job, base: buf };
   }
-  return { buf, applied: true, reason: null, inpaint, holeMask: r.holeMask, headMask: r.headMask, ...info, s: r.sEff ?? plan.s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
+  return { buf, applied: true, reason: null, inpaint, holeMask: r.holeMask, headMask: r.headMask, ...info, s: r.sEff ?? s, planS: plan.s, anchorY: r.anchorY, exposed: r.exposed, holePx: r.holePx, holeDepth: r.holeDepth, seam: r.seam, seamHi: r.seamHi, head, movedPx: r.moved, silReason: so.ok ? null : so.reason };
 }
 
 // KAFA SAÇAĞI TEMİZLİĞİ (2026-10-10, 790bd56b c0, kullanıcı: "base fotodan
@@ -1532,6 +1938,7 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
 
 module.exports = {
   correctHeadScale,
+  planHeadAlign,
   prepareHeadFringeRepaint,
   personMask,
   measureSilhouette,
@@ -1544,6 +1951,8 @@ module.exports = {
   widthUsable,
   APPLY_MIN_DELTA,
   MIN_SCALE,
+  MIN_SCALE_EXTREME,
+  SOFT_MIN_SCALE,
   MAX_SCALE,
   BODY_ALIGNED_IOU,
   FACE_ALIGNED_SHIFT,

@@ -13,10 +13,14 @@ function session(modelPath) {
   if (!sessionP) {
     sessionP = (async () => {
       const ort = require("onnxruntime-node");
+      // ARENA KAPALI (2026-10-26): arena en büyük çalıştırmanın ara
+      // tensörlerini örnek ömrünce tutuyordu (+0.81 GB; kapalı +0.32 GB,
+      // ~0.6 sn yavaş). Üretim fonksiyonu 8 GiB'in %81-91'ini kullanıyor.
       const s = await ort.InferenceSession.create(modelPath, {
         intraOpNumThreads: 2,
         interOpNumThreads: 1,
         graphOptimizationLevel: "all",
+        enableCpuMemArena: false,
       });
       return { ort, s };
     })();

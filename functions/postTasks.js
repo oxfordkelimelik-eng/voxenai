@@ -20,7 +20,7 @@ function plainInpaint(inp) {
  * YÜZ IŞIĞI (bayrakla) → TEN ALANI → YÜZ DETAYI → ARKA PLAN → SİYAH-BEYAZ SON.
  * Açıklamalar falPhotos'taki eski kilit bloğundan.
  */
-async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, templateEyewear = false, skinLight = null }) {
+async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, templateEyewear = false, skinLight = null, mstUser = null, mstTpl = null }) {
   let deliverBuf = toBuf(buf);
   tpl = toBuf(tpl);
   let bgRestored = false;
@@ -32,7 +32,7 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, template
   try {
     if (faceLight && tpl) {
       const { relightFace } = require("./faceRelight");
-      const fl = await relightFace(deliverBuf, tpl, { templateEyewear, skinLight });
+      const fl = await relightFace(deliverBuf, tpl, { templateEyewear, skinLight, mstUser, mstTpl });
       const n = (v, d = 2) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
       const tp = fl.tone || {};
       const v3 = (e) => (e ? `[${e.map((v) => n(v)).join("/")}]` : "-");
@@ -59,7 +59,7 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, template
     const { correctSkinToneField } = require("./skinTone");
     const st = await correctSkinToneField(deliverBuf, { templateBuf: tpl });
     const n = (v) => (v != null ? v.toFixed(1) : "null");
-    const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"} vücutIşığı=${st.bodyLightRatio != null ? st.bodyLightRatio.toFixed(2) : "null"}`;
+    const ölçü = `açıklıkFarkı=${n(st.deltaLBefore)}->${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}->${n(st.chromaAfter)} yayılım=${n(st.spreadBefore)}->${n(st.spreadAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVetosu=${st.clothVeto != null ? st.clothVeto.toFixed(2) : "null"} vücutIşığı=${st.bodyLightRatio != null ? st.bodyLightRatio.toFixed(2) : "null"}`;
     if (st.applied && st.buf) {
       deliverBuf = st.buf;
       console.log(`TEN ALANI (style=${styleId}, chunk=${chunkIdx}): UYGULANDI ${ölçü} değişenPx=${st.changedPx}`);
@@ -151,22 +151,181 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, template
 }
 
 /**
+ * SADE AKIŞIN SON ADIMLARI (2026-10-30, kullanıcı: "kafa orantılı, ışık doğru
+ * yerden vursun, ten vücutla uyumlu, yüz net, yapıştırılmış gibi durmasın").
+ * KAFA BÜKME (headWarp) → YÜZ SAHNE IŞIĞI (faceTone) → YÜZ DETAYI (faceDetail:
+ * keskinlik + gren, yüzü yeniden çizmez) → SİYAH-BEYAZ. Eski ışık/ten
+ * katmanları yüzü açıyordu (bkz. faceTone başlığı) — burada yoklar.
+ */
+// Selfie kafa profilleri (bkz. ghostClean.headProfileOf), iş başına bir kez —
+// worker aynı işin kareleri arasında önbellekte tutar. Selfie'ler iş bitince
+// silinir; boş sonuç önbelleğe alınmaz.
+// 2026-11-03 KAPATILDI (8ee5afa0, kullanıcı: "göz açma promptta veriliyor"):
+// kapak selfie'de ve çıktıda iki kez kaldırılıyordu, gözler iri/kaymış göründü.
+const EYE_OPEN_SIMPLE = false;
+// AĞIZ KÖŞESİ KİLİDİ 2026-11-03 KAPATILDI (8ee5afa0, kullanıcı: "bu yapılmasın;
+// selfie'deki gibi doğal olsun"): köşe base'in altına iniyor, 5 karede kişi
+// somurtkan göründü. İfade artık yalnız promptla.
+const MOUTH_LOCK_ON = false;
+// VÜCUT TENİ YÜZE (2026-11-03, 7e04933e c5, kullanıcı: "yüz ten rengi ile el
+// uyuşmamış, yüz ten rengi ile tüm vücut teni uyuşmalı"): model base'in elini
+// değiştirmeden bırakıyor. skinTone yüz kilidiyle: yalnız el/kol yüzün rengine
+// gelir (ışık/gölge sahneden), yüz ve boyun değişmez, kıyafet yüze göre deri
+// kapısıyla korunur.
+const SKIN_FIELD_SIMPLE = true;
+const PROFILE_CACHE = new Map();
+const PROFILE_CACHE_MAX = 4;
+const PROFILE_FETCH_MS = 15000;
+function selfieProfiles(key, urls) {
+  const k = key || urls.join("|");
+  if (PROFILE_CACHE.has(k)) return PROFILE_CACHE.get(k);
+  const p = (async () => {
+    const { headProfileOf } = require("./ghostClean");
+    const res = [];
+    for (const u of urls) {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), PROFILE_FETCH_MS);
+      try {
+        const r = await fetch(u, { signal: ctl.signal });
+        if (!r.ok) continue;
+        const prof = await headProfileOf(Buffer.from(await r.arrayBuffer()));
+        if (prof) res.push(prof);
+      } catch (e) {
+        console.error("Selfie kafa profili alınamadı (atlanıyor):", e.message || e);
+      } finally {
+        clearTimeout(tm);
+      }
+    }
+    if (!res.length) PROFILE_CACHE.delete(k);
+    return res;
+  })();
+  PROFILE_CACHE.set(k, p);
+  if (PROFILE_CACHE.size > PROFILE_CACHE_MAX) PROFILE_CACHE.delete(PROFILE_CACHE.keys().next().value);
+  return p;
+}
+
+async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = false, mstUser = null, mstTpl = null, refUrls = null, jobKey = null, refDescriptor = null, hairErased = false }) {
+  let out = toBuf(buf);
+  tpl = toBuf(tpl);
+  const tag = `style=${styleId}, chunk=${chunkIdx}`;
+  if (!tpl) {
+    console.log(`SADE SON ADIMLAR (${tag}): ATLANDI[no-template]`);
+    return { buf: out };
+  }
+  // ŞABLON KAFASI İZİ (2026-10-30, bkz. ghostClean.js) — kafa bükmeden ÖNCE:
+  // iz şablonla piksel hizasındayken bulunur. Modele saçı silinmiş base gittiyse
+  // (falPhotos.TEMPLATE_HAIR_ERASE) iz kaynağı yok; büyük dolgu yalnız zarar
+  // veriyordu (80fc7ec4 c0: bulanık leke, kesik kafa tepesi) — atlanır.
+  if (hairErased) console.log(`ŞABLON İZİ (${tag}): ATLANDI[hair-erased]`);
+  else try {
+    const { cleanTemplateGhost } = require("./ghostClean");
+    const profiles = Array.isArray(refUrls) && refUrls.length ? await selfieProfiles(jobKey, refUrls) : [];
+    const gc = await cleanTemplateGhost(out, tpl, { profiles });
+    if (gc.applied && gc.buf) out = gc.buf;
+    const n = (v, d = 3) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
+    console.log(`ŞABLON İZİ (${tag}): ${gc.applied ? "TEMİZLENDİ" : `ATLANDI[${gc.reason}]`} izPx=${gc.ghostPx ?? "null"} iz/yüz²=${n(gc.ghostFace2)} kırıntı=${gc.crumbPx ?? 0} gözÜstü=${n(gc.ghostUp, 2)} kafayaBitişik=${n(gc.ghostAttached, 2)} yöntem=${gc.mode || "null"} selfieProfil=${profiles.length}${gc.ms != null ? ` ${gc.ms}ms` : ""}`);
+  } catch (e) {
+    console.error("Sade akış: şablon izi temizliği hata verdi (atlanıyor):", e);
+  }
+  try {
+    const { correctHeadByWarp } = require("./headWarp");
+    const hw = await correctHeadByWarp(out, tpl, { templateEyewear });
+    if (hw.applied && hw.buf) out = hw.buf;
+    console.log(`KAFA BÜKME (${tag}): ${hw.applied ? "UYGULANDI" : `ATLANDI[${hw.reason}]`} ${hw.ölçü || ""}`);
+  } catch (e) {
+    console.error("Sade akış: kafa bükme hata verdi (atlanıyor):", e);
+  }
+  try {
+    const { matchFaceToScene } = require("./faceTone");
+    const ft = await matchFaceToScene(out, tpl, { mstUser, mstTpl });
+    const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
+    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"}`;
+    if (ft.applied && ft.buf) out = ft.buf;
+    console.log(`YÜZ SAHNE IŞIĞI (${tag}): ${ft.applied ? "UYGULANDI" : `ATLANDI[${ft.reason}]`} ${ölçü}${ft.ms != null ? ` ${ft.ms}ms` : ""}`);
+  } catch (e) {
+    console.error("Sade akış: yüz sahne ışığı hata verdi (atlanıyor):", e);
+  }
+  if (SKIN_FIELD_SIMPLE) try {
+    const t0 = Date.now();
+    const { correctSkinToneField } = require("./skinTone");
+    const st = await correctSkinToneField(out, { templateBuf: tpl, faceLocked: true });
+    if (st.applied && st.buf) out = st.buf;
+    const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
+    console.log(`TEN ALANI (${tag}): ${st.applied ? "UYGULANDI" : `ATLANDI[${st.reason}]`} yüzKilidi=evet açıklıkFarkı=${n(st.deltaLBefore)}→${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}→${n(st.chromaAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVeto=${n(st.clothVeto, 2)} değişenPx=${st.changedPx ?? 0} ${Date.now() - t0}ms`);
+  } catch (e) {
+    console.error("Sade akış: ten alanı hata verdi (atlanıyor):", e);
+  }
+  // AĞIZ KÖŞESİ (2026-11-01, 831a00a4 c0, kullanıcı: "gereksiz bir
+  // gülümseme eklenmiş … kişiye gereksiz gülümseme katma"): base gülmüyorsa
+  // çıktının ağız köşeleri nötrün biraz altına iner (bkz. refMatch).
+  if (MOUTH_LOCK_ON) try {
+    const t0 = Date.now();
+    const mo = await require("./refMatch").lockMouthToBase(out, tpl);
+    if (mo.applied && mo.buf) out = mo.buf;
+    const n = (v) => (v != null ? v.toFixed(3) : "null");
+    console.log(`AĞIZ KÖŞESİ (${tag}): ${mo.applied ? "UYGULANDI" : `ATLANDI[${mo.reason}]`} çıktı=${n(mo.smile)}${mo.applied ? `→${n(mo.after)}` : ""} base=${n(mo.base)} ${Date.now() - t0}ms`);
+  } catch (e) {
+    console.error("Sade akış: ağız köşesi hata verdi (atlanıyor):", e);
+  }
+  // GÖZ AÇIKLIĞI (2026-10-30, kullanıcı: "uykulu gibi duruyorsa gözleri
+  // açmalı, base ile aynı yere bakmalı"): eyeOpen.js yalnız üst kapağı en çok
+  // açıklığın %25'i kadar kaldırır (iris ve bakış yönü yerinde), kimlik
+  // kapılı; 10-27'de 18 karede kimlik değişmedi. Yüz detayından ÖNCE (bükme
+  // irisi hafif yumuşatıyor, keskinlik geri getirir).
+  if (EYE_OPEN_SIMPLE) {
+    try {
+      const t0 = Date.now();
+      const eo = await require("./eyeOpen").openEyes(out, refDescriptor);
+      if (eo.applied && eo.buf) out = eo.buf;
+      const n = (v) => (v != null ? v.toFixed(3) : "null");
+      console.log(`GÖZ AÇIKLIĞI (${tag}): ${eo.applied ? "UYGULANDI" : `ATLANDI[${eo.reason}]`} açıklık=${n(eo.ap)} kaldırma=${n(eo.lift)} kimlik=${n(eo.id0)}→${n(eo.id1)} ${Date.now() - t0}ms`);
+    } catch (e) {
+      console.error("Sade akış: göz açıklığı hata verdi (atlanıyor):", e);
+    }
+  }
+  try {
+    const { matchFaceDetail } = require("./faceDetail");
+    const fd = await matchFaceDetail(out, tpl);
+    const n = (v) => (v != null ? v.toFixed(2) : "null");
+    const gr = fd.grain || {};
+    if (fd.applied && fd.buf) out = fd.buf;
+    console.log(`YÜZ DETAYI (${tag}): ${fd.applied ? "UYGULANDI" : "ATLANDI"} keskinlik=${fd.sharpened ? "UYGULANDI" : `ATLANDI[${fd.reason}]`} kazanç=${n(fd.gain)} yüz=${n(fd.outFace)}->${n(fd.after)} hedef=${n(fd.target)} gren=${gr.reason ? `ATLANDI[${gr.reason}]` : "UYGULANDI"} şablonGren=${n(gr.tpl)} yüzGren=${n(gr.before)}->${n(gr.after)}`);
+  } catch (e) {
+    console.error("Sade akış: yüz detayı hata verdi (atlanıyor):", e);
+  }
+  try {
+    const { matchGrayscale } = require("./faceLight");
+    const g = await matchGrayscale(out, tpl);
+    if (g.applied && g.buf) out = g.buf;
+  } catch (e) {
+    console.error("Sade akış: siyah-beyaz hata verdi (atlanıyor):", e);
+  }
+  return { buf: out };
+}
+
+/**
  * KAFA ÖLÇEĞİ (bkz. headScale.correctHeadScale). Log metinleri burada
  * kurulur, yazdırma çağıranda (sonuç AI dolgusuna bağlı).
  */
-async function headScale({ buf, tpl, templateEyewear = false }) {
+async function headScale({ buf, tpl, templateEyewear = false, noShrink = false }) {
   const { correctHeadScale } = require("./headScale");
-  const hs = await correctHeadScale(toBuf(buf), toBuf(tpl), { deferInpaint: true, templateEyewear });
+  const hs = await correctHeadScale(toBuf(buf), toBuf(tpl), { deferInpaint: true, templateEyewear, noShrink });
   const n = (v) => (v != null ? v.toFixed(3) : "null");
   const hp = hs.parts || {};
   const parçalar = hs.eyewear
     ? `gözlüklüŞablon gözsüzNokta=${n(hp.landmark)} yüzAlanı=${n(hp.faceArea)} kutuEn=${n(hp.boxW)} kutuBoy=${n(hp.boxH)}`
     : `gözÇene=${n(hp.eyeChin)} kaşBurun=${n(hp.browNose)} gözBurun=${n(hp.eyeNose)} burunBoyu=${n(hp.noseLen)}`;
+  // KAFA HİZASI (bkz. headScale.planHeadAlign): yatay kayma ve eğim.
+  const al = hs.align || {};
+  const sh = hs.shoulders;
+  const hiza = ` hiza[${al.side ? "yan" : "ön"} önde=${n(al.fwd)} dx=${n(al.dx)} eğim=${al.rollO != null ? al.rollO.toFixed(1) : "null"}/${al.rollT != null ? al.rollT.toFixed(1) : "null"}°]` +
+    ` kaydırPx=${hs.shiftPx != null ? Math.round(hs.shiftPx) : "null"} döndür=${hs.rollDeg != null ? hs.rollDeg.toFixed(1) : "null"}°` +
+    (sh ? ` omuz=${sh.ok ? "yerinde" : `kaymış[${sh.reason}]`}${sh.dx != null ? `/${n(sh.dx)},${n(sh.dy)}x${n(sh.wRatio)}` : ""}` : "");
   const hacim = ` kafaHacmi=${n(hs.volRatio)}${hs.volUsed ? "" : "[kullanılmadı]"} genişlik=${n(hs.widthRatio)}${hs.widthUsed ? "[kullanıldı]" : ""}`;
-  const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} ${parçalar}${hacim} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}${hs.planS != null ? ` plan=${n(hs.planS)} açıkŞablon=${n(hs.exposed)}` : ""}${hs.sEff != null ? ` izinliS=${n(hs.sEff)}` : ""}`;
+  const ölçü = `s=${n(hs.s)} ham=${n(hs.rawS)} yüzOranı=${n(hs.faceRatio)} ${parçalar}${hacim} gövdeIoU=${n(hs.bodyIou)} yüzKayması=${n(hs.faceShift)} çeneDy=${n(hs.chinDy)} kaldırmaPx=${hs.liftPx != null ? Math.round(hs.liftPx) : "null"}${hiza}${hs.limbProtected ? " uzuvKoruması=evet" : ""}${hs.ghostLayerPx != null ? ` taşınmayanHayalet=${hs.ghostLayerPx}` : ""}${hs.touch != null ? ` dokunma=${n(hs.touch)}` : ""}${hs.silReason ? ` silüetYok=${hs.silReason}` : ""}${hs.planS != null ? ` plan=${n(hs.planS)} açıkŞablon=${n(hs.exposed)}` : ""}${hs.sEff != null ? ` izinliS=${n(hs.sEff)}` : ""}`;
   const applied = !!(hs.applied && hs.buf);
   const delik = applied ? `taşınanPx=${hs.movedPx} delikPx=${hs.holePx ?? "null"} delikDerinlik=${hs.holeDepth != null ? Math.round(hs.holeDepth) : "null"}` : "";
-  return { applied, reason: hs.reason, buf: applied ? hs.buf : null, holeMask: applied ? hs.holeMask || null : null, headMask: applied ? hs.headMask || null : null, inpaint: applied ? plainInpaint(hs.inpaint) : null, ölçü, delik };
+  return { applied, reason: hs.reason, buf: applied ? hs.buf : null, holeMask: applied ? hs.holeMask || null : null, headMask: applied ? hs.headMask || null : null, inpaint: applied ? plainInpaint(hs.inpaint) : null, ölçü, delik, s: hs.s ?? null, moves: !!(hs.liftPx || hs.shiftPx || hs.rollDeg) };
 }
 
 async function surroundPrep({ buf, tpl = null, extraHole = null, newHead = null }) {
@@ -185,11 +344,53 @@ async function surroundPrep({ buf, tpl = null, extraHole = null, newHead = null 
   return { ...rest, inpaint: plainInpaint(inpaint) };
 }
 
+/** BUKLE KALINTISI (bkz. curlRemnant.js). Dolgu çağıranda (fillHeadJobLocally). */
+async function curlRemnantPrep({ buf, tpl }) {
+  const { prepareCurlRemnantFill } = require("./curlRemnant");
+  const cr = await prepareCurlRemnantFill(toBuf(buf), toBuf(tpl));
+  const { inpaint, ...rest } = cr;
+  return { ...rest, inpaint: plainInpaint(inpaint) };
+}
+
 async function fringePrep({ buf, tpl }) {
   const { prepareHeadFringeRepaint } = require("./headScale");
   const fr = await prepareHeadFringeRepaint(toBuf(buf), toBuf(tpl));
   const { inpaint, ...rest } = fr;
   return { ...rest, inpaint: plainInpaint(inpaint) };
+}
+
+/**
+ * IŞIKLI (2026-10-21, FaceApp örneğinden ölçülen ton eğrisi, bkz.
+ * faceGlow.js): yalnız koyu arka planlı karelerde. Log metni burada kurulur,
+ * yazdırma çağıranda.
+ * KİŞİ = SAHNE (2026-11-01, kullanıcı: "ışıklandırma arka plana göre tam
+ * yerinde"): 0.6/0.3 kişiyi sahneden ~+3 L fazla açıyordu (831a00a4'te yüz
+ * base'den +0.41 stop). Eşit güçte tüm kareye aynı eğri: FaceApp ışığı kalır,
+ * yüz-arka plan ilişkisi base'deki gibi. Eski hâl: GLOW_PERSON 0.6, GLOW_SCENE 0.3.
+ */
+const GLOW_PERSON = 0.45;
+const GLOW_SCENE = 0.45;
+async function glow({ buf }) {
+  const { applyGlowFilter } = require("./faceGlow");
+  const gl = await applyGlowFilter(toBuf(buf), { strength: GLOW_PERSON, bgStrength: GLOW_SCENE });
+  const n = (v) => (v != null ? v.toFixed(1) : "null");
+  const applied = !!(gl.applied && gl.buf);
+  const ölçü = applied
+    ? `arkaPlanL=${n(gl.bgL)} güç=${gl.gate.toFixed(2)} gri=${gl.grayscale ? 1 : 0}`
+    : `ATLANDI[${gl.reason}] arkaPlanL=${n(gl.bgL)}`;
+  return { applied, buf: applied ? gl.buf : null, ölçü };
+}
+
+/**
+ * SELFIE'DEN YÜZ DETAYI (2026-10-22, bkz. faceDetailTransfer.js). Log metni
+ * burada kurulur, yazdırma çağıranda.
+ */
+async function selfieDetail({ buf, selfies }) {
+  const { transferSelfieDetail } = require("./faceDetailTransfer");
+  const r = await transferSelfieDetail(toBuf(buf), (selfies || []).map(toBuf));
+  const n = (v) => (v != null && Number.isFinite(v) ? v.toFixed(2) : "null");
+  const ölçü = `selfie=${r.selfieIdx ?? "-"} yön=${n(r.yawOut)}/${n(r.yawSelfie)} ölçek=${n(r.k)} yüzBoyu=${r.faceH != null ? Math.round(r.faceH) : "null"} detay=${n(r.hfOut)}/${n(r.hfSelfie)} deriPx=${r.skinPx ?? "null"} ölüPx=${r.deadPx ?? "null"} ters=${r.flipped ?? "null"}`;
+  return { applied: !!(r.applied && r.buf), buf: r.applied ? r.buf : null, reason: r.reason, ölçü };
 }
 
 /** AI çıktısını inpaint işine yerleştirir (bkz. headScale.finishInpaint). */
@@ -199,4 +400,31 @@ async function finishInpaint({ job, ai, base }) {
   return _finishInpaint(job, toBuf(ai), toBuf(base));
 }
 
-module.exports = { layers, headScale, surroundPrep, fringePrep, finishInpaint, toBuf };
+/**
+ * SELFIE'Yİ BASE POZUNA ÇEVİRME (2026-10-31, bkz. headPose3d.reposeFace) —
+ * ağ + bükme + iki ölçüm ~1 sn; ana iş parçacığını bloklamasın diye havuzda.
+ * base verilirse (refMatch.baseFeatures) bakış/kapak/yatıklık/ağız da base'e
+ * uydurulur (+~0.5 sn), poz çevrilmese bile.
+ */
+async function reposeSelfie({ buf, yaw, pitch = null, mirror = false, base = null, only = null }) {
+  const { reposeFace } = require("./headPose3d");
+  const rp = await reposeFace(toBuf(buf), { yaw, pitch }, { mirror });
+  if (base && rp && rp.buf) {
+    const m = await require("./refMatch").matchRefToBase(rp.buf, base, { only });
+    rp.match = { applied: m.applied, steps: m.steps, log: m.log, ms: m.ms };
+    if (m.applied && m.buf) rp.buf = m.buf;
+  }
+  return rp;
+}
+
+/** SELFIE IŞIĞINI EŞİTLEME (2026-11-03, bkz. selfieLight.js) — segmentasyon havuzda. */
+async function flattenSelfie({ buf }) {
+  return require("./selfieLight").flattenSelfieLight(toBuf(buf));
+}
+
+/** GÜNEŞ GÖZLÜĞÜNÜ BASE'DEN TAŞIMA (2026-11-03, bkz. sunglassTransfer.js). */
+async function sunglassTransfer({ buf, tpl }) {
+  return require("./sunglassTransfer").transferSunglasses(toBuf(buf), toBuf(tpl));
+}
+
+module.exports = { _testables: { SKIN_FIELD_SIMPLE }, layers, simpleFinish, reposeSelfie, flattenSelfie, sunglassTransfer, headScale, surroundPrep, curlRemnantPrep, fringePrep, glow, selfieDetail, finishInpaint, toBuf };

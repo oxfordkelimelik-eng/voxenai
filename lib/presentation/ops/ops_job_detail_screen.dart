@@ -219,6 +219,11 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       padding: const EdgeInsets.all(16),
       children: [
         _infoCard(),
+        if (data.selfies.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          _sectionTitle('SELFIE\'LER (${data.selfies.length})'),
+          _photoGrid(data.selfies, const []),
+        ],
         if (data.awaitingApproval || staged.isNotEmpty) ...[
           const SizedBox(height: 20),
           _sectionTitle(

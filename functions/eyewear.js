@@ -50,7 +50,11 @@ function segDist(px, py, a, b) {
  * Gözlük maskesi (68 nokta, görüntü koordinatı): iki cam elipsi, köprü ve
  * kulağa giden saplar. Kaşların üstü, alın ve saç dışarıda kalır.
  */
-function eyewearGeometry(pts) {
+// YAN DÖNÜK BAŞ (2026-11-03, 8ee5afa0 c4, 53°): göz arası mesafe görüntüde
+// cos(yaw) kadar kısalıyor; cam elipsi base gözlüğünün yarısı kaldı, model tek
+// küçük cam çizdi. Ölçek kısalmanın tersiyle büyür (en çok 1/YAW_COS_MIN).
+const YAW_COS_MIN = 0.5;
+function eyewearGeometry(pts, { yawDeg = null } = {}) {
   const ctr = (i0, i1) => {
     let x = 0, y = 0;
     for (let i = i0; i <= i1; i++) { x += pts[i].x; y += pts[i].y; }
@@ -58,7 +62,9 @@ function eyewearGeometry(pts) {
     return { x: x / n, y: y / n };
   };
   const eR = ctr(36, 41), eL = ctr(42, 47);
-  const iod = Math.hypot(eL.x - eR.x, eL.y - eR.y);
+  const iodImg = Math.hypot(eL.x - eR.x, eL.y - eR.y);
+  const cosY = yawDeg != null && Number.isFinite(yawDeg) ? Math.max(YAW_COS_MIN, Math.cos((Math.abs(yawDeg) * Math.PI) / 180)) : 1;
+  const iod = iodImg / cosY;
   const RX = LENS_RX * iod, RY = LENS_RY * iod, ARM = ARM_HALF * iod;
   const segs = [
     [{ x: eR.x - 0.45 * iod, y: eR.y - 0.12 * iod }, { x: pts[0].x, y: pts[0].y - 0.05 * iod }],
@@ -73,7 +79,7 @@ function eyewearGeometry(pts) {
     for (const [a, b] of segs) if (segDist(x, y, a, b) <= ARM) return true;
     return false;
   };
-  return { eR, eL, iod, inMask };
+  return { eR, eL, iod, iodImg, cosY, inMask };
 }
 
 async function blur1(arr, W, H, r) {
@@ -163,17 +169,70 @@ async function compositeEyewear(baseRgb, W, H, rect, geom, aiRgb, { keepEyes = f
   const useGrowth = grownFrac <= GROW_MAX_FRAC;
   if (useGrowth) for (let i = 0; i < N; i++) if (grown[i]) m[i] = 1;
   const wgt = await blur1(m, side, side, feather);
+  const shade = await castShadow(baseRgb, W, rect, geom, aiRgb, off, m);
   const out = Buffer.from(baseRgb);
+  if (shade) {
+    for (let i = 0; i < N; i++) {
+      if (!(shade[i] > 0)) continue;
+      const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+      for (let c = 0; c < 3; c++) out[gi + c] = Math.round(baseRgb[gi + c] * (1 - shade[i]));
+    }
+  }
+  const src = shade ? Buffer.from(out) : baseRgb;
   for (let i = 0; i < N; i++) {
     const w = wgt[i] / 255;
     if (w <= 0) continue;
     const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
     for (let c = 0; c < 3; c++) {
-      out[gi + c] = Math.max(0, Math.min(255, Math.round(baseRgb[gi + c] * (1 - w) + (aiRgb[i * 3 + c] + off[c]) * w)));
+      out[gi + c] = Math.max(0, Math.min(255, Math.round(src[gi + c] * (1 - w) + (aiRgb[i * 3 + c] + off[c]) * w)));
     }
   }
   const lens = keepEyes ? await keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, keepEyes) : 0;
   return { rgb: out, grown: useGrowth ? grownFrac : 0, grownRejected: useGrowth ? 0 : grownFrac, lensPx: lens };
+}
+
+/**
+ * ÇERÇEVENİN GÖLGESİ (2026-10-30, c2e8eff1 c2/c4/c7, kullanıcı: "gözlük yapay
+ * duruyor"): prompt modelden çerçevenin tene düşen gölgesini istiyor, model
+ * çiziyor; ama bileştirme yalnız maskeyi ve belirgin koyu taşmayı (fark >40,
+ * ≥15 koyu) alıyordu — yumuşak gölge atılıyor, gözlük yüzün üstünde asılı
+ * duruyordu. Maskenin çevresinde (SHADOW_REACH_IOD) modelin yalnız KOYULAŞTIRDIĞI
+ * ve rengi aynı kalan pikseller (gölge = parlaklık düşüşü) tabana ORAN olarak
+ * uygulanır: ten dokusu ve rengi tabandan, gölge modelden. Döner kayıp payı
+ * (0..SHADOW_MAX) dizisi ya da null. Saf (ağ yok).
+ */
+const SHADOW_REACH_IOD = 0.15;
+const SHADOW_MIN = 0.04; // bundan az koyulaşma gürültü
+const SHADOW_MAX = 0.35; // fazlası gölge değil, yeniden çizilmiş başka şey
+const SHADOW_CHROMA = 0.05; // renk oranı farkı (r,g payı) bu kadar kalmalı
+async function castShadow(baseRgb, W, rect, geom, aiRgb, off, m) {
+  const { left, top, side } = rect;
+  const N = side * side;
+  const { chamfer } = require("./headSurround");
+  const d = chamfer(Uint8Array.from(m, (v) => (v ? 0 : 1)), side, side);
+  const reach = Math.max(3, SHADOW_REACH_IOD * geom.iod);
+  const raw = new Uint8Array(N);
+  let n = 0;
+  for (let i = 0; i < N; i++) {
+    if (m[i] || !(d[i] <= reach)) continue;
+    const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+    const b0 = baseRgb[gi], b1 = baseRgb[gi + 1], b2 = baseRgb[gi + 2];
+    const a0 = aiRgb[i * 3] + off[0], a1 = aiRgb[i * 3 + 1] + off[1], a2 = aiRgb[i * 3 + 2] + off[2];
+    const sb = b0 + b1 + b2, sa = a0 + a1 + a2;
+    if (sb < 30 || sa <= 0) continue;
+    const loss = 1 - sa / sb;
+    if (loss < SHADOW_MIN || loss > SHADOW_MAX) continue;
+    if (Math.abs(a0 / sa - b0 / sb) > SHADOW_CHROMA || Math.abs(a1 / sa - b1 / sb) > SHADOW_CHROMA) continue;
+    raw[i] = Math.round(loss * (1 - d[i] / reach) * 255 / SHADOW_MAX);
+    n++;
+  }
+  if (n < 0.01 * geom.iod * geom.iod) return null;
+  // Gürültüyü yumuşat: tek tük piksel değil, sürekli gölge kalsın.
+  const sm = await sharp(Buffer.from(raw), { raw: { width: side, height: side, channels: 1 } })
+    .blur(Math.max(0.5, 0.02 * geom.iod)).extractChannel(0).raw().toBuffer();
+  const out = new Float32Array(N);
+  for (let i = 0; i < N; i++) if (!m[i]) out[i] = (sm[i] / 255) * SHADOW_MAX;
+  return out;
 }
 
 /**
@@ -197,6 +256,11 @@ const LENS_RIM_IOD = 0.07; // çerçeve kenarı modelden kalır
 const LENS_REACH = 1.15; // modelin camı elipsten biraz kayabilir
 const LENS_HIDE_BLUR_IOD = 0.06; // gözsüz camda göz ayrıntısını silen bulanıklık
 const LENS_CORE = 0.7; // cam elipsinin bu oranı (göz bölgesi); çerçeve dışarıda
+const LENS_EYE_RX = 0.3, LENS_EYE_RY = 0.16; // göz elipsi (göz arası oranı)
+const LENS_TINT_BLUR_IOD = 0.18;
+const LENS_SPEC_BLUR_IOD = 0.05;
+const LENS_SPEC_MIN = 10; // bu kadar parlak ayrıntı yansıma sayılır
+const LENS_SPEC_MAX = 90;
 async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
   const { left, top, side } = rect;
   const N = side * side;
@@ -258,13 +322,50 @@ async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
     glass = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) for (let c = 0; c < 3; c++) glass[i * 3 + c] = den[i] > 2 ? (num[i * 3 + c] * 255) / den[i] : aiAdj[i * 3 + c];
   }
+  // 2026-10-30 (c2e8eff1 c4/c7, "gözlük yapay"): ton oranı bA/bB modelin
+  // KENDİ çizdiği gözü de içeriyordu; göz yeri iki karede farklı olunca camda
+  // bulanık göz lekesi kaldı. Oran artık göz elipsi dışındaki cam
+  // pikselleriyle (yalnız ten + cam) ve geniş bulanıklıkla ölçülür.
+  const eyeAt = (i, k) => {
+    const x = left + (i % side), y = top + Math.floor(i / side);
+    for (const e of [geom.eR, geom.eL]) {
+      const dx = (x - e.x) / (LENS_EYE_RX * geom.iod * k), dy = (y - e.y) / (LENS_EYE_RY * geom.iod * k);
+      if (dx * dx + dy * dy <= 1) return true;
+    }
+    return false;
+  };
+  let tint = null;
+  if (!glass) {
+    const wT = new Uint8Array(N);
+    let nT = 0;
+    for (let i = 0; i < N; i++) if (cand[i] && !eyeAt(i, 1.3)) { wT[i] = 1; nT++; }
+    if (nT >= 0.05 * geom.iod * geom.iod) {
+      const mA = Buffer.alloc(N * 3), mB = Buffer.alloc(N * 3);
+      for (let i = 0; i < N; i++) if (wT[i]) for (let c = 0; c < 3; c++) { mA[i * 3 + c] = aiAdj[i * 3 + c]; mB[i * 3 + c] = baseCrop[i * 3 + c]; }
+      const s3 = Math.max(1, LENS_TINT_BLUR_IOD * geom.iod);
+      const bl = (b) => sharp(b, { raw: { width: side, height: side, channels: 3 } }).blur(s3).raw().toBuffer();
+      const [nA, nB] = await Promise.all([bl(mA), bl(mB)]);
+      tint = new Float32Array(N * 3);
+      for (let k = 0; k < N * 3; k++) tint[k] = nB[k] > 2 ? Math.min(1.1, (nA[k] + 1) / (nB[k] + 1)) : (bA[k] + 1) / (bB[k] + 1);
+    }
+  }
+  // YANSIMA: modelin camındaki parlak ince ayrıntı (parlama, gökyüzü/ışık
+  // yansıması) geri eklenir; göz bölgesinde değil (modelin göz akı/ışığı
+  // yansıma sayılmasın). Bulanık cam tonu tek başına düz, mat bir leke gibi.
+  const sS = Math.max(1, LENS_SPEC_BLUR_IOD * geom.iod);
+  const bS = await sharp(aiAdj, { raw: { width: side, height: side, channels: 3 } }).blur(sS).raw().toBuffer();
   for (let i = 0; i < N; i++) {
     const w = wIn[i] / 255;
     if (w <= 0) continue;
     const gi = ((top + Math.floor(i / side)) * W + left + (i % side)) * 3;
+    let spec = 0;
+    if (!eyeAt(i, 1.15)) {
+      const r = lum(aiAdj, i * 3) - lum(bS, i * 3) - LENS_SPEC_MIN;
+      if (r > 0) spec = Math.min(LENS_SPEC_MAX, r);
+    }
     for (let c = 0; c < 3; c++) {
       const k = i * 3 + c;
-      const tinted = glass ? glass[k] : baseCrop[k] * (bA[k] + 1) / (bB[k] + 1);
+      const tinted = (glass ? glass[k] : baseCrop[k] * (tint ? tint[k] : (bA[k] + 1) / (bB[k] + 1))) + spec;
       out[gi + c] = Math.max(0, Math.min(255, Math.round(out[gi + c] * (1 - w) + tinted * w)));
     }
   }
@@ -283,7 +384,8 @@ async function prepareEyewear(outBuf, tplBuf) {
   if (!lt) return { reason: "no-face-template" };
   const mo = await sharp(outBuf).metadata(), mt = await sharp(tplBuf).metadata();
   const W = mo.width, H = mo.height;
-  const geom = eyewearGeometry(lo.pts);
+  const p3 = await require("./headPose3d").headPose3dOf(outBuf).catch(() => null);
+  const geom = eyewearGeometry(lo.pts, { yawDeg: p3 ? p3.yaw : null });
   const xs = lo.pts.map((p) => p.x);
   const fw = Math.max(...xs) - Math.min(...xs);
   const side = Math.round(Math.min(W, H, fw * CROP_FACE_MULT));
@@ -318,4 +420,4 @@ async function prepareEyewear(outBuf, tplBuf) {
   return { image, ref, mask, finish, rect, iod: geom.iod };
 }
 
-module.exports = { prepareEyewear, compositeEyewear, eyewearGeometry, EYEWEAR_ADD_PROMPT };
+module.exports = { prepareEyewear, compositeEyewear, eyewearGeometry, castShadow, EYEWEAR_ADD_PROMPT };
