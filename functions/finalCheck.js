@@ -114,7 +114,9 @@ async function validateFinalOutput(verifiedBuf, finalBuf, { eyewear = false } = 
     }
     const ok = geo.ok && sharpOk;
     return {
-      ok, reason: ok ? null : (geo.ok ? "sharpness" : geo.reason),
+      // ok iken reason yalnız ölçülemeyen durumda dolu (no-before,
+      // degenerate-before); çağıran bunu "ÖLÇÜLEMEDİ" diye loglar.
+      ok, reason: ok ? (geo.reason || null) : (geo.ok ? "sharpness" : geo.reason),
       boxShift: geo.boxShift ?? null, boxScale: geo.boxScale ?? null, ptsShift: geo.ptsShift ?? null,
       sharpBefore: sharpB, sharpAfter: sharpA, sharpRatio,
       faceBefore: !!fb, faceAfter: !!fa, ms: Date.now() - t0,

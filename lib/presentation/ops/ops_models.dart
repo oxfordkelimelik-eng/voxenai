@@ -402,6 +402,23 @@ class OpsJobDetail {
   /// için kaydedilmiş işlerde dolu (2026-11-01, falPhotos keepSelfiesForReview).
   final List<String> selfies;
 
+  // DENETİM ALANLARI (2026-11-04, bkz. opsPanel.jobAuditFields).
+  /// Onay beklemeye başladığı an; yalnız onay bekleyen işte otomatik iptal anı.
+  final int? pendingApprovalAtMillis;
+  final int? autoCancelAtMillis;
+  final bool pendingApprovalOverdue;
+  /// Ölçülmüş OpenAI maliyeti (USD); eski işlerde yok.
+  final double? costUsd;
+  final int refundedUnits;
+  final String? cancelledReason;
+  /// Son doğrulamada geri alınan (gözlüksüz/ışıksız teslim) kare sayısı.
+  final int finalFallbackCount;
+  /// Bitirme adımları kimliği gerilettiği için ham hâli teslim edilen kare sayısı.
+  final int finishRegressedCount;
+  /// Reddedilmiş kare teslim kaydı sayısı; statusOverride: iade almış iş teslim edildi.
+  final int approvalOverrideCount;
+  final bool statusOverride;
+
   OpsJobDetail({
     required this.uid,
     required this.email,
@@ -425,6 +442,16 @@ class OpsJobDetail {
     required this.approvedBy,
     this.templates = const {},
     this.selfies = const [],
+    this.pendingApprovalAtMillis,
+    this.autoCancelAtMillis,
+    this.pendingApprovalOverdue = false,
+    this.costUsd,
+    this.refundedUnits = 0,
+    this.cancelledReason,
+    this.finalFallbackCount = 0,
+    this.finishRegressedCount = 0,
+    this.approvalOverrideCount = 0,
+    this.statusOverride = false,
   });
 
   OpsTemplate? templateFor(String? ref) => ref == null ? null : templates[ref];
@@ -478,5 +505,16 @@ class OpsJobDetail {
             .where((e) => e != null)
             .map((e) => e.toString())
             .toList(),
+        pendingApprovalAtMillis: (j['pendingApprovalAt'] as num?)?.toInt(),
+        autoCancelAtMillis: (j['autoCancelAt'] as num?)?.toInt(),
+        pendingApprovalOverdue: j['pendingApprovalOverdue'] as bool? ?? false,
+        costUsd: (j['costUsd'] as num?)?.toDouble(),
+        refundedUnits: (j['refundedUnits'] as num?)?.toInt() ?? 0,
+        cancelledReason: _asString(j['cancelledReason']),
+        finalFallbackCount: (j['finalFallbackCount'] as num?)?.toInt() ?? 0,
+        finishRegressedCount: (j['finishRegressedCount'] as num?)?.toInt() ?? 0,
+        approvalOverrideCount:
+            (j['approvalOverrideCount'] as num?)?.toInt() ?? 0,
+        statusOverride: j['statusOverride'] as bool? ?? false,
       );
 }

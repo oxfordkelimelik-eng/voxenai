@@ -10,7 +10,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const {
   admin, db, bucket, assertSafeId, signedDownloadUrl,
-  enforceRateLimit, checkAppAttestation,
+  enforceRateLimit, checkAppAttestation, PENDING_APPROVAL_CANCEL_MS,
 } = require("./_shared");
 
 // productId -> TL fiyat. payments.js'teki PRODUCT_CREDITS ile EL İLE senkron
@@ -462,6 +462,31 @@ exports.opsListPendingApprovalJobs = onCall(
   }
 );
 
+/**
+ * İş detayının denetim alanları (2026-11-04). SAF. Bu alanlar iş dokümanına
+ * yazılıyordu ama panel göstermiyordu: onay gecikmesi ve otomatik iptal
+ * tarihi, ölçülmüş maliyet, yapılan iade, son doğrulamada geri alınan kare
+ * sayısı, bitirme sonrası kimlik gerilemesi, gerekçeli teslimler.
+ */
+function jobAuditFields(job) {
+  const ms = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : null);
+  const countKeys = (m) => (m && typeof m === "object" ? Object.keys(m).length : 0);
+  const pendingAt = ms(job.pendingApprovalAt);
+  const pending = job.status === "pendingApproval";
+  return {
+    pendingApprovalAt: pendingAt,
+    autoCancelAt: pending && pendingAt != null ? pendingAt + PENDING_APPROVAL_CANCEL_MS : null,
+    pendingApprovalOverdue: pending && job.pendingApprovalOverdue === true,
+    costUsd: typeof job.costUsd === "number" ? job.costUsd : null,
+    refundedUnits: Number(job.refundedUnits) || 0,
+    cancelledReason: safeString(job.cancelledReason),
+    finalFallbackCount: countKeys(job.chunkFinalFallback),
+    finishRegressedCount: countKeys(job.chunkFinishRegressed),
+    approvalOverrideCount: Array.isArray(job.approvalOverrides) ? job.approvalOverrides.length : 0,
+    statusOverride: !!job.statusOverride,
+  };
+}
+
 exports.opsGetJobDetail = onCall(
   { region: "europe-west1", memory: "256MiB", timeoutSeconds: 30 },
   async (request) => {
@@ -588,6 +613,7 @@ exports.opsGetJobDetail = onCall(
       rejectedFrames,
       templates,
       selfies,
+      ...jobAuditFields(job),
     };
   }
 );
@@ -720,15 +746,30 @@ function rejectedPhotoUrls(job) {
 // yol sahipliğine bakıyordu; kimlik kapısından elenen kare de yaw kapısından
 // elenen kare de aynı tıklamayla teslim edilebiliyordu. Kapılar risk
 // düzeyine göre ayrılır:
-//  • BLOCKED: normal onayla teslim edilemez. Yalnız `overrideReason` (en az
-//    OVERRIDE_REASON_MIN karakter) ile ve kayıt tutularak (approvalOverrides).
-//  • Diğer kapılar (yaw, bakış, artefakt, kafa konumu, ten): panel kapı adını
-//    zaten gösteriyor; admin kararı yeterli, kayıt yine tutulur.
-// Kapı adları falPhotos.REJECTION_REASON_LABELS ile aynı.
-const BLOCKED_GATES = new Set([
-  "math-identity", "vision-identity", "math-no-face+vision-inconclusive",
-  "vision-no-evidence", "head-ratio", "head-grew",
+//  • SOFT_GATES (poz, bakış, göz, kafa konumu, yüzey artefaktı, ten, el/saç,
+//    genel kalite): panel kapı adını zaten gösteriyor; admin kararı yeterli,
+//    kayıt yine tutulur.
+//  • Geri kalan HER kapı engelli: normal onayla teslim edilemez, yalnız
+//    `overrideReason` (en az OVERRIDE_REASON_MIN karakter) ile ve kayıt
+//    tutularak (approvalOverrides). Kimlik (math-identity, vision-identity),
+//    kafa oranı/büyümesi (math-head-ratio, math-head-grew), baş-boyun
+//    deformasyonu (vision-proportion, vision-attachment), yüz bulunamadı ve
+//    kanıt yok kapıları bu gruptadır.
+// İZİN LİSTESİ, YASAK LİSTESİ DEĞİL: math kapısı `math-${reason}` biçiminde
+// yazılır ve yeni kapı adları zamanla eklenir; tanınmayan ad (ör. "?",
+// "math-?", ileride eklenecek bir kapı) varsayılan olarak engellidir.
+// Kapı adları falPhotos.REJECTION_REASON_LABELS ve saveRejectedFrame
+// çağrılarıyla aynı.
+const SOFT_GATES = new Set([
+  "yaw-drift", "yaw-to-camera", "yaw-over-rotate", "yaw-under-rotate",
+  "yaw-pulled-to-camera", "vision-pulled-to-camera", "vision-orientation",
+  "gaze-opposite", "iris-gaze", "vision-gaze", "eyes-closed",
+  "head-dx", "head-ghost", "face-artifact", "vision-artifact",
+  "skin-tone", "vision-skin", "vision-face-light", "vision-exposure",
+  "vision-hands", "vision-hair", "vision-ghosting", "limb-ghost",
+  "vision-quality", "math-blurry",
 ]);
+const isBlockedGate = (g) => !SOFT_GATES.has(g);
 const OVERRIDE_REASON_MIN = 10;
 
 /** gs:// adresi → reddedilme kapısı (reddedilmemiş kare için null). SAF. */
@@ -749,7 +790,7 @@ function checkRejectedSelection(selected, gates, overrideReason) {
     const g = gates.get(url);
     if (!g) continue;
     rejected.push({ url, gate: g });
-    if (BLOCKED_GATES.has(g)) blocked.push({ url, gate: g });
+    if (isBlockedGate(g)) blocked.push({ url, gate: g });
   }
   const reason = typeof overrideReason === "string" ? overrideReason.trim() : "";
   if (blocked.length && reason.length < OVERRIDE_REASON_MIN) {
@@ -761,6 +802,41 @@ function checkRejectedSelection(selected, gates, overrideReason) {
     );
   }
   return { blocked, rejected, reason };
+}
+
+/**
+ * İşin onaylanabilir durumda olup olmadığı. SAF. Eskiden durum hiç
+ * denetlenmiyordu: iade almış (failed) ya da onay süresi dolup iptal edilmiş
+ * iş, panelde karesi göründüğü için onaylanabiliyor, kullanıcı hem iadeyi hem
+ * fotoğrafları alıyordu.
+ *  • pendingApproval, done (yeniden onay): serbest.
+ *  • failed: kullanıcı iadesini almış. Bilerek teslim (ör. müşteri jesti)
+ *    yalnız gerekçeyle; gerekçe yoksa details.needsReason ile reddedilir.
+ *  • Diğerleri (generating, ready, expired): teslim edilemez.
+ * Döner { statusOverride: boolean }.
+ */
+function checkApprovableStatus(job, overrideReason) {
+  const status = job.status || "?";
+  if (status === "pendingApproval" || status === "done") return { statusOverride: false };
+  if (status === "failed") {
+    const reason = typeof overrideReason === "string" ? overrideReason.trim() : "";
+    if (reason.length >= OVERRIDE_REASON_MIN) return { statusOverride: true };
+    const why = job.cancelledReason === "pending-approval-timeout"
+      ? "onay süresi dolduğu için iptal edildi"
+      : "başarısız sonuçlandı";
+    throw new HttpsError(
+      "failed-precondition",
+      `Bu iş ${why} ve kullanıcıya ${job.refundedUnits ?? job.packUnitsCharged ?? 0} hak iade edildi. ` +
+      `Teslim edersen kullanıcı hem iadeyi hem fotoğrafları alır. Yine de teslim etmek için en az ` +
+      `${OVERRIDE_REASON_MIN} karakterlik gerekçe gir.`,
+      { needsReason: true, status }
+    );
+  }
+  throw new HttpsError(
+    "failed-precondition",
+    `İş şu an '${status}' durumunda; yalnız onay bekleyen ya da teslim edilmiş iş onaylanabilir.`,
+    { status }
+  );
 }
 
 exports.opsApprovePhotos = onCall(
@@ -778,6 +854,7 @@ exports.opsApprovePhotos = onCall(
     const snap = await jobRef.get();
     if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
     const job = snap.data();
+    const st = checkApprovableStatus(job, overrideReason);
 
     // Üst sınır kullanıcının SATIN ALDIĞI sayıdır (fazla üretilen değil).
     const maxCount = job.photoCount || 0;
@@ -790,7 +867,7 @@ exports.opsApprovePhotos = onCall(
       staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)],
       uid, jobId, maxCount,
     });
-    // Kapı bazlı denetim (bkz. BLOCKED_GATES): kimlik/yüz kapısından elenen
+    // Kapı bazlı denetim (bkz. SOFT_GATES): kimlik/yüz kapısından elenen
     // kare gerekçesiz teslim edilemez.
     const sel = checkRejectedSelection(selectedUrls, gateByUrl(job), overrideReason);
 
@@ -840,11 +917,18 @@ exports.opsApprovePhotos = onCall(
     };
     if (sel.rejected.length) {
       approvalUpdate.approvalOverrides = admin.firestore.FieldValue.arrayUnion(...sel.rejected.map((r) => ({
-        ref: r.url, gate: r.gate, blocked: BLOCKED_GATES.has(r.gate),
+        ref: r.url, gate: r.gate, blocked: isBlockedGate(r.gate),
         reason: sel.reason || null, by: request.auth.token.email || null,
         at: admin.firestore.Timestamp.now(),
       })));
       console.warn(`ONAY: ${sel.rejected.length} REDDEDİLMİŞ kare teslim edildi (uid=${uid}, job=${jobId}) kapılar=[${sel.rejected.map((r) => r.gate).join(",")}] engelli=${sel.blocked.length} gerekçe="${sel.reason || "-"}"`);
+    }
+    if (st.statusOverride) {
+      approvalUpdate.statusOverride = {
+        from: job.status, reason: sel.reason, by: request.auth.token.email || null,
+        at: admin.firestore.Timestamp.now(),
+      };
+      console.warn(`ONAY: İADE ALMIŞ iş gerekçeyle teslim edildi (uid=${uid}, job=${jobId}, durum=${job.status}) gerekçe="${sel.reason}"`);
     }
     await jobRef.set(approvalUpdate, { merge: true });
 
@@ -937,7 +1021,10 @@ exports._testables = {
   rejectedPhotoUrls,
   gateByUrl,
   checkRejectedSelection,
-  BLOCKED_GATES,
+  SOFT_GATES,
+  isBlockedGate,
+  checkApprovableStatus,
+  jobAuditFields,
   OVERRIDE_REASON_MIN,
   extractGateCounts,
   aggregateGateCounts,

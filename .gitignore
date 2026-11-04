@@ -66,3 +66,11 @@ android_keystore_base64.txt
 
 # Cuzdan migrasyon anlik goruntusu — kullanici ID ve bakiye tasir, repoya girmemeli
 functions/scripts/wallet-snapshot.json
+
+# Indirilen uretim ciktilari ve selfie'ler — kullanicinin yuzunu tasir (KVKK),
+# repoya girmemeli
+/ref_selfies/
+/ciktilar/
+/glow_compare/
+/son_*_cikti/
+/son_*_foto_*/

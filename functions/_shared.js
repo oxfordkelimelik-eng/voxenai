@@ -142,8 +142,15 @@ async function signedDownloadUrl(file) {
     `/o/${encodedPath}?alt=media&token=${token}`;
 }
 
+// Onay bekleyen işin uyarı ve otomatik iptal süreleri (bkz.
+// falPhotos.cleanupOverduePendingApproval). Ops paneli iptal tarihini aynı
+// değerden hesaplar.
+const PENDING_APPROVAL_WARN_MS = 3 * 24 * 60 * 60 * 1000;
+const PENDING_APPROVAL_CANCEL_MS = 30 * 24 * 60 * 60 * 1000;
+
 module.exports = {
   admin, db, bucket,
   assertSafeId, enforceRateLimit, checkAppAttestation, APP_CHECK_ENFORCED,
   signedDownloadUrl,
+  PENDING_APPROVAL_WARN_MS, PENDING_APPROVAL_CANCEL_MS,
 };

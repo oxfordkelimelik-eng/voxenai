@@ -127,12 +127,14 @@ final opsJobDetailProvider = FutureProvider.autoDispose
 
 /// Seçilen kareleri teslim eder. [selectedRefs] HAM gs:// adresleridir —
 /// imzalı URL süreli olduğu için kare kimliği olarak kullanılamaz.
-/// Döner: kaç kare teslim edildi.
+/// Döner: teslim edilen ve bozuk/boş olduğu için atlanan kare sayısı.
 ///
-/// [overrideReason]: kimlik/yüz kapısından elenmiş kare seçildiyse sunucu
-/// gerekçesiz teslimi reddeder (failed-precondition, details.blocked);
-/// gerekçe (en az 10 karakter) bu alanla gönderilir ve işe kaydedilir.
-Future<int> opsApprovePhotos({
+/// [overrideReason]: kimlik/yüz kapısından elenmiş kare seçildiyse
+/// (details.blocked) ya da iş iade almış 'failed' durumundaysa
+/// (details.needsReason) sunucu gerekçesiz teslimi reddeder
+/// (failed-precondition); gerekçe (en az 10 karakter) bu alanla gönderilir
+/// ve işe kaydedilir.
+Future<({int approved, int skipped})> opsApprovePhotos({
   required String uid,
   required String jobId,
   required List<String> selectedRefs,
@@ -148,7 +150,10 @@ Future<int> opsApprovePhotos({
       'overrideReason': overrideReason.trim(),
   });
   final data = Map<String, dynamic>.from(result.data as Map);
-  return (data['approved'] as num?)?.toInt() ?? 0;
+  return (
+    approved: (data['approved'] as num?)?.toInt() ?? 0,
+    skipped: (data['skipped'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// Panelden ELLE yüklenen fotoğrafı kullanıcının teslim listesine ekler.

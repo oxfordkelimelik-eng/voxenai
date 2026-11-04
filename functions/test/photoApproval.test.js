@@ -1,5 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   validateApprovalSelection,
   resultPathForStaging,
@@ -7,9 +9,13 @@ const {
   rejectedPhotoUrls,
   gateByUrl,
   checkRejectedSelection,
-  BLOCKED_GATES,
+  SOFT_GATES,
+  isBlockedGate,
+  checkApprovableStatus,
+  jobAuditFields,
   OVERRIDE_REASON_MIN,
 } = require("../opsPanel")._testables;
+const { pendingCancelRefund } = require("../falPhotos")._testables;
 
 // KAPI BAZLI ONAY GÜVENLİĞİ (2026-11-04): kimlik/yüz kapısından elenen kare
 // gerekçesiz teslim edilemez; diğer kapılar serbest ama kayıt tutulur.
@@ -57,9 +63,101 @@ test("checkRejectedSelection: kısa gerekçe yetmez, yeterli gerekçe geçer ve 
   assert.equal(r.reason, reason);
 });
 
-test("BLOCKED_GATES: kimlik ve yüz kapıları engelli, poz kapıları değil", () => {
-  for (const g of ["math-identity", "vision-identity", "head-ratio", "head-grew"]) assert.ok(BLOCKED_GATES.has(g), g);
-  for (const g of ["yaw-drift", "gaze-opposite", "face-artifact", "head-dx", "skin-tone"]) assert.ok(!BLOCKED_GATES.has(g), g);
+// Engellenmesi gereken kapılar — GERÇEK adlarıyla (math kapısı
+// `math-${faceQuality reason}` biçiminde yazılır; eski liste "head-ratio"
+// diye arıyordu ve hiç eşleşmiyordu).
+const EXPECTED_BLOCKED = [
+  "math-identity", "math-head-ratio", "math-head-grew", "vision-identity",
+  "vision-proportion", "vision-attachment", "vision-no-evidence",
+  "math-no-face+vision-inconclusive",
+];
+
+test("isBlockedGate: kimlik, kafa oranı ve deformasyon kapıları engelli; poz/bakış kapıları serbest", () => {
+  for (const g of EXPECTED_BLOCKED) assert.ok(isBlockedGate(g), g);
+  for (const g of ["yaw-drift", "gaze-opposite", "face-artifact", "head-dx", "skin-tone", "math-blurry"]) {
+    assert.ok(!isBlockedGate(g), g);
+  }
+});
+
+test("isBlockedGate: tanınmayan kapı varsayılan engelli", () => {
+  for (const g of ["?", "math-?", "vision-?", "head-ratio", "yepyeni-kapi"]) assert.ok(isBlockedGate(g), g);
+});
+
+test("kapı adları falPhotos ile senkron: her etiket bilerek sınıflandırılmış, serbest liste yazım hatası içermiyor", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "falPhotos.js"), "utf8");
+  const start = src.indexOf("const REJECTION_REASON_LABELS = {");
+  assert.ok(start > 0, "REJECTION_REASON_LABELS bulunamadı");
+  const block = src.slice(start, src.indexOf("};", start));
+  const labelKeys = [...block.matchAll(/^\s*"([^"]+)":/gm)].map((m) => m[1]);
+  assert.ok(labelKeys.length > 20, `etiket sayısı beklenenden az: ${labelKeys.length}`);
+  // Serbest listedeki her ad gerçekten var olan bir kapı olmalı.
+  for (const g of SOFT_GATES) assert.ok(labelKeys.includes(g), `SOFT_GATES'te bilinmeyen ad: ${g}`);
+  // Yeni eklenen her kapı ya serbest listeye ya da beklenen engelli listeye
+  // bilerek eklenmeli.
+  for (const g of labelKeys) {
+    assert.ok(SOFT_GATES.has(g) || EXPECTED_BLOCKED.includes(g), `sınıflandırılmamış kapı: ${g}`);
+  }
+});
+
+// ONAYDA İŞ DURUMU (2026-11-04): iade almış iş gerekçesiz teslim edilemez.
+test("checkApprovableStatus: pendingApproval ve done serbest", () => {
+  assert.deepEqual(checkApprovableStatus({ status: "pendingApproval" }, null), { statusOverride: false });
+  assert.deepEqual(checkApprovableStatus({ status: "done" }, null), { statusOverride: false });
+});
+
+test("checkApprovableStatus: failed iş gerekçesiz → needsReason, gerekçeyle → statusOverride", () => {
+  const job = { status: "failed", cancelledReason: "pending-approval-timeout", refundedUnits: 5 };
+  assert.throws(
+    () => checkApprovableStatus(job, "kısa"),
+    (e) => e.code === "failed-precondition" && e.details.needsReason === true && /onay süresi/.test(e.message),
+  );
+  assert.deepEqual(checkApprovableStatus(job, "x".repeat(OVERRIDE_REASON_MIN)), { statusOverride: true });
+});
+
+test("checkApprovableStatus: generating/ready/expired gerekçeyle bile reddedilir", () => {
+  for (const status of ["generating", "ready", "expired", undefined]) {
+    assert.throws(
+      () => checkApprovableStatus({ status }, "x".repeat(OVERRIDE_REASON_MIN)),
+      (e) => e.code === "failed-precondition" && e.details.needsReason !== true,
+      String(status),
+    );
+  }
+});
+
+// ONAY İPTALİ İADESİ (2026-11-04): kısmi iade yapılmış işte yalnız kalan iade edilir.
+test("pendingCancelRefund: hiç iade yoksa tam iade + paket geri", () => {
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 5, packConsumed: 5 }), { units: 5, totalRefunded: 5, returnPack: true });
+});
+
+test("pendingCancelRefund: kısmi iade yapılmışsa yalnız kalan, paket geri verilmez (c2e8eff1: 5 düşüldü, 4 iade)", () => {
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 5, refundedUnits: 4, packConsumed: 5 }), { units: 1, totalRefunded: 5, returnPack: false });
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 5, refundedUnits: 1, packConsumed: 5 }), { units: 4, totalRefunded: 5, returnPack: false });
+});
+
+test("pendingCancelRefund: ücretsiz/bozuk alanlar güvenli", () => {
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 0 }), { units: 0, totalRefunded: 0, returnPack: false });
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 5, refundedUnits: 9 }), { units: 0, totalRefunded: 5, returnPack: false });
+  assert.deepEqual(pendingCancelRefund({ packUnitsCharged: 10, packConsumed: null }), { units: 10, totalRefunded: 10, returnPack: false });
+});
+
+// PANEL DENETİM ALANLARI (2026-11-04).
+test("jobAuditFields: onay bekleyen işte otomatik iptal tarihi pendingApprovalAt + 30 gün", () => {
+  const at = { toMillis: () => 1_000_000 };
+  const f = jobAuditFields({ status: "pendingApproval", pendingApprovalAt: at, pendingApprovalOverdue: true, costUsd: 1.25, chunkFinalFallback: { 0: "box-shift", 3: "face-lost" } });
+  assert.equal(f.pendingApprovalAt, 1_000_000);
+  assert.equal(f.autoCancelAt, 1_000_000 + 30 * 24 * 60 * 60 * 1000);
+  assert.equal(f.pendingApprovalOverdue, true);
+  assert.equal(f.costUsd, 1.25);
+  assert.equal(f.finalFallbackCount, 2);
+});
+
+test("jobAuditFields: teslim edilmiş işte iptal tarihi ve gecikme yok", () => {
+  const f = jobAuditFields({ status: "done", pendingApprovalAt: { toMillis: () => 5 }, pendingApprovalOverdue: true, approvalOverrides: [{}, {}], statusOverride: { from: "failed" } });
+  assert.equal(f.autoCancelAt, null);
+  assert.equal(f.pendingApprovalOverdue, false);
+  assert.equal(f.costUsd, null);
+  assert.equal(f.approvalOverrideCount, 2);
+  assert.equal(f.statusOverride, true);
 });
 
 // FOTO ONAYI (2026-09-22).

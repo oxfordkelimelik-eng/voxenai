@@ -4,6 +4,7 @@ const { defineSecret } = require("firebase-functions/params");
 const {
   admin, db, bucket,
   assertSafeId, enforceRateLimit, checkAppAttestation, signedDownloadUrl,
+  PENDING_APPROVAL_WARN_MS, PENDING_APPROVAL_CANCEL_MS,
 } = require("./_shared");
 
 // HIZ SINIRLARI — her ikisi de GERÇEK PARA harcayan uç noktalar.
@@ -3603,6 +3604,9 @@ const EYE_OPEN_MIN_LEFT_MS = 120000;
 // webhook yolundaki "vision-..." — bkz. assessOutputWithVision reason'ları).
 const REJECTION_REASON_LABELS = {
   "math-identity": "Yüz, referans fotoğraflarınla yeterince eşleşmedi",
+  "math-head-ratio": "Kafa boyutu kareye göre orantısız",
+  "math-head-grew": "Kafa, taban fotoğraftakinden belirgin büyük çıktı",
+  "math-blurry": "Yüz bulanık çıktı",
   "yaw-drift": "Baş açısı şablondan çok saptı",
   "yaw-to-camera": "Taban fotoğraf profilken baş kameraya çevrilmiş",
   "yaw-over-rotate": "Baş, tabandakinden belirgin daha fazla yana dönmüş",
@@ -4898,8 +4902,14 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // görülemiyordu. Her chunk kendi kaydına startedAt + lastHeartbeatAt yazar;
   // cleanupStuckGenJobs bu alanlarla chunk'ı TEK BAŞINA kapatabilir (bkz.
   // CHUNK_HEARTBEAT_STALE_MS). Hatalar yutulur, üretimi bloklamaz.
+  // Nabız, iş defterindeki o ana kadarki harcamayı (costUsd, MUTLAK değer)
+  // da taşır: fonksiyon zaman aşımında ya da çökmede harcama en fazla bir
+  // nabız aralığı geride kalır. Çağrı başına ayrı yazım yapılmaz — 30
+  // chunk'lık işte aynı doküman finalizeChunk transaction'larıyla çakışırdı.
+  const ledger = ledgerSummary();
   const chunkBeat = (extra = {}) => jobRef.set({
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(ledger ? { costUsd: Number(ledger.spentUsd.toFixed(4)) } : {}),
     results: { [styleId]: { chunks: { [String(chunkIdx)]: {
       lastHeartbeatAt: admin.firestore.FieldValue.serverTimestamp(), ...extra,
     } } } },
@@ -6928,7 +6938,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       const fv = await validateFinalOutput(verifiedBuf, textured, { eyewear: eyewearApplied });
       const f3 = (v) => (v != null && Number.isFinite(v) ? v.toFixed(3) : "null");
       const f0 = (v) => (v != null && Number.isFinite(v) ? v.toFixed(0) : "null");
-      console.log(`SON DOĞRULAMA (style=${styleId}, chunk=${chunkIdx}): ${fv.ok ? (fv.reason === "error" ? `ÖLÇÜLEMEDİ[${fv.error}]` : "GEÇTİ") : `GERİ ALINDI[${fv.reason}]`} kutuKayma=${f3(fv.boxShift)} kutuÖlçek=${f3(fv.boxScale)} noktaKayma=${f3(fv.ptsShift)} netlik=${f0(fv.sharpBefore)}→${f0(fv.sharpAfter)} oran=${f3(fv.sharpRatio)} gözlük=${eyewearApplied ? "evet" : "hayır"} yüz=${fv.faceBefore ? "var" : "yok"}→${fv.faceAfter ? "var" : "yok"} ${fv.ms ?? "?"}ms`);
+      console.log(`SON DOĞRULAMA (style=${styleId}, chunk=${chunkIdx}): ${fv.ok ? (fv.reason ? `ÖLÇÜLEMEDİ[${fv.reason === "error" ? fv.error : fv.reason}]` : "GEÇTİ") : `GERİ ALINDI[${fv.reason}]`} kutuKayma=${f3(fv.boxShift)} kutuÖlçek=${f3(fv.boxScale)} noktaKayma=${f3(fv.ptsShift)} netlik=${f0(fv.sharpBefore)}→${f0(fv.sharpAfter)} oran=${f3(fv.sharpRatio)} gözlük=${eyewearApplied ? "evet" : "hayır"} yüz=${fv.faceBefore ? "var" : "yok"}→${fv.faceAfter ? "var" : "yok"} ${fv.ms ?? "?"}ms`);
       if (!fv.ok) {
         textured = await addPhoneCameraTexture(verifiedBuf);
         if (!rejectedFinishPath) {
@@ -7549,9 +7559,15 @@ exports.startPhotoGeneration = onCall(
       // okunur; 'ready' değilse hiçbir şey yazılmaz.
       const jobNow = await tx.get(jobRef);
       if (!jobNow.exists || jobNow.data().status !== "ready") {
+        // İş zaten başlamış/bitmişse 'already-exists': istemci bu kodda hata
+        // ekranına geçmez, iş dokümanını dinlemeye devam eder ve sonucu
+        // gösterir (bkz. module_flows startPhotoGeneration catch'i —
+        // yalnız unauthenticated/failed-precondition hata ekranı açar).
+        const started = jobNow.exists &&
+          ["generating", JOB_STATUS_PENDING_APPROVAL, "done"].includes(jobNow.data().status);
         const e = new HttpsError(
-          "failed-precondition",
-          jobNow.exists && jobNow.data().status === "generating"
+          started ? "already-exists" : "failed-precondition",
+          started
             ? "Bu üretim zaten başlatıldı."
             : "Fotoğraflar henüz doğrulanmadı. Lütfen baştan tekrar dene."
         );
@@ -7739,15 +7755,9 @@ exports.startPhotoGeneration = onCall(
 
           // MALİYET DEFTERİ (bkz. jobContext): tüm chunk'lar aynı defteri
           // paylaşır; isteğe bağlı AI adımları sınırı aşmayacaksa çalışır.
+          // Ara toplam chunk nabzıyla yazılır (bkz. runOpenAiDirectChunk
+          // chunkBeat); iş sonunda kesin toplam aşağıda yazılır.
           const costLedger = createLedger(picked.length);
-          // Her gerçek OpenAI çağrısından sonra dokümana artış (bkz.
-          // jobContext.recordUsage). Değer OpenAI'nin döndürdüğü token
-          // sayılarından hesaplanır (faturayla kalibre, bkz. PRICES) — tahmin
-          // değil, ölçülmüş kullanım. İş sonunda toplam yine yazılır.
-          costLedger.persist = (usd) => {
-            jobRef.set({ costUsd: admin.firestore.FieldValue.increment(Number(usd.toFixed(6))) }, { merge: true })
-              .catch(() => {});
-          };
           // YEREL DOLGU MODELİ ISINMASI (bkz. lamaFill.js): model indirme +
           // oturum açma örnek başına bir kez 10-20 sn; kareler kafa çevresine
           // gelene kadar arka planda (ayrı iş parçacığı) hazır olur. Sade
@@ -7809,8 +7819,9 @@ exports.startPhotoGeneration = onCall(
           );
           // KALICI MALİYET (2026-11-04): defter yalnız log'daydı; panelin
           // "onaylı kare başına maliyet" gösterebilmesi için dokümana
-          // yazılıyor. Tahmini API maliyeti (üretim + Vision + isteğe bağlı
-          // AI adımları); iş durumunu değiştirmez, yazılamazsa akış bozulmaz.
+          // yazılıyor. Ölçülmüş API maliyeti (üretim + Vision + isteğe bağlı
+          // AI adımları, bkz. costBasis); iş durumunu değiştirmez, yazılamazsa
+          // akış bozulmaz.
           try {
             await jobRef.set({
               costUsd: Number(costLedger.spentUsd.toFixed(4)),
@@ -8611,13 +8622,15 @@ exports.cleanupExpiredReadyJobs = onSchedule(
  * "onay bekleyen" iş kalacaktı. İki eşik:
  *  • PENDING_WARN_MS (3 gün): iş `pendingApprovalOverdue: true` işaretlenir
  *    ve uyarı loglanır (panel bunu kırmızı gösterebilir). İş durumu değişmez.
- *  • PENDING_CANCEL_MS (30 gün): iş iptal edilir, bakiye ve paket TAM iade
- *    edilir, kullanıcıya iade mesajı yazılır. Staging TTL'si (90 gün) bundan
- *    uzun olduğu için dosyalar karardan önce silinmez.
+ *  • PENDING_CANCEL_MS (30 gün): iş iptal edilir, düşülen hakkın HENÜZ İADE
+ *    EDİLMEMİŞ kısmı iade edilir (bkz. pendingCancelRefund), kullanıcıya iade
+ *    mesajı yazılır ve bildirim gider; staging ve reddedilen kare dosyaları
+ *    silinir. Staging TTL'si (90 gün) bundan uzun olduğu için dosyalar
+ *    karardan önce silinmez.
  * Onay zaten yapılmış işler (status done) bu sorguya girmez.
  */
-const PENDING_WARN_MS = 3 * 24 * 60 * 60 * 1000;
-const PENDING_CANCEL_MS = 30 * 24 * 60 * 60 * 1000;
+const PENDING_WARN_MS = PENDING_APPROVAL_WARN_MS;
+const PENDING_CANCEL_MS = PENDING_APPROVAL_CANCEL_MS;
 exports.cleanupOverduePendingApproval = onSchedule(
   { schedule: "every 60 minutes", region: "europe-west1", timeoutSeconds: 300 },
   async () => {
@@ -8634,9 +8647,8 @@ exports.cleanupOverduePendingApproval = onSchedule(
       const job = doc.data();
       const waitedMs = now - (job.pendingApprovalAt ? job.pendingApprovalAt.toMillis() : now);
       if (waitedMs >= PENDING_CANCEL_MS) {
-        console.warn(`ONAY SÜRESİ DOLDU: ${doc.ref.path} ${Math.round(waitedMs / 86400000)} gün bekledi — iptal ve tam iade`);
-        await cancelPendingApprovalJob(uid, doc.id);
-        cancelled++;
+        console.warn(`ONAY SÜRESİ DOLDU: ${doc.ref.path} ${Math.round(waitedMs / 86400000)} gün bekledi — iptal ve iade`);
+        if (await cancelPendingApprovalJob(uid, doc.id)) cancelled++;
       } else if (job.pendingApprovalOverdue !== true) {
         console.warn(`ONAY GECİKTİ: ${doc.ref.path} ${Math.round(waitedMs / 3600000)} saattir onay bekliyor`);
         await doc.ref.set({ pendingApprovalOverdue: true }, { merge: true });
@@ -8647,22 +8659,44 @@ exports.cleanupOverduePendingApproval = onSchedule(
   }
 );
 
-/** Onayı çok geciken işi iptal eder: tam iade (foto + paket), 'failed'. */
+/**
+ * Onay bekleme iptalinde iade edilecek miktar. SAF. İş onaya düşerken eksik
+ * kareler için kısmi iade yapılmış olabilir (finalizeChunk → refundedUnits);
+ * iptal yalnız KALANI iade eder. Paket defteri yalnız hiç iade yapılmamışsa
+ * geri verilir: kısmi iade serbest hak olarak eklendi, paket de geri gelirse
+ * defter bakiyeyi aşar (bkz. refundAndFail'deki aynı kural).
+ * Döner { units, totalRefunded, returnPack }.
+ */
+function pendingCancelRefund(job) {
+  const charged = Math.max(0, Number(job.packUnitsCharged) || 0);
+  const already = Math.min(charged, Math.max(0, Number(job.refundedUnits) || 0));
+  const units = charged - already;
+  return {
+    units,
+    totalRefunded: already + units,
+    returnPack: !!job.packConsumed && already === 0 && units > 0,
+  };
+}
+
+/** Onayı çok geciken işi iptal eder: kalan hak iadesi, 'failed'. İptal
+ *  yapıldıysa true döner. */
 async function cancelPendingApprovalJob(uid, jobId) {
   const walletRef = db.doc(`users/${uid}/private/wallet`);
   const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+  let refund = null;
   await db.runTransaction(async (tx) => {
+    refund = null;
     const jobSnap = await tx.get(jobRef);
     if (!jobSnap.exists || jobSnap.data().status !== JOB_STATUS_PENDING_APPROVAL) return;
     const job = jobSnap.data();
-    const units = job.packUnitsCharged || 0;
+    const r = pendingCancelRefund(job);
     const walletSnap = await tx.get(walletRef);
     const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
     const walletUpdate = {
-      photoBalance: (wallet.photoBalance || 0) + units,
+      photoBalance: (wallet.photoBalance || 0) + r.units,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (job.packConsumed && units > 0) {
+    if (r.returnPack) {
       walletUpdate.photoPacks = require("./photoPacks").addPack(wallet.photoPacks, job.packConsumed);
     }
     if (job.usedFreeTier === true) walletUpdate.freePhotoUsed = false;
@@ -8670,11 +8704,27 @@ async function cancelPendingApprovalJob(uid, jobId) {
     tx.set(jobRef, {
       status: "failed",
       errorMessage: "Fotoğrafların onay sürecinde beklemede kaldı; hakkın hesabına iade edildi, dilediğin zaman yeniden üretebilirsin.",
-      refundedUnits: units,
+      refundedUnits: r.totalRefunded,
+      cancelRefundedUnits: r.units,
       cancelledReason: "pending-approval-timeout",
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
+    refund = r;
   });
+  if (!refund) return false;
+  console.warn(`ONAY İPTALİ (uid=${uid}, job=${jobId}): iade=${refund.units} toplamİade=${refund.totalRefunded} paketGeri=${refund.returnPack ? "evet" : "hayır"}`);
+  // İptal edilen işin kareleri artık kimseye teslim edilmeyecek; kullanıcının
+  // yüzünü taşıdıkları için TTL beklenmeden silinir (KVKK).
+  await Promise.all([
+    bucket().deleteFiles({ prefix: `dating_staging/${uid}/${jobId}/` }),
+    bucket().deleteFiles({ prefix: `${DEBUG_ROOT}/${uid}/${jobId}/` }),
+  ]).catch((e) => console.error(`Onay iptali: dosyalar silinemedi (${jobId}, TTL silecek):`, e.message || e));
+  await require("./notifications").sendPushToUser(uid, {
+    title: "Fotoğraf hakkın iade edildi",
+    body: "Fotoğrafların onay sürecinde beklemede kaldı; hakkın hesabına geri yüklendi, dilediğin zaman yeniden üretebilirsin.",
+    data: { type: "photos_refunded", jobId },
+  });
+  return true;
 }
 
 // Saf yardımcıların testten erişilebilmesi için. index.js barrel'ı yalnızca
@@ -8700,4 +8750,5 @@ exports._testables = {
   jobTimeLeftMs,
   JOB_TIME_LIMIT_MS,
   JOB_FINALIZE_RESERVE_MS,
+  pendingCancelRefund,
 };

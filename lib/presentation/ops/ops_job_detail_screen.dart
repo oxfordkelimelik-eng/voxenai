@@ -140,25 +140,31 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     if (_selected.isEmpty || _busy) return;
     setState(() => _busy = true);
     try {
-      final n = await opsApprovePhotos(
+      final r = await opsApprovePhotos(
         uid: data.uid,
         jobId: data.jobId,
         selectedRefs: _selected.toList(),
         overrideReason: overrideReason,
       );
-      _snack('$n fotoğraf teslim edildi, kullanıcıya bildirim gönderildi.');
+      _snack(r.skipped > 0
+          ? '${r.approved} fotoğraf teslim edildi; ${r.skipped} kare bozuk/boş '
+              'olduğu için atlandı. Eksik kalanı tamamlamak için tüm seçimi '
+              'yeniden yapıp tekrar onayla.'
+          : '${r.approved} fotoğraf teslim edildi, kullanıcıya bildirim gönderildi.',
+          error: r.skipped > 0);
       _selected.clear();
       ref.invalidate(opsJobDetailProvider);
       // Paneldeki "N iş ONAY BEKLİYOR" sayacı da güncellensin.
       ref.invalidate(opsOverviewProvider);
     } on FirebaseFunctionsException catch (e) {
-      // KİMLİK/YÜZ KAPISINDAN ELENEN KARE (2026-11-04): sunucu gerekçesiz
-      // teslimi reddeder (bkz. opsPanel BLOCKED_GATES). Gerekçe sorulur ve
-      // aynı seçim gerekçeyle yeniden gönderilir; gerekçe işe kaydedilir.
+      // KİMLİK/YÜZ KAPISINDAN ELENEN KARE ya da İADE ALMIŞ İŞ (2026-11-04):
+      // sunucu gerekçesiz teslimi reddeder (bkz. opsPanel SOFT_GATES,
+      // checkApprovableStatus). Gerekçe sorulur ve aynı seçim gerekçeyle
+      // yeniden gönderilir; gerekçe işe kaydedilir.
+      final details = e.details is Map ? e.details as Map : const {};
       if (e.code == 'failed-precondition' &&
           overrideReason == null &&
-          e.details is Map &&
-          (e.details as Map)['blocked'] != null) {
+          (details['blocked'] != null || details['needsReason'] == true)) {
         if (mounted) setState(() => _busy = false);
         final reason = await _askOverrideReason(e.message ?? '');
         if (reason != null) await _approve(overrideReason: reason);
@@ -172,13 +178,14 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     }
   }
 
-  /// Engelli kapıdan elenmiş kare için teslim gerekçesi (en az 10 karakter).
+  /// Engelli kapıdan elenmiş kare ya da iade almış iş için teslim gerekçesi
+  /// (en az 10 karakter).
   Future<String?> _askOverrideReason(String serverMessage) async {
     final ctrl = TextEditingController();
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Reddedilmiş kare teslimi'),
+        title: const Text('Gerekçeli teslim'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,11 +479,44 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
             _row('Mod', data.photoMode ?? '?'),
             _row('Ücretsiz Deneme', data.usedFreeTier ? 'Evet' : 'Hayır'),
             _row('Ücret (birim)', '${data.packUnitsCharged}'),
+            if (data.refundedUnits > 0)
+              _row('İade (birim)', '${data.refundedUnits}'),
+            if (data.costUsd != null)
+              _row('Maliyet', '\$${data.costUsd!.toStringAsFixed(3)}'),
+            if (data.pendingApprovalAtMillis != null)
+              _row('Onaya düştü', _fmtDateTime(data.pendingApprovalAtMillis!)),
+            if (data.autoCancelAtMillis != null)
+              _row(
+                'Otomatik iptal',
+                '${_fmtDateTime(data.autoCancelAtMillis!)} (onaylanmazsa iade)',
+                valueColor:
+                    data.pendingApprovalOverdue ? AppColors.error : null,
+              ),
+            if (data.cancelledReason == 'pending-approval-timeout')
+              _row('İptal', 'Onay süresi doldu, iade yapıldı',
+                  valueColor: AppColors.error),
+            if (data.finalFallbackCount > 0)
+              _row('Son doğrulama',
+                  '${data.finalFallbackCount} kare gözlüksüz/ışıksız teslim'),
+            if (data.finishRegressedCount > 0)
+              _row('Bitirme geri alındı', '${data.finishRegressedCount} kare'),
+            if (data.approvalOverrideCount > 0)
+              _row('Reddedilmiş kare teslimi',
+                  '${data.approvalOverrideCount} kayıt'),
+            if (data.statusOverride)
+              _row('İade almış iş', 'Gerekçeyle teslim edildi',
+                  valueColor: AppColors.error),
             if (data.errorMessage != null)
               _row('Hata', data.errorMessage!, valueColor: AppColors.error),
           ],
         ),
       );
+
+  String _fmtDateTime(int millis) {
+    final d = DateTime.fromMillisecondsSinceEpoch(millis);
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(d.day)}.${two(d.month)}.${d.year} ${two(d.hour)}:${two(d.minute)}';
+  }
 
   Widget _row(String label, String value, {Color? valueColor}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 3),
