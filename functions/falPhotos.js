@@ -3524,10 +3524,14 @@ function visionRejectionOverridden(visionReason, distance) {
 // artık yalnız ops onay ızgarasında (opsGetJobDetail, imzalı URL) görünür —
 // onay akışında reddedilen son kare bitirilip panelde seçilebildiği için
 // (FINISH_REJECTED_FRAMES) hâlâ ürünün parçası, false yapılamaz.
-// SAKLAMA: kova yaşam döngüsü (bucket lifecycle, 2026-11-04) dating_debug/ ve
-// dating_rejected/ altını 30 gün, dating_staging/ altını 60 gün,
-// dating_training/ altını 7 gün sonra siler. Kural kovada tanımlı (repo'da
-// dosya yok); okumak için admin SDK bucket.getMetadata().lifecycle.
+// SAKLAMA: kova yaşam döngüsü (bucket lifecycle, 2026-11-04):
+//   7 gün  dating_training/, dating_debug/selfies/ (biyometrik: selfie)
+//   30 gün dating_debug/{layers,headscale,surround,resample,eyewear}/, dating_rejected/
+//   90 gün dating_staging/ (onay bekleme iptali 30 günde — bkz.
+//          cleanupOverduePendingApproval — dosyalar karardan önce silinmez)
+// Kural kovada tanımlı (repo'da dosya yok); okumak için admin SDK
+// bucket.getMetadata().lifecycle. Hesap silmede payments.deleteAccount
+// bunların hepsini TTL beklemeden siler.
 const SAVE_REJECTED_FRAMES = true;
 const DEBUG_ROOT = "dating_rejected";
 
@@ -4889,9 +4893,19 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
   // paylaştı, ikisi de öldü). Bu interval, kuyrukta geçirilen süre dahil
   // fonksiyonun TÜM ömrü boyunca çalışır — attempt döngüsünün varlığından
   // bağımsızdır. Fire-and-forget: hata sessizce yutulur, üretimi bloklamaz.
-  const heartbeatTimer = setInterval(() => {
-    jobRef.set({ updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
-  }, 90 * 1000);
+  // CHUNK BAZLI KALP ATIŞI (2026-11-04): iş dokümanının updatedAt'i tüm
+  // chunk'ların ortak nabzı; tek bir chunk canlıyken diğerlerinin öldüğü
+  // görülemiyordu. Her chunk kendi kaydına startedAt + lastHeartbeatAt yazar;
+  // cleanupStuckGenJobs bu alanlarla chunk'ı TEK BAŞINA kapatabilir (bkz.
+  // CHUNK_HEARTBEAT_STALE_MS). Hatalar yutulur, üretimi bloklamaz.
+  const chunkBeat = (extra = {}) => jobRef.set({
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    results: { [styleId]: { chunks: { [String(chunkIdx)]: {
+      lastHeartbeatAt: admin.firestore.FieldValue.serverTimestamp(), ...extra,
+    } } } },
+  }, { merge: true }).catch(() => {});
+  chunkBeat({ startedAt: admin.firestore.FieldValue.serverTimestamp() });
+  const heartbeatTimer = setInterval(() => chunkBeat(), 90 * 1000);
   try {
     return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel, templateNames, refSkinLight, refSkinMst);
   } finally {
@@ -6778,6 +6792,13 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
 
+    // DOĞRULANMIŞ KARE (2026-11-04, bkz. finalCheck.js): bu noktaya kadar
+    // yüz kimlik/geometri ölçümlerinden geçti. Gözlük, ışıklı katman ve
+    // doku bundan sonra; teslimden önce son kare bununla karşılaştırılır ve
+    // bozulma varsa bu kare (gözlüksüz/ışıksız) teslim edilir.
+    const verifiedBuf = deliverBuf;
+    let eyewearApplied = false;
+
     // GÖZLÜK EN SON (2026-10-10, kullanıcı kararı: "önce yüz şekli tamamen
     // bitsin, gözlüğü en son ekle"). Ana üretim gözlüğü her zaman kaldırır;
     // kimlik, kafa ölçeği ve yüz katmanları gözlüksüz yüzde çalıştı. Şablonda
@@ -6798,6 +6819,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             const st = await runPostTask("sunglassTransfer", { buf: deliverBuf, tpl: tplForEyewear });
             if (st && st.applied && st.buf) {
               deliverBuf = Buffer.from(st.buf);
+              eyewearApplied = true;
               console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): BASE'DEN TAŞINDI camPx=${st.lensPx} gözArası=${Math.round(st.iod)}px yaw=${st.yawT != null ? st.yawT.toFixed(0) : "?"}/${st.yawO != null ? st.yawO.toFixed(0) : "?"} kısalma=${st.foreshorten != null ? st.foreshorten.toFixed(3) : "null"} kapsama=${(st.cover || []).map((c) => (c == null ? "-" : c.toFixed(2))).join("/")} dışPay=${st.outFrac != null ? st.outFrac.toFixed(2) : "null"} kapalıKoyu=${st.holePx ?? 0} gri=${st.grayOut ? "evet" : "hayır"} ${st.ms}ms`);
               return true;
             }
@@ -6863,6 +6885,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
               // Camın içi: görünür camda kendi gözü, koyu camda gözsüz cam (bkz. eyewear.keepOwnEyes).
               const fin = await job.finish(ai, { keepEyes: templateEyewear.eyesVisible === true ? "own" : "hide" });
               deliverBuf = fin.buf;
+              eyewearApplied = true;
               console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): EKLENDİ gözArası=${Math.round(job.iod)}px taşmaEklendi=${fin.grown.toFixed(3)} kendiGözPx=${fin.lensPx || 0}${fin.grownRejected ? ` taşmaReddedildi=${fin.grownRejected.toFixed(3)}` : ""}`);
               // Şablon griyse eklenen gözlük renk getirmesin.
               const { matchGrayscale } = require("./faceLight");
@@ -6894,7 +6917,28 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       }
     }
 
-    const textured = await addPhoneCameraTexture(deliverBuf);
+    let textured = await addPhoneCameraTexture(deliverBuf);
+    // SON DOĞRULAMA (2026-11-04, bkz. finalCheck.js): teslim edilecek kare
+    // doğrulanmış kareyle yapısal karşılaştırılır. Bozulma varsa doğrulanmış
+    // kare (gözlüksüz, ışıksız) dokulanıp teslim edilir; bilgi dokümana
+    // chunkFinalFallback olarak yazılır. Reddedilen-kare bitirmesinde de
+    // çalışır (panelde görünen kare de sağlam olsun).
+    try {
+      const { validateFinalOutput } = require("./finalCheck");
+      const fv = await validateFinalOutput(verifiedBuf, textured, { eyewear: eyewearApplied });
+      const f3 = (v) => (v != null && Number.isFinite(v) ? v.toFixed(3) : "null");
+      const f0 = (v) => (v != null && Number.isFinite(v) ? v.toFixed(0) : "null");
+      console.log(`SON DOĞRULAMA (style=${styleId}, chunk=${chunkIdx}): ${fv.ok ? (fv.reason === "error" ? `ÖLÇÜLEMEDİ[${fv.error}]` : "GEÇTİ") : `GERİ ALINDI[${fv.reason}]`} kutuKayma=${f3(fv.boxShift)} kutuÖlçek=${f3(fv.boxScale)} noktaKayma=${f3(fv.ptsShift)} netlik=${f0(fv.sharpBefore)}→${f0(fv.sharpAfter)} oran=${f3(fv.sharpRatio)} gözlük=${eyewearApplied ? "evet" : "hayır"} yüz=${fv.faceBefore ? "var" : "yok"}→${fv.faceAfter ? "var" : "yok"} ${fv.ms ?? "?"}ms`);
+      if (!fv.ok) {
+        textured = await addPhoneCameraTexture(verifiedBuf);
+        if (!rejectedFinishPath) {
+          await jobRef.set({ chunkFinalFallback: { [String(chunkIdx)]: fv.reason } }, { merge: true })
+            .catch((e) => console.error("Son doğrulama kaydı yazılamadı:", e.message || e));
+        }
+      }
+    } catch (e) {
+      console.error("Son doğrulama hata verdi (kare olduğu gibi teslim):", e.message || e);
+    }
     if (rejectedFinishPath) {
       await bucket().file(rejectedFinishPath).save(textured, { metadata: { contentType: "image/jpeg" } });
       console.log(`REDDEDİLEN KARE BİTİRİLDİ (style=${styleId}, chunk=${chunkIdx}): ${rejectedFinishPath}`);
@@ -7383,6 +7427,9 @@ exports.startPhotoGeneration = onCall(
     // kullanıcı hiç bakiyesi olmadan denemişti). Bu yol artık ANINDA ve
     // DOĞRU mesajla sonuçlanır.
     const failJobAndRethrow = async (e) => {
+      // Çift başlatma reddi (bkz. transaction içindeki durum kontrolü):
+      // iş başka çağrıda sürüyor, dokunma.
+      if (e && e.doNotFailJob) throw e;
       try {
         await jobRef.set({
           status: "failed",
@@ -7495,6 +7542,24 @@ exports.startPhotoGeneration = onCall(
     let packConsumed = null;
 
     await db.runTransaction(async (tx) => {
+      // ÇİFT BAŞLATMA KORUMASI (2026-11-04): 'ready' kontrolü yukarıda
+      // transaction DIŞINDA yapılıyor; iki eş zamanlı çağrı (çift dokunma,
+      // istemci yeniden denemesi) ikisi de 'ready' görüp ikisi de bakiye
+      // düşebiliyordu. Durum burada, cüzdanla AYNI transaction'da yeniden
+      // okunur; 'ready' değilse hiçbir şey yazılmaz.
+      const jobNow = await tx.get(jobRef);
+      if (!jobNow.exists || jobNow.data().status !== "ready") {
+        const e = new HttpsError(
+          "failed-precondition",
+          jobNow.exists && jobNow.data().status === "generating"
+            ? "Bu üretim zaten başlatıldı."
+            : "Fotoğraflar henüz doğrulanmadı. Lütfen baştan tekrar dene."
+        );
+        // İş 'failed' YAPILMAMALI: başka bir çağrı onu meşru olarak
+        // 'generating'e aldı; failJobAndRethrow o üretimi bozardı.
+        e.doNotFailJob = true;
+        throw e;
+      }
       const walletSnap = await tx.get(walletRef);
       const wallet = walletSnap.data() || {
         photoBalance: 0,
@@ -7675,6 +7740,14 @@ exports.startPhotoGeneration = onCall(
           // MALİYET DEFTERİ (bkz. jobContext): tüm chunk'lar aynı defteri
           // paylaşır; isteğe bağlı AI adımları sınırı aşmayacaksa çalışır.
           const costLedger = createLedger(picked.length);
+          // Her gerçek OpenAI çağrısından sonra dokümana artış (bkz.
+          // jobContext.recordUsage). Değer OpenAI'nin döndürdüğü token
+          // sayılarından hesaplanır (faturayla kalibre, bkz. PRICES) — tahmin
+          // değil, ölçülmüş kullanım. İş sonunda toplam yine yazılır.
+          costLedger.persist = (usd) => {
+            jobRef.set({ costUsd: admin.firestore.FieldValue.increment(Number(usd.toFixed(6))) }, { merge: true })
+              .catch(() => {});
+          };
           // YEREL DOLGU MODELİ ISINMASI (bkz. lamaFill.js): model indirme +
           // oturum açma örnek başına bir kez 10-20 sn; kareler kafa çevresine
           // gelene kadar arka planda (ayrı iş parçacığı) hazır olur. Sade
@@ -7741,6 +7814,10 @@ exports.startPhotoGeneration = onCall(
           try {
             await jobRef.set({
               costUsd: Number(costLedger.spentUsd.toFixed(4)),
+              // Kaynak: OpenAI yanıtlarındaki gerçek token kullanımı × fatura
+              // ile kalibre edilmiş birim fiyat (jobContext.PRICES). Yerel
+              // adımlar (LaMa, face-api) API maliyeti doğurmaz.
+              costBasis: "openai-usage-tokens",
               costLimitUsd: Number(costLedger.limitUsd.toFixed(2)),
               costSkippedSteps: costLedger.skipped,
             }, { merge: true });
@@ -8151,6 +8228,15 @@ async function finalizeChunk(uid, jobId, styleId, chunkIdx, { photoUrls = [], fa
     const snap = await tx.get(jobRef);
     if (!snap.exists) return;
     const j = snap.data();
+    // GEÇ YAZMA KORUMASI (2026-11-04): iş zaten uç duruma geldiyse (temizlik
+    // 'failed' yapıp iade etti; onay 'done' yaptı; süresi doldu) geç gelen
+    // chunk sonucu yazılmaz. Eskiden yalnız chunk'ın kendi durumuna
+    // bakılıyordu: temizlik sonrası gelen son chunk, işi yeniden
+    // 'pendingApproval'a çevirebilir ya da İKİNCİ kez tam iade yapabilirdi.
+    if (["failed", "done", JOB_STATUS_PENDING_APPROVAL, "expired"].includes(j.status)) {
+      console.warn(`finalizeChunk (${jobId} ${styleId}/c${chunkIdx}): iş zaten '${j.status}', geç sonuç yok sayıldı`);
+      return;
+    }
     const chunks = j.results?.[styleId]?.chunks || {};
     const chunk = chunks[chunkIdx];
     if (!chunk || chunk.status === "done" || chunk.status === "failed") return; // idempotent no-op
@@ -8453,8 +8539,39 @@ exports.cleanupStuckGenJobs = onSchedule(
       console.warn(`Takılı iş temizleniyor: ${doc.ref.path}`);
       await refundAndFail(uid, doc.id, job.packUnitsCharged || 0, "Zaman aşımı — işlem tamamlanamadı.");
     }
+
+    // CHUNK BAZLI TAKILMA (2026-11-04): iş dokümanı canlı (başka chunk'lar
+    // nabız atıyor) ama bir chunk'ın kendi nabzı kesilmişse o chunk tek
+    // başına 'failed' kapatılır; finalizeChunk idempotent olduğu için chunk
+    // sonradan yine de bitirirse sonucu yok sayılır, iş diğer chunk'larla
+    // normal kapanır (eksik kare iadesi finalizeChunk'ta). Nabzı hiç olmayan
+    // (eski sürümde başlamış) chunk'lara dokunulmaz.
+    const live = await db
+      .collectionGroup("genJobs")
+      .where("status", "==", "generating")
+      .where("updatedAt", ">=", cutoff)
+      .get();
+    const staleMs = CHUNK_HEARTBEAT_STALE_MS;
+    for (const doc of live.docs) {
+      const uid = doc.ref.parent.parent.parent.parent.id;
+      const job = doc.data();
+      for (const [styleId, r] of Object.entries(job.results || {})) {
+        for (const [idx, c] of Object.entries((r && r.chunks) || {})) {
+          if (!c || c.status !== "pending") continue;
+          const beat = c.lastHeartbeatAt || c.startedAt;
+          if (!beat || typeof beat.toMillis !== "function") continue;
+          if (Date.now() - beat.toMillis() < staleMs) continue;
+          console.warn(`Takılı chunk kapatılıyor: ${doc.ref.path} ${styleId}/c${idx} sonNabız=${Math.round((Date.now() - beat.toMillis()) / 1000)}sn önce`);
+          await finalizeChunk(uid, doc.id, styleId, idx, { failed: true });
+        }
+      }
+    }
   }
 );
+// Bir chunk'ın nabzı bu kadar süre kesilmişse takılı sayılır. Nabız 90 sn'de
+// bir atar; 6 dk = dört kaçırılmış atış, tek bir Firestore yazım hatasıyla
+// yanlış kapanmaz.
+const CHUNK_HEARTBEAT_STALE_MS = 6 * 60 * 1000;
 
 /**
  * 'ready' işlerin KVKK temizliği — cleanupStuckGenJobs'tan ayrı tutuldu
@@ -8486,6 +8603,79 @@ exports.cleanupExpiredReadyJobs = onSchedule(
     }
   }
 );
+
+/**
+ * ONAY BEKLEME SÜRESİ (2026-11-04). 'pendingApproval' için hiçbir süre
+ * sınırı yoktu: kullanıcı ödemiş, kareler hazır, admin onaylamadıkça iş
+ * sonsuza dek bekliyordu; staging TTL'si dolunca da panelde karesi olmayan
+ * "onay bekleyen" iş kalacaktı. İki eşik:
+ *  • PENDING_WARN_MS (3 gün): iş `pendingApprovalOverdue: true` işaretlenir
+ *    ve uyarı loglanır (panel bunu kırmızı gösterebilir). İş durumu değişmez.
+ *  • PENDING_CANCEL_MS (30 gün): iş iptal edilir, bakiye ve paket TAM iade
+ *    edilir, kullanıcıya iade mesajı yazılır. Staging TTL'si (90 gün) bundan
+ *    uzun olduğu için dosyalar karardan önce silinmez.
+ * Onay zaten yapılmış işler (status done) bu sorguya girmez.
+ */
+const PENDING_WARN_MS = 3 * 24 * 60 * 60 * 1000;
+const PENDING_CANCEL_MS = 30 * 24 * 60 * 60 * 1000;
+exports.cleanupOverduePendingApproval = onSchedule(
+  { schedule: "every 60 minutes", region: "europe-west1", timeoutSeconds: 300 },
+  async () => {
+    const now = Date.now();
+    const warnCutoff = admin.firestore.Timestamp.fromMillis(now - PENDING_WARN_MS);
+    const snap = await db
+      .collectionGroup("genJobs")
+      .where("status", "==", JOB_STATUS_PENDING_APPROVAL)
+      .where("pendingApprovalAt", "<", warnCutoff)
+      .get();
+    let warned = 0, cancelled = 0;
+    for (const doc of snap.docs) {
+      const uid = doc.ref.parent.parent.parent.parent.id;
+      const job = doc.data();
+      const waitedMs = now - (job.pendingApprovalAt ? job.pendingApprovalAt.toMillis() : now);
+      if (waitedMs >= PENDING_CANCEL_MS) {
+        console.warn(`ONAY SÜRESİ DOLDU: ${doc.ref.path} ${Math.round(waitedMs / 86400000)} gün bekledi — iptal ve tam iade`);
+        await cancelPendingApprovalJob(uid, doc.id);
+        cancelled++;
+      } else if (job.pendingApprovalOverdue !== true) {
+        console.warn(`ONAY GECİKTİ: ${doc.ref.path} ${Math.round(waitedMs / 3600000)} saattir onay bekliyor`);
+        await doc.ref.set({ pendingApprovalOverdue: true }, { merge: true });
+        warned++;
+      }
+    }
+    if (warned || cancelled) console.log(`ONAY BEKLEME TARAMASI: uyarı=${warned} iptal=${cancelled} toplamBekleyen=${snap.size}`);
+  }
+);
+
+/** Onayı çok geciken işi iptal eder: tam iade (foto + paket), 'failed'. */
+async function cancelPendingApprovalJob(uid, jobId) {
+  const walletRef = db.doc(`users/${uid}/private/wallet`);
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+  await db.runTransaction(async (tx) => {
+    const jobSnap = await tx.get(jobRef);
+    if (!jobSnap.exists || jobSnap.data().status !== JOB_STATUS_PENDING_APPROVAL) return;
+    const job = jobSnap.data();
+    const units = job.packUnitsCharged || 0;
+    const walletSnap = await tx.get(walletRef);
+    const wallet = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
+    const walletUpdate = {
+      photoBalance: (wallet.photoBalance || 0) + units,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (job.packConsumed && units > 0) {
+      walletUpdate.photoPacks = require("./photoPacks").addPack(wallet.photoPacks, job.packConsumed);
+    }
+    if (job.usedFreeTier === true) walletUpdate.freePhotoUsed = false;
+    tx.set(walletRef, walletUpdate, { merge: true });
+    tx.set(jobRef, {
+      status: "failed",
+      errorMessage: "Fotoğrafların onay sürecinde beklemede kaldı; hakkın hesabına iade edildi, dilediğin zaman yeniden üretebilirsin.",
+      refundedUnits: units,
+      cancelledReason: "pending-approval-timeout",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+}
 
 // Saf yardımcıların testten erişilebilmesi için. index.js barrel'ı yalnızca
 // seçili Cloud Function isimlerini dışa açtığı için (bkz. o dosyadaki liste)

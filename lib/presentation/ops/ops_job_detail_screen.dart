@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -135,7 +136,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     ));
   }
 
-  Future<void> _approve() async {
+  Future<void> _approve({String? overrideReason}) async {
     if (_selected.isEmpty || _busy) return;
     setState(() => _busy = true);
     try {
@@ -143,17 +144,74 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         uid: data.uid,
         jobId: data.jobId,
         selectedRefs: _selected.toList(),
+        overrideReason: overrideReason,
       );
       _snack('$n fotoğraf teslim edildi, kullanıcıya bildirim gönderildi.');
       _selected.clear();
       ref.invalidate(opsJobDetailProvider);
       // Paneldeki "N iş ONAY BEKLİYOR" sayacı da güncellensin.
       ref.invalidate(opsOverviewProvider);
+    } on FirebaseFunctionsException catch (e) {
+      // KİMLİK/YÜZ KAPISINDAN ELENEN KARE (2026-11-04): sunucu gerekçesiz
+      // teslimi reddeder (bkz. opsPanel BLOCKED_GATES). Gerekçe sorulur ve
+      // aynı seçim gerekçeyle yeniden gönderilir; gerekçe işe kaydedilir.
+      if (e.code == 'failed-precondition' &&
+          overrideReason == null &&
+          e.details is Map &&
+          (e.details as Map)['blocked'] != null) {
+        if (mounted) setState(() => _busy = false);
+        final reason = await _askOverrideReason(e.message ?? '');
+        if (reason != null) await _approve(overrideReason: reason);
+        return;
+      }
+      _snack('Onay başarısız: ${e.message ?? e.code}', error: true);
     } catch (e) {
       _snack('Onay başarısız: $e', error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Engelli kapıdan elenmiş kare için teslim gerekçesi (en az 10 karakter).
+  Future<String?> _askOverrideReason(String serverMessage) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reddedilmiş kare teslimi'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(serverMessage, style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Gerekçe (en az 10 karakter)',
+                hintText: 'Örn. gözle kontrol edildi, yüz kullanıcıyla eşleşiyor',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final t = ctrl.text.trim();
+              if (t.length < 10) return;
+              Navigator.of(ctx).pop(t);
+            },
+            child: const Text('Gerekçeyle teslim et'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Dışarıdan fotoğraf ekleme: dosya doğrudan Storage'a yüklenir, sonra

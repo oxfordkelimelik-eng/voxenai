@@ -78,6 +78,13 @@ function recordUsage(model, usage) {
   const st = jobClock.getStore();
   if (!st || !st.ledger) return cost;
   st.ledger.spentUsd += cost;
+  // KALICI YAZIM (2026-11-04): defter yalnız bellekteydi ve iş sonunda tek
+  // seferde dokümana yazılıyordu; fonksiyon zaman aşımında ya da çökmede
+  // harcama hiç kaydedilmiyordu. persist, çağıranın (falPhotos) taktığı
+  // kancadır — her gerçek çağrıdan sonra dokümana artış yazar. Hata yutulur.
+  if (typeof st.ledger.persist === "function" && cost > 0) {
+    try { st.ledger.persist(cost); } catch { /* muhasebe üretimi durdurmaz */ }
+  }
   if (!st.post && st.reserveLeft > 0) {
     const r = Math.min(st.reserveLeft, cost);
     st.reserveLeft -= r;

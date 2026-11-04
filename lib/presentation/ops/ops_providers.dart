@@ -128,10 +128,15 @@ final opsJobDetailProvider = FutureProvider.autoDispose
 /// Seçilen kareleri teslim eder. [selectedRefs] HAM gs:// adresleridir —
 /// imzalı URL süreli olduğu için kare kimliği olarak kullanılamaz.
 /// Döner: kaç kare teslim edildi.
+///
+/// [overrideReason]: kimlik/yüz kapısından elenmiş kare seçildiyse sunucu
+/// gerekçesiz teslimi reddeder (failed-precondition, details.blocked);
+/// gerekçe (en az 10 karakter) bu alanla gönderilir ve işe kaydedilir.
 Future<int> opsApprovePhotos({
   required String uid,
   required String jobId,
   required List<String> selectedRefs,
+  String? overrideReason,
 }) async {
   final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
       .httpsCallable('opsApprovePhotos');
@@ -139,6 +144,8 @@ Future<int> opsApprovePhotos({
     'uid': uid,
     'jobId': jobId,
     'selectedUrls': selectedRefs,
+    if (overrideReason != null && overrideReason.trim().isNotEmpty)
+      'overrideReason': overrideReason.trim(),
   });
   final data = Map<String, dynamic>.from(result.data as Map);
   return (data['approved'] as num?)?.toInt() ?? 0;

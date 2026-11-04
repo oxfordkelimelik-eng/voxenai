@@ -716,11 +716,58 @@ function rejectedPhotoUrls(job) {
   return (job.rejectedFrames || []).map((f) => f && f.gsUrl).filter(Boolean);
 }
 
+// REDDEDİLEN KARE ONAY GÜVENLİĞİ (2026-11-04). Eskiden onay yalnız sayı ve
+// yol sahipliğine bakıyordu; kimlik kapısından elenen kare de yaw kapısından
+// elenen kare de aynı tıklamayla teslim edilebiliyordu. Kapılar risk
+// düzeyine göre ayrılır:
+//  • BLOCKED: normal onayla teslim edilemez. Yalnız `overrideReason` (en az
+//    OVERRIDE_REASON_MIN karakter) ile ve kayıt tutularak (approvalOverrides).
+//  • Diğer kapılar (yaw, bakış, artefakt, kafa konumu, ten): panel kapı adını
+//    zaten gösteriyor; admin kararı yeterli, kayıt yine tutulur.
+// Kapı adları falPhotos.REJECTION_REASON_LABELS ile aynı.
+const BLOCKED_GATES = new Set([
+  "math-identity", "vision-identity", "math-no-face+vision-inconclusive",
+  "vision-no-evidence", "head-ratio", "head-grew",
+]);
+const OVERRIDE_REASON_MIN = 10;
+
+/** gs:// adresi → reddedilme kapısı (reddedilmemiş kare için null). SAF. */
+function gateByUrl(job) {
+  const m = new Map();
+  for (const f of job.rejectedFrames || []) if (f && f.gsUrl) m.set(f.gsUrl, f.gate || "?");
+  return m;
+}
+
+/**
+ * Seçimdeki reddedilen kareleri kapıya göre denetler. SAF. Döner
+ * { blocked: [{url, gate}], rejected: [{url, gate}] }. blocked boş değilse ve
+ * geçerli overrideReason yoksa HttpsError fırlatır.
+ */
+function checkRejectedSelection(selected, gates, overrideReason) {
+  const rejected = [], blocked = [];
+  for (const url of selected) {
+    const g = gates.get(url);
+    if (!g) continue;
+    rejected.push({ url, gate: g });
+    if (BLOCKED_GATES.has(g)) blocked.push({ url, gate: g });
+  }
+  const reason = typeof overrideReason === "string" ? overrideReason.trim() : "";
+  if (blocked.length && reason.length < OVERRIDE_REASON_MIN) {
+    throw new HttpsError(
+      "failed-precondition",
+      `${blocked.length} kare kimlik/yüz kapısından elendi (${[...new Set(blocked.map((b) => b.gate))].join(", ")}); ` +
+      `normal onayla teslim edilemez. Teslim etmek için en az ${OVERRIDE_REASON_MIN} karakterlik gerekçe gir.`,
+      { blocked: blocked.map((b) => ({ ref: b.url, gate: b.gate })) }
+    );
+  }
+  return { blocked, rejected, reason };
+}
+
 exports.opsApprovePhotos = onCall(
   { region: "europe-west1", memory: "512MiB", timeoutSeconds: 300 },
   async (request) => {
     await assertOps(request, "opsApprovePhotos");
-    const { uid, jobId, selectedUrls } = request.data || {};
+    const { uid, jobId, selectedUrls, overrideReason } = request.data || {};
     if (!uid || !jobId) {
       throw new HttpsError("invalid-argument", "uid ve jobId zorunlu.");
     }
@@ -743,18 +790,31 @@ exports.opsApprovePhotos = onCall(
       staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)],
       uid, jobId, maxCount,
     });
+    // Kapı bazlı denetim (bkz. BLOCKED_GATES): kimlik/yüz kapısından elenen
+    // kare gerekçesiz teslim edilemez.
+    const sel = checkRejectedSelection(selectedUrls, gateByUrl(job), overrideReason);
 
     // Kopyalama — onaylananlar kullanıcının okuyabildiği yola taşınır.
     // Tek tek hata yakalanıyor: bir dosya kopyalanamazsa TÜM onay çökmesin,
     // kopyalanabilenler teslim edilsin ve eksik olan logda görünsün.
+    // DOSYA BÜTÜNLÜĞÜ (2026-11-04): kopyalamadan önce dosya indirilip
+    // çözülür; boş/bozuk dosya teslim edilmez (eskiden yalnız kopyalama
+    // hatası yakalanıyordu, bozuk ama var olan dosya teslim edilebilirdi).
     const approvedUrls = [];
+    const skipped = [];
     for (const path of paths) {
       const dest = resultPathForStaging(path);
       try {
+        const [buf] = await bucket().file(path).download();
+        const meta = await require("sharp")(buf).metadata();
+        if (!meta.width || !meta.height || buf.length < 20000) {
+          throw new Error(`bozuk/boş dosya (${buf.length} bayt, ${meta.width || 0}x${meta.height || 0})`);
+        }
         await bucket().file(path).copy(bucket().file(dest));
         approvedUrls.push(`gs://${bucket().name}/${dest}`);
       } catch (e) {
-        console.error(`ONAY: kopyalama başarısız (${path}):`, e.message || e);
+        skipped.push(path);
+        console.error(`ONAY: kare teslim edilemedi (${path}):`, e.message || e);
       }
     }
     if (approvedUrls.length === 0) {
@@ -768,13 +828,25 @@ exports.opsApprovePhotos = onCall(
       (u) => (gsPathFromUrl(u) || "").includes("/manual_")
     );
 
-    await jobRef.set({
+    // Reddedilen kare teslimi kayıt altına alınır: hangi kare, hangi kapı,
+    // kim, gerekçe (yalnız engelli kapılarda zorunlu). Tekrar onayda dizi
+    // birikir (arrayUnion) — geçmiş silinmez.
+    const approvalUpdate = {
       approvedPhotoUrls: [...approvedUrls, ...manualUrls],
       status: "done",
       approvedAt: admin.firestore.FieldValue.serverTimestamp(),
       approvedBy: request.auth.token.email || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    };
+    if (sel.rejected.length) {
+      approvalUpdate.approvalOverrides = admin.firestore.FieldValue.arrayUnion(...sel.rejected.map((r) => ({
+        ref: r.url, gate: r.gate, blocked: BLOCKED_GATES.has(r.gate),
+        reason: sel.reason || null, by: request.auth.token.email || null,
+        at: admin.firestore.Timestamp.now(),
+      })));
+      console.warn(`ONAY: ${sel.rejected.length} REDDEDİLMİŞ kare teslim edildi (uid=${uid}, job=${jobId}) kapılar=[${sel.rejected.map((r) => r.gate).join(",")}] engelli=${sel.blocked.length} gerekçe="${sel.reason || "-"}"`);
+    }
+    await jobRef.set(approvalUpdate, { merge: true });
 
     const { sendPushToUser } = require("./notifications");
     const pushed = await sendPushToUser(uid, {
@@ -787,7 +859,7 @@ exports.opsApprovePhotos = onCall(
       `ONAY: ${approvedUrls.length} foto teslim edildi (uid=${uid}, job=${jobId}, ` +
       `push=${pushed ? "gitti" : "gitmedi"})`
     );
-    return { approved: approvedUrls.length, manualKept: manualUrls.length, pushed };
+    return { approved: approvedUrls.length, manualKept: manualUrls.length, pushed, skipped: skipped.length };
   }
 );
 
@@ -863,6 +935,10 @@ exports._testables = {
   resultPathForStaging,
   stagedPhotoUrls,
   rejectedPhotoUrls,
+  gateByUrl,
+  checkRejectedSelection,
+  BLOCKED_GATES,
+  OVERRIDE_REASON_MIN,
   extractGateCounts,
   aggregateGateCounts,
   buildPurchaseSummary,

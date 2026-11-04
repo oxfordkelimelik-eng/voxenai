@@ -24,6 +24,7 @@ for (const name of [
   "falInferenceWebhook",
   "cleanupStuckGenJobs",
   "cleanupExpiredReadyJobs",
+  "cleanupOverduePendingApproval",
 ]) {
   exports[name] = falPhotos[name];
 }

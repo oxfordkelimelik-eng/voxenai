@@ -10,6 +10,14 @@
     },
     {
       "collectionGroup": "genJobs",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "pendingApprovalAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "genJobs",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },

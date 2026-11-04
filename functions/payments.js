@@ -335,10 +335,16 @@ exports.deleteAccount = onCall(
     // selfie'leri + üretilen sonuçlar). recursiveDelete yalnızca Firestore'u
     // sildiği icin bu adim olmadan fotograflar geride kaliyordu.
     try {
+      // 2026-11-04: onay havuzu (staging) ve teşhis kopyaları
+      // (dating_debug/<alt>/<uid>/) eklendi — bunlar da kullanıcının yüzünü
+      // taşıyor ve TTL'leri dolmadan hesap silinirse geride kalıyordu.
+      const debugSubdirs = ["selfies", "layers", "headscale", "surround", "resample", "eyewear"];
       await Promise.all([
         bucket().deleteFiles({ prefix: `dating_training/${uid}/` }),
         bucket().deleteFiles({ prefix: `dating_results/${uid}/` }),
         bucket().deleteFiles({ prefix: `dating_rejected/${uid}/` }),
+        bucket().deleteFiles({ prefix: `dating_staging/${uid}/` }),
+        ...debugSubdirs.map((d) => bucket().deleteFiles({ prefix: `dating_debug/${d}/${uid}/` })),
       ]);
     } catch (e) {
       console.error("deleteAccount storage silme hatası:", e);

@@ -5,7 +5,62 @@ const {
   resultPathForStaging,
   stagedPhotoUrls,
   rejectedPhotoUrls,
+  gateByUrl,
+  checkRejectedSelection,
+  BLOCKED_GATES,
+  OVERRIDE_REASON_MIN,
 } = require("../opsPanel")._testables;
+
+// KAPI BAZLI ONAY GÜVENLİĞİ (2026-11-04): kimlik/yüz kapısından elenen kare
+// gerekçesiz teslim edilemez; diğer kapılar serbest ama kayıt tutulur.
+const rejJob = {
+  rejectedFrames: [
+    { gsUrl: "gs://b/dating_rejected/u/j/a.jpg", gate: "math-identity" },
+    { gsUrl: "gs://b/dating_rejected/u/j/b.jpg", gate: "yaw-drift" },
+    { gsUrl: "gs://b/dating_rejected/u/j/c.jpg" },
+  ],
+};
+
+test("gateByUrl: reddedilen adres → kapı, kapı yoksa '?'", () => {
+  const m = gateByUrl(rejJob);
+  assert.equal(m.get("gs://b/dating_rejected/u/j/a.jpg"), "math-identity");
+  assert.equal(m.get("gs://b/dating_rejected/u/j/c.jpg"), "?");
+  assert.equal(m.get("gs://b/dating_staging/u/j/x.jpg"), undefined);
+});
+
+test("checkRejectedSelection: yalnız üretilen kareler → boş", () => {
+  const r = checkRejectedSelection(["gs://b/dating_staging/u/j/x.jpg"], gateByUrl(rejJob), null);
+  assert.deepEqual(r.rejected, []);
+  assert.deepEqual(r.blocked, []);
+});
+
+test("checkRejectedSelection: yaw kapısından elenen kare gerekçesiz teslim edilebilir, kayda girer", () => {
+  const r = checkRejectedSelection(["gs://b/dating_rejected/u/j/b.jpg"], gateByUrl(rejJob), null);
+  assert.equal(r.rejected.length, 1);
+  assert.equal(r.rejected[0].gate, "yaw-drift");
+  assert.equal(r.blocked.length, 0);
+});
+
+test("checkRejectedSelection: kimlik kapısından elenen kare gerekçesiz → failed-precondition + details.blocked", () => {
+  assert.throws(
+    () => checkRejectedSelection(["gs://b/dating_rejected/u/j/a.jpg"], gateByUrl(rejJob), null),
+    (e) => e.code === "failed-precondition" && Array.isArray(e.details.blocked) && e.details.blocked[0].gate === "math-identity",
+  );
+});
+
+test("checkRejectedSelection: kısa gerekçe yetmez, yeterli gerekçe geçer ve kaydedilir", () => {
+  const sel = ["gs://b/dating_rejected/u/j/a.jpg"];
+  assert.throws(() => checkRejectedSelection(sel, gateByUrl(rejJob), "kısa"));
+  const reason = "x".repeat(OVERRIDE_REASON_MIN);
+  const r = checkRejectedSelection(sel, gateByUrl(rejJob), `  ${reason}  `);
+  assert.equal(r.blocked.length, 1);
+  assert.equal(r.reason, reason);
+});
+
+test("BLOCKED_GATES: kimlik ve yüz kapıları engelli, poz kapıları değil", () => {
+  for (const g of ["math-identity", "vision-identity", "head-ratio", "head-grew"]) assert.ok(BLOCKED_GATES.has(g), g);
+  for (const g of ["yaw-drift", "gaze-opposite", "face-artifact", "head-dx", "skin-tone"]) assert.ok(!BLOCKED_GATES.has(g), g);
+});
 
 // FOTO ONAYI (2026-09-22).
 //
