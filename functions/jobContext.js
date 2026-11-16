@@ -65,7 +65,7 @@ function createLedger(chunkCount, limitUsd = costLimitFor(chunkCount)) {
 
 /** Chunk'ın kendi bağlam nesnesi (defter paylaşılır). */
 function chunkContext(deadline, ledger) {
-  return { deadline, ledger, reserveLeft: ledger ? MANDATORY_RESERVE_PER_CHUNK_USD : 0, post: false };
+  return { deadline, ledger, reserveLeft: ledger ? MANDATORY_RESERVE_PER_CHUNK_USD : 0, post: false, optional: 0 };
 }
 
 /**
@@ -78,7 +78,7 @@ function recordUsage(model, usage) {
   const st = jobClock.getStore();
   if (!st || !st.ledger) return cost;
   st.ledger.spentUsd += cost;
-  if (!st.post && st.reserveLeft > 0) {
+  if (!st.post && !(st.optional > 0) && st.reserveLeft > 0) {
     const r = Math.min(st.reserveLeft, cost);
     st.reserveLeft -= r;
     st.ledger.reservedUsd -= r;
@@ -101,6 +101,25 @@ function releaseMandatoryReserve() {
  * çağrılır, gerçek maliyet recordUsage ile ayrıca yazılır. Bağlam yoksa
  * sınırsız.
  */
+/**
+ * İsteğe bağlı bir adımı (kendi tryReserveOptional/waitReserveOptional slotu
+ * olan) çalıştırır: içindeki çağrıların maliyeti chunk'ın ZORUNLU payından
+ * düşülmez. SIZINTI (2026-11-13, e67abb0e c9): yön ikinci üretimi zorunlu evrede
+ * koştuğu için maliyeti chunk payından düşülüyor, ardından slot.release() kendi
+ * payını da serbest bırakıyordu — chunk'ın sonraki Vision çağrılarına pay
+ * kalmıyordu (iş sınırı aşılabilirdi). Bağlam yoksa fn aynen çalışır.
+ */
+async function runOptional(fn) {
+  const st = jobClock.getStore();
+  if (!st) return fn();
+  st.optional = (st.optional || 0) + 1;
+  try {
+    return await fn();
+  } finally {
+    st.optional--;
+  }
+}
+
 function tryReserveOptional(estUsd) {
   const st = jobClock.getStore();
   if (!st || !st.ledger) return { release() {} };
@@ -155,6 +174,7 @@ module.exports = {
   releaseMandatoryReserve,
   tryReserveOptional,
   waitReserveOptional,
+  runOptional,
   ledgerSummary,
   PRICES,
   COST_LIMIT_PER_FRAME_USD,

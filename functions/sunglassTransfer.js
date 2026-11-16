@@ -69,6 +69,23 @@ const ARM_THICK_R = 0.08, THICK_NEUTRAL_C = 4;
 const OUT_EXT = 0.2, OUT_RAMP = 0.06;
 // Çıktı siyah-beyazsa (yüz kroması medyanı bu altı) taşınan piksel gri (80f c9).
 const GRAY_FACE_C = 3;
+// Kapı D — CAMDAN GÖZ, YEREL (2026-11-06, kullanıcı: "renkli camda gözlük
+// yargıcının yanılması"). Koyu cam kanıtı (darkFrac) renkli camı koyudan
+// ayırmıyor: iris, kirpik ve renkli cam altındaki göz çukuru da eşiğin altında.
+// Ana yargı NO dediyse base'in camı İÇİNDEKİ GÖZLERLE taşınıyordu (7e04933e c4
+// teslimde sklera parıltısı; 80fc7ec4 c2 yerel denemede base gözleri). Ölçü:
+// göz açıklığında (yüz ağı göz çizgisi ×1.15, cam elipsinin 0.7'si içinde) L*
+// yayılımı (p95−p5). Opak cam orada düzdür (1.7-11.8); görünen gözde sklera,
+// iris, kapak, parıltı yayılım yapar (V/F en düşük 12.1). Yalnız |yaw| ≤ 20°:
+// dönük başta uzak göz çizgisi cam kenarına/arka plana taşıyor ve aynalı/
+// yansımalı cam da yüksek yayılım veriyor (80f c3 61, b932 c9 51/36 — bellekte
+// temiz taşıma, yanlış veto olurdu); dönük kareleri cam yargısı (headGhost.
+// judgeLensEyes) kapsar. 44 uygun karede 9 veto: 6 V/F + d87c25b4 c6 doğru,
+// 3b4f51cb c0 ve b932fd71 c3 yanlış (yalnız kalite: AI yolu). KESİN DEĞİL:
+// marjlar ince (d87 c6 13.0-13.2), çok koyu renkli camda (80f c2 t=0.2) kaçıyor.
+const EYE_CONT_R = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const EYE_CONT_L = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398];
+const EYE_SPREAD_MAX = 12, EYE_SPREAD_YAW_MAX = 20, EYE_SPREAD_CORE = 0.7, EYE_SPREAD_DIL = 1.15, EYE_SPREAD_MIN_PX = 12;
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -127,6 +144,58 @@ const centre = (mesh, idx) => {
   for (const i of idx) { x += mesh[i][0]; y += mesh[i][1]; }
   return [x / idx.length, y / idx.length];
 };
+
+const inPoly = (x, y, P) => {
+  let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const [xi, yi] = P[i], [xj, yj] = P[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+};
+
+/**
+ * Göz başına göz açıklığındaki L* yayılımı (p95−p5), cam çekirdeği içinde;
+ * ölçülemeyen göz null (bkz. Kapı D). SAF.
+ */
+function eyeSpread(rgb, W, H, mesh, yawDeg) {
+  const eR = centre(mesh, EYE_R), eL = centre(mesh, EYE_L);
+  const iodImg = Math.hypot(eL[0] - eR[0], eL[1] - eR[1]) || 1;
+  const cosY = yawDeg != null && Number.isFinite(yawDeg) ? Math.max(YAW_COS_MIN, Math.cos((Math.abs(yawDeg) * Math.PI) / 180)) : 1;
+  const iod = iodImg / cosY, ux = (eL[0] - eR[0]) / iodImg, uy = (eL[1] - eR[1]) / iodImg;
+  return [[eR, EYE_CONT_R], [eL, EYE_CONT_L]].map(([e, cont]) => {
+    const P0 = cont.map((i) => mesh[i]);
+    const cx = P0.reduce((s, p) => s + p[0], 0) / P0.length, cy = P0.reduce((s, p) => s + p[1], 0) / P0.length;
+    const P = P0.map(([x, y]) => [cx + EYE_SPREAD_DIL * (x - cx), cy + EYE_SPREAD_DIL * (y - cy)]);
+    const xs = P.map((p) => p[0]), ys = P.map((p) => p[1]);
+    const L = [];
+    const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(H - 1, Math.ceil(Math.max(...ys)));
+    const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
+    for (let Y = y0; Y <= y1; Y++) {
+      for (let X = x0; X <= x1; X++) {
+        const dx = X - e[0], dy = Y - e[1] - LENS_DY * iod;
+        const u = dx * ux + dy * uy, v = -dx * uy + dy * ux;
+        if ((u / (LENS_RX * iod)) ** 2 + (v / (LENS_RY * iod)) ** 2 > EYE_SPREAD_CORE * EYE_SPREAD_CORE) continue;
+        if (!inPoly(X, Y, P)) continue;
+        const i = (Y * W + X) * 3;
+        L.push(lstar(rgb[i], rgb[i + 1], rgb[i + 2]));
+      }
+    }
+    if (L.length < EYE_SPREAD_MIN_PX) return null;
+    L.sort((a, b) => a - b);
+    return L[Math.floor(0.95 * (L.length - 1))] - L[Math.floor(0.05 * (L.length - 1))];
+  });
+}
+
+/**
+ * Kapı D kararı: düz/yarı düz başta (|yaw| ≤ 20°, yaw bilinmiyorsa da) ölçülen
+ * gözlerden biri eşik üstündeyse camdan göz görünüyor → taşıma yok. Dönük başta
+ * ve iki göz de ölçülemezse yerel veto yok (cam yargısı karar verir). SAF.
+ */
+function eyesVisibleVeto(spread, yawDeg) {
+  if (yawDeg != null && Number.isFinite(yawDeg) && Math.abs(yawDeg) > EYE_SPREAD_YAW_MAX) return false;
+  return spread.some((v) => v != null && v >= EYE_SPREAD_MAX);
+}
 
 function segDist(px, py, a, b) {
   const vx = b[0] - a[0], vy = b[1] - a[1];
@@ -306,6 +375,30 @@ function glassesMask(rgb, W, H, mesh, yawDeg, seg) {
  * Base'in koyu camlı gözlüğünü çıktıya taşır. Döner: { buf, applied, reason, ... }.
  * applied:false ise çağıran AI yoluna (eyewear.js) düşer.
  */
+// Göz konturu (iki göz) — gözlük sınıfı payı burada ölçülür.
+const EYE_RING = [33, 246, 161, 160, 159, 158, 157, 173, 133, 7, 163, 144, 145, 153, 154, 155,
+  362, 398, 384, 385, 386, 387, 388, 466, 263, 382, 381, 380, 374, 373, 390, 249];
+/**
+ * Göz konturu noktalarında yüz segmentasyonunun gözlük ("others") olasılığı ortalaması
+ * (2026-11-12, 41589067 c2: renkli camlı şablonda ZIT BAKIŞ kapısı camı ölçüyordu).
+ * 111 şablon: koyu/renkli/şeffaf gözlüklüler 0.42-1.00 (çoğu ≥0.66), gözlüksüzler ≤0.09
+ * (profil 0.49, kasket 0.31 istisna). Ölçülemezse null.
+ */
+async function eyeGlassShare(buf) {
+  const m = await meshOf(buf);
+  if (!m) return null;
+  const meta = await sharp(buf).metadata();
+  const seg = await glassesSeg(buf, meta.width, meta.height, m.mesh);
+  if (!seg) return null;
+  let sum = 0, n = 0;
+  for (const i of EYE_RING) {
+    const x = Math.round(m.mesh[i][0] - seg.x0), y = Math.round(m.mesh[i][1] - seg.y0);
+    if (x < 0 || y < 0 || x >= seg.w || y >= seg.h) continue;
+    sum += seg.G[y * seg.w + x]; n++;
+  }
+  return n ? sum / n : null;
+}
+
 async function transferSunglasses(outBuf, tplBuf) {
   const t0 = Date.now();
   const mo = await sharp(outBuf).metadata();
@@ -331,6 +424,9 @@ async function transferSunglasses(outBuf, tplBuf) {
   const sm = glassesMask(tRgb, W, H, Mt.mesh, yawT, seg);
   if (!sm) return { buf: null, applied: false, reason: "no-lens", yawT, yawO };
   if (sm.reject) return { buf: null, applied: false, reason: sm.reject, darkFrac: sm.darkFrac, cover: sm.cover, outFrac: sm.outFrac, yawT, yawO };
+  // Kapı D (bkz. EYE_SPREAD_MAX): camdan görünen base gözü taşınmaz.
+  const eyeSp = eyeSpread(tRgb, W, H, Mt.mesh, yawT);
+  if (eyesVisibleVeto(eyeSp, yawT)) return { buf: null, applied: false, reason: "eyes-visible", eyeSpread: eyeSp, darkFrac: sm.darkFrac, yawT, yawO };
   const T = affineFit(PLANE_IDX.map((i) => Mt.mesh[i]), PLANE_IDX.map((i) => Mo.mesh[i]));
   if (!T) return { buf: null, applied: false, reason: "no-align", yawT, yawO };
   const scale = Math.sqrt(Math.abs(T.a * T.e - T.b * T.d));
@@ -389,7 +485,7 @@ async function transferSunglasses(outBuf, tplBuf) {
     px++;
   }
   const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
-  return { buf, applied: true, reason: null, lensPx: px, lensArea: sm.area, outFrac: sm.outFrac, holePx: sm.holePx, cover: sm.cover, iod: sm.iod, scale, yawT, yawO, foreshorten: yawT != null && yawO != null ? foreshortenDiff(yawT, yawO) : null, grayOut, ms: Date.now() - t0 };
+  return { buf, applied: true, reason: null, lensPx: px, lensArea: sm.area, outFrac: sm.outFrac, holePx: sm.holePx, cover: sm.cover, iod: sm.iod, scale, yawT, yawO, foreshorten: yawT != null && yawO != null ? foreshortenDiff(yawT, yawO) : null, grayOut, eyeSpread: eyeSp, ms: Date.now() - t0 };
 }
 
-module.exports = { transferSunglasses, _testables: { ARM_THICK_R, glassesMask, glassesSeg, affineFit, invertAffine, applyAffine, foreshortenDiff, lstar, MIN_COVER, MAX_FORESHORTEN, MAX_OUT_ZONE_FRAC } };
+module.exports = { transferSunglasses, eyeGlassShare, _testables: { ARM_THICK_R, glassesMask, eyeSpread, eyesVisibleVeto, EYE_SPREAD_MAX, EYE_SPREAD_YAW_MAX, glassesSeg, affineFit, invertAffine, applyAffine, foreshortenDiff, lstar, MIN_COVER, MAX_FORESHORTEN, MAX_OUT_ZONE_FRAC } };

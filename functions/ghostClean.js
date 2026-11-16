@@ -68,6 +68,19 @@ const USER_SKIN_MIN = 0.35;
 const USER_SKIN_BAND_FACE = 0.015;
 // Şablon şapkası: kaş üstünde aksesuar sınıfı bu kadar (yüz²) ise şapka.
 const HAT_MIN_FACE2 = 0.1;
+// MODELİN KORUDUĞU ŞAPKA (2026-11-06, şapkalı şablon promptu): şablonda şapka
+// varsa (falPhotos şablon şapka tespiti, templateHat) ve çıktıda şablon şapka
+// maskesinin (kaş üstü; gözlük hariç) en az bu payı opak 'others' ise model şapkayı
+// tuttu: şablon şapka maskesi ∪ çıktının kaş üstü opak 'others'ı hiçbir yolda iz
+// sayılmaz (iz detektörü sıcak eklemesi dahil). Ölçüldü (yerel teslim zinciri):
+// korunmayınca 7e04933e c1 beresi tamamen silinip kafa tepesi düz kesildi
+// (pay 0.82 → 0), 0eeb75c8 c3 kep tepesi basamaklı yırtıldı (0.71 → 0.38);
+// açık renk şapka koyu saçlı kullanıcıda "kullanıcı saçından uzak ve açık" sıcak
+// yama kuralına (d87c25b4 c0 kubbesi) birebir uyuyordu. Pay düşükse (model şapkayı
+// düşürdü) bugünkü davranış: kalan kubbe temizlenir (80fc7ec4 c5).
+const HAT_KEPT_SHARE = 0.4;
+// Korunan şapkanın kenar bandı (yumuşak kenar pikselleri basamaklanmasın).
+const HAT_KEEP_BAND_FACE = 0.015;
 // Beklenen kafanın dışında "kafa gibi" sayılan sınıf skorları.
 const OUT_HAIR_MIN = 0.25;
 const OUT_SKIN_MIN = 0.35;
@@ -105,6 +118,20 @@ const LAMA_SPAN_MAX = 440;
 // Bundan küçük iz bileşeni (yüz² payı) yok sayılır; genişleme ve kenar yumuşatma.
 const MIN_AREA_FACE2 = 0.004;
 const GROW_FACE = 0.03;
+// ARTIK İZ (2026-11-05, 9c8f2cb5 c3 "belli belirsiz tutam"): açık zeminde (gökyüzü
+// 204) soluk şablon telleri (165-185) ne karışım testine (kaba zemin ortalaması,
+// α≥0.18) ne kırıntı eşiğine (28) giriyordu ve kafanın üstünde gri leke kalıyordu.
+// Bileşimden sonra temiz LaMa dolgusu zemin kabul edilir; şablon kafası alanında,
+// izin/kafanın RES_REACH yakınında, skinSeg'in arka plan dediği (≥RES_BG_MIN) ve
+// "çıktı − zemin ≈ α·(şablon − zemin)" imzası tutan pikseller dolguyla değişir.
+// Kullanıcının kafası (core), korunan saç, deri hiç sınanmaz.
+const RES_REACH_FACE = 0.2;
+const RES_BG_MIN = 0.5;
+const RES_SMOOTH_FACE = 0.004;
+const RES_OD_MIN = 8;
+const RES_ALPHA_LO = 0.02;
+const RES_ALPHA_RAMP = 0.04;
+const RES_ALPHA_MAX = 1.1;
 const FEATHER_FACE = 0.02;
 
 const clampI = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
@@ -165,6 +192,73 @@ function dropSmall(mask, W, H, minArea) {
 }
 
 /** 3 kanallı raw için kutu bulanıklığı (yarıçap r). SAF. */
+// YARI SAYDAM KAFA HALESİ (2026-11-07, 173acc7f c0, kullanıcı: "arkada hafif
+// bi silüet"): model, kullanıcının selfie saç çizgisine kadar YARI SAYDAM koyu
+// bir saç bandı çiziyor (opak saçın 0.05-0.2 yüz eni dışında). Bant şablon
+// kafasının DIŞINDA (şablon kişi daha küçük) ve beklenen kafanın İÇİNDE olduğu
+// için iz testleri (hepsi Th içi) ona hiç bakmıyordu. Test: çıktı = α·kullanıcı
+// saç rengi + (1-α)·şablonun o pikseldeki gerçek zemini (şablon kafası dışı =
+// zemin), α 0.1-0.85; opak kafaya bitişik; göz hizasının üstünde; bileşen alanı
+// büyük (küçük lekeler saç ucu / gözlük sapı olabilir — "saç kesilmez").
+// 10 karede (bugünkü iş) yalnız c0'da tetiklenir (0.078 yüz²; diğerleri ≤0.022).
+const HALO_ON = true;
+const HALO_BAND_FACE = 0.22;
+const HALO_ALPHA_LO = 0.1;
+const HALO_ALPHA_HI = 0.85;
+const HALO_OD_MIN = 8;
+const HALO_EYE_BELOW_FACE = 0.1;
+const HALO_MIN_AREA_FACE2 = 0.04;
+// GERÇEK SAÇ HALE DEĞİL (2026-11-10, 7bbdad12 c8/c4, kullanıcı): koyu zeminde kıvırcık saç kenarı
+// "kullanıcı saçı + zemin karışımı" testine uyup hale sayılıyor, siliniyordu (c8 sol saç → LaMa
+// bulamacı "hayalet bukle"). Bileşenin bu payı skinSeg'e göre kesin saçsa (≥ HALO_HAIR_SURE)
+// bileşen bütünüyle korunur. Son iş: c8 %55, c4 %47 (gerçek saç), c1 %6 (gerçek hale, silinir).
+const HALO_HAIR_SURE = 0.8;
+const HALO_HAIR_SHARE = 0.35;
+
+/**
+ * Hale maskesi. O: opak kafa, Th: şablon kafası, userSkin: korunan deri,
+ * oF/tF: yumuşatılmış çıktı/şablon kesiti, U: kullanıcı saç rengi, po: çıktı
+ * 68 noktası, Od: O'ya uzaklık. SAF.
+ */
+function haloMask({ n, O, Od, Th, userSkin, Po, CLASSES, oF, tF, U, po, fwk }) {
+  const out = new Uint8Array(n * n);
+  if (!U) return out;
+  const eyeY = po.slice(36, 48).reduce((a, p) => a + p.y, 0) / 12;
+  const yMax = eyeY + HALO_EYE_BELOW_FACE * fwk;
+  const m = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) {
+    if (Th[i] || O[i] || userSkin[i] || Math.floor(i / n) > yMax) continue;
+    if (Od[i] < 1.5 || Od[i] > HALO_BAND_FACE * fwk) continue;
+    if (Po[CLASSES.clothes][i] >= 0.5 || Po[CLASSES.bodySkin][i] >= 0.5) continue;
+    const j = i * 3;
+    const f = mixFit([oF[j], oF[j + 1], oF[j + 2]], U, [tF[j], tF[j + 1], tF[j + 2]]);
+    if (f.od < HALO_OD_MIN || f.a < HALO_ALPHA_LO || f.a > HALO_ALPHA_HI || f.resid > 0.35 * f.od + RESID_ABS) continue;
+    m[i] = 1;
+  }
+  // Opak kafaya bitişik bileşenler, alanı yeterli olanlar.
+  const seed = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) if (m[i] && Od[i] <= 2.5) seed[i] = 1;
+  const att = connected(m, seed, n, n);
+  const seen = new Uint8Array(n * n), minA = HALO_MIN_AREA_FACE2 * fwk * fwk;
+  for (let i = 0; i < n * n; i++) {
+    if (!att[i] || seen[i]) continue;
+    const comp = [i];
+    seen[i] = 1;
+    for (let h = 0; h < comp.length; h++) {
+      const k = comp[h], x = k % n, y = (k - x) / n;
+      for (const q of [x > 0 ? k - 1 : -1, x < n - 1 ? k + 1 : -1, y > 0 ? k - n : -1, y < n - 1 ? k + n : -1]) {
+        if (q >= 0 && att[q] && !seen[q]) { seen[q] = 1; comp.push(q); }
+      }
+    }
+    if (comp.length < minA) continue;
+    let sure = 0;
+    for (const k of comp) if (Po[CLASSES.hair][k] >= HALO_HAIR_SURE) sure++;
+    if (sure >= HALO_HAIR_SHARE * comp.length) continue;
+    for (const k of comp) out[k] = 1;
+  }
+  return out;
+}
+
 function boxBlur3(src, W, H, r) {
   const tmp = new Float32Array(W * H * 3), out = new Float32Array(W * H * 3);
   for (let y = 0; y < H; y++) {
@@ -207,6 +301,24 @@ function boxSum(src, W, H, r) {
     }
   }
   return out;
+}
+
+/** Çıktı-şablon yerel normalize çapraz korelasyonu (parlaklık) ve şablonun yerel sapması. SAF. */
+function localNcc(oC, tC, n, r) {
+  const N = n * n, lo = new Float32Array(N), lt = new Float32Array(N), oo = new Float32Array(N), tt = new Float32Array(N), ot = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const a = (oC[i * 3] + oC[i * 3 + 1] + oC[i * 3 + 2]) / 3, b = (tC[i * 3] + tC[i * 3 + 1] + tC[i * 3 + 2]) / 3;
+    lo[i] = a; lt[i] = b; oo[i] = a * a; tt[i] = b * b; ot[i] = a * b;
+  }
+  const [so, st, soo, stt, sot, c] = [lo, lt, oo, tt, ot, new Float32Array(N).fill(1)].map((m) => boxSum(m, n, n, r));
+  const ncc = new Float32Array(N), tsd = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const k = c[i], mo = so[i] / k, mt = st[i] / k;
+    const vo = soo[i] / k - mo * mo, vt = stt[i] / k - mt * mt, cv = sot[i] / k - mo * mt;
+    tsd[i] = Math.sqrt(Math.max(0, vt));
+    ncc[i] = vo > 4 && vt > 4 ? cv / Math.sqrt(vo * vt) : 0;
+  }
+  return { ncc, tsd };
 }
 
 /**
@@ -324,6 +436,42 @@ function headMask(P, pts, n, CLASSES, faceOval, inPolygon) {
   return { head, inOval, hat };
 }
 
+/**
+ * Modelin koruduğu şablon şapkası (bkz. HAT_KEPT_SHARE). Şablon şapka maskesi kaş
+ * çizgisinde kesilir (gözlük de 'others'; bkz. hatDetect GÖZLÜK HARİÇ). SAF.
+ * Döner { share, area (yüz²), kept, core, keep } — core: şablon şapkası ∪ çıktının
+ * kaş üstü opak 'others'ı ve ona bağlı 'others' (yüz ovali dışında, çene üstü);
+ * keep: core + kenar bandı.
+ * Kaş altına iniş (2026-11-06, 7e04933e c1): berenin ense tarafındaki kenarı kaş
+ * çizgisinin altında; yalnız kaş üstü korununca iz detektörü sıcak eklemesi kenarı
+ * tam kaş satırında yatay bir çizgiyle kesti. Gözlük yüz ovalinin içinde kalır.
+ */
+function keptHatMask({ Ht, Ho, Po, CLASSES, pt, po, n, fwk, distanceTo }) {
+  const browT = Math.min(...pt.slice(17, 27).map((p) => p.y));
+  const browO = Math.min(...po.slice(17, 27).map((p) => p.y));
+  let tp = 0, hit = 0;
+  for (let i = 0; i < n * n; i++) {
+    if (!Ht.hat[i] || Math.floor(i / n) >= browT) continue;
+    tp++;
+    if (Po[CLASSES.others][i] >= SEG_MIN) hit++;
+  }
+  const area = tp / (fwk * fwk);
+  const share = tp ? hit / tp : 0;
+  const kept = area >= HAT_MIN_FACE2 && share >= HAT_KEPT_SHARE;
+  if (!kept) return { share, area, kept, core: null, keep: null };
+  const core = new Uint8Array(n * n);
+  const seedO = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) {
+    const y = Math.floor(i / n);
+    if (Ht.hat[i] && y < browT) core[i] = 1;
+    if (Ho.hat[i] && y < browO) { core[i] = 1; seedO[i] = 1; }
+  }
+  const chinO = po[8].y;
+  const down = growFrom(seedO, (i) => Po[CLASSES.others][i] >= OUT_HAT_MIN && !Ho.inOval[i] && Math.floor(i / n) <= chinO, 4 * n, n);
+  for (let i = 0; i < n * n; i++) if (down[i]) core[i] = 1;
+  return { share, area, kept, core, keep: dilate(core, n, n, HAT_KEEP_BAND_FACE * fwk, distanceTo) };
+}
+
 const faceWidth = (lm) => Math.max(lm.box.width, Math.hypot(lm.pts[0].x - lm.pts[16].x, lm.pts[0].y - lm.pts[16].y));
 
 /**
@@ -378,12 +526,381 @@ function pickProfile(profiles, yawO, pose3dO) {
   return prof ? { prof, deg: null, margin: EXP_MARGIN_FACE + EXP_MARGIN_PER_YAW * Math.abs(prof.yaw - yawO) } : null;
 }
 
+// İZ BÜYÜTME (2026-11-04): selfie kafa çizgisi + pay, kullanıcının gerçek saç
+// sınırından geniş kalabiliyor; o şeritte kalan şablon izi (80fc7ec4 c0: koyu
+// saçın hemen üstünde bej bant + kubbenin alt kenarı) "beklenen kafa" sayılıp
+// korunuyordu. Çok etiketli skinSeg'de gerçek saç arka plan≈0, iz saç≈1 VE
+// arka plan≈1 (bkz. ghost-hair-is-background-class; 80f c0 sütun ölçümü: koyu
+// saç bg 0.00, kubbe/bant bg 1.00). İz, beklenen kafanın içine yalnız arka
+// plan sınıfı yüksek, deri olmayan, kaş üstü ve yüz ovali dışındaki
+// piksellerden, dışarıdaki ize BAĞLI olarak ve sınırlı derinlikte ilerler.
+const GROW_BG_MIN = 0.8;
+const GROW_SKIN_MAX = 0.35;
+const GROW_DEPTH_FACE = 0.15;
+// İZ KENARI (2026-11-04, 80fc7ec4 c0 "saçın üstünde açık kenar kalmamalı"):
+// büyütmeden sonra kullanıcının koyu saçının üst kenarında 5-8 px'lik açık
+// şerit kalıyordu (113,90,76; kullanıcı saçı 74,56,45; zemin 95,94,89) — bej
+// bandın saç sınıfında kalan ucu (arka plan 0.13). İze BİTİŞİK, kullanıcının
+// saç renginden belirgin farklı saç pikselleri de iz sayılır; yalnız ince
+// bir şerit (derinlik sınırı) — saçın içine ilerlemez.
+const RIM_DIFF = 35;
+const RIM_DEPTH_FACE = 0.06;
+// Kenar şeridi kullanıcının saçından AÇIK olmalı (2026-11-04 v9, 80f c0 "sağ üst
+// silinmiş"): renk uzaklığı iki yönlü olunca gölgedeki neredeyse siyah gerçek
+// saç (35,26,21; arka plan sınıfı 0.00; kullanıcı ortancası 71,58,48) da kenar
+// sayılıp siliniyordu. İz kenarı her zaman zeminle/şablon saçıyla karışım =
+// açık; koyu piksel asla kenar değildir.
+const RIM_LIGHTER = 12;
+// Yüz ovali (yer işaretinden: kaş + 0.4·(çene−kaş)) alçak saç çizgisinde saçın
+// alt kısmını da kapsıyor; 80f c0'da şablon alnı izi (132,118,105; saç=1, yüz
+// derisi=0, arka plan 0.3-0.9) oval içinde kaldığı için korunuyordu. Oval
+// içinde kenar kuralı yalnız arka plan sınıfı bu eşikten yüksek saç pikseline
+// uygulanır: kullanıcının gerçek alnı yüz derisi=1, gerçek saçı arka plan≈0.
+const RIM_OVAL_BG_MIN = 0.2;
+function growFrom(seed, ok, maxD, n) {
+  const out = new Uint8Array(n * n);
+  const depth = new Float32Array(n * n).fill(Infinity);
+  const q = [];
+  for (let i = 0; i < n * n; i++) if (seed[i]) { depth[i] = 0; q.push(i); }
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], x = i % n, y = (i - x) / n, d = depth[i] + 1;
+    if (d > maxD) continue;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const X = x + dx, Y = y + dy;
+      if (X < 0 || Y < 0 || X >= n || Y >= n) continue;
+      const j = Y * n + X;
+      if (depth[j] <= d || seed[j] || !ok(j)) continue;
+      depth[j] = d; out[j] = 1; q.push(j);
+    }
+  }
+  return out;
+}
+function growGhostIntoExpected(cand, { Th, Ex, userSkin, inOval, Po, CLASSES, n, browO, fwk }) {
+  // Renk şartı YOK (denendi 2026-11-04): kubbenin koyu kısmı kullanıcı saç
+  // rengine yakın (80f c0 61,51,44) — renkle durdurunca tepede tutam kaldı.
+  // Gerçek saç arka plan≈0 olduğu için bu kurala zaten girmez (a4433 c6 ense).
+  const ok = (i) => Th[i] && Ex[i] && !userSkin[i] && !inOval[i] && Math.floor(i / n) < browO &&
+    Po[CLASSES.background][i] >= GROW_BG_MIN && Po[CLASSES.faceSkin][i] < GROW_SKIN_MAX && Po[CLASSES.bodySkin][i] < GROW_SKIN_MAX;
+  return growFrom(cand, ok, GROW_DEPTH_FACE * fwk, n);
+}
+function growGhostRim(seed, { Th, Ex, userSkin, inOval, Po, CLASSES, n, browO, fwk, oF, U }) {
+  if (!U) return new Uint8Array(n * n);
+  const ok = (i) => {
+    if (!(Th[i] && Ex[i] && !userSkin[i] && Math.floor(i / n) < browO)) return false;
+    if (inOval[i] && Po[CLASSES.background][i] < RIM_OVAL_BG_MIN) return false;
+    if (Po[CLASSES.faceSkin][i] >= GROW_SKIN_MAX || Po[CLASSES.bodySkin][i] >= GROW_SKIN_MAX) return false;
+    const j = i * 3;
+    if ((oF[j] + oF[j + 1] + oF[j + 2]) / 3 < lU + RIM_LIGHTER) return false;
+    return Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]) > RIM_DIFF;
+  };
+  const lU = (U[0] + U[1] + U[2]) / 3;
+  return growFrom(seed, ok, RIM_DEPTH_FACE * fwk, n);
+}
+// GERÇEK SAÇ KORUMASI (2026-11-04 toplu deneme, a4433ad1 c6 / 017dbe34 c6 aynı
+// şablon, "kafanın arkası kesildi" — eski sürümde de): beklenen kafa (selfie
+// çizgisi) çıktıdaki gerçek kafadan küçük kalınca (model kafayı medyan %8.5
+// büyük çiziyor; dönük başta selfie çizgisi enseyi kapsamıyor) kafanın
+// arkasındaki OPAK gerçek saç "kafa sınıfı, beklenen kafanın dışında" diye iz
+// sayılıp siliniyordu. Ölçüm (a4433 c6 delik pikselleri): saç=1.0, arka
+// plan=0.0, renk 20-29 (gölgedeki ense; kullanıcı saç ortancası 52 — renk
+// uzaklığı ve karışım testi bu koyu saçta yanılıyor). 80f c0 kubbesi ise
+// saç=1 VE arka plan=1; kenar şeridi kullanıcı saçından açık. Kural: çıktının
+// kafasına bağlı, skinSeg'in EMİN olduğu saç (saç yüksek, arka plan düşük) ve
+// kullanıcının saçından belirgin AÇIK olmayan piksel korunur. Şablonun açık
+// renkli saçı (c2e8eff1 c0 sarı perçem), kubbe ve açık kenar korunmaz.
+const PROTECT_HAIR_MIN = 0.5;
+const PROTECT_HAIR_BG_MAX = 0.3;
+const PROTECT_HAIR_LIGHTER = 15;
+// Derinlik pratikte sınırsız (şablon kafası alanı içinde; 2026-11-04 v11 toplu
+// deneme a4433ad1 c1): dönük başta selfie çizgisi enseyi hiç kapsamıyor, 0.4·yüz
+// sınırı kafanın arkasındaki opak saçı (saç=1, arka plan=0, 30-42 gri) yarıda
+// bırakıp kesiyordu. Kural "kafanın arkası/tepesi asla kesilmez" önceliklidir.
+const PROTECT_HAIR_DEPTH_FACE = 3;
+
+// KULLANICININ OPAK SAÇI (2026-11-12, 41589067 c4, kullanıcı: "saçın arka kısmında
+// siliklik, saç eksilmesi ve leke"): gökyüzüne karşı kıvırcık arka saçın dış
+// bukleleri skinSeg'de saç ≈ 0-0.3 / arka plan ≈ 1 (selfie çizgisi dışında, opak
+// kafa O'ya girmiyor). İz şeridi (bukle uçları + gök karışımı) silinince dolgu
+// deliği (Gd) ve "kırıntı" bileşimi izin 0.08·yüz yakınındaki GERÇEK koyu bukleleri
+// de zeminle değiştirdi; kesik kenar sonra kafa küçültmede gökte koyu lekeye döndü.
+// Segmentasyon payı ayırmıyor (42 bileşen kör etiket: gerçek iz 1108a c2 kesin
+// saç 0.78, c4 gerçek saç 0.15). Ayıran: piksel kullanıcının saç RENGİNDE (opak)
+// ve zemin o renkten belirgin farklı (opaklık ölçülebilir) — yarı saydam iz zeminle
+// karışır, açık kalır. Koyu zeminde (1109 c7, 1106 c5: iz de saç renginde) zemin
+// karşıtlığı yok → koruma devreye girmez. Kafaya (keep/O) bağlı olmalı.
+const USER_OPAQUE = {
+  ON: true,
+  NEAR_U: 35, // piksel ↔ kullanıcı saç rengi (blursuz ya da yumuşatılmış, küçüğü)
+  BG_CONTRAST: 60, // yerel zemin ↔ kullanıcı saç rengi en az
+  DEPTH_FACE: 0.15, // kafadan en çok bu kadar uzağa yayılır
+  EDGE_FACE: 0.008, // korunan bukle kenarına ince pay (kenar yumuşaması)
+  // Bukle ucu: opak bukleye (ya da opak kafaya) en çok bu kadar uzaklıkta, "kullanıcı
+  // saçı + zemin" karışımına sıkı uyan yarı saydam piksel kullanıcınındır — şablon
+  // saçı da koyuysa (c4) şablon karışımı da uyar; bitişik bantta belirsizlik
+  // kullanıcı lehine. Gerçek iz kubbe/tutamı 0.07·yüzden kalın (STRONG_FACE).
+  FRINGE_FACE: 0.03,
+  FRINGE_A_LO: 0.15,
+  FRINGE_RESID_FRAC: 0.2,
+  FRINGE_RESID_ABS: 4,
+};
+function userOpaqueHair({ seed, O, Th, n, fwk, oC, oF, bg, U, distanceTo }) {
+  const s = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) if ((seed && seed[i]) || (O && O[i])) s[i] = 1;
+  const d3 = (a, j) => Math.hypot(a[j] - U[0], a[j + 1] - U[1], a[j + 2] - U[2]);
+  const contrast = (j) => Math.hypot(bg.v[j] - U[0], bg.v[j + 1] - U[1], bg.v[j + 2] - U[2]) >= USER_OPAQUE.BG_CONTRAST;
+  const ok = (i) => {
+    if (!Th[i] || !bg.ok[i]) return false;
+    const j = i * 3;
+    if (!contrast(j)) return false;
+    return Math.min(d3(oC, j), d3(oF, j)) <= USER_OPAQUE.NEAR_U;
+  };
+  const g = growFrom(s, ok, USER_OPAQUE.DEPTH_FACE * fwk, n);
+  for (let i = 0; i < n * n; i++) if (s[i]) g[i] = 0; // yalnız yeni eklenen bukleler
+  const r = USER_OPAQUE.EDGE_FACE * fwk;
+  const out = r >= 1 ? dilate(g, n, n, r, distanceTo) : g;
+  if (USER_OPAQUE.FRINGE_FACE > 0) {
+    // Uçlar yalnız YENİ korunan bukleden büyür (opak kafa O'nun kenarı zaten
+    // protectUserFringe ile sınanıyor; O'dan da büyütmek izsiz karede bile iz
+    // kenarını kullanıcıya verirdi).
+    const fs = new Uint8Array(n * n);
+    let any = false;
+    for (let i = 0; i < n * n; i++) if (g[i]) { fs[i] = 1; any = true; }
+    if (any) {
+      const okF = (i) => {
+        if (!Th[i] || !bg.ok[i]) return false;
+        const j = i * 3;
+        if (!contrast(j)) return false;
+        const o = [oC[j], oC[j + 1], oC[j + 2]], b = [bg.v[j], bg.v[j + 1], bg.v[j + 2]];
+        const fu = mixFit(o, U, b);
+        if (fu.a < USER_OPAQUE.FRINGE_A_LO || fu.a > 1.1) return false;
+        return fu.resid <= USER_OPAQUE.FRINGE_RESID_FRAC * fu.od + USER_OPAQUE.FRINGE_RESID_ABS;
+      };
+      const f = growFrom(fs, okF, USER_OPAQUE.FRINGE_FACE * fwk, n);
+      for (let i = 0; i < n * n; i++) if (f[i]) out[i] = 1;
+    }
+  }
+  return out;
+}
+function protectRealHair({ Th, Ex, Ho, keep, Po, CLASSES, n, fwk, oF, U }) {
+  if (!U) return new Uint8Array(n * n);
+  const lU = (U[0] + U[1] + U[2]) / 3;
+  const seed = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) if ((Ex[i] && Ho[i]) || keep[i]) seed[i] = 1;
+  const ok = (i) => {
+    if (!Th[i] || Ex[i]) return false;
+    if (Po[CLASSES.hair][i] < PROTECT_HAIR_MIN || Po[CLASSES.background][i] >= PROTECT_HAIR_BG_MAX) return false;
+    const j = i * 3;
+    return (oF[j] + oF[j + 1] + oF[j + 2]) / 3 <= lU + PROTECT_HAIR_LIGHTER;
+  };
+  return growFrom(seed, ok, PROTECT_HAIR_DEPTH_FACE * fwk, n);
+}
+
+// KULLANICININ BUKLE KENARI (2026-11-05 v12 toplu deneme, b932fd71 c0 / 7e04933e c7
+// "kıvırcık saç kırpıldı"): gökyüzüne karşı yarı saydam gerçek bukleler skinSeg'de
+// saç=1 VE arka plan=1 — hayaletle aynı imza; selfie çizgisi dışında kaldıkları
+// için siliniyordu. Ayıran renk: bukle = α·(kullanıcı saçı) + (1−α)·zemin (ölçüm
+// 105,91,78; U 20,19,16; zemin ≈220,195,155 → artık 4, uzaklık 154), şablon izi
+// şablonun saç rengiyle karışır. Kafaya bağlı, ince bantta, kullanıcı rengiyle
+// SIKI uyan (artık ≤ 0.2·uzaklık + 3) ve şablon renginden belirgin iyi açıklanan
+// yarı saydam piksel korunur. 80f c0 açık uçları (94,73,61: artık/uzaklık 0.39)
+// ve opak koyu kubbe (α≈1) bu kurala girmez.
+const FRINGE_DEPTH_FACE = 0.12;
+const FRINGE_A_LO = 0.08;
+const FRINGE_A_HI = 0.9;
+const FRINGE_RESID_FRAC = 0.2;
+const FRINGE_RESID_ABS = 3;
+const FRINGE_UB_MIN = 40;
+const FRINGE_BETTER = 1.5;
+function protectUserFringe({ seed, Th, n, fwk, oF, tF, bg, U }) {
+  if (!U) return new Uint8Array(n * n);
+  const ok = (i) => {
+    if (!Th[i] || !bg.ok[i]) return false;
+    const j = i * 3;
+    const o = [oF[j], oF[j + 1], oF[j + 2]], b = [bg.v[j], bg.v[j + 1], bg.v[j + 2]];
+    const fu = mixFit(o, U, b);
+    if (fu.c2 < FRINGE_UB_MIN * FRINGE_UB_MIN || fu.a < FRINGE_A_LO || fu.a > FRINGE_A_HI) return false;
+    if (fu.resid > FRINGE_RESID_FRAC * fu.od + FRINGE_RESID_ABS) return false;
+    const ft = mixFit(o, [tF[j], tF[j + 1], tF[j + 2]], b);
+    const ftRes = ft.a < 0 || ft.a > 1.2 ? Infinity : ft.resid;
+    return ftRes + RESID_ABS > FRINGE_BETTER * (fu.resid + RESID_ABS);
+  };
+  return growFrom(seed, ok, FRINGE_DEPTH_FACE * fwk, n);
+}
+
+// OPAK KAFA (2026-11-05 v18 görsel inceleme: 134 karenin 35'inde yeni sürüm
+// canlıdan kötü — izsiz karelerde bile saç kenarı/tepe/ense/kulaklık siliniyordu;
+// dd788c00 c7, d87c25b4 c2, b932fd71 c0). Selfie çizgisi ±%10 hatalı ve "arka
+// plan sınıfı yüksek" imzası gerçek saç kenarında da tutuyor. Yüze bağlı, arka
+// plan sınıfı düşük saç / aksesuar (şapka, kulaklık) kullanıcının kafasıdır ve
+// hiçbir aday kuralı ona dokunmaz (yalnız güçlü ize bitişik açık kenar kuralı).
+// Şablon renginde opak saç (c2e8eff1 c0 sarı perçem: kullanıcı saçından çok
+// uzak, şablona yakın) opak kafa sayılmaz.
+const OPAQUE_BG_MAX = 0.5;
+const OPAQUE_TPL_MARGIN = 20;
+const OPAQUE_FAR_FROM_U = 90; // 40 denendi: ışık alan gerçek saç (dd788c00 c7 120,91,74; U 75,56,46) dışlanıp kesildi
+// Opak kafaya bitişik bu bantta aday yalnız şablon rengi kullanıcı saçından
+// belirgin daha iyi açıklıyorsa (EDGE_RATIO) iz kalır.
+const EDGE_BAND_FACE = 0.04;
+// Güçlü iz: aday bileşeni opak kafadan en az bu kadar uzağa taşmalı (hayalet
+// kubbe/tutam 0.1-0.4·yüz; gerçek saç kenarı bandı ≤0.04·yüz).
+const STRONG_FACE = 0.07;
+// RENKÇE BELİRSİZ yarı saydam piksel (kullanıcı ve şablon saçı benzer renk):
+// tek başına iz sayılmaz — opak nesne ile yarı saydam katman tek piksel renginden
+// ayrılamıyor (d87c25b4 c2 duvara karşı gri kulaklık bandı "karışım" göründü,
+// uzaklık kuralıyla silindi, büyütmeler enseyi yedi). Yalnız renkçe KESİN ize
+// bağlıysa (histerezis) aynı hayaletin parçası sayılır (80fc7ec4 c0 kubbenin
+// koyu kısmı; tek başına silinmeyince lekeler kaldı). Bedeli: kesin pikseli hiç
+// olmayan, kullanıcı saçıyla aynı renkte iz kalabilir. İstisna: opak kafadan
+// AMBIG_FAR uzakta ve şablonun dokusunu taşıyan (yerel korelasyon ≥ AMBIG_NCC_MIN)
+// belirsiz piksel kesin iz sayılır (9c8f2cb5 c3).
+const AMBIG_FAR_FACE = 0.05;
+const AMBIG_NCC_MIN = 0.5;
+const AMBIG_TSD_MIN = 8;
+const AMBIG_NCC_R_FACE = 0.035;
+function opaqueHead({ Ho, userSkin, Th, Po, CLASSES, n, oF, tF, U, personHead, bg }) {
+  const seed = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) if (Ho.inOval[i] || userSkin[i]) seed[i] = 1;
+  const ok = (i) => {
+    if (!Th[i]) return false;
+    // Renkle opaklık (kullanıcı rengine yakın = opak) DENENDİ, geri alındı (2026-11-05):
+    // 80fc7ec4 c0 kubbesinin koyu kısmı (63,58,53) kullanıcı rengine yakın, tüm kubbe korundu.
+    if (Po[CLASSES.background][i] >= OPAQUE_BG_MAX) return false;
+    if (Po[CLASSES.hair][i] < PROTECT_HAIR_MIN && Po[CLASSES.others][i] < OUT_HAT_MIN) return false;
+    if (U) {
+      const j = i * 3;
+      const dU = Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]);
+      const dT = Math.hypot(oF[j] - tF[j], oF[j + 1] - tF[j + 1], oF[j + 2] - tF[j + 2]);
+      if (dU > OPAQUE_FAR_FROM_U && dT + OPAQUE_TPL_MARGIN < dU) return false;
+      // Kesin şablon karışımı + kullanıcı saçından açık = iz, opak kafa değil
+      // (2026-11-05 v27, 80fc7ec4 c0 sol şakak üstü bej tutam 120-132,100-113,86-99;
+      // arka plan sınıfı 0.25 olduğu için opak sayılıp korunuyordu).
+      if (bg && bg.ok[i] && (oF[j] + oF[j + 1] + oF[j + 2]) / 3 >= (U[0] + U[1] + U[2]) / 3 + RIM_LIGHTER) {
+        const o = [oF[j], oF[j + 1], oF[j + 2]], b = [bg.v[j], bg.v[j + 1], bg.v[j + 2]], t = [tF[j], tF[j + 1], tF[j + 2]];
+        if (ghostAlpha(o, t, b) != null) {
+          const fu = mixFit(o, U, b), ft = mixFit(o, t, b);
+          if (ft.resid + RESID_ABS < EDGE_RATIO * (fu.resid + RESID_ABS)) return false;
+        }
+      }
+    }
+    return true;
+  };
+  const g = growFrom(seed, ok, 4 * n, n);
+  for (let i = 0; i < n * n; i++) if (seed[i]) g[i] = 1;
+  return g;
+}
+// BÜYÜTME TOHUMU (2026-11-05 v26, 125 kare + ham etiketleri): büyütme/kenar
+// kuralları küçük tohumdan (iz 0.001-0.02·yüz²) izsiz karelerde 0.2·yüz²'ye kadar
+// yayılıp saç kenarını yiyordu (canlıdan kötü 24 karenin çoğu). En büyük iz
+// bileşeni ≥0.09·yüz² yalnız belirgin izli karelerde görüldü (80fc7ec4 c0 0.25,
+// c5 0.11, 3b4f51cb c1 0.10, 017dbe34 c5 0.10; izsizlerde en çok 0.08).
+const GROW_SEED_FACE2 = 0.09;
+/** Alanı minArea'dan büyük aday bileşenlerinin maskesi. SAF. */
+function bigComponents(cand, minArea, n) {
+  const out = new Uint8Array(n * n), seen = new Uint8Array(n * n);
+  for (let s0 = 0; s0 < n * n; s0++) {
+    if (!cand[s0] || seen[s0]) continue;
+    const comp = [s0];
+    seen[s0] = 1;
+    for (let h = 0; h < comp.length; h++) {
+      const i = comp[h], x = i % n, y = (i - x) / n;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const X = x + dx, Y = y + dy;
+        if (X < 0 || Y < 0 || X >= n || Y >= n) continue;
+        const j = Y * n + X;
+        if (cand[j] && !seen[j]) { seen[j] = 1; comp.push(j); }
+      }
+    }
+    if (comp.length >= minArea) for (const i of comp) out[i] = 1;
+  }
+  return out;
+}
+/** Opak kafadan STRONG uzaklığa uzanmayan aday bileşenlerini siler (yerinde). Döner silinen piksel. */
+function keepStrongGhost(cand, Od, minD, n) {
+  const lab = new Int32Array(n * n).fill(-1);
+  let dropped = 0;
+  for (let s = 0; s < n * n; s++) {
+    if (!cand[s] || lab[s] >= 0) continue;
+    const comp = [s];
+    lab[s] = s;
+    let far = 0;
+    for (let h = 0; h < comp.length; h++) {
+      const i = comp[h], x = i % n, y = (i - x) / n;
+      if (Od[i] > far) far = Od[i];
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const X = x + dx, Y = y + dy;
+        if (X < 0 || Y < 0 || X >= n || Y >= n) continue;
+        const j = Y * n + X;
+        if (cand[j] && lab[j] < 0) { lab[j] = s; comp.push(j); }
+      }
+    }
+    if (far < minD) { for (const i of comp) cand[i] = 0; dropped += comp.length; }
+  }
+  return dropped;
+}
+
+// ŞABLON ALNI İZİ (2026-11-04, 80fc7ec4 c0 sol üst): yüksek alınlı şablonun
+// alın derisi kullanıcının saç çizgisinin ÜSTÜNDE yarı saydam bej leke olarak
+// kalıyordu; skinSeg onu "yüz derisi" görüyor, iki büyütme de deriyi dışarıda
+// bırakıyordu. Kullanıcının yüz derisine bağlı olmayan (userSkin dışı), kaşların
+// belirgin üstündeki (kulak üstleri kaş hizasını aşmaz) ve rengi kullanıcının
+// saçından farklı deri pikseli, ize bağlıysa iz sayılır.
+const SKIN_REMNANT_ABOVE_BROW_FACE = 0.15;
+function growGhostSkinRemnant(seed, { Th, Ex, userSkin, inOval, Po, CLASSES, n, browO, fwk, oF, U }) {
+  if (!U) return new Uint8Array(n * n);
+  const yMax = browO - SKIN_REMNANT_ABOVE_BROW_FACE * fwk;
+  const ok = (i) => {
+    if (!(Th[i] && Ex[i] && !userSkin[i] && !inOval[i] && Math.floor(i / n) < yMax)) return false;
+    if (Math.max(Po[CLASSES.faceSkin][i], Po[CLASSES.bodySkin][i]) < GROW_SKIN_MAX) return false;
+    const j = i * 3;
+    return Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]) > RIM_DIFF;
+  };
+  return growFrom(seed, ok, GROW_DEPTH_FACE * fwk, n);
+}
+
 /**
  * Çıktıdaki şablon kafası izini siler. profiles: headProfileOf sonuçları
  * (kullanıcının selfie'leri; boşsa yalnız karışım testi). Dönüş { buf (PNG) |
  * null, applied, reason, ghostPx, ghostFace2, mode, ms }.
  */
-async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug = null } = {}) {
+/**
+ * Yama skorlarından (grid×grid, kırpımın üstünde) iz bölgesi maskesi. SAF.
+ * hp = { grid, scores (grid², null = puanlanmadı), tau }. Yama bazında:
+ * skor ≥ tau çekirdek; çekirdeğe komşu ve skor ≥ tau − HOT_HYST yamalar
+ * (histerezis); 8 komşusunun en az 5'i sıcak olan yama (delik). Sonra yarım
+ * yama genişletme — bloklu maske izin parçasını temiz zeminde kırıntı olarak
+ * bırakıyordu (2026-11-06, 9c8f2cb5 c3 tepede "haç", dd788c00 c8 gri blok).
+ */
+const HOT_HYST = 1.5;
+function hotMaskOf(hp, n) {
+  const G = hp.grid, cell = n / G, S = hp.scores;
+  const hotP = new Uint8Array(G * G);
+  const q = [];
+  for (let p = 0; p < G * G; p++) if (S[p] != null && S[p] >= hp.tau) { hotP[p] = 1; q.push(p); }
+  const nb8 = (p) => {
+    const x = p % G, y = (p - x) / G, r = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const X = x + dx, Y = y + dy;
+      if (X >= 0 && Y >= 0 && X < G && Y < G) r.push(Y * G + X);
+    }
+    return r;
+  };
+  for (let h = 0; h < q.length; h++) for (const r of nb8(q[h])) if (!hotP[r] && S[r] != null && S[r] >= hp.tau - HOT_HYST) { hotP[r] = 1; q.push(r); }
+  const fill = [];
+  for (let p = 0; p < G * G; p++) if (!hotP[p] && nb8(p).filter((r) => hotP[r]).length >= 5) fill.push(p);
+  for (const p of fill) hotP[p] = 1;
+  const out = new Uint8Array(n * n), pad = Math.round(cell / 2);
+  for (let p = 0; p < G * G; p++) {
+    if (!hotP[p]) continue;
+    const gx = p % G, gy = (p - gx) / G;
+    const y0 = Math.max(0, Math.round(gy * cell) - pad), y1 = Math.min(n, Math.round((gy + 1) * cell) + pad);
+    const x0 = Math.max(0, Math.round(gx * cell) - pad), x1 = Math.min(n, Math.round((gx + 1) * cell) + pad);
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out[y * n + x] = 1;
+  }
+  return out;
+}
+
+async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug = null, ghostScorer = null, templateHat = false } = {}) {
   const t0 = Date.now();
   const { faceLandmarks } = require("./faceQuality");
   const { classProbs, CLASSES } = require("./skinSeg");
@@ -421,6 +938,10 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   const Ho = headMask(Po, po, n, CLASSES, faceOval, inPolygon);
   const Th = dilate(Ht.head, n, n, TPL_GROW_FACE * fwk, distanceTo);
   const HoD = dilate(Ho.head, n, n, HOLE_GROW_FACE * fwk, distanceTo);
+  // MODELİN KORUDUĞU ŞAPKA (bkz. HAT_KEPT_SHARE). Yalnız şablonda şapka tespit
+  // edildiyse; değilse hiçbir şey değişmez.
+  const hk = templateHat ? keptHatMask({ Ht, Ho, Po, CLASSES, pt, po, n, fwk, distanceTo }) : null;
+  const hatKeep = hk && hk.kept ? hk.keep : null;
 
   // BEKLENEN KAFA: poza en yakın selfie'nin maskesi çıktının yüzüne taşınır.
   const ecO = eyeChin(po);
@@ -440,7 +961,13 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
     if (hatPx >= HAT_MIN_FACE2 * fwk * fwk) {
       const ecT = eyeChin(pt);
       const hatO = mapMask(Ht.hat, n, ecT.E, ecT.C, ecO.E, ecO.C, n);
-      for (let i = 0; i < n * n; i++) if (hatO[i]) Ex[i] = 1;
+      // Şablon şapkası yalnız çıktıda OPAK şapka varsa korunur (2026-11-04,
+      // 80fc7ec4 c5): model şapkayı çoğu karede düşürüyor (4/4) ve geride
+      // yarı saydam kubbe kalıyor; şapka bölgesinin tamamı korununca kubbe
+      // hiç aranmıyordu. Opak şapka: aksesuar sınıfı, arka plan sınıfı düşük.
+      for (let i = 0; i < n * n; i++) {
+        if (hatO[i] && Po[CLASSES.others][i] >= OUT_HAT_MIN && Po[CLASSES.background][i] < GROW_BG_MIN) Ex[i] = 1;
+      }
     }
     for (let i = 0; i < n * n; i++) if (Ho.inOval[i]) Ex[i] = 1;
     Ex = dilate(Ex, n, n, pick.margin * fwk, distanceTo);
@@ -468,6 +995,7 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   const cand = new Uint8Array(n * n);
   let core;
   let keep = null;
+  let weakPx = null, Uout = null, hotAdded = 0, hotPatches = null, detScore = null, haloFace2 = 0, userOpaquePx = 0;
   if (Ex) {
     // Beklenen kafanın dışı: kafa sınıfı, kafaya bağlı kişi maskesi ya da yarı
     // saydam karışım = iz.
@@ -481,31 +1009,168 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
     // Kullanıcının kendi saç rengi: beklenen kafanın içindeki dolu saç.
     const hc = [[], [], []];
     for (let i = 0; i < n * n; i++) {
-      if (!Ex[i] || !Ho.head[i] || Ho.inOval[i] || Po[CLASSES.hair][i] < USER_HAIR_MIN) continue;
+      // Kubbe (saç≈1 VE arka plan≈1) kullanıcının saçı değil: ortancayı kaydırmasın (2026-11-05 inceleme).
+      if (!Ex[i] || !Ho.head[i] || Ho.inOval[i] || Po[CLASSES.hair][i] < USER_HAIR_MIN || Po[CLASSES.background][i] >= GROW_BG_MIN) continue;
       for (let c = 0; c < 3; c++) hc[c].push(oF[i * 3 + c]);
     }
     const med = (a) => { a.sort((x, y) => x - y); return a[a.length >> 1]; };
     const U = hc[0].length >= Math.max(20, 0.002 * fwk * fwk) ? hc.map(med) : null;
+    Uout = U;
     keep = new Uint8Array(n * n);
     const exDist = distanceTo(Ex, n, n);
+    // OPAK KAFA (bkz. OPAQUE_*) adaylardan önce: belirsiz renkli yarı saydam piksel
+    // için uzaklık ölçütü ona göre.
+    const O = opaqueHead({ Ho, userSkin, Th, Po, CLASSES, n, oF, tF, U, personHead, bg });
+    const Od = distanceTo(O, n, n);
+    const mixA = new Uint8Array(n * n);
+    const ambig = new Uint8Array(n * n);
+    const tex = localNcc(oC, tC, n, Math.max(2, Math.round(AMBIG_NCC_R_FACE * fwk)));
     for (let i = 0; i < n * n; i++) {
       if (!Th[i] || Ex[i] || userSkin[i]) continue;
       const j = i * 3;
       const hairCls = Po[CLASSES.hair][i] >= OUT_HAIR_MIN;
       const mix = bg.ok[i] && ghostAlpha([oF[j], oF[j + 1], oF[j + 2]], [tF[j], tF[j + 1], tF[j + 2]], [bg.v[j], bg.v[j + 1], bg.v[j + 2]]) != null;
-      const headLike = hairCls || Po[CLASSES.faceSkin][i] >= OUT_SKIN_MIN || Po[CLASSES.others][i] >= OUT_HAT_MIN ||
-        (personHead[i] && Math.floor(i / n) < browO);
-      if (!headLike && !mix) continue;
-      // KULLANICININ SAÇI selfie çizgisini biraz aşmış olabilir (c8: saç kenarı
-      // kesilip basamak kaldı): çizgiye yakın bantta, rengi kendi saçına yakın,
-      // karışım olmayan saç pikseli korunur (uzağa uzanan iz korunmaz — c9
-      // perçemi). Bu kural yalnız korur, silme kararı vermez.
-      if (U && hairCls && !mix && exDist[i] <= USER_HAIR_REACH_FACE * fwk &&
-          Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]) <= USER_HAIR_SAME) { keep[i] = 1; continue; }
+      if (mix) mixA[i] = 1;
+      // YALNIZ YARI SAYDAM İZ ADAYDIR (2026-11-05 v18 görsel inceleme, 134 kare):
+      // eskiden "beklenen kafanın dışında saç/deri/şapka sınıfı" da adaydı; selfie
+      // çizgisi ±%10 hatalı olduğundan izsiz karelerde modelin opak çizdiği gerçek
+      // saç (şablonun şeklinde olsa bile: dd788c00 c7 kıvırcık tepe, d87c25b4 c2
+      // kulaklık/ense, b932fd71 c0 bukleler) kırpılıyordu — kural "kafa kesilmez".
+      // Hayalet = arkasından zemin görünen şablon katmanı (ghostAlpha α 0.18-0.88).
+      if (!mix) {
+        // KULLANICININ SAÇI selfie çizgisini biraz aşmış olabilir (c8): korunur.
+        if (U && hairCls && exDist[i] <= USER_HAIR_REACH_FACE * fwk &&
+            Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]) <= USER_HAIR_SAME) keep[i] = 1;
+        continue;
+      }
+      // Kullanıcının saçı + zemin olarak da en az o kadar iyi açıklanıyorsa
+      // (saç kenarı, bukle ucu) iz değildir: şablon belirgin daha iyi açıklamalı.
+      if (U) {
+        const o = [oF[j], oF[j + 1], oF[j + 2]], b = [bg.v[j], bg.v[j + 1], bg.v[j + 2]];
+        const fu = mixFit(o, U, b), ft = mixFit(o, [tF[j], tF[j + 1], tF[j + 2]], b);
+        if (!(ft.resid + RESID_ABS < EDGE_RATIO * (fu.resid + RESID_ABS))) {
+          // Belirsiz: opak kafadan uzakta ve şablonun DOKUSUNU taşıyorsa kesin iz
+          // (9c8f2cb5 c3: şablon ve kullanıcı saçı aynı koyu renk, gökyüzünde soluk
+          // şablon kıvrımları); düz opak nesne (kulaklık bandı) dokuyu taşımaz.
+          // Değilse yalnız kesin ize bağlıysa (aşağıda histerezis) iz olur.
+          if (Od[i] > AMBIG_FAR_FACE * fwk && tex.ncc[i] >= AMBIG_NCC_MIN && tex.tsd[i] >= AMBIG_TSD_MIN) { cand[i] = 1; continue; }
+          if (Od[i] > EDGE_BAND_FACE * fwk) ambig[i] = 1;
+          continue;
+        }
+      }
       cand[i] = 1;
     }
+    // HİSTEREZİS (bkz. RENKÇE BELİRSİZ): belirsiz yarı saydam piksel kesin ize bağlıysa
+    // aynı hayalet katmanının parçasıdır (80fc7ec4 c0 kubbenin koyu kısmı).
+    const reach = growFrom(cand, (i) => ambig[i] === 1, 4 * n, n);
+    for (let i = 0; i < n * n; i++) if (reach[i]) cand[i] = 1;
+    // GERÇEK SAÇ KORUMASI (bkz. PROTECT_HAIR_*): çıktının kafasına bağlı, opak,
+    // kullanıcı renginde saç beklenen kafanın dışında da iz sayılmaz.
+    const protectedHair = protectRealHair({ Th, Ex, Ho: Ho.head, keep, Po, CLASSES, n, fwk, oF, U });
+    for (let i = 0; i < n * n; i++) if (protectedHair[i]) { cand[i] = 0; keep[i] = 1; }
+    // Kullanıcının yarı saydam bukle kenarı (bkz. FRINGE_*): opak kafadan büyür.
+    const fSeed = new Uint8Array(n * n);
+    for (let i = 0; i < n * n; i++) {
+      if (keep[i] || userSkin[i] || (Ex[i] && Ho.head[i] && Po[CLASSES.background][i] < PROTECT_HAIR_BG_MAX)) fSeed[i] = 1;
+    }
+    const fringe = protectUserFringe({ seed: fSeed, Th, n, fwk, oF, tF, bg, U });
+    for (let i = 0; i < n * n; i++) if (fringe[i]) { cand[i] = 0; keep[i] = 1; }
+    // OPAK KAFA (bkz. OPAQUE_*): hiçbir aday kuralı ona dokunmaz; ince kenar
+    // bandında yalnız şablonun açıkça daha iyi açıkladığı piksel iz kalır; iz
+    // bileşeni opak kafadan belirgin uzağa taşmıyorsa (gerçek saç kenarı) bırakılır.
+    for (let i = 0; i < n * n; i++) if (O[i]) { cand[i] = 0; keep[i] = 1; }
+    if (U) {
+      for (let i = 0; i < n * n; i++) {
+        if (!cand[i] || Od[i] > EDGE_BAND_FACE * fwk || !bg.ok[i]) continue;
+        const j = i * 3, o = [oF[j], oF[j + 1], oF[j + 2]], b = [bg.v[j], bg.v[j + 1], bg.v[j + 2]];
+        const fu = mixFit(o, U, b), ft = mixFit(o, [tF[j], tF[j + 1], tF[j + 2]], b);
+        if (!(ft.resid + RESID_ABS < EDGE_RATIO * (fu.resid + RESID_ABS))) cand[i] = 0;
+      }
+    }
+    const weak = keepStrongGhost(cand, Od, STRONG_FACE * fwk, n);
+    weakPx = weak;
+    if (debug) Object.assign(debug, { protectedHair, mixA, Th, keep, fringe, O, personHead });
+    // Büyütme/kenar/alın kuralları yalnız BÜYÜK iz bileşeninden başlar (bkz.
+    // GROW_SEED_FACE2): küçük tohumdan yayılınca izsiz karelerde saç kenarını yiyordu.
+    const seed = bigComponents(cand, GROW_SEED_FACE2 * fwk * fwk, n);
+    // İZİ BEKLENEN KAFANIN İÇİNE BÜYÜT (2026-11-04, 80fc7ec4 c0 bej bant).
+    const grown = growGhostIntoExpected(seed, { Th, Ex, userSkin, inOval: Ho.inOval, Po, CLASSES, n, browO, fwk });
+    const grownBg = debug ? Uint8Array.from(grown) : null;
+    for (let i = 0; i < n * n; i++) if (grown[i]) { cand[i] = 1; seed[i] = 1; }
+    // Şablon alnı izi (bkz. SKIN_REMNANT_ABOVE_BROW_FACE): ize bağlı.
+    const skinRem = growGhostSkinRemnant(seed, { Th, Ex, userSkin, inOval: Ho.inOval, Po, CLASSES, n, browO, fwk, oF, U });
+    for (let i = 0; i < n * n; i++) if (skinRem[i]) { cand[i] = 1; grown[i] = 1; seed[i] = 1; }
+    // İzin kenarındaki açık şerit (bkz. RIM_DIFF): büyütülmüş ize bitişik.
+    const rim = growGhostRim(seed, { Th, Ex, userSkin, inOval: Ho.inOval, Po, CLASSES, n, browO, fwk, oF, U });
+    for (let i = 0; i < n * n; i++) if (rim[i]) { cand[i] = 1; grown[i] = 1; }
+    // Büyütmeler bukle kenarından geçmiş olabilir: korunan kenar iz sayılmaz.
+    for (let i = 0; i < n * n; i++) if (fringe[i]) { cand[i] = 0; grown[i] = 0; }
+    // DETEKTÖR ONAYLI İZ (2026-11-06, bkz. ghostDetect.js): kare düzeyi iz skoru
+    // eşiği geçtiyse, skoru yüksek yamalarda şablon kafasının içindeki piksel
+    // karışım testine bakmadan iz sayılır — BEKLENEN KAFANIN İÇİNDE DE (kalıntının
+    // çoğu opak kafa ile selfie çizgisi arasındaki ±%10 payda: dd788c00 c8,
+    // 6dd26e3e c2; dokulu zeminde karışım testi de izi kaçırıyor: 9c8f2cb5 c3).
+    // Opak kafa, yüz ovali, deri, gerçek saç/bukle koruması yine dokunulmaz;
+    // opak kafanın kenar bandında yalnız kullanıcı saç renginden çok uzak piksel.
+    // İstisna: sıcak yamada kullanıcı saçından çok uzak ve AÇIK "opak" piksel
+    // opak sayılmaz (d87c25b4 c0 siyah saç üstünde bej kubbe).
+    if (ghostScorer && U) {
+      // Detektör bölgeleri (bkz. ghostDetect.js): R = beklenen kafa dışı, bant = içi.
+      const zoneR = new Uint8Array(n * n), zoneB = new Uint8Array(n * n);
+      for (let i = 0; i < n * n; i++) {
+        if (!Th[i] || userSkin[i] || O[i]) continue;
+        if (Ex[i]) zoneB[i] = 1; else zoneR[i] = 1;
+      }
+      try {
+        const r = await ghostScorer({ oC, n, zoneR, zoneB });
+        hotPatches = (r && r.hot) || null;
+        detScore = r ? r.frameScore : null;
+      } catch (e) { console.warn("ghostClean: iz detektörü atlandı:", e.message); }
+    }
+    if (hotPatches && U) {
+      const hot = hotMaskOf(hotPatches, n);
+      const lU = (U[0] + U[1] + U[2]) / 3;
+      const farLight = (i) => {
+        const j = i * 3;
+        return Math.hypot(oF[j] - U[0], oF[j + 1] - U[1], oF[j + 2] - U[2]) > OPAQUE_FAR_FROM_U &&
+          (oF[j] + oF[j + 1] + oF[j + 2]) / 3 >= lU + RIM_LIGHTER;
+      };
+      const O2 = Uint8Array.from(O), relaxed = new Uint8Array(n * n);
+      for (let i = 0; i < n * n; i++) {
+        if (O[i] && hot[i] && Th[i] && !userSkin[i] && !protectedHair[i] && !Ho.inOval[i] && farLight(i)) { O2[i] = 0; relaxed[i] = 1; }
+      }
+      const Od2 = distanceTo(O2, n, n);
+      const hc = Uint8Array.from(cand);
+      for (let i = 0; i < n * n; i++) {
+        if (cand[i] || !hot[i] || !Th[i] || userSkin[i] || O2[i] || protectedHair[i] || fringe[i] || Ho.inOval[i]) continue;
+        if (keep[i] && !relaxed[i]) continue;
+        if (Od2[i] <= EDGE_BAND_FACE * fwk && !farLight(i)) continue;
+        hc[i] = 1;
+      }
+      keepStrongGhost(hc, Od2, STRONG_FACE * fwk, n);
+      for (let i = 0; i < n * n; i++) if (hc[i] && !cand[i]) { cand[i] = 1; grown[i] = 1; hotAdded++; }
+    }
+    // YARI SAYDAM HALE (bkz. HALO_*): şablon kafası dışında, opak kafaya bitişik.
+    let haloPx = 0;
+    if (HALO_ON && U) {
+      const halo = haloMask({ n, O, Od, Th, userSkin, Po, CLASSES, oF, tF, U, po, fwk });
+      if (debug) Object.assign(debug, { haloM: halo, Po, CLASSES });
+      for (let i = 0; i < n * n; i++) {
+        if (!halo[i] || protectedHair[i] || fringe[i]) continue;
+        cand[i] = 1; grown[i] = 1; haloPx++;
+      }
+    }
+    haloFace2 = haloPx / (fwk * fwk);
+    // KULLANICININ OPAK SAÇI (bkz. USER_OPAQUE): hiçbir kural (iz, büyütme, dolgu
+    // genişlemesi, kırıntı, artık iz) ona dokunmaz.
+    if (USER_OPAQUE.ON && U) {
+      const uo = userOpaqueHair({ seed: keep, O, Th, n, fwk, oC, oF, bg, U, distanceTo });
+      for (let i = 0; i < n * n; i++) if (uo[i]) { if (cand[i]) userOpaquePx++; cand[i] = 0; grown[i] = 0; keep[i] = 1; }
+      if (debug) Object.assign(debug, { userOpaque: uo });
+    }
+    if (debug) Object.assign(debug, { grown, U, browO, oF, rim, skinRem, grownBg });
     core = new Uint8Array(n * n);
-    for (let i = 0; i < n * n; i++) if ((Ex[i] && Ho.head[i]) || keep[i] || userSkin[i]) core[i] = 1;
+    for (let i = 0; i < n * n; i++) if (((Ex[i] && Ho.head[i]) || keep[i] || userSkin[i]) && !grown[i]) core[i] = 1;
   } else {
     // Selfie yok: yalnız kafa dışındaki karışım, kenarda kullanıcı rengi testiyle.
     const headW = new Float32Array(n * n);
@@ -523,6 +1188,9 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
     const band = dilate(core, n, n, PROTECT_FACE * fwk, distanceTo);
     for (let i = 0; i < n * n; i++) if (band[i]) cand[i] = 0;
   }
+  if (hatKeep) {
+    for (let i = 0; i < n * n; i++) if (hatKeep[i]) { cand[i] = 0; core[i] = 1; }
+  }
   const G = dropSmall(cand, n, n, Math.max(4, MIN_AREA_FACE2 * fwk * fwk));
   let gPx = 0;
   for (let i = 0; i < n * n; i++) if (G[i]) gPx++;
@@ -530,7 +1198,8 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   const mode = !Ex ? "karışım" : pick.deg != null
     ? `selfie(3B ${f0(prof.pose3d.yaw)}/${f0(prof.pose3d.pitch)}→${f0(pose3dO.yaw)}/${f0(pose3dO.pitch)}° Δ=${pick.deg.toFixed(0)}° pay=${pick.margin.toFixed(2)})`
     : `selfie(yaw ${prof.yaw.toFixed(2)}→${yawO.toFixed(2)} pay=${pick.margin.toFixed(2)})`;
-  const stats = { ghostPx: Math.round(gPx / (k * k)), ghostFace2: gPx / (fwk * fwk), mode };
+  const stats = { ghostPx: Math.round(gPx / (k * k)), ghostFace2: gPx / (fwk * fwk), mode, weakPx, hotAdded: hotAdded / (fwk * fwk), detScore, detHot: !!hotPatches, halo: haloFace2, userOpaque: userOpaquePx / (fwk * fwk) };
+  if (hk) Object.assign(stats, { hatShare: hk.share, hatArea: hk.area, hatKept: hk.kept });
   // NEREDEN SİLİNDİ (2026-11-01, 831a00a4 c3 "kafa basık", c7 "kafa küçük"):
   // ham kare saklanmadığı için izin kafanın saçı mı, şablon izi mi olduğu
   // ayrılamadı. Göz çizgisinin üstü ve kullanıcının kafasına bitişik pay
@@ -550,7 +1219,7 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   if (debug) {
     const Bdbg = Buffer.alloc(n * n * 3);
     for (let i = 0; i < n * n * 3; i++) Bdbg[i] = bg.ok[(i / 3) | 0] ? Math.round(bg.v[i]) : 0;
-    Object.assign(debug, { n, side, left, top, oC, tC, B: Bdbg, Th, Ho: Ho.head, HoD, Ex, cand, G, Po, CLASSES, userSkin });
+    Object.assign(debug, { n, side, left, top, oC, tC, B: Bdbg, Th, Ho: Ho.head, HoD, Ex, cand, G, Po, CLASSES, userSkin, po, fwk });
   }
   if (!gPx) return { buf: null, applied: false, reason: "clean", ...stats, ms: Date.now() - t0 };
 
@@ -561,13 +1230,26 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   const Gd = dilate(G, n, n, GROW_FACE * fwk, distanceTo);
   for (let i = 0; i < n * n; i++) if (core[i]) Gd[i] = 0;
   const chinMax = Math.max(po[8].y, pt[8].y);
+  // ARTIK İZ BÖLGESİ (bkz. RES_*): şablon kafası alanında, izin ya da kafanın
+  // yakınında, kullanıcının kafası/korunan saçı/derisi dışında, skinSeg'in
+  // "arka plan" dediği pikseller (hayalet saç arka plan sınıfında).
+  const nearHead = new Uint8Array(n * n);
+  // Yalnız gerçek izin yakını (kafa kenarının her yeri değil: izsiz karede
+  // gerçek bukle uçları da bu imzaya uyuyordu, b932fd71 c0 v18).
+  for (let i = 0; i < n * n; i++) if (G[i]) nearHead[i] = 1;
+  const nearD = dilate(nearHead, n, n, RES_REACH_FACE * fwk, distanceTo);
+  const resZone = new Uint8Array(n * n);
+  for (let i = 0; i < n * n; i++) {
+    if (!Th[i] || !nearD[i] || core[i] || userSkin[i] || Math.floor(i / n) > chinMax) continue;
+    if (Po[CLASSES.background][i] >= RES_BG_MIN) resZone[i] = 1;
+  }
   const hole = new Uint8Array(n * n);
   let hx0 = n, hx1 = -1, hy0 = n, hy1 = -1;
   for (let i = 0; i < n * n; i++) {
     // Aranan bölgenin tamamı da delikte: dışarıda kalan soluk teller bağlam
     // olunca LaMa onları izin yerine yeniden çiziyordu (c0).
     const searched = Ex ? Th[i] && !Ex[i] : 0;
-    if (!((Gd[i] || HoD[i] || searched) && Math.floor(i / n) <= chinMax + 0.1 * fwk)) continue;
+    if (!((Gd[i] || HoD[i] || searched || resZone[i]) && Math.floor(i / n) <= chinMax + 0.1 * fwk)) continue;
     hole[i] = 1;
     const x = i % n, y = (i - x) / n;
     if (x < hx0) hx0 = x;
@@ -612,6 +1294,45 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
   const feather = Math.max(1, Math.round(FEATHER_FACE * fw));
   const wgt = await sharp(comp, { raw: { width: side, height: side, channels: 1 } })
     .blur(Math.max(0.3, feather / 2)).extractChannel(0).raw().toBuffer();
+  // ARTIK İZ: temiz LaMa dolgusu zemin kabul edilip her piksel "çıktı − zemin ≈
+  // α·(şablon − zemin)" imzasıyla sınanır (yumuşatılmış kopyalarda; tek piksel
+  // greni α'yı bozar). İmza tutan soluk teller dolguyla değiştirilir.
+  const resU = await resizeMask(resZone, n, side);
+  const tcrop = await cropSquare(t.data, W, H, left, top, side, side);
+  const sb = Math.max(0.3, RES_SMOOTH_FACE * fw);
+  const blur3 = async (b) => {
+    const r = await sharp(b, { raw: { width: side, height: side, channels: 3 } }).blur(sb).raw().toBuffer();
+    if (r.length !== side * side * 3) throw new Error("ghostClean: artık iz bulanıklaştırma kanal sayısı");
+    return r;
+  };
+  const [cS, fS, tS] = await Promise.all([blur3(crop), blur3(Buffer.from(filled)), blur3(tcrop)]);
+  const rw = Buffer.alloc(side * side);
+  let residPx = 0;
+  for (let i = 0; i < side * side; i++) {
+    if (resU[i] <= 200 || comp[i]) continue;
+    const j = i * 3;
+    const ft = mixFit([cS[j], cS[j + 1], cS[j + 2]], [tS[j], tS[j + 1], tS[j + 2]], [fS[j], fS[j + 1], fS[j + 2]]);
+    if (ft.c2 < CONTRAST_MIN * CONTRAST_MIN || ft.od < RES_OD_MIN) continue;
+    if (ft.a < RES_ALPHA_LO || ft.a > RES_ALPHA_MAX) continue;
+    if (ft.resid > RESID_FRAC * ft.od + RESID_ABS) continue;
+    // Kullanıcının saçıyla zemin karışımı olarak da açıklanıyorsa (bukle ucu) dokunma.
+    if (Uout) {
+      const fu = mixFit([cS[j], cS[j + 1], cS[j + 2]], Uout, [fS[j], fS[j + 1], fS[j + 2]]);
+      if (!(ft.resid + RESID_ABS < EDGE_RATIO * (fu.resid + RESID_ABS))) continue;
+    }
+    rw[i] = Math.round(255 * Math.min(1, (ft.a - RES_ALPHA_LO) / RES_ALPHA_RAMP));
+    residPx++;
+  }
+  stats.residPx = residPx;
+  const rwB = residPx ? await sharp(rw, { raw: { width: side, height: side, channels: 1 } })
+    .blur(Math.max(0.3, feather / 2)).extractChannel(0).raw().toBuffer() : null;
+  // Tepe ağırlık korunmaz (denendi 2026-11-05 v17): saç ucunda sert zemin beneği bıraktı.
+  if (rwB) for (let i = 0; i < side * side; i++) if (rwB[i] > wgt[i]) wgt[i] = rwB[i];
+  // Korunan şapkaya kenar yumuşatması da sızmasın (bkz. HAT_KEPT_SHARE).
+  if (hatKeep) {
+    const hkU = await resizeMask(hk.core, n, side);
+    for (let i = 0; i < side * side; i++) if (hkU[i] > 128) wgt[i] = 0;
+  }
   const res = Buffer.from(o.data);
   for (let y = 0; y < side; y++) {
     for (let x = 0; x < side; x++) {
@@ -628,5 +1349,5 @@ async function cleanTemplateGhost(outputBuf, templateBuf, { profiles = [], debug
 
 module.exports = {
   cleanTemplateGhost, headProfileOf,
-  _testables: { ghostAlpha, mixFit, maskedMean, mapMask, signedYaw, eyeChin, connected, dropSmall, pickProfile, ALPHA_LO, ALPHA_HI, CONTRAST_MIN, EXP_MARGIN_FACE, EXP_MARGIN_PER_DEG, EXP_MARGIN_DEAD_DEG, EXP_MARGIN_MAX },
+  _testables: { userOpaqueHair, USER_OPAQUE, haloMask, HALO_MIN_AREA_FACE2, keptHatMask, HAT_KEPT_SHARE, hotMaskOf, growGhostIntoExpected, growGhostRim, growGhostSkinRemnant, protectRealHair, protectUserFringe, keepStrongGhost, localNcc, SKIN_REMNANT_ABOVE_BROW_FACE, GROW_BG_MIN, GROW_DEPTH_FACE, RIM_DIFF, RIM_DEPTH_FACE, ghostAlpha, mixFit, maskedMean, mapMask, signedYaw, eyeChin, connected, dropSmall, pickProfile, ALPHA_LO, ALPHA_HI, CONTRAST_MIN, EXP_MARGIN_FACE, EXP_MARGIN_PER_DEG, EXP_MARGIN_DEAD_DEG, EXP_MARGIN_MAX },
 };

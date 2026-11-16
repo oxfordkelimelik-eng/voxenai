@@ -99,3 +99,25 @@ test("waitReserveOptional: süre dolar ya da keepWaiting false ise null, bir kez
     assert.equal(L.skipped, 2);
   });
 });
+
+// 2026-11-13 (e67abb0e c9): yön ikinci üretimi zorunlu payı tüketip kendi slotunu da
+// serbest bırakıyordu → chunk'ın sonraki Vision çağrılarına pay kalmıyordu.
+test("defter: runOptional içindeki maliyet chunk'ın zorunlu payından düşülmez", async () => {
+  const { runOptional } = require("../jobContext");
+  const L = createLedger(1, 1.0);
+  const gen = { input_tokens: 6849, input_tokens_details: { text_tokens: 797, image_tokens: 6052 }, output_tokens: 1544 };
+  await jobClock.run(chunkContext(0, L), async () => {
+    const slot = tryReserveOptional(0.11);
+    assert.ok(slot);
+    await runOptional(async () => { recordUsage("gpt-image-2", gen); });
+    slot.release();
+    // Zorunlu pay (0.13) yerinde; harcanan yalnız ~0.099.
+    assert.ok(Math.abs(L.reservedUsd - MANDATORY_RESERVE_PER_CHUNK_USD) < 1e-9);
+    assert.ok(Math.abs(L.spentUsd - 0.0987) < 0.001);
+    // runOptional dışında yine paydan düşer.
+    recordUsage("gpt-image-2", gen);
+    assert.ok(Math.abs(L.reservedUsd - (MANDATORY_RESERVE_PER_CHUNK_USD - 0.0987)) < 0.001);
+  });
+  // Bağlam yoksa fn aynen çalışır.
+  assert.equal(await runOptional(async () => 7), 7);
+});

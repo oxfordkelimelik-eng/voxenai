@@ -209,7 +209,11 @@ async function castShadow(baseRgb, W, rect, geom, aiRgb, off, m) {
   const { left, top, side } = rect;
   const N = side * side;
   const { chamfer } = require("./headSurround");
-  const d = chamfer(Uint8Array.from(m, (v) => (v ? 0 : 1)), side, side);
+  // chamfer(mask) = en yakın DOLU piksele uzaklık: kaynak gözlük maskesinin kendisi
+  // (2026-11-12: ters veriliyordu → maske dışı her piksel d=0, gölge sınırı hiç
+  // uygulanmadı; modelin genel kararması tüm kırpım karesine %5-9 kopyalanıp
+  // kare kenarında dikiş bıraktı — 16 karede 2.6k-61k px).
+  const d = chamfer(Uint8Array.from(m, (v) => (v ? 1 : 0)), side, side);
   const reach = Math.max(3, SHADOW_REACH_IOD * geom.iod);
   const raw = new Uint8Array(N);
   let n = 0;
@@ -261,6 +265,9 @@ const LENS_TINT_BLUR_IOD = 0.18;
 const LENS_SPEC_BLUR_IOD = 0.05;
 const LENS_SPEC_MIN = 10; // bu kadar parlak ayrıntı yansıma sayılır
 const LENS_SPEC_MAX = 90;
+const LENS_TURN_COS = 0.94; // cos(~20°): bundan dönük başta çerçeve çekirdekten çıkarılır
+const LENS_FRAME_LUM = 70; // çerçeve sayılan model pikseli bundan koyu...
+const LENS_FRAME_RATIO = 0.5; // ...ve tabanın (bulanık) parlaklığının bu oranından koyu
 async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
   const { left, top, side } = rect;
   const N = side * side;
@@ -293,14 +300,59 @@ async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
   const dOut = chamfer(Uint8Array.from(cand, (v) => (v ? 0 : 1)), side, side);
   // Yalnız camın göz bulunan ortası: kalın siyah çerçeve de koyu olduğu için
   // "cam" sayılıyor, kenarı bulanıklaşıyordu (10ee6a46 c5).
+  // YAN DÖNÜK BAŞ (2026-11-06, 80fc7ec4 c9 / d87c25b4 c2 / 10ee6a46 c0, ~46°):
+  // geom.iod maske için yaw ile büyütülmüş (bkz. eyewearGeometry), ama cam ve
+  // göz görüntüde cos(yaw) kadar daralıyor. Çekirdek elipsi büyütülmüş iod ile
+  // çiziliyordu: görünür camda (own) çerçevenin alt kenarı ve uzak camın
+  // çerçevesi tabanın teni/duvarla değişti (yarım, hayalet çerçeve); koyu camda
+  // (hide) köprü ve burun üstü bulanık leke oldu. Ham AI çıktısında ve keepEyes
+  // kapalı bileşimde çerçeve 6/6 tamdı. Yatay yarıçaplar artık kısalmayla
+  // daralır; düz başta (cosY=1) hiçbir şey değişmez.
+  const fx = Number.isFinite(geom.cosY) && geom.cosY > 0 ? geom.cosY : 1;
   const inner = new Uint8Array(N);
-  const cx = LENS_RX * geom.iod * LENS_CORE, cy = LENS_RY * geom.iod * LENS_CORE;
+  const cx = LENS_RX * geom.iod * fx * LENS_CORE, cy = LENS_RY * geom.iod * LENS_CORE;
   for (let i = 0; i < N; i++) {
     if (!(dOut[i] > rim)) continue;
     const x = left + (i % side), y = top + Math.floor(i / side);
     for (const e of [geom.eR, geom.eL]) {
       const dx = (x - e.x) / cx, dy = (y - e.y) / cy;
       if (dx * dx + dy * dy <= 1) inner[i] = 1;
+    }
+  }
+  // 2026-10-30 (c2e8eff1 c4/c7, "gözlük yapay"): ton oranı bA/bB modelin
+  // KENDİ çizdiği gözü de içeriyordu; göz yeri iki karede farklı olunca camda
+  // bulanık göz lekesi kaldı. Oran artık göz elipsi dışındaki cam
+  // pikselleriyle (yalnız ten + cam) ve geniş bulanıklıkla ölçülür.
+  const eyeAt = (i, k) => {
+    const x = left + (i % side), y = top + Math.floor(i / side);
+    for (const e of [geom.eR, geom.eL]) {
+      const dx = (x - e.x) / (LENS_EYE_RX * geom.iod * fx * k), dy = (y - e.y) / (LENS_EYE_RY * geom.iod * k);
+      if (dx * dx + dy * dy <= 1) return true;
+    }
+    return false;
+  };
+  // ÇERÇEVE MODELDEN (2026-11-06, yalnız yan dönük baş): kısalmış camda
+  // daraltılmış çekirdek bile çerçeveye değiyor — 10ee6a46 c0 (own) modelin
+  // çizdiği çerçeve piksellerinin yalnız %57-67'si kaldı, uzak cam duvarın
+  // üstünde hayalet gibi; 80fc7ec4 c9 (hide) köprü bulanık. Çekirdekte, göz
+  // elipsi dışında, modelin tabandan belirgin koyu çizdiği (çerçeve) pikseller
+  // ve rim kadar çevresi çekirdekten çıkarılır: çerçeve modelden kalır.
+  // Göz elipsinin içi (modelin çizdiği göz) eskisi gibi değiştirilir. Bu çerçeve
+  // dalı yalnız |yaw| > ~20°'de çalışır (kanıt yalnız dönük karelerde); yukarıdaki
+  // cosY daraltması ise her açıda geçerli (13°'de 1 px, 19°'de ~100 px fark).
+  if (fx < LENS_TURN_COS) {
+    const fr = new Uint8Array(N);
+    let nF = 0;
+    for (let i = 0; i < N; i++) {
+      if (!inner[i] || eyeAt(i, 1)) continue;
+      const a = lum(aiAdj, i * 3);
+      if (a < LENS_FRAME_LUM && a < LENS_FRAME_RATIO * lum(bB, i * 3)) { fr[i] = 1; nF++; }
+    }
+    if (nF) {
+      // Kaynak çerçeve pikselleri (2026-11-12: ters veriliyordu → göz elipsi dışındaki
+      // tüm çekirdek siliniyordu; c2 505 → 613 px).
+      const dF = chamfer(Uint8Array.from(fr, (v) => (v ? 1 : 0)), side, side);
+      for (let i = 0; i < N; i++) if (inner[i] && dF[i] <= rim && !eyeAt(i, 1)) inner[i] = 0;
     }
   }
   let px = 0;
@@ -322,18 +374,6 @@ async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
     glass = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) for (let c = 0; c < 3; c++) glass[i * 3 + c] = den[i] > 2 ? (num[i * 3 + c] * 255) / den[i] : aiAdj[i * 3 + c];
   }
-  // 2026-10-30 (c2e8eff1 c4/c7, "gözlük yapay"): ton oranı bA/bB modelin
-  // KENDİ çizdiği gözü de içeriyordu; göz yeri iki karede farklı olunca camda
-  // bulanık göz lekesi kaldı. Oran artık göz elipsi dışındaki cam
-  // pikselleriyle (yalnız ten + cam) ve geniş bulanıklıkla ölçülür.
-  const eyeAt = (i, k) => {
-    const x = left + (i % side), y = top + Math.floor(i / side);
-    for (const e of [geom.eR, geom.eL]) {
-      const dx = (x - e.x) / (LENS_EYE_RX * geom.iod * k), dy = (y - e.y) / (LENS_EYE_RY * geom.iod * k);
-      if (dx * dx + dy * dy <= 1) return true;
-    }
-    return false;
-  };
   let tint = null;
   if (!glass) {
     const wT = new Uint8Array(N);
@@ -371,6 +411,19 @@ async function keepOwnEyes(out, baseRgb, W, rect, geom, aiRgb, off, mode) {
   }
   return px;
 }
+
+// KENDİ GÖZ (2026-11-12, kör test V3 - mevcut: gözler 6-2, temizlik 6-2, cam
+// 4-4): üstü koyu geçişli açık şablon camında model kullanıcının gözünü
+// kameraya bakan açık gözle yeniden çiziyordu. Bileşimden sonra yakın camda
+// gözlük öncesi göz dikişsiz konur + şablonun karartma eğrisi uygulanır
+// (eyewearOwnEye.js); yalnız güçlü üst karartmada (≤ 0.60). Kapatmak için false.
+const OWN_EYE_ON = true;
+// CAM TONU + ÇERÇEVE RENGİ (2026-11-12, "V3b", kör test V3b - mevcut, değişen
+// karelerde cam uyumu 4/4, temizlik 4/4): kendi gözden sonra aynı işçi
+// çağrısında iki cam şablonun geçirgenliğine (düzey × sönümlü renk × geçiş
+// eğrisi), çerçeve şablon rengine çekilir (eyewearLensTint.js). Koyu şablonda
+// ve iki cam bulunamayan karede kare değişmez. Kapatmak için false.
+const LENS_TINT_ON = true;
 
 /**
  * Gözlük ekleme işini hazırlar. Dönüş: { image, ref, mask, finish(aiBuf) }
@@ -410,12 +463,31 @@ async function prepareEyewear(outBuf, tplBuf) {
   const tb = Math.min(mt.height, Math.round(P[30].y + 0.15 * tfw));
   const refRaw = await sharp(tplBuf).extract({ left: tl, top: tt, width: tr - tl, height: tb - tt }).png().toBuffer();
   const ref = await sharp(refRaw).resize({ width: 768, kernel: "lanczos3" }).png().toBuffer();
-  const finish = async (aiBuf, { keepEyes = false } = {}) => {
+  // ownEyeRunner: üretimde işçi havuzu (postTasks.eyewearOwnEye — segmentasyon/ağ
+  // modelleri ana iş parçacığına yüklenmesin); verilmezse doğrudan çağrı.
+  const finish = async (aiBuf, { keepEyes = false, ownEyeRunner = null } = {}) => {
     const baseRgb = await sharp(outBuf).removeAlpha().raw().toBuffer();
     const aiRgb = await sharp(aiBuf).resize(side, side, { kernel: "lanczos3" }).removeAlpha().raw().toBuffer();
     const { rgb, grown, grownRejected, lensPx } = await compositeEyewear(baseRgb, W, H, rect, geom, aiRgb, { keepEyes });
-    const buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
-    return { buf, grown, grownRejected, lensPx };
+    let buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+    // Görünür geçişli camda kendi gözü (bkz. eyewearOwnEye), sonra cam tonu
+    // (bkz. eyewearLensTint). Hata ya da kapı dışı → önceki görüntü aynen kalır.
+    let ownEye = { applied: false, reason: "off" }, lensTint = { applied: false, reason: "off" };
+    if (OWN_EYE_ON || LENS_TINT_ON) {
+      try {
+        const p = { preBuf: outBuf, fixBuf: buf, W, H, rect, geom: { iod: geom.iod, cosY: geom.cosY }, tplBuf, ownEyeOn: OWN_EYE_ON, lensTintOn: LENS_TINT_ON };
+        const r = ownEyeRunner ? await ownEyeRunner(p)
+          : await require("./eyewearLensTint").ownEyeThenTint({ ...p, preRgb: baseRgb, fixRgb: rgb });
+        ownEye = r && r.ownEye ? r.ownEye : { applied: false, reason: "no-result" };
+        if (r && r.lensTint) lensTint = r.lensTint;
+        if (r && r.png) buf = Buffer.isBuffer(r.png) ? r.png : Buffer.from(r.png);
+      } catch (e) {
+        const reason = "error:" + (e.message || e);
+        ownEye = { applied: false, reason };
+        lensTint = { applied: false, reason };
+      }
+    }
+    return { buf, grown, grownRejected, lensPx, ownEye, lensTint };
   };
   return { image, ref, mask, finish, rect, iod: geom.iod };
 }

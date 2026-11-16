@@ -11,30 +11,59 @@ import '../../../core/constants/app_colors.dart';
 enum CaptureKind { face, body }
 
 /// Çekilecek açılar — sırayla istenir. [right]/[left] analiz akışının
-/// 3 açısı; hafif/tam açılar AI foto üretiminin 5 açısı (2026-10-08: model
-/// kafa yönünü selfie'den alıyor, şablon açısına yakın selfie gerekiyor).
-enum CaptureAngle { front, right, left, slightRight, slightLeft, fullRight, fullLeft }
+/// 3 açısı; turnR*/turnL*/chinDown AI foto üretiminin 10 açısı.
+///
+/// SIK AÇILI ÇEKİM (2026-11-16, kullanıcı kararı): model çıktıdaki baş açısını
+/// şablondan değil kendisine giden selfie'lerden alıyor; 5 açılı sette
+/// (ön / hafif / tam) arada kalan şablonlar (ör. 17-21° ve 35° dönük, 8° dönük
+/// ama çenesi aşağı) her işte fazla dönüp eleniyordu. Artık her yöne 4 adım +
+/// çene aşağı bir kare çekilir; sunucu her şablona açısı en uygun 5'ini
+/// gönderir (functions/falPhotos.js MAX_FACE_PHOTOS / selfieOrderForYaw).
+enum CaptureAngle {
+  front,
+  right,
+  left,
+  turnR1,
+  turnR2,
+  turnR3,
+  turnR4,
+  turnL1,
+  turnL2,
+  turnL3,
+  turnL4,
+  chinDown,
+}
 
-/// AI foto üretimi için 5 yüz açısının ÇEKİM sırası (2026-10-11, kullanıcı
-/// kararı): önden sonra hafif sağ → tam sağ, sonra hafif sol → tam sol —
-/// kullanıcı başını bir yöne adım adım çevirip sonra diğer yöne geçiyor.
+/// AI foto üretimi için 10 yüz açısının ÇEKİM sırası: önden, sonra başı adım
+/// adım sağa, sonra adım adım sola, en son çene aşağı — kullanıcı başını bir
+/// yöne yavaşça çevirirken kareler sırayla otomatik çekilir.
 const kAiFaceAngles = [
   CaptureAngle.front,
-  CaptureAngle.slightRight,
-  CaptureAngle.fullRight,
-  CaptureAngle.slightLeft,
-  CaptureAngle.fullLeft,
+  CaptureAngle.turnR1,
+  CaptureAngle.turnR2,
+  CaptureAngle.turnR3,
+  CaptureAngle.turnR4,
+  CaptureAngle.turnL1,
+  CaptureAngle.turnL2,
+  CaptureAngle.turnL3,
+  CaptureAngle.turnL4,
+  CaptureAngle.chinDown,
 ];
 
-/// Sunucuya GİDEN sıra değişmedi (functions/falPhotos.js FACE_PHOTO_COUNT):
-/// ilk kare ön kare kabul ediliyor; eski sırayı korumak, çekim sırası
-/// değişikliğini sunucu tarafında risksiz kılıyor.
+/// Sunucuya GİDEN sıra: ilk 5 eski 5 açıya (ön, hafif sağ/sol, tam sağ/sol)
+/// en yakın kareler — sunucu ücretli kontrollerde (Vision, ten) yalnız ilk 5'i
+/// kullanıyor. Ardından ara açılar ve çene aşağı.
 const kAiFaceUploadOrder = [
   CaptureAngle.front,
-  CaptureAngle.slightRight,
-  CaptureAngle.slightLeft,
-  CaptureAngle.fullRight,
-  CaptureAngle.fullLeft,
+  CaptureAngle.turnR2,
+  CaptureAngle.turnL2,
+  CaptureAngle.turnR4,
+  CaptureAngle.turnL4,
+  CaptureAngle.turnR1,
+  CaptureAngle.turnL1,
+  CaptureAngle.turnR3,
+  CaptureAngle.turnL3,
+  CaptureAngle.chinDown,
 ];
 
 extension on CaptureAngle {
@@ -42,30 +71,68 @@ extension on CaptureAngle {
         CaptureAngle.front => 'ÖN',
         CaptureAngle.right => 'SAĞ',
         CaptureAngle.left => 'SOL',
-        CaptureAngle.slightRight => 'HAFİF SAĞ',
-        CaptureAngle.slightLeft => 'HAFİF SOL',
-        CaptureAngle.fullRight => 'TAM SAĞ',
-        CaptureAngle.fullLeft => 'TAM SOL',
+        CaptureAngle.turnR1 => 'AZICIK SAĞ',
+        CaptureAngle.turnR2 => 'HAFİF SAĞ',
+        CaptureAngle.turnR3 => 'YARIM SAĞ',
+        CaptureAngle.turnR4 => 'TAM SAĞ',
+        CaptureAngle.turnL1 => 'AZICIK SOL',
+        CaptureAngle.turnL2 => 'HAFİF SOL',
+        CaptureAngle.turnL3 => 'YARIM SOL',
+        CaptureAngle.turnL4 => 'TAM SOL',
+        CaptureAngle.chinDown => 'ÇENE AŞAĞI',
       };
+
+  /// Üst barda: "TAM SAĞ AÇI"; çene karesinde "AÇI" eki anlamsız.
+  String get title => this == CaptureAngle.chinDown ? label : '$label AÇI';
 
   String faceHint() => switch (this) {
         CaptureAngle.front => 'Yüzünü ovalin içine ortala, dümdüz kameraya bak',
         CaptureAngle.right => 'Başını hafifçe SAĞA çevir (sağ profilin görünsün)',
         CaptureAngle.left => 'Başını hafifçe SOLA çevir (sol profilin görünsün)',
-        CaptureAngle.slightRight => 'Başını AZICIK SAĞA çevir, gözlerin kameraya baksın',
-        CaptureAngle.slightLeft => 'Başını AZICIK SOLA çevir, gözlerin kameraya baksın',
-        CaptureAngle.fullRight => 'Başını iyice SAĞA çevir (sağ yanağın tam görünsün)',
-        CaptureAngle.fullLeft => 'Başını iyice SOLA çevir (sol yanağın tam görünsün)',
+        CaptureAngle.turnR1 => 'Başını ÇOK AZ SAĞA çevir, gözlerin kameraya baksın',
+        CaptureAngle.turnR2 => 'Başını biraz daha SAĞA çevir',
+        CaptureAngle.turnR3 => 'Başını yarıya kadar SAĞA çevir',
+        CaptureAngle.turnR4 => 'Başını iyice SAĞA çevir (sağ yanağın tam görünsün)',
+        CaptureAngle.turnL1 => 'Önce kameraya dön, sonra başını ÇOK AZ SOLA çevir',
+        CaptureAngle.turnL2 => 'Başını biraz daha SOLA çevir',
+        CaptureAngle.turnL3 => 'Başını yarıya kadar SOLA çevir',
+        CaptureAngle.turnL4 => 'Başını iyice SOLA çevir (sol yanağın tam görünsün)',
+        CaptureAngle.chinDown =>
+          'Kameraya dön, başını hafifçe ÖNE eğ (çene aşağı), gözlerin kameraya baksın',
       };
 
   String bodyHint() => switch (this) {
-        CaptureAngle.front => 'Tüm vücudun silüetin içinde, önden dur',
-        CaptureAngle.right || CaptureAngle.slightRight || CaptureAngle.fullRight =>
+        CaptureAngle.front || CaptureAngle.chinDown =>
+          'Tüm vücudun silüetin içinde, önden dur',
+        CaptureAngle.right ||
+        CaptureAngle.turnR1 ||
+        CaptureAngle.turnR2 ||
+        CaptureAngle.turnR3 ||
+        CaptureAngle.turnR4 =>
           'Sağ yan profilini ver, tüm vücut görünsün',
-        CaptureAngle.left || CaptureAngle.slightLeft || CaptureAngle.fullLeft =>
+        CaptureAngle.left ||
+        CaptureAngle.turnL1 ||
+        CaptureAngle.turnL2 ||
+        CaptureAngle.turnL3 ||
+        CaptureAngle.turnL4 =>
           'Sol yan profilini ver, tüm vücut görünsün',
       };
 }
+
+/// AI çekiminin yön bantları (ML Kit headEulerAngleY, sağ+/sol−). Bantlar
+/// birbirine değmiyor ki iki kare aynı açıya düşmesin; aralıklar sunucudaki
+/// 3B ölçümle ~5°'lik adımlara karşılık geliyor (eski bantlar: hafif 10-22,
+/// tam 38-60).
+const _turnBands = <CaptureAngle, (double, double)>{
+  CaptureAngle.turnR1: (6, 12),
+  CaptureAngle.turnR2: (15, 22),
+  CaptureAngle.turnR3: (26, 34),
+  CaptureAngle.turnR4: (40, 60),
+  CaptureAngle.turnL1: (-12, -6),
+  CaptureAngle.turnL2: (-22, -15),
+  CaptureAngle.turnL3: (-34, -26),
+  CaptureAngle.turnL4: (-60, -40),
+};
 
 /// Sırayla açı fotoğraflarını canlı hizalama rehberiyle çeken ekran.
 /// Her açı çizgiye "oturmadan" çekim kabul edilmez. Oturunca çerçeve yeşile
@@ -275,6 +342,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final cy = box.center.dy / size.height;
     final wRatio = box.width / size.width;
     final yaw = f.headEulerAngleY ?? 0; // sağ+/sol- (yaklaşık)
+    final pitch = f.headEulerAngleX ?? 0; // yukarı+/aşağı-
     final roll = f.headEulerAngleZ ?? 0;
 
     // Yüz TAM ovalin içine otursun: mesafe + ortalama toleransları önceki
@@ -286,9 +354,43 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     if (cy < 0.30 || cy > 0.56) return (false, 'Yüzü tam ovalin içine ortala');
     if (roll.abs() > 9) return (false, 'Başını dik tut');
 
+    // AI çekimindeki yana dönük karelerde baş dik (çene aşağı/yukarı değil);
+    // eğim yalnız çene karesinden gelsin.
+    final isTurn = _turnBands.containsKey(_angle);
+    if (isTurn || _angle == CaptureAngle.chinDown) {
+      if (_angle == CaptureAngle.chinDown) {
+        if (yaw.abs() > 8) return (false, 'Kameraya dön, yüzün düz baksın');
+        if (pitch > -12) return (false, 'Başını biraz daha ÖNE eğ (çene aşağı)');
+        if (pitch < -30) return (false, 'Biraz kaldır (fazla eğdin)');
+      } else {
+        if (pitch.abs() > 12) return (false, 'Başını dik tut, çene düz');
+        final (lo, hi) = _turnBands[_angle]!;
+        final toRight = hi > 0;
+        if (yaw < lo) {
+          return (false, toRight ? 'Başını biraz daha SAĞA çevir' : 'Biraz geri dön (fazla döndün)');
+        }
+        if (yaw > hi) {
+          return (false, toRight ? 'Biraz geri dön (fazla döndün)' : 'Başını biraz daha SOLA çevir');
+        }
+      }
+    }
+
     switch (_angle) {
+      case CaptureAngle.turnR1:
+      case CaptureAngle.turnR2:
+      case CaptureAngle.turnR3:
+      case CaptureAngle.turnR4:
+      case CaptureAngle.turnL1:
+      case CaptureAngle.turnL2:
+      case CaptureAngle.turnL3:
+      case CaptureAngle.turnL4:
+      case CaptureAngle.chinDown:
+        break; // yukarıda bantla denetlendi
       case CaptureAngle.front:
-        if (yaw.abs() > 8) return (false, 'Dümdüz kameraya bak');
+        // AI çekiminde ön kare daha dar (ilk azıcık-dönük kare 6°'den başlıyor).
+        if (yaw.abs() > (widget.angles == kAiFaceAngles ? 5 : 8)) {
+          return (false, 'Dümdüz kameraya bak');
+        }
       case CaptureAngle.right:
         // Net bir sağ profil için BELİRGİN dönüş şart — dönerken anlık geçen
         // küçük açıda (15°) çekmesin, kullanıcı tam dönene kadar beklesin.
@@ -297,20 +399,6 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       case CaptureAngle.left:
         if (yaw > -25) return (false, 'Başını daha SOLA çevir');
         if (yaw < -55) return (false, 'Biraz geri dön (fazla döndün)');
-      // 5 açılı AI çekimi: hafif ve tam dönüş aralıkları birbirine
-      // değmiyor (22°–38° boşluğu) ki iki kare aynı açıya düşmesin.
-      case CaptureAngle.slightRight:
-        if (yaw < 10) return (false, 'Başını azıcık SAĞA çevir');
-        if (yaw > 22) return (false, 'Biraz geri dön (az çevirmen yeterli)');
-      case CaptureAngle.slightLeft:
-        if (yaw > -10) return (false, 'Başını azıcık SOLA çevir');
-        if (yaw < -22) return (false, 'Biraz geri dön (az çevirmen yeterli)');
-      case CaptureAngle.fullRight:
-        if (yaw < 38) return (false, 'Başını daha SAĞA çevir');
-        if (yaw > 60) return (false, 'Biraz geri dön (fazla döndün)');
-      case CaptureAngle.fullLeft:
-        if (yaw > -38) return (false, 'Başını daha SOLA çevir');
-        if (yaw < -60) return (false, 'Biraz geri dön (fazla döndün)');
     }
 
     // Canlı/uyanık bir kare için gözler açık olmalı — kapalı/kısık gözle
@@ -369,13 +457,18 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
 
     switch (_angle) {
       case CaptureAngle.front:
+      case CaptureAngle.chinDown:
         if (ratio < 0.16) return (false, 'Önden dur, omuzlar açık');
       case CaptureAngle.right:
       case CaptureAngle.left:
-      case CaptureAngle.slightRight:
-      case CaptureAngle.slightLeft:
-      case CaptureAngle.fullRight:
-      case CaptureAngle.fullLeft:
+      case CaptureAngle.turnR1:
+      case CaptureAngle.turnR2:
+      case CaptureAngle.turnR3:
+      case CaptureAngle.turnR4:
+      case CaptureAngle.turnL1:
+      case CaptureAngle.turnL2:
+      case CaptureAngle.turnL3:
+      case CaptureAngle.turnL4:
         if (ratio > 0.16) return (false, 'Yana dön (yan profil)');
         // Yön ayrımı: burun hangi tarafa bakıyor
         if (nose != null) {
@@ -656,11 +749,63 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             style: const TextStyle(color: Colors.white60, fontSize: 13),
           ),
           const SizedBox(height: 20),
+          // 10 açılı AI çekiminde tek satır küçük resimleri okunmaz kılıyordu →
+          // 5'erli satırlar.
           Expanded(
-            child: Row(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var r = 0; r < order.length; r += 5)
+                  Flexible(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: _reviewRow(
+                          order.sublist(r, r + 5 > order.length ? order.length : r + 5)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _confirm,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+            icon: const Icon(Icons.check_rounded, color: Colors.white),
+            label: Text(
+                order.length == 1
+                    ? 'BU FOTOĞRAFI KULLAN'
+                    : 'BU ${order.length} FOTOĞRAFI KULLAN',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5)),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _restart,
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white30),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+            ),
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            label: const Text('BAŞTAN ÇEK',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewRow(List<CaptureAngle> row) {
+    return Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                for (final a in order)
+                for (final a in row)
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -710,41 +855,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                     ),
                   ),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _confirm,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.success,
-              padding: const EdgeInsets.symmetric(vertical: 15),
-            ),
-            icon: const Icon(Icons.check_rounded, color: Colors.white),
-            label: Text(
-                order.length == 1
-                    ? 'BU FOTOĞRAFI KULLAN'
-                    : 'BU ${order.length} FOTOĞRAFI KULLAN',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5)),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _restart,
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Colors.white30),
-              padding: const EdgeInsets.symmetric(vertical: 15),
-            ),
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            label: const Text('BAŞTAN ÇEK',
-                style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
+            );
   }
 
   Widget _buildTopBar() {
@@ -789,7 +900,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${_angle.label} AÇI',
+                        _angle.title,
                         maxLines: 1,
                         style: const TextStyle(
                           color: Colors.white,
@@ -833,6 +944,9 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                               borderRadius: BorderRadius.circular(2),
                             ),
                           ),
+                          // 10 açıda etiketler okunamayacak kadar küçülüyor;
+                          // açının adı zaten üstte büyük yazıyor.
+                          if (_angles.length <= 5) ...[
                           const SizedBox(height: 5),
                           FittedBox(
                             fit: BoxFit.scaleDown,
@@ -860,6 +974,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                               ],
                             ),
                           ),
+                          ],
                         ],
                       ),
                     ),

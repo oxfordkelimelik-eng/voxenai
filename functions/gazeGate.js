@@ -175,6 +175,13 @@ const IRIS_OPPOSITE_BASE_MIN = 0.15;
 const IRIS_OPPOSITE_OUT_MIN = 0.10;
 const IRIS_OPPOSITE_MIN_EYE_PX = 12;
 const IRIS_EYEWEAR_RATIO = 0.38;
+// Şablonun gözü camın arkasındaysa (göz konturunda gözlük sınıfı payı ≥ bu)
+// kapı susar (2026-11-12, 41589067 c2): renkli/degrade camda göz/yanak oranı
+// 0.43 kalıp güneş gözlüğü eşiğini geçiyordu, iris ölçüsü camı ölçtü
+// (şablon 0.34 / aşağı bakan çıktı 0.68 → yanlış RED; MediaPipe iris iki
+// kareyi uyumlu ölçüyor: 0.44/0.61 vs 0.46/0.55). Bakış kilidi de gözlüklü
+// şablonda atlar. 111 çiftte eski kapının 3 reddinden ikisi bu şablon.
+const IRIS_TPL_GLASS_SKIP = 0.5;
 
 function isIrisGazeOpposite(base, out) {
   const ok = (g) => g && g.irisX != null && g.eyes === 2 && (g.eyeWidth || 0) >= IRIS_OPPOSITE_MIN_EYE_PX &&
@@ -403,6 +410,7 @@ function selfieSideCoverage(signedYaws) {
 }
 
 module.exports = {
+  IRIS_TPL_GLASS_SKIP,
   selfieSideCoverage,
   SELFIE_SIDE_MIN,
   poseMatchedOrder,

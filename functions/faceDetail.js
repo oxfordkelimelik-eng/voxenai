@@ -38,7 +38,10 @@ const GRAIN_MIN_RATIO = 1.15;
 // Eksik pay (gri seviye, ölçü biriminde) bunun altındaysa fark edilmez.
 const GRAIN_MIN_ADD = 0.5;
 // Üstü "bozuk görüntü" gibi durur; 6dd c2 şablonu 5.7 (doku) ölçüyor.
-const GRAIN_MAX_ADD = 2.5;
+// 2.5 → 1.2 ve eksik payın yarısı (2026-11-08, 27deeec2 c7, kullanıcı: "piksellerde
+// sıkıntı"): yüz greni 0.91 → 1.91 ikiye katlanınca cilt kumlu göründü.
+const GRAIN_MAX_ADD = 1.2;
+const GRAIN_SHARE = 0.5;
 // Sensör greni tek piksellik beyaz gürültü değil (demozaik + JPEG).
 const GRAIN_CORR_SIGMA = 0.5;
 
@@ -74,9 +77,10 @@ function planDetailGain({ outFace, outCloth, tplFace, tplCloth }) {
 function planGrain(tpl, out) {
   if (!(tpl > 0) || !(out >= 0)) return { apply: false, reason: "no-measure" };
   if (tpl < out * GRAIN_MIN_RATIO) return { apply: false, reason: "grainy-enough" };
-  const add = Math.sqrt(tpl * tpl - out * out);
-  if (add < GRAIN_MIN_ADD) return { apply: false, reason: "small", add };
-  return { apply: true, reason: null, add: Math.min(GRAIN_MAX_ADD, add), rawAdd: add };
+  const rawAdd = Math.sqrt(tpl * tpl - out * out);
+  const add = GRAIN_SHARE * rawAdd;
+  if (add < GRAIN_MIN_ADD) return { apply: false, reason: "small", add, rawAdd };
+  return { apply: true, reason: null, add: Math.min(GRAIN_MAX_ADD, add), rawAdd };
 }
 
 // Ayrılabilir Gauss, kayan nokta (sharp'ın 8 bit blur'u σ<1'de ölçüyü
@@ -282,7 +286,86 @@ function addFaceGrain(rgb, tRgb, W, H, Po, Pt, CLASSES) {
   return { out, reason: null, ...info, amp, after };
 }
 
+// YÜZ YAPISI / HAT BELİRGİNLİĞİ (2026-11-13, kullanıcı: "doğal, yüz hatları belirgin, ışıklı").
+// Ölçüm 79956cb2: dramatik ışıklı şablonlarda yüzün orta ölçek gölgesi (burun, elmacık, göz
+// çukuru, çene; σ ≈ 0.02-0.08 yüz boyu) şablondan zayıf: c2 .32→.26, c5 .33→.20, c7 .34→.19,
+// c9 .18→.11. faceDetail'in keskinliği ince doku (σ 1.2 px) — bunu yapamaz. Burada modelin
+// KENDİ çizdiği bant güçlendirilir (şablondan desen kopyalanmaz — 10-16 faceRelight lekeleri);
+// yalnız yüz derisinde (sakal/saç sınıfı dışarıda), yalnız artırma, şablon kadar ve en çok
+// STRUCT.MAX. Işığı olmayan/düz şablonda oran ≤ 1 → dokunulmaz.
+const STRUCT = { ON: true, S1: 0.02, S2: 0.08, MAX: 1.3, MIN_APPLY: 1.05, MASK_THR: 0.6 };
+
+function faceBoxOf(P, CLASSES, W, H) {
+  const xs = [], ys = [];
+  for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (P[CLASSES.faceSkin][y * W + x] > STRUCT.MASK_THR) { xs.push(x); ys.push(y); }
+  if (xs.length < 60) return null;
+  xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+  const q = (a, p) => a[Math.min(a.length - 1, Math.floor(p * a.length))];
+  return { x0: q(xs, 0.02), x1: q(xs, 0.98), y0: q(ys, 0.02), y1: q(ys, 0.98) };
+}
+
+/** Kırpımda yüz derisi bant gücü: rms(G(σ1)−G(σ2)) / ortalama ışıklık. */
+function structOf(rgb, W, H, P, CLASSES, box) {
+  const fh = Math.max(16, box.y1 - box.y0);
+  const pad = Math.round(0.6 * fh);
+  const cx0 = Math.max(0, box.x0 - pad), cy0 = Math.max(0, box.y0 - pad);
+  const cw = Math.min(W, box.x1 + pad) - cx0, ch = Math.min(H, box.y1 + pad) - cy0;
+  const g = new Float32Array(cw * ch), m = new Float32Array(cw * ch);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+    const i = (y + cy0) * W + (x + cx0);
+    g[y * cw + x] = 0.299 * rgb[i * 3] + 0.587 * rgb[i * 3 + 1] + 0.114 * rgb[i * 3 + 2];
+    m[y * cw + x] = P[CLASSES.faceSkin][i];
+  }
+  const b1 = gaussBlurF(g, cw, ch, Math.max(0.8, STRUCT.S1 * fh));
+  const b2 = gaussBlurF(g, cw, ch, Math.max(2, STRUCT.S2 * fh));
+  let ss = 0, sm = 0, n = 0;
+  const D = new Float32Array(cw * ch);
+  for (let i = 0; i < cw * ch; i++) {
+    D[i] = b1[i] - b2[i];
+    if (m[i] > STRUCT.MASK_THR) { ss += D[i] * D[i]; sm += g[i]; n++; }
+  }
+  if (n < 200 || sm <= 0) return null;
+  return { rel: Math.sqrt(ss / n) / (sm / n), D, cx0, cy0, cw, ch, fh };
+}
+
+/**
+ * Yüz yapısını şablon yüzünün yapısına doğru güçlendirir (outputBuf/templateBuf aynı kadraj).
+ * Döner { buf|null, applied, reason, tpl, before, gain, after }.
+ */
+async function matchFaceStructure(outputBuf, templateBuf) {
+  if (!STRUCT.ON) return { buf: null, applied: false, reason: "off" };
+  const { classProbs, CLASSES } = require("./skinSeg");
+  const o = await sharp(outputBuf).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = o.info.width, H = o.info.height;
+  const t = await sharp(templateBuf).rotate().removeAlpha().resize(W, H, { fit: "fill" }).raw().toBuffer();
+  const Po = await classProbs(o.data, W, H);
+  const Pt = await classProbs(t, W, H);
+  const bo = faceBoxOf(Po, CLASSES, W, H), bt = faceBoxOf(Pt, CLASSES, W, H);
+  if (!bo || !bt) return { buf: null, applied: false, reason: "no-face" };
+  const so = structOf(o.data, W, H, Po, CLASSES, bo), st = structOf(t, W, H, Pt, CLASSES, bt);
+  if (!so || !st) return { buf: null, applied: false, reason: "no-skin" };
+  const gain = Math.min(STRUCT.MAX, st.rel / so.rel);
+  if (!(gain >= STRUCT.MIN_APPLY)) return { buf: null, applied: false, reason: "structured-enough", tpl: st.rel, before: so.rel, gain };
+  const { cx0, cy0, cw, ch, D } = so;
+  const m8 = Buffer.alloc(cw * ch);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) m8[y * cw + x] = Math.round(255 * Math.min(1, Po[CLASSES.faceSkin][(y + cy0) * W + x + cx0]));
+  const soft = await sharp(m8, { raw: { width: cw, height: ch, channels: 1 } }).blur(Math.max(1.5, 0.02 * so.fh)).extractChannel(0).raw().toBuffer();
+  const res = Buffer.from(o.data);
+  const k = gain - 1;
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+    const a = soft[y * cw + x] / 255;
+    if (a <= 0.01) continue;
+    const d = a * k * D[y * cw + x];
+    const i = ((y + cy0) * W + x + cx0) * 3;
+    for (let c = 0; c < 3; c++) { const v = o.data[i + c] + d; res[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
+  }
+  const after = structOf(res, W, H, Po, CLASSES, bo);
+  const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+  return { buf, applied: true, reason: null, tpl: st.rel, before: so.rel, gain, after: after ? after.rel : null };
+}
+
 module.exports = {
+  matchFaceStructure, STRUCT,
   matchFaceDetail, planDetailGain, hfRms, APPLY_MIN_GAIN, MAX_GAIN,
-  planGrain, fineNoise, grainField, GRAIN_MIN_RATIO, GRAIN_MAX_ADD,
+  planGrain, fineNoise, grainField, GRAIN_MIN_RATIO, GRAIN_MAX_ADD, GRAIN_SHARE,
 };

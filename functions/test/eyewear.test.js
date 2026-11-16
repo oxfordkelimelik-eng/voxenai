@@ -129,3 +129,25 @@ test("gölge: maskenin yanında modelin koyulaştırdığı aynı renkli ten gö
   assert.strictEqual(s[22 * side + 20], 0, "maskenin içi bileştirmede");
   assert.ok(s[55 * side + 15] < 0.01, "uzakta gölge yok");
 });
+
+// 2026-11-12: castShadow chamfer'a maskeyi ters veriyordu → gölge sınırı uygulanmadı,
+// modelin genel kararması tüm kırpım karesine kopyalandı (kare kenarında dikiş).
+test("castShadow: gölge yalnız gözlük maskesinin yakınında (kırpımın geri kalanı değişmez)", async () => {
+  const { castShadow } = require("../eyewear");
+  const side = 120, W = side, N = side * side, iod = 60;
+  const base = Buffer.alloc(N * 3, 180), ai = Buffer.alloc(N * 3, 160); // model her yeri ~%11 karartmış
+  const m = new Uint8Array(N);
+  for (let y = 55; y < 65; y++) for (let x = 40; x < 80; x++) m[y * side + x] = 1;
+  const sh = await castShadow(base, W, { left: 0, top: 0, side }, { iod }, ai, [0, 0, 0], m);
+  assert.ok(sh, "yakın çevrede gölge olmalı");
+  const reach = 0.15 * iod;
+  let far = 0, near = 0;
+  for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) {
+    const i = y * side + x; if (m[i]) continue;
+    const dx = Math.max(40 - x, 0, x - 79), dy = Math.max(55 - y, 0, y - 64), d = Math.hypot(dx, dy);
+    if (d > reach + 3 && sh[i] > 0.005) far++;
+    if (d <= 2 && sh[i] > 0.005) near++;
+  }
+  assert.strictEqual(far, 0, `uzakta gölge: ${far} px`);
+  assert.ok(near > 50, `yakında gölge: ${near} px`);
+});

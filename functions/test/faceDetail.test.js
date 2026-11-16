@@ -46,7 +46,11 @@ test("pushPullField: bilinen değerleri korur, boşluğu komşulardan doldurur",
 test("gren: şablon yüzü belirgin grenliyse eksik pay eklenir", () => {
   const p = planGrain(1.86, 0.61);
   assert.equal(p.apply, true);
-  assert.ok(Math.abs(p.add - Math.sqrt(1.86 ** 2 - 0.61 ** 2)) < 1e-9);
+  // 2026-11-08 (27deeec2 c7): eksik payın yarısı, en çok GRAIN_MAX_ADD.
+  assert.ok(Math.abs(p.rawAdd - Math.sqrt(1.86 ** 2 - 0.61 ** 2)) < 1e-9);
+  assert.ok(Math.abs(p.add - Math.min(GRAIN_MAX_ADD, 0.5 * p.rawAdd)) < 1e-9);
+  const c7 = planGrain(1.85, 0.91); // 27deeec2 c7: 0.91 → 1.91 kumlu göründü
+  assert.ok(c7.add <= 0.85, `add=${c7.add}`);
 });
 
 test("gren: çıktı zaten grenliyse dokunulmaz (asla gren silinmez)", () => {

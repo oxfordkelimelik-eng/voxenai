@@ -363,12 +363,83 @@ async function computeFaceCropGeometry(buf, box, currentRatio, targetRatio, pers
  * outputBuf   : OpenAI'den dönen üretim sonucu (kırpılmış tuval üzerinde)
  * originalBuf : prepareTemplate'e giren, HİÇ kırpılmamış orijinal şablon
  * geo         : computeFaceCropGeometry'nin döndürdüğü { left, top, cropW, cropH, imgW, imgH }
+ * keepMask    : (isteğe bağlı) { png, fwFrac } — kırpılmış tuval boyunda tek kanallı
+ *               maske (bkz. hatDetect.detectTemplateHat maskPng); içinde yama TAM
+ *               opak kalır (aşağıda ŞAPKA BÖLGESİ). Yoksa davranış bugünküyle aynı.
  *
  * Döner: orijinal boyutta, yüzü değişmiş JPEG Buffer | null (başarısızsa —
  * çağıran taraf bu durumda kırpılmış (dar kadrajlı) sonucu kullanmaya devam
  * edebilir, üretim asla bloklanmaz).
  */
-async function recompositeIntoOriginal(outputBuf, originalBuf, geo, { scale = 1 } = {}) {
+// DİKİŞ KAPISI (2026-11-15, 1cc3e022 c9, kullanıcı: "görselde kayma olmuş"): model kırpım
+// içinde sahneyi de yeniden diziyor (ayakkabı yukarı, koltuk sola, poster yazısı yukarı);
+// geri yapıştırınca kenarda iki sahne üst üste biniyor (çift koltuk kolu/ayakkabı, kesik
+// yazı). Yamanın tam opak iç bandında (yumuşatma payının 1.6-3.2 katı içeride) dokulu
+// bloklar şablonun aynı yerinde ±5 px (çalışma boyu; kırpım eni 380 px) içinde aranır;
+// bulunamayan blok "kaybolmuş" sayılır. 7 iş × 6 kırpılan şablon (42 kare): kusurlu
+// 11-15 c9 %42, 11-08 c9 %50; temizlerin en kötüsü %3. Küçük kayma (2-5 px, dalga/doku)
+// gözle görünmüyor (11-15 c3 %50 kaymış, 0 kaybolmuş, temiz) — kapı onu saymaz.
+// Tutmazsa null döner: çağıran kırpılmış (dar kadraj) sonucu kullanır.
+const SEAM_GATE_ON = true;
+const SEAM_WORK_W = 380;
+const SEAM_BLOCK = 12;
+const SEAM_SEARCH = 5;
+const SEAM_BAND = [1.6, 3.2];
+const SEAM_MIN_VAR = 30;
+const SEAM_MATCH_NCC = 0.5;
+const SEAM_MIN_BLOCKS = 40;
+const SEAM_LOST_MAX = 0.15;
+
+/**
+ * Yama ile şablonun kırpım kenarında örtüşmesi (bkz. SEAM_GATE_ON). patchGray: kırpım boyunda
+ * (PW×PH) gri yama; baseGray: tuval boyunda (BW×BH) gri şablon; L/T yamanın tuvaldeki yeri;
+ * fp yumuşatma payı (hepsi aynı çalışma ölçeğinde). SAF. Döner { n, lost, frac }.
+ */
+function seamMismatch(patchGray, PW, PH, baseGray, BW, BH, L, T, fp) {
+  const blk = SEAM_BLOCK, S = SEAM_SEARCH;
+  let n = 0, lost = 0;
+  const stats = (bx, by, dx, dy) => {
+    let a = 0, b = 0, aa = 0, bb = 0, ab = 0, q = 0;
+    for (let y = by; y < by + blk; y++) for (let x = bx; x < bx + blk; x++) {
+      const u = patchGray[y * PW + x], v = baseGray[(T + y + dy) * BW + L + x + dx];
+      a += u; b += v; aa += u * u; bb += v * v; ab += u * v; q++;
+    }
+    const va = aa / q - (a / q) ** 2, vb = bb / q - (b / q) ** 2;
+    return { r: (ab / q - (a / q) * (b / q)) / Math.sqrt(va * vb + 1e-9), va, vb };
+  };
+  for (let by = 0; by + blk <= PH; by += blk) for (let bx = 0; bx + blk <= PW; bx += blk) {
+    const cx = bx + blk / 2, cy = by + blk / 2;
+    const d = Math.min(cx, PW - cx, cy, PH - cy);
+    if (d < fp * SEAM_BAND[0] || d > fp * SEAM_BAND[1]) continue;
+    if (L + bx - S < 0 || T + by - S < 0 || L + bx + blk + S > BW || T + by + blk + S > BH) continue;
+    const z = stats(bx, by, 0, 0);
+    if (z.va < SEAM_MIN_VAR || z.vb < SEAM_MIN_VAR) continue; // dokusuz blok bilgi taşımaz
+    n++;
+    let best = z.r;
+    for (let dy = -S; dy <= S && best < SEAM_MATCH_NCC; dy++) for (let dx = -S; dx <= S; dx++) {
+      const r = stats(bx, by, dx, dy).r;
+      if (r > best) best = r;
+      if (best >= SEAM_MATCH_NCC) break;
+    }
+    if (best < SEAM_MATCH_NCC) lost++;
+  }
+  return { n, lost, frac: n ? lost / n : 0 };
+}
+
+async function seamCheck(patch, base, { left, top, cropW, cropH, imgW, imgH, featherPx }) {
+  const k = Math.min(1, SEAM_WORK_W / cropW);
+  const PW = Math.max(1, Math.round(cropW * k)), PH = Math.max(1, Math.round(cropH * k));
+  const BW = Math.max(1, Math.round(imgW * k)), BH = Math.max(1, Math.round(imgH * k));
+  const [pg, bg] = await Promise.all([
+    sharp(patch).removeAlpha().resize(PW, PH, { fit: "fill" }).greyscale().raw().toBuffer(),
+    // Döndürme YOK: yapıştırma (composite) da tabanı ham yönüyle kullanıyor.
+    sharp(base).removeAlpha().resize(BW, BH, { fit: "fill" }).greyscale().raw().toBuffer(),
+  ]);
+  const L = Math.min(BW - PW, Math.round(left * k)), T = Math.min(BH - PH, Math.round(top * k));
+  return seamMismatch(pg, PW, PH, bg, BW, BH, Math.max(0, L), Math.max(0, T), featherPx * k);
+}
+
+async function recompositeIntoOriginal(outputBuf, originalBuf, geo, { scale = 1, keepMask = null, seamGate = SEAM_GATE_ON, logTag = "" } = {}) {
   try {
     if (!geo) return null;
     // scale > 1 (bkz. recompositeScale): orijinal tuval büyütülür, yama kendi
@@ -391,15 +462,26 @@ async function recompositeIntoOriginal(outputBuf, originalBuf, geo, { scale = 1 
     // saydamlaşan bir alfa maskesi. Blur yarıçapı kırpma boyutuna göre
     // ölçekli (küçük kırpmada aşırı blur her şeyi saydamlaştırır).
     const featherPx = Math.max(8, Math.round(Math.min(cropW, cropH) * 0.06));
+    if (seamGate) {
+      try {
+        const sm = await seamCheck(patch, base, { left, top, cropW, cropH, imgW, imgH, featherPx });
+        const fail = sm.n >= SEAM_MIN_BLOCKS && sm.frac > SEAM_LOST_MAX;
+        console.log(`GERİ YERLEŞTİRME DİKİŞİ${logTag}: ${fail ? "TUTMADI (kırpılmış kadraj teslim)" : "TUTTU"} kayıpBlok=${sm.lost}/${sm.n} (%${Math.round(sm.frac * 100)}) eşik=%${Math.round(SEAM_LOST_MAX * 100)}`);
+        if (fail) return null;
+      } catch (e) {
+        console.error("Geri yerleştirme dikiş ölçümü hata verdi (geri yerleştiriliyor):", e.message || e);
+      }
+    }
     const insetSvg =
       `<svg width="${cropW}" height="${cropH}">` +
       `<rect x="${featherPx}" y="${featherPx}" ` +
       `width="${Math.max(1, cropW - featherPx * 2)}" height="${Math.max(1, cropH - featherPx * 2)}" ` +
       `fill="white"/></svg>`;
-    const mask = await sharp(Buffer.from(insetSvg))
+    let mask = await sharp(Buffer.from(insetSvg))
       .blur(featherPx / 1.5)
       .png()
       .toBuffer();
+    if (keepMask && keepMask.png) mask = await keepMaskOpaque(mask, keepMask, cropW, cropH);
 
     // Yamayı maskeyle birleştir: maskenin saydam (siyah) bölgeleri yamayı
     // saydamlaştırır, composite ile orijinalin üstüne bindirildiğinde altta
@@ -432,6 +514,45 @@ async function recompositeIntoOriginal(outputBuf, originalBuf, geo, { scale = 1 
   }
 }
 
+// ŞAPKA BÖLGESİ YAMADAN (2026-11-06, şapkalı şablon promptu incelemesi): kırpma
+// kenarının yumuşak bandı (kırpma kenarının 0.06'sı) şapka tepesine denk gelince
+// şablonun ASIL şapkası, modelin (biraz aşağı/küçük çizdiği) şapkasının üstüne yarı
+// saydam kubbe olarak karışıyordu (0eeb75c8 c3: şapka tepesi kenardan ~120 px,
+// bant 125 px; 7e04933e c1: 45 px / 52 px). Ham çıktıda kubbe yok. Bitirmede
+// ghostClean/iz detektörü bu kubbeyi şablon izi sayıp opak şapkayı da kesti.
+// Şablon şapka maskesinde (biraz genişletilmiş, yumuşak kenarlı) yama tam opak:
+// orada yalnız modelin çizdiği görünür. Maske yoksa (şapkasız şablon) hiçbir şey
+// değişmez.
+// Maskenin yumuşatma yarıçapı (yüz genişliği) ve kazancı: kazanç 3 ile alfa maske
+// kenarının ~0.05 yüz dışına kadar 1, ~0.3 yüzde 0'a iner. Şablon şapkasının kenarı
+// bulanık (segmentasyon maskesinin dışına taşar): 0.05'te maske dışındaki 0-0.08 yüz
+// halkasında şablon hâlâ karışıyordu (yama farkı 0eeb75c8 c10 4.4-8.7, normal kenar
+// bandı 2.3-4.5); 0.12'de 0.2-2.5.
+const KEEP_SOFT_FACE = 0.12;
+const KEEP_GAIN = 3;
+async function keepMaskOpaque(featherMask, keepMask, cropW, cropH) {
+  const n = cropW * cropH;
+  // TEK KANAL TUZAĞI (hafıza sharp-mask-channel-trap): her adımda extractChannel.
+  const fa = await sharp(featherMask).ensureAlpha().extractChannel(3).raw().toBuffer();
+  const fwPx = Math.max(1, (keepMask.fwFrac || 0.1) * cropW);
+  const km = await sharp(Buffer.isBuffer(keepMask.png) ? keepMask.png : Buffer.from(keepMask.png))
+    .extractChannel(0)
+    .resize(cropW, cropH, { fit: "fill", kernel: "linear" })
+    .blur(Math.max(0.3, KEEP_SOFT_FACE * fwPx))
+    .extractChannel(0)
+    .raw()
+    .toBuffer();
+  if (fa.length !== n || km.length !== n) throw new Error("şapka maskesi boyutu tutmuyor");
+  for (let i = 0; i < n; i++) {
+    const k = Math.min(255, km[i] * KEEP_GAIN);
+    if (k > fa[i]) fa[i] = k;
+  }
+  return sharp(Buffer.alloc(n * 3, 255), { raw: { width: cropW, height: cropH, channels: 3 } })
+    .joinChannel(fa, { raw: { width: cropW, height: cropH, channels: 1 } })
+    .png()
+    .toBuffer();
+}
+
 // YÜZ DETAYI KÜÇÜLMESİN (2026-10-22, kullanıcı: "yüzdeki detayları
 // göstermek"): üretim 1.5 kat çözünürlükte (bkz. falPhotos hiResSize), ama
 // küçük şablonda (1170x1560) yama kırpma boyutuna küçültülünce yüz yine
@@ -448,6 +569,7 @@ function recompositeScale(patchW, geo) {
 }
 
 module.exports = {
+  _testables: { keepMaskOpaque, KEEP_SOFT_FACE, KEEP_GAIN, seamMismatch, seamCheck, SEAM_GATE_ON, SEAM_LOST_MAX, SEAM_MIN_BLOCKS },
   recompositeScale,
   RECOMPOSITE_LONG_MAX,
   addPhoneCameraTexture,

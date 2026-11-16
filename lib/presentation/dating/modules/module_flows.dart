@@ -141,7 +141,7 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
   // (kullanıcı kararı) — akış stil → selfie + paket → üretim.
   _AiStage _stage = _AiStage.style;
   String _selectedStyle = PhotoStyle.defaultId;
-  /// Canlı ön / sağ / sol (sıra sabit).
+  /// Canlı yüz kareleri, kAiFaceUploadOrder sırasıyla (ilk 5 = eski 5 açı).
   final List<File> _facePhotos = [];
   String? _errorMessage;
   bool _preparing = false; // "Oluştur"a basıldı → sunucu doğrulaması sürüyor
@@ -428,11 +428,14 @@ class _AiPhotoFlowState extends ConsumerState<AiPhotoFlow> {
       _prepareError = null;
     });
     try {
-      for (var i = 0; i < refs.length; i++) {
-        await FirebaseStorage.instance
-            .ref('dating_training/$uid/$jobId/photo_$i.jpg')
-            .putFile(refs[i]);
-      }
+      // 10 kare (2026-11-16): sıralı yükleme süreyi ikiye katlıyordu → paralel.
+      // Dosya adındaki sıra = poz sırası (sunucu numaraya göre sıralar).
+      await Future.wait([
+        for (var i = 0; i < refs.length; i++)
+          FirebaseStorage.instance
+              .ref('dating_training/$uid/$jobId/photo_$i.jpg')
+              .putFile(refs[i]),
+      ]);
       await functions
           .httpsCallable(
             'prepareReferencePhotos',

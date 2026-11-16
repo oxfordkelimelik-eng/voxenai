@@ -126,7 +126,21 @@ async function validateFinalOutput(verifiedBuf, finalBuf, { eyewear = false } = 
   }
 }
 
+/**
+ * Doğrulama sonucunda kare geri alınır mı? SAF. Gözlük eklenmiş karede
+ * (2026-11-04 inceleme) gözlük yüz dedektörünün kutusunu tek başına 0.07-0.08
+ * kaydırıyor; geri alma kareyi gözlüksüz teslim ederdi (kullanıcı kuralı:
+ * "gözlüklü fotoğrafları gözlüksüz göstermeyelim"). Gözlüklü karede yalnız
+ * bozuk dosya / boyut değişikliği geri alınır, geri kalanı yalnız loglanır.
+ */
+function shouldRevert(fv, { eyewear = false } = {}) {
+  if (!fv || fv.ok) return false;
+  const hardFail = fv.reason === "corrupt-file" || fv.reason === "size-changed";
+  return hardFail || !eyewear;
+}
+
 module.exports = {
   validateFinalOutput,
+  shouldRevert,
   _testables: { compareFaces, sharpnessVerdict, BOX_SHIFT_MAX, BOX_SCALE_MIN, BOX_SCALE_MAX, PTS_SHIFT_MAX, SHARP_RATIO_MIN, SHARP_RATIO_MAX },
 };

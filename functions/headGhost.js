@@ -224,9 +224,13 @@ const EYEWEAR_PROMPT =
 function parseEyewearReply(raw) {
   const m = /EYEWEAR\s*:\s*(YES|NO)/i.exec(raw || "");
   if (!m) return { ok: false, reason: "unparsable" };
-  // Gözler camdan görünüyor mu (eyewear.keepOwnEyes); okunamazsa false — eski davranış.
+  // Gözler camdan görünüyor mu (eyewear.keepOwnEyes). Okunamazsa null (2026-11-04
+  // inceleme): eskiden false sayılıyordu ve koyu cam taşıması (sunglassTransfer)
+  // renkli camlı base'de çalışıp base kişinin camın arkasındaki gözlerini
+  // kullanıcının yüzüne taşıyabiliyordu (80fc7ec4 c2 yerel deneme). Taşıma artık
+  // yalnız açık "NO"da; null'da yapay zeka yolu (gözsüz cam) — eski AI davranışı.
   const v = /EYES_VISIBLE\s*:\s*(YES|NO)/i.exec(raw || "");
-  return { ok: true, eyewear: m[1].toUpperCase() === "YES", eyesVisible: !!v && v[1].toUpperCase() === "YES" };
+  return { ok: true, eyewear: m[1].toUpperCase() === "YES", eyesVisible: v ? v[1].toUpperCase() === "YES" : null };
 }
 
 /**
@@ -268,4 +272,145 @@ async function judgeEyewear(templateBuf, faceBox, apiKey) {
   }
 }
 
-module.exports = { judgeHeadGhost, judgeScaleResidue, parseHeadGhostReply, headCropRect, judgeEyewear, parseEyewearReply, PROMPT, SCALE_PROMPT };
+// CAMDAN GÖZ GÖRÜNÜYOR MU — İKİNCİ YARGI (2026-11-06). judgeEyewear bütün
+// yüzü 512'ye küçültüp düşük çözünürlükte soruyor; renkli/açık camda bazen
+// EYES_VISIBLE NO diyor ve sunglassTransfer base'in camını İÇİNDEKİ base
+// gözleriyle kullanıcının yüzüne taşıyor (80fc7ec4 c2 yerel deneme, 7e04933e
+// c4 11-03 teslimi). Yerel ölçüler (L* yayılımı "Kapı D", geçirgenlik
+// oranları, OWLv2) koyu renkli camda sızdı ya da doğrulanmış temiz koyu/ayna
+// taşımalarını (80f c3/c8, b932 c9) yanlış eledi. Bu soru yalnız iki camı
+// kapsayan sıkı, büyütülmüş bir bantta sorulur; taşıma ancak İKİ yargı da
+// NO derse yapılır. Bant göz noktalarından (face-api 68 nokta) çıkarılır.
+// PROMPT ÖLÇÜMÜ (2026-11-06, 48 etiketli base + 12 yapay koyu renkli cam):
+// tek soruluk "can you see the eyes? YES|NO" ve "önce betimle" sürümleri
+// 80fc7ec4 c2'de (göz ve parıltılar camdan açıkça görünürken) NO dedi; "her
+// cam ayrı YES|MAYBE|NO" + "camın arkasında göz VAR, gizli mi?" çerçevesi ile
+// ölçülen V/F karelerin 12/13'ünde YES, doğrulanmış temiz koyu/ayna camlarda
+// (80f c1/c3/c8, b932 c2/c9) NO. MAYBE = görünüyor sayılır (temkinli taraf).
+// KESİN DEĞİL: prompt aynı karelerde ayarlandı (ayrı test kümesi yok).
+// BİLİNEN SIZINTILAR (iki kez NO/NO): d87c25b4 c6 (gerçek base, sol camda
+// iris ve kapak görünüyor), 9c8f2cb5 c0 (soluk göz), yapay 80fc7ec4 c2
+// t<=0.3 ve 7e04933e c4 t=0.3 (sağ camda göz akı parıltısı).
+const LENS_EYES_PROMPT =
+  "This is a close-up crop of the eye area of a person wearing glasses or sunglasses. " +
+  "Its local contrast has been enhanced so that details behind dark lenses are easier to see.\n\n" +
+  "Behind each lens is one of the person's eyes. Look only at the lenses. For EACH lens separately, say whether that eye " +
+  "shows through the glass: you can make out its almond shape, the iris or pupil, the white of the eye, the eyelid or the lashes — " +
+  "even if the lens is dark and the eye is dim. Small bright glints sitting on the eye count as part of the eye.\n" +
+  "Answer YES (the eye shows through), MAYBE (possibly, unclear) or NO. Answer NO only if the eye behind that lens is hidden: " +
+  "the lens is opaque, solid black, or a mirror showing only reflected scenery, sky, buildings or lights.\n\n" +
+  "Reply on exactly two lines:\n" +
+  "LEFT_LENS: <YES | MAYBE | NO>\n" +
+  "RIGHT_LENS: <YES | MAYBE | NO>";
+// Bant göz arası (iod) cinsinden: cam merkezi gözün biraz altında, yarıçapı
+// ~0.66 iod yatay / ~0.46 iod dikey (sunglassTransfer LENS_*); pay cömert.
+const LENS_BAND_SIDE = 0.95;
+const LENS_BAND_UP = 0.65;
+const LENS_BAND_DOWN = 0.8;
+// Yan dönük yüzde görüntüdeki göz arası kısalır; cam yine de yüz genişliğine
+// yakın yer kaplar — en az yüz kutusunun bu oranı kadar alınır.
+const LENS_BAND_MIN_IOD_BOX = 0.42;
+// Görsel bu kutuya sığacak kadar BÜYÜTÜLÜR (high ayrıntıda tek karo; bantlar
+// çoğunlukla 100-400 px, 512 bilgi kaybettirmiyor).
+const LENS_BAND_MAX_W = 512;
+const LENS_BAND_MAX_H = 512;
+const LENS_BAND_MIN_PX = 24;
+const LENS_CLAHE_TILE = 48;
+const LENS_CLAHE_SLOPE = 4;
+// Ölçülen yanıt 1-2 sn; asılı kalan istek iş süresini (900 sn) yemesin.
+// Zaman aşımı = hata = göz görünüyor (taşıma yok).
+const LENS_JUDGE_TIMEOUT_MS = 20000;
+
+/**
+ * SAF. Her cam için YES | MAYBE | NO. İki satır da okunmalı; herhangi bir camda
+ * YES ya da MAYBE -> göz görünüyor (taşıma yok). Döner { ok:true, eyesThrough,
+ * lenses:[sol, sağ] } | { ok:false, reason, eyesThrough:null }.
+ */
+function parseLensEyesReply(raw) {
+  const s = raw || "";
+  const l = /LEFT_LENS\W*(YES|MAYBE|NO)\b/i.exec(s), r = /RIGHT_LENS\W*(YES|MAYBE|NO)\b/i.exec(s);
+  if (!l || !r) return { ok: false, reason: "unparsable", eyesThrough: null };
+  const lenses = [l[1].toUpperCase(), r[1].toUpperCase()];
+  return { ok: true, eyesThrough: lenses.some((v) => v !== "NO"), lenses };
+}
+
+/**
+ * SAF. Taşımaya izin: yalnız okunmuş ve iki camda da NO. Hata, zaman aşımı,
+ * okunamayan cevap, MAYBE -> izin yok (yapay zeka yolu, base gözü taşınmaz).
+ */
+function lensJudgeAllowsTransfer(r) {
+  return !!r && r.ok === true && r.eyesThrough === false;
+}
+
+/**
+ * SAF. İki camı kapsayan bant (orijinal görsel pikselleri). pts: face-api
+ * 68 nokta (36-41 ve 42-47 gözler) ya da null; box: yüz kutusu. Göz noktası
+ * yoksa yüz kutusundan tahmin edilir. Döner { left, top, width, height } | null.
+ */
+function lensBandRect(pts, box, W, H) {
+  if (!box || !(W > 0) || !(H > 0)) return null;
+  let cR = null, cL = null;
+  if (Array.isArray(pts) && pts.length >= 48) {
+    const c = (a, b) => { let x = 0, y = 0; for (let i = a; i <= b; i++) { x += pts[i].x; y += pts[i].y; } return [x / (b - a + 1), y / (b - a + 1)]; };
+    cR = c(36, 41); cL = c(42, 47);
+  }
+  let x0, x1, y0, y1;
+  if (cR && cL) {
+    const s = Math.max(Math.hypot(cL[0] - cR[0], cL[1] - cR[1]), LENS_BAND_MIN_IOD_BOX * box.width);
+    x0 = Math.min(cR[0], cL[0]) - LENS_BAND_SIDE * s; x1 = Math.max(cR[0], cL[0]) + LENS_BAND_SIDE * s;
+    y0 = Math.min(cR[1], cL[1]) - LENS_BAND_UP * s; y1 = Math.max(cR[1], cL[1]) + LENS_BAND_DOWN * s;
+  } else {
+    x0 = box.x - 0.05 * box.width; x1 = box.x + 1.05 * box.width;
+    y0 = box.y + 0.05 * box.height; y1 = box.y + 0.65 * box.height;
+  }
+  const left = Math.max(0, Math.round(x0)), top = Math.max(0, Math.round(y0));
+  const right = Math.min(W, Math.round(x1)), bottom = Math.min(H, Math.round(y1));
+  if (right - left < LENS_BAND_MIN_PX || bottom - top < LENS_BAND_MIN_PX) return null;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+/**
+ * Camın arkasında göz görünüyor mu? eyeBand: lensBandRect çıktısı.
+ * FAIL-SAFE: girdi yok / ağ hatası / zaman aşımı / http hatası / okunamadı ->
+ * { ok:false, eyesThrough:null } — çağıran bunu "göz görünüyor" sayar (taşıma
+ * YOK). Retry yok. Çağrı ~$0.0011 (gpt-4.1, high, tek karo: ~500 girdi jetonu).
+ */
+async function judgeLensEyes(templateBuf, eyeBand, apiKey, { detail = "high", enhance = true, timeoutMs = LENS_JUDGE_TIMEOUT_MS } = {}) {
+  try {
+    if (!Buffer.isBuffer(templateBuf) || !eyeBand || !apiKey) return { ok: false, reason: "insufficient-input", eyesThrough: null };
+    // Döndürme YOK: bant face-api noktalarından, onlar da EXIF'siz piksellerden.
+    const big = await sharp(templateBuf).extract(eyeBand)
+      .resize({ width: LENS_BAND_MAX_W, height: LENS_BAND_MAX_H, fit: "inside", kernel: "lanczos3" }).toBuffer();
+    // YEREL KONTRAST (CLAHE): koyu camın arkasındaki göz yerelce açılınca
+    // belirginleşiyor (0eeb75c8 c1 t=0.2 yapay tonda göz net), opak camda
+    // (10ee6a46 c5) göz çıkmıyor. Daha sert ayar (slope 12) yüzü bozdu.
+    const img = enhance ? sharp(big).clahe({ width: LENS_CLAHE_TILE, height: LENS_CLAHE_TILE, maxSlope: LENS_CLAHE_SLOPE }) : sharp(big);
+    const crop = await img.jpeg({ quality: 92 }).toBuffer();
+    const resp = await fetch(OPENAI_CHAT_URL, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: HEAD_GHOST_MODEL,
+        temperature: 0,
+        max_tokens: 24,
+        messages: [
+          { role: "system", content: SYSTEM_MSG },
+          { role: "user", content: [{ type: "text", text: LENS_EYES_PROMPT }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${crop.toString("base64")}`, detail } }] },
+        ],
+      }),
+    });
+    if (!resp.ok) return { ok: false, reason: `http-${resp.status}`, eyesThrough: null };
+    const json = await resp.json();
+    if (json.usage) require("./jobContext").recordUsage(HEAD_GHOST_MODEL, json.usage);
+    const text = (json?.choices?.[0]?.message?.content || "").trim();
+    // Ham yanıt loga gider (taşıma ATLANDI[lens-judge] satırı): canlı yanlış
+    // ret oranı ilk işlerden sayılabilsin.
+    return { ...parseLensEyesReply(text), raw: text.replace(/\s+/g, " ").slice(0, 80) };
+  } catch (e) {
+    console.error("Cam göz yargısı hata verdi (göz görünüyor sayılıyor, taşıma yok):", e.message || e);
+    return { ok: false, reason: "error", eyesThrough: null };
+  }
+}
+
+module.exports = { judgeHeadGhost, judgeScaleResidue, parseHeadGhostReply, headCropRect, judgeEyewear, parseEyewearReply, judgeLensEyes, parseLensEyesReply, lensJudgeAllowsTransfer, lensBandRect, PROMPT, SCALE_PROMPT, LENS_EYES_PROMPT };

@@ -101,6 +101,15 @@ const WIDTH_MAX_YAW = 0.8;
 const WIDTH_FRONTAL_SLACK = 0.05;
 // Büyütme toplam kafa hacmini şablonun bu oranının üstüne çıkaramaz.
 const VOLUME_CEIL = 1.03;
+// KÜÇÜLTME HACİM TABANI (2026-11-13, kullanıcı: "c4'te kafa gereğinden fazla küçülmüş, yeteri
+// kadar küçülmeli"): küçültme toplam kafa hacmini (saç ∪ yüz) şablonun bu katının altına
+// indirmesin. c4 (e67abb0e) hacim 1.02 iken 0.80 ölçek → kafa şablondan belirgin küçük.
+const VOLUME_FLOOR = 0.97;
+// PROFİL ŞABLONDA YÜZ ORANI 3B AĞDAN (2026-11-13): 68 nokta profilde bozuluyor (c4, şablon
+// yaw 54°: yüz 1.37-1.46, kaş-burun 1.56-1.67; 3B ağ alın-çene 1.14-1.19) → hacim (1.02-1.06)
+// "yüzden çok sapıyor" diye atılıyor, ölçek 0.80. |şablon yaw| ≥ bu eşikte ve iki karede
+// de ağ varsa yüz oranı ağın alın-çene uzaklığından.
+const PROFILE_MESH_MIN_YAW = 35;
 
 let _segPromise = null;
 
@@ -381,7 +390,7 @@ function perceivedHeadRatio(faceRatio, volRatio) {
 /**
  * Ölçekleme kararı. SAF. s = gövdeÖlçeği / kafaOranı; s<1 küçült, s>1 büyüt.
  */
-function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRatio = null, widthRatio = null } = {}) {
+function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRatio = null, widthRatio = null, volFloor = false } = {}) {
   if (!(faceRatio > 0)) return { apply: false, reason: "no-measure" };
   const aligned = bodyIou >= BODY_ALIGNED_IOU || faceShift <= FACE_ALIGNED_SHIFT;
   const ph = perceivedHeadRatio(faceRatio, volRatio);
@@ -392,6 +401,9 @@ function planLandmarkScale(faceRatio, { bodyIou = 0, faceShift = Infinity, volRa
   // Hacim tavanı: büyütme toplam kafa hacmini şablondan belirgin büyük
   // bırakmasın.
   if (ph.volUsed && rawS > 1) rawS = Math.min(rawS, VOLUME_CEIL / volRatio);
+  // Yalnız profil şablonda (yüz oranı 3B ağdan): önden karelerde kullanıcının "kafa büyük"
+  // dediği 61079257 c5 / 017dbe34 c0 küçültmeleri zayıflamasın.
+  if (volFloor && ph.volUsed && rawS < 1) rawS = Math.min(1, Math.max(rawS, VOLUME_FLOOR / volRatio));
   if (Math.abs(1 - rawS) < APPLY_MIN_DELTA) return { apply: false, reason: "within-tolerance", rawS, s: rawS, volUsed: ph.volUsed, widthUsed };
   const soft = rawS >= SOFT_MIN_SCALE ? rawS
     : rawS < RAMP_TRUST_MIN_RAW_S ? SOFT_MIN_SCALE
@@ -1647,7 +1659,15 @@ async function correctHeadScale(outputBuf, templateBuf, { deferInpaint = false, 
       console.error("Kafa genişliği ölçülemedi (yalnız yüz/hacim):", e.message || e);
     }
   }
-  const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio, widthRatio: width ? width.ratio : null });
+  let meshUsed = false;
+  try {
+    const mr = await meshFaceRatio(outputBuf, templateBuf);
+    if (mr) meshUsed = true;
+    if (mr) lr = { ratio: mr.ratio, parts: { ...(lr.parts || {}), landmark: lr.ratio, mesh: mr.ratio, meshYaw: mr.tplYaw } };
+  } catch (e) {
+    console.error("3B ağ yüz oranı ölçülemedi (68 nokta kalır):", e.message || e);
+  }
+  const plan = planLandmarkScale(lr.ratio, { bodyIou, faceShift, volRatio, widthRatio: width ? width.ratio : null, volFloor: meshUsed });
   const info = { s: plan.s ?? null, rawS: plan.rawS ?? null, faceRatio: lr.ratio, parts: lr.parts, volRatio, volUsed: plan.volUsed ?? false, widthRatio: width ? width.ratio : null, widthUsed: plan.widthUsed ?? false, bodyIou, faceShift, eyewear: templateEyewear };
   // ÇENE HİZASI (2026-10-22, kullanıcı: "kafa önde, boyun gözükmeli"): 25
   // teslim karesinin çoğunda model çeneyi şablonunkinden yüz boyunun
@@ -1936,6 +1956,23 @@ async function prepareHeadFringeRepaint(outputBuf, templateBuf) {
   };
 }
 
+/** Profil şablonda yüz oranı (çıktı/şablon) 3B ağın alın(10)-çene(152) uzaklığından; değilse null. */
+async function meshFaceRatio(outputBuf, templateBuf) {
+  const H = require("./headPose3d");
+  const m = async (b) => {
+    const { data, W, H: h } = await H._testables.normalized(b, 1600);
+    const r = await H._testables.meshPose(data, W, h, { loose: true });
+    if (!r.mesh || !r.pose) return null;
+    const M = r.mesh;
+    return { yaw: r.pose.yaw, d: Math.hypot(M[10][0] - M[152][0], M[10][1] - M[152][1]) / h };
+  };
+  const t = await m(templateBuf);
+  if (!t || !(Math.abs(t.yaw) >= PROFILE_MESH_MIN_YAW)) return null;
+  const o = await m(outputBuf);
+  if (!o || !(t.d > 0) || !(o.d > 0)) return null;
+  return { ratio: o.d / t.d, tplYaw: t.yaw };
+}
+
 module.exports = {
   correctHeadScale,
   planHeadAlign,
@@ -1948,6 +1985,9 @@ module.exports = {
   eyewearFaceRatio,
   perceivedHeadRatio,
   planLandmarkScale,
+  meshFaceRatio,
+  VOLUME_FLOOR,
+  PROFILE_MESH_MIN_YAW,
   widthUsable,
   APPLY_MIN_DELTA,
   MIN_SCALE,

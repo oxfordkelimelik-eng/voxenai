@@ -77,9 +77,15 @@ class DatingConfig {
   // 5 AÇI (2026-10-08, kullanıcı kararı): ön, hafif sağ, hafif sol, tam
   // sağ, tam sol — model kafa yönünü selfie'den alıyor, şablon açısına yakın
   // bir selfie olunca bakış doğru çıkıyor. Sunucu eski sürümler için 3'ü de
-  // kabul ediyor. functions/falPhotos.js FACE_PHOTO_COUNT ile senkron.
-  static const int faceCaptureCount = 5;
-  static const int referencePhotoCount = faceCaptureCount; // 5
+  // kabul ediyor.
+  // 10 AÇI (2026-11-16, kullanıcı kararı): her yöne 4 adım + çene aşağı.
+  // 5 açıda arada kalan şablonlar (17-21°, 35° dönük, eğik baş) her işte
+  // fazla dönüp eleniyordu. Modele yine şablon başına 5 kare gider; sunucu
+  // açısı en uygun 5'i seçer. functions/falPhotos.js MAX_FACE_PHOTOS ile
+  // senkron — SUNUCU bu sürümden ÖNCE deploy edilmeli (eski sunucu 10'u
+  // reddeder).
+  static const int faceCaptureCount = 10;
+  static const int referencePhotoCount = faceCaptureCount; // 10
 
   // --- İlk çıktı önizlemesi: ücretsiz gösterilen foto sayısı ---
   // AI foto üretiminde VE foto analizinde üretilen/işlenen ilk foto/sonuç

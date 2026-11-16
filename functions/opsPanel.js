@@ -930,7 +930,48 @@ exports.opsApprovePhotos = onCall(
       };
       console.warn(`ONAY: İADE ALMIŞ iş gerekçeyle teslim edildi (uid=${uid}, job=${jobId}, durum=${job.status}) gerekçe="${sel.reason}"`);
     }
-    await jobRef.set(approvalUpdate, { merge: true });
+    // DURUM YARIŞI (2026-11-04 inceleme): durum yukarıda düz okumayla
+    // denetleniyor, dosya kopyası birkaç saniye sürüyor. Arada saatlik
+    // otomatik iptal (cancelPendingApprovalJob, 30 gün) işi iade edip 'failed'
+    // yaparsa kontrolsüz yazım kullanıcıya hem iadeyi hem fotoğrafları
+    // verirdi. Yazım transaction'da; durum arada onaylanamaz bir duruma
+    // geçtiyse (iptal/iade) gerekçe olsa BİLE durur (2026-11-05 inceleme: aynı
+    // overrideReason alanı engelli kapı gerekçesi olarak girilmiş olabilir,
+    // yönetici iade uyarısını hiç görmedi). Yönetici yeniden açınca iş 'failed'
+    // görünür ve iade uyarısıyla ayrıca gerekçe istenir.
+    const STATUS_RACE = "status-race";
+    await db.runTransaction(async (tx) => {
+      const nowSnap = await tx.get(jobRef);
+      const now = nowSnap.exists ? nowSnap.data() : null;
+      if (!now) {
+        const e = new HttpsError("not-found", "İş bulunamadı.");
+        e.undo = "gone";
+        throw e;
+      }
+      if (now.status !== job.status) {
+        console.warn(`ONAY: iş durumu onay sırasında değişti ${job.status}→${now.status} (uid=${uid}, job=${jobId})`);
+        if (now.status !== "pendingApproval" && now.status !== "done") {
+          const e = new HttpsError(
+            "failed-precondition",
+            `İş onay sırasında '${now.status}' durumuna geçti (${now.cancelledReason || "?"}); kullanıcıya iade yapılmış olabilir. Sayfayı yenileyip yeniden değerlendir.`,
+            { status: now.status, race: true }
+          );
+          e.undo = STATUS_RACE;
+          throw e;
+        }
+      }
+      tx.set(jobRef, approvalUpdate, { merge: true });
+    }).catch(async (e) => {
+      // Kopyalar YALNIZ bu çağrının yazımı reddedildiğinde geri silinir: iş
+      // silindiyse (hesap silme — kopyalar sahipsiz yüz fotoğrafı kalmasın) ya da
+      // iptal/iade yarışı (daha önce teslim edilmemiş iş). Altyapı hatasında
+      // dokunulmaz: eş zamanlı başka bir onay aynı yolları teslim etmiş olabilir.
+      if (e && (e.undo === "gone" || (e.undo === STATUS_RACE && job.status !== "done"))) {
+        await Promise.all(approvedUrls.map((u) => bucket().file(gsPathFromUrl(u)).delete().catch(() => {})));
+        console.warn(`ONAY: yazım reddedildi, ${approvedUrls.length} kopya geri silindi (uid=${uid}, job=${jobId}): ${e.message || e}`);
+      }
+      throw e;
+    });
 
     const { sendPushToUser } = require("./notifications");
     const pushed = await sendPushToUser(uid, {

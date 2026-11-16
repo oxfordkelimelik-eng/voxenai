@@ -1,0 +1,5651 @@
+{
+ "version": 2,
+ "style": "elegance",
+ "band": "tall",
+ "prefix": "dating_templates/elegance/tall/",
+ "builtAt": "2026-11-15T16:05:33.975Z",
+ "count": 45,
+ "templates": {
+  "dating_templates/elegance/tall/@lapetitemaison_marbella 🌊🍝☀️.jpg": {
+   "md5": "J5eqa10DTCtUk/vreDV5Ag==",
+   "size": 186213,
+   "ms": {
+    "prep": 481,
+    "pose": 586,
+    "hat": 799,
+    "finish": 2273,
+    "total": 4141
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.143,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1560
+   },
+   "pose2d": {
+    "yaw": 0.95,
+    "yawSigned": 0.97
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 50,
+    "pitch": 4.4,
+    "roll": 7.8,
+    "chinX": 0.519,
+    "chinY": 0.516,
+    "faceW": 0.132
+   },
+   "promptPose": {
+    "yaw": 50.022,
+    "pitch": 4.391,
+    "roll": null,
+    "chinX": 0.519,
+    "chinY": 0.516,
+    "faceW": 0.132
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 25.5,
+    "ringL": 67.9,
+    "faceMinusRing": -42.4,
+    "gu": 0.64,
+    "gv": -0.63,
+    "skinA": 17.9,
+    "skinB": 11.7,
+    "neckMinusFace": 1,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.199
+   },
+   "glowGate": {
+    "bgL": 65.2,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": false,
+    "profile": true,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14323779940605164,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.9531066114308246,
+     "yawSigned": 0.9729397517920271
+    },
+    "pose3d": {
+     "yaw": 50.02216314334308,
+     "pitch": 4.391183292684147,
+     "roll": 7.773679174736335,
+     "src": "mesh",
+     "agree": 0.14100936763864969,
+     "faceW": 0.13246252823641064,
+     "chinX": 0.5193589019614658,
+     "chinY": 0.5163152854991976
+    },
+    "promptPose": {
+     "yaw": 50.02216314334308,
+     "pitch": 4.391183292684147,
+     "roll": null,
+     "chinX": 0.5193589019614658,
+     "chinY": 0.5163152854991976,
+     "faceW": 0.13246252823641064
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/BAFTAs night 🖤 The last slide was necessary 😂Such an honour to be invited by @pandocruises & t (1).jpg": {
+   "md5": "FFW/72XfM3ewkkT8P/LFDA==",
+   "size": 266376,
+   "ms": {
+    "prep": 340,
+    "pose": 531,
+    "hat": 531,
+    "finish": 2213,
+    "total": 3617
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.105,
+    "blurScore": null,
+    "w": 970,
+    "h": 1295
+   },
+   "pose2d": {
+    "yaw": 0.04,
+    "yawSigned": -0.05
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -3.6,
+    "pitch": 0.7,
+    "roll": 1.6,
+    "chinX": 0.47,
+    "chinY": 0.161,
+    "faceW": 0.099
+   },
+   "promptPose": {
+    "yaw": -3.629,
+    "pitch": 0.707,
+    "roll": 1.571,
+    "chinX": 0.47,
+    "chinY": 0.161,
+    "faceW": 0.099
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 58.1,
+    "ringL": 18.4,
+    "faceMinusRing": 39.6,
+    "gu": -0.16,
+    "gv": -0.37,
+    "skinA": 22,
+    "skinB": 17.5,
+    "neckMinusFace": -1.7,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.146
+   },
+   "glowGate": {
+    "bgL": 49.7,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.10471215967050533,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.04260196507123892,
+     "yawSigned": -0.04887412534254609
+    },
+    "pose3d": {
+     "yaw": -3.6287269757640437,
+     "pitch": 0.7066348678624554,
+     "roll": 1.571431568286736,
+     "src": "mesh",
+     "agree": 0.033585207388224354,
+     "faceW": 0.0991503700451803,
+     "chinX": 0.469677727915376,
+     "chinY": 0.16148341269407993
+    },
+    "promptPose": {
+     "yaw": -3.6287269757640437,
+     "pitch": 0.7066348678624554,
+     "roll": 1.571431568286736,
+     "chinX": 0.469677727915376,
+     "chinY": 0.16148341269407993,
+     "faceW": 0.0991503700451803
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/BAFTAs night 🖤 The last slide was necessary 😂Such an honour to be invited by @pandocruises & t.jpg": {
+   "md5": "HpKQkWmkJkenLDTDMoZlXw==",
+   "size": 311903,
+   "ms": {
+    "prep": 358,
+    "pose": 534,
+    "hat": 597,
+    "finish": 2342,
+    "total": 3834
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.114,
+    "blurScore": null,
+    "w": 821,
+    "h": 1095
+   },
+   "pose2d": {
+    "yaw": 0.54,
+    "yawSigned": -0.42
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -25.9,
+    "pitch": -1.2,
+    "roll": -5.4,
+    "chinX": 0.455,
+    "chinY": 0.165,
+    "faceW": 0.098
+   },
+   "promptPose": {
+    "yaw": -25.873,
+    "pitch": -1.235,
+    "roll": null,
+    "chinX": 0.455,
+    "chinY": 0.165,
+    "faceW": 0.098
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 69.6,
+    "ringL": 50.6,
+    "faceMinusRing": 19,
+    "gu": -0.2,
+    "gv": -0.33,
+    "skinA": 22.4,
+    "skinB": 18.6,
+    "neckMinusFace": null,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.137
+   },
+   "glowGate": {
+    "bgL": 37.9,
+    "gate": 0.63,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11415678240930555,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.5440114220187489,
+     "yawSigned": -0.41679199500877906
+    },
+    "pose3d": {
+     "yaw": -25.873455553571425,
+     "pitch": -1.2353339311929925,
+     "roll": -5.410056805972881,
+     "src": "mesh",
+     "agree": 0.029447865847727253,
+     "faceW": 0.09782165520233539,
+     "chinX": 0.4550733351439656,
+     "chinY": 0.1648687454383613
+    },
+    "promptPose": {
+     "yaw": -25.873455553571425,
+     "pitch": -1.2353339311929925,
+     "roll": null,
+     "chinX": 0.4550733351439656,
+     "chinY": 0.1648687454383613,
+     "faceW": 0.09782165520233539
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 7,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/Love That 🌞🏝️@marksandspencerman @marksandspencer.jpg": {
+   "md5": "ZN9+Gcsviw1kbc27mi3rCg==",
+   "size": 241069,
+   "ms": {
+    "prep": 325,
+    "pose": 586,
+    "hat": 605,
+    "finish": 2263,
+    "total": 3781
+   },
+   "width": 1170,
+   "height": 1464,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.112,
+    "blurScore": null,
+    "w": 883,
+    "h": 1105
+   },
+   "pose2d": {
+    "yaw": 0.2,
+    "yawSigned": 0.27
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 14.6,
+    "pitch": -1.5,
+    "roll": -3,
+    "chinX": 0.555,
+    "chinY": 0.15,
+    "faceW": 0.089
+   },
+   "promptPose": {
+    "yaw": 14.563,
+    "pitch": -1.511,
+    "roll": -3.026,
+    "chinX": 0.555,
+    "chinY": 0.15,
+    "faceW": 0.089
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 48.7,
+    "ringL": 34.1,
+    "faceMinusRing": 14.5,
+    "gu": 0.36,
+    "gv": -1.29,
+    "skinA": 17.8,
+    "skinB": 22.1,
+    "neckMinusFace": 4.7,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.167
+   },
+   "glowGate": {
+    "bgL": 32.5,
+    "gate": 0.97,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11195630341397002,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.19762479494889673,
+     "yawSigned": 0.268346689421342
+    },
+    "pose3d": {
+     "yaw": 14.56331889691178,
+     "pitch": -1.5106155755675854,
+     "roll": -3.026119925747306,
+     "src": "mesh",
+     "agree": 0.024619234817738117,
+     "faceW": 0.08928006356072472,
+     "chinX": 0.5551458398672598,
+     "chinY": 0.15048152685902985
+    },
+    "promptPose": {
+     "yaw": 14.56331889691178,
+     "pitch": -1.5106155755675854,
+     "roll": -3.026119925747306,
+     "chinX": 0.5551458398672598,
+     "chinY": 0.15048152685902985,
+     "faceW": 0.08928006356072472
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/costa vice.jpg": {
+   "md5": "Se1EE6XCveNEqnojRFa9Ow==",
+   "size": 134633,
+   "ms": {
+    "prep": 228,
+    "pose": 523,
+    "hat": 608,
+    "finish": 3006,
+    "total": 4367
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.161,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1560
+   },
+   "pose2d": {
+    "yaw": 0.04,
+    "yawSigned": -0.03
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -2.2,
+    "pitch": 2.8,
+    "roll": 1,
+    "chinX": 0.49,
+    "chinY": 0.313,
+    "faceW": 0.15
+   },
+   "promptPose": {
+    "yaw": -2.226,
+    "pitch": 2.801,
+    "roll": 0.955,
+    "chinX": 0.49,
+    "chinY": 0.313,
+    "faceW": 0.15
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 51,
+    "ringL": 91.3,
+    "faceMinusRing": -40.3,
+    "gu": 0.57,
+    "gv": -0.93,
+    "skinA": 15.1,
+    "skinB": 25,
+    "neckMinusFace": -8,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.253
+   },
+   "glowGate": {
+    "bgL": 86.3,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1613781452178955,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.03776932339080519,
+     "yawSigned": -0.028018625307583256
+    },
+    "pose3d": {
+     "yaw": -2.2257232269870726,
+     "pitch": 2.801197006368425,
+     "roll": 0.9554440305099726,
+     "src": "mesh",
+     "agree": 0.03942814433671574,
+     "faceW": 0.1502291072284091,
+     "chinX": 0.48988395828190445,
+     "chinY": 0.3128339433865587
+    },
+    "promptPose": {
+     "yaw": -2.2257232269870726,
+     "pitch": 2.801197006368425,
+     "roll": 0.9554440305099726,
+     "chinX": 0.48988395828190445,
+     "chinY": 0.3128339433865587,
+     "faceW": 0.1502291072284091
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/happy easter from the south (1).jpg": {
+   "md5": "FGID2554QXb+nIqYx/KXHQ==",
+   "size": 170781,
+   "ms": {
+    "prep": 244,
+    "pose": 569,
+    "hat": 592,
+    "finish": 2328,
+    "total": 3738
+   },
+   "width": 1170,
+   "height": 1559,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.139,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1559
+   },
+   "pose2d": {
+    "yaw": 0.2,
+    "yawSigned": -0.36
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -44.3,
+    "pitch": -29.7,
+    "roll": 28.7,
+    "chinX": 0.431,
+    "chinY": 0.497,
+    "faceW": 0.134
+   },
+   "promptPose": {
+    "yaw": -44.342,
+    "pitch": -29.651,
+    "roll": null,
+    "chinX": 0.431,
+    "chinY": 0.497,
+    "faceW": 0.134
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 37.3,
+    "ringL": 55.7,
+    "faceMinusRing": -18.4,
+    "gu": 2.46,
+    "gv": -1.52,
+    "skinA": 17.1,
+    "skinB": 13,
+    "neckMinusFace": -12.7,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.234
+   },
+   "glowGate": {
+    "bgL": 42.6,
+    "gate": 0.34,
+    "applies": true
+   },
+   "flags": {
+    "bowed": true,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1385716199874878,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.20469549231571094,
+     "yawSigned": -0.3576654768427784
+    },
+    "pose3d": {
+     "yaw": -44.34226169172688,
+     "pitch": -29.651021379204977,
+     "roll": 28.68587159798576,
+     "src": "mesh",
+     "agree": 0.224262268129989,
+     "faceW": 0.134218992112816,
+     "chinX": 0.43121333386867755,
+     "chinY": 0.49702086820535873
+    },
+    "promptPose": {
+     "yaw": -44.34226169172688,
+     "pitch": -29.651021379204977,
+     "roll": null,
+     "chinX": 0.43121333386867755,
+     "chinY": 0.49702086820535873,
+     "faceW": 0.134218992112816
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 4,
+    "gates": {
+     "yaw-over-rotate": 3,
+     "gaze-opposite": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DCMwLvXIUkb_3.jpg": {
+   "md5": "3BfUkKVcwftbkdpDe2whSw==",
+   "size": 493859,
+   "ms": {
+    "prep": 263,
+    "pose": 571,
+    "hat": 596,
+    "finish": 2600,
+    "total": 4032
+   },
+   "width": 1440,
+   "height": 1806,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.13,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1806
+   },
+   "pose2d": {
+    "yaw": 0.06,
+    "yawSigned": -0.04
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 0.9,
+    "pitch": -1.5,
+    "roll": -1.8,
+    "chinX": 0.529,
+    "chinY": 0.334,
+    "faceW": 0.117
+   },
+   "promptPose": {
+    "yaw": 0.925,
+    "pitch": -1.507,
+    "roll": -1.831,
+    "chinX": 0.529,
+    "chinY": 0.334,
+    "faceW": 0.117
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 31.7,
+    "ringL": 39.5,
+    "faceMinusRing": -7.9,
+    "gu": 2.03,
+    "gv": -1.18,
+    "skinA": 9.6,
+    "skinB": 10.9,
+    "neckMinusFace": -21.9,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.214
+   },
+   "glowGate": {
+    "bgL": 39,
+    "gate": 0.56,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1300792098045349,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.06225654070984299,
+     "yawSigned": -0.04093753086826668
+    },
+    "pose3d": {
+     "yaw": 0.9246027605939005,
+     "pitch": -1.5074083579830255,
+     "roll": -1.8305475464278813,
+     "src": "mesh",
+     "agree": 0.0325662469533275,
+     "faceW": 0.1170101808607369,
+     "chinX": 0.5286750569190848,
+     "chinY": 0.33401651493748624
+    },
+    "promptPose": {
+     "yaw": 0.9246027605939005,
+     "pitch": -1.5074083579830255,
+     "roll": -1.8305475464278813,
+     "chinX": 0.5286750569190848,
+     "chinY": 0.33401651493748624,
+     "faceW": 0.1170101808607369
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DDHrMBhsVqk_1.jpg": {
+   "md5": "NGNgtAAtkub/JlJvqQNBMA==",
+   "size": 587972,
+   "ms": {
+    "prep": 358,
+    "pose": 543,
+    "hat": 586,
+    "finish": 2889,
+    "total": 4378
+   },
+   "width": 1440,
+   "height": 1800,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.121,
+    "blurScore": null,
+    "w": 1306,
+    "h": 1633
+   },
+   "pose2d": {
+    "yaw": 0.06,
+    "yawSigned": -0.17
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -10.1,
+    "pitch": 0.2,
+    "roll": 6.8,
+    "chinX": 0.521,
+    "chinY": 0.165,
+    "faceW": 0.095
+   },
+   "promptPose": {
+    "yaw": -10.145,
+    "pitch": 0.199,
+    "roll": 6.789,
+    "chinX": 0.521,
+    "chinY": 0.165,
+    "faceW": 0.095
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 56.2,
+    "ringL": 37.1,
+    "faceMinusRing": 19.1,
+    "gu": -2.42,
+    "gv": -1.35,
+    "skinA": 14.4,
+    "skinB": 19.1,
+    "neckMinusFace": null,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.187
+   },
+   "glowGate": {
+    "bgL": 29.2,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1207741296309607,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.06425424855707984,
+     "yawSigned": -0.17386216280828237
+    },
+    "pose3d": {
+     "yaw": -10.144548675019792,
+     "pitch": 0.19899108378584904,
+     "roll": 6.789259237992961,
+     "src": "mesh",
+     "agree": 0.04525779741591553,
+     "faceW": 0.09462240641123217,
+     "chinX": 0.5207886678267781,
+     "chinY": 0.16534085157820974
+    },
+    "promptPose": {
+     "yaw": -10.144548675019792,
+     "pitch": 0.19899108378584904,
+     "roll": 6.789259237992961,
+     "chinX": 0.5207886678267781,
+     "chinY": 0.16534085157820974,
+     "faceW": 0.09462240641123217
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DIt281sAG4G_2.jpg": {
+   "md5": "3biRhF/hFrh7v7Lv6N6SKQ==",
+   "size": 521045,
+   "ms": {
+    "prep": 358,
+    "pose": 559,
+    "hat": 557,
+    "finish": 2708,
+    "total": 4185
+   },
+   "width": 1440,
+   "height": 1800,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.108,
+    "blurScore": null,
+    "w": 1292,
+    "h": 1615
+   },
+   "pose2d": {
+    "yaw": 0.19,
+    "yawSigned": -0.02
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 1.7,
+    "pitch": -3.8,
+    "roll": -10.2,
+    "chinX": 0.485,
+    "chinY": 0.16,
+    "faceW": 0.093
+   },
+   "promptPose": {
+    "yaw": 1.723,
+    "pitch": -3.833,
+    "roll": -10.15,
+    "chinX": 0.485,
+    "chinY": 0.16,
+    "faceW": 0.093
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 50.1,
+    "ringL": 42.8,
+    "faceMinusRing": 7.3,
+    "gu": -1.47,
+    "gv": -0.48,
+    "skinA": 12.6,
+    "skinB": 20,
+    "neckMinusFace": -3.6,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.207
+   },
+   "glowGate": {
+    "bgL": 47.6,
+    "gate": 0.03,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.10789091926610138,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.18671685663524618,
+     "yawSigned": -0.017540022296819724
+    },
+    "pose3d": {
+     "yaw": 1.7234187642861531,
+     "pitch": -3.8332732484456042,
+     "roll": -10.15049457040513,
+     "src": "mesh",
+     "agree": 0.030261968022979067,
+     "faceW": 0.09252702456492834,
+     "chinX": 0.48533226837534704,
+     "chinY": 0.15955697852765485
+    },
+    "promptPose": {
+     "yaw": 1.7234187642861531,
+     "pitch": -3.8332732484456042,
+     "roll": -10.15049457040513,
+     "chinX": 0.48533226837534704,
+     "chinY": 0.15955697852765485,
+     "faceW": 0.09252702456492834
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "head-dx": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DN2ZRi12P5l_9.jpg": {
+   "md5": "tU3qjcslOBJ8hM4uQpdOyg==",
+   "size": 504940,
+   "ms": {
+    "prep": 261,
+    "pose": 583,
+    "hat": 643,
+    "finish": 3414,
+    "total": 4904
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.22,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1920
+   },
+   "pose2d": {
+    "yaw": 0.18,
+    "yawSigned": 0.12
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 7.4,
+    "pitch": -0.9,
+    "roll": 6.9,
+    "chinX": 0.443,
+    "chinY": 0.623,
+    "faceW": 0.218
+   },
+   "promptPose": {
+    "yaw": 7.434,
+    "pitch": -0.946,
+    "roll": 6.863,
+    "chinX": 0.443,
+    "chinY": 0.623,
+    "faceW": 0.218
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 32.6,
+    "ringL": 11.7,
+    "faceMinusRing": 20.9,
+    "gu": -1.83,
+    "gv": -1.61,
+    "skinA": 13.3,
+    "skinB": 13.7,
+    "neckMinusFace": 9.9,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.303
+   },
+   "glowGate": {
+    "bgL": 2.2,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.21953529119491577,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.17641944403689291,
+     "yawSigned": 0.12260093473601152
+    },
+    "pose3d": {
+     "yaw": 7.43387332729865,
+     "pitch": -0.9464138640825263,
+     "roll": 6.862735517734523,
+     "src": "mesh",
+     "agree": 0.03965554913732067,
+     "faceW": 0.21796437190394963,
+     "chinX": 0.44338936406146684,
+     "chinY": 0.623065007333249
+    },
+    "promptPose": {
+     "yaw": 7.43387332729865,
+     "pitch": -0.9464138640825263,
+     "roll": 6.862735517734523,
+     "chinX": 0.44338936406146684,
+     "chinY": 0.623065007333249,
+     "faceW": 0.21796437190394963
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DND36l3ospI_1.jpg": {
+   "md5": "k4XPAXSyJZAzR8p8bPMiMg==",
+   "size": 723927,
+   "ms": {
+    "prep": 369,
+    "pose": 506,
+    "hat": 513,
+    "finish": 2712,
+    "total": 4102
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.17,
+    "blurScore": null,
+    "w": 898,
+    "h": 1198
+   },
+   "pose2d": {
+    "yaw": 0.42,
+    "yawSigned": -0.2
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -21,
+    "pitch": -22.8,
+    "roll": -2.6,
+    "chinX": 0.46,
+    "chinY": 0.372,
+    "faceW": 0.145
+   },
+   "promptPose": {
+    "yaw": -21.034,
+    "pitch": -22.838,
+    "roll": null,
+    "chinX": 0.46,
+    "chinY": 0.372,
+    "faceW": 0.145
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 33.3,
+    "ringL": 74.2,
+    "faceMinusRing": -40.9,
+    "gu": 2.31,
+    "gv": -1.22,
+    "skinA": 12,
+    "skinB": 12.5,
+    "neckMinusFace": -7.7,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.303
+   },
+   "glowGate": {
+    "bgL": 26.4,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1700503788971423,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.424312896574087,
+     "yawSigned": -0.20365843551191876
+    },
+    "pose3d": {
+     "yaw": -21.034070586879547,
+     "pitch": -22.83848115173917,
+     "roll": -2.629503725120724,
+     "src": "mesh",
+     "agree": 0.041978501883323596,
+     "faceW": 0.14516887405071227,
+     "chinX": 0.4600899429771048,
+     "chinY": 0.37162786126804104
+    },
+    "promptPose": {
+     "yaw": -21.034070586879547,
+     "pitch": -22.83848115173917,
+     "roll": null,
+     "chinX": 0.4600899429771048,
+     "chinY": 0.37162786126804104,
+     "faceW": 0.14516887405071227
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DOi2v0AjIW4_8.jpg": {
+   "md5": "T5UugBXQp2ovx7LsAS4dzw==",
+   "size": 978375,
+   "ms": {
+    "prep": 397,
+    "pose": 620,
+    "hat": 8807,
+    "finish": 3719,
+    "total": 13545
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.117,
+    "blurScore": null,
+    "w": 1438,
+    "h": 1919
+   },
+   "pose2d": {
+    "yaw": 0.9,
+    "yawSigned": 0.72
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 41.6,
+    "pitch": -8.4,
+    "roll": 1.7,
+    "chinX": 0.646,
+    "chinY": 0.503,
+    "faceW": 0.113
+   },
+   "promptPose": {
+    "yaw": 41.619,
+    "pitch": -8.361,
+    "roll": null,
+    "chinX": 0.646,
+    "chinY": 0.503,
+    "faceW": 0.113
+   },
+   "hat": {
+    "hat": true,
+    "reason": null,
+    "area": 0.799,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 37.4,
+    "ringL": 18.8,
+    "faceMinusRing": 18.5,
+    "gu": -0.85,
+    "gv": -1.5,
+    "skinA": 11,
+    "skinB": 12,
+    "neckMinusFace": -10,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.281
+   },
+   "glowGate": {
+    "bgL": 28,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": true,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11673845070956977,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.9031169904100176,
+     "yawSigned": 0.7235038644491147
+    },
+    "pose3d": {
+     "yaw": 41.61857007932178,
+     "pitch": -8.360863819771826,
+     "roll": 1.7052566669479943,
+     "src": "mesh",
+     "agree": 0.040104433040520984,
+     "faceW": 0.1125973805551219,
+     "chinX": 0.6458725442727508,
+     "chinY": 0.5027212257486098
+    },
+    "promptPose": {
+     "yaw": 41.61857007932178,
+     "pitch": -8.360863819771826,
+     "roll": null,
+     "chinX": 0.6458725442727508,
+     "chinY": 0.5027212257486098,
+     "faceW": 0.1125973805551219
+    },
+    "hat": null
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 2,
+    "rejects": 1,
+    "gates": {
+     "yaw-under-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DQBwuaqjBfs_1.jpg": {
+   "md5": "afxF4ej4cBiPHJym3pM6Qg==",
+   "size": 773539,
+   "ms": {
+    "prep": 396,
+    "pose": 498,
+    "hat": 534,
+    "finish": 2726,
+    "total": 4157
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.17,
+    "blurScore": null,
+    "w": 858,
+    "h": 1144
+   },
+   "pose2d": {
+    "yaw": 0.1,
+    "yawSigned": 0.04
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 1,
+    "pitch": -3.4,
+    "roll": -8.2,
+    "chinX": 0.487,
+    "chinY": 0.362,
+    "faceW": 0.142
+   },
+   "promptPose": {
+    "yaw": 1.014,
+    "pitch": -3.422,
+    "roll": -8.172,
+    "chinX": 0.487,
+    "chinY": 0.362,
+    "faceW": 0.142
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 29.4,
+    "ringL": 40.9,
+    "faceMinusRing": -11.5,
+    "gu": 2.51,
+    "gv": -2.36,
+    "skinA": 9.3,
+    "skinB": 9.2,
+    "neckMinusFace": -5.9,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.296
+   },
+   "glowGate": {
+    "bgL": 32.7,
+    "gate": 0.96,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1699706224294809,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.10438318164111504,
+     "yawSigned": 0.044206328688400465
+    },
+    "pose3d": {
+     "yaw": 1.0143087531795332,
+     "pitch": -3.4216171880662154,
+     "roll": -8.171662513501168,
+     "src": "mesh",
+     "agree": 0.04333002563186584,
+     "faceW": 0.14222460162985154,
+     "chinX": 0.4873066126012393,
+     "chinY": 0.36163182399966315
+    },
+    "promptPose": {
+     "yaw": 1.0143087531795332,
+     "pitch": -3.4216171880662154,
+     "roll": -8.171662513501168,
+     "chinX": 0.4873066126012393,
+     "chinY": 0.36163182399966315,
+     "faceW": 0.14222460162985154
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "head-dx": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DQuPSPvDHP__1.jpg": {
+   "md5": "ojyBsZZ2Hprg8jTaMHYVFQ==",
+   "size": 621540,
+   "ms": {
+    "prep": 363,
+    "pose": 519,
+    "hat": 583,
+    "finish": 2800,
+    "total": 4267
+   },
+   "width": 1440,
+   "height": 1919,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.17,
+    "blurScore": null,
+    "w": 1020,
+    "h": 1359
+   },
+   "pose2d": {
+    "yaw": 0.19,
+    "yawSigned": -0.19
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -14.4,
+    "pitch": -10,
+    "roll": 2.5,
+    "chinX": 0.49,
+    "chinY": 0.367,
+    "faceW": 0.133
+   },
+   "promptPose": {
+    "yaw": -14.399,
+    "pitch": -9.972,
+    "roll": 2.461,
+    "chinX": 0.49,
+    "chinY": 0.367,
+    "faceW": 0.133
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 32.1,
+    "ringL": 7.7,
+    "faceMinusRing": 24.4,
+    "gu": 0.48,
+    "gv": -2.65,
+    "skinA": 13.2,
+    "skinB": 14.7,
+    "neckMinusFace": -22.1,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.264
+   },
+   "glowGate": {
+    "bgL": 15.4,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.16994114483104034,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.19230169433244038,
+     "yawSigned": -0.19204760207677063
+    },
+    "pose3d": {
+     "yaw": -14.39877242221413,
+     "pitch": -9.971960745850291,
+     "roll": 2.4613096005719712,
+     "src": "mesh",
+     "agree": 0.023694434302997575,
+     "faceW": 0.1328795056392886,
+     "chinX": 0.4901136502547612,
+     "chinY": 0.3673869333463627
+    },
+    "promptPose": {
+     "yaw": -14.39877242221413,
+     "pitch": -9.971960745850291,
+     "roll": 2.4613096005719712,
+     "chinX": 0.4901136502547612,
+     "chinY": 0.3673869333463627,
+     "faceW": 0.1328795056392886
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DR1oknbjA_A_2.jpg": {
+   "md5": "TjXsjA7Jq4ztodFco4z1Eg==",
+   "size": 444966,
+   "ms": {
+    "prep": 294,
+    "pose": 569,
+    "hat": 5220,
+    "finish": 13163,
+    "total": 19247
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.183,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1920
+   },
+   "pose2d": {
+    "yaw": 0.73,
+    "yawSigned": -0.62
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -49.2,
+    "pitch": -10.3,
+    "roll": 2.1,
+    "chinX": 0.461,
+    "chinY": 0.386,
+    "faceW": 0.14
+   },
+   "promptPose": {
+    "yaw": -49.21,
+    "pitch": -10.279,
+    "roll": null,
+    "chinX": 0.461,
+    "chinY": 0.386,
+    "faceW": 0.14
+   },
+   "hat": {
+    "hat": false,
+    "reason": "owl",
+    "area": 0.188,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 27.6,
+    "ringL": 51.7,
+    "faceMinusRing": -24.1,
+    "gu": -1.56,
+    "gv": -2.15,
+    "skinA": 10,
+    "skinB": 11.5,
+    "neckMinusFace": -15.7,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.301
+   },
+   "glowGate": {
+    "bgL": 48.9,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.18283122777938843,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.7259166107651889,
+     "yawSigned": -0.6177821598628717
+    },
+    "pose3d": {
+     "yaw": -49.21010578128722,
+     "pitch": -10.278537812520504,
+     "roll": 2.0753214925609984,
+     "src": "mesh",
+     "agree": 0.10030968462767292,
+     "faceW": 0.1395494043915817,
+     "chinX": 0.4613098653907607,
+     "chinY": 0.38596719652618733
+    },
+    "promptPose": {
+     "yaw": -49.21010578128722,
+     "pitch": -10.278537812520504,
+     "roll": null,
+     "chinX": 0.4613098653907607,
+     "chinY": 0.38596719652618733,
+     "faceW": 0.1395494043915817
+    },
+    "hat": {
+     "hat": false,
+     "reason": "owl",
+     "score": 0.033,
+     "hair": 0.147,
+     "area": 0.188
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DR1oknbjA_A_7.jpg": {
+   "md5": "cMddWeDcHPwSoUwe1ww8SQ==",
+   "size": 463430,
+   "ms": {
+    "prep": 340,
+    "pose": 517,
+    "hat": 593,
+    "finish": 2736,
+    "total": 4188
+   },
+   "width": 1440,
+   "height": 1919,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.107,
+    "blurScore": null,
+    "w": 931,
+    "h": 1241
+   },
+   "pose2d": {
+    "yaw": 0.65,
+    "yawSigned": -0.61
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -32.1,
+    "pitch": -4.6,
+    "roll": 1.6,
+    "chinX": 0.52,
+    "chinY": 0.163,
+    "faceW": 0.085
+   },
+   "promptPose": {
+    "yaw": -32.06,
+    "pitch": -4.556,
+    "roll": null,
+    "chinX": 0.52,
+    "chinY": 0.163,
+    "faceW": 0.085
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 41.7,
+    "ringL": 22.5,
+    "faceMinusRing": 19.2,
+    "gu": 1.19,
+    "gv": -1.33,
+    "skinA": 16.7,
+    "skinB": 15.9,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.245
+   },
+   "glowGate": {
+    "bgL": 26.7,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.10705695884696395,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.6495894501434799,
+     "yawSigned": -0.6109596670164152
+    },
+    "pose3d": {
+     "yaw": -32.05990794883645,
+     "pitch": -4.556376875504188,
+     "roll": 1.6293400210099531,
+     "src": "mesh",
+     "agree": 0.023836196369003658,
+     "faceW": 0.08547080246520815,
+     "chinX": 0.5200624332229339,
+     "chinY": 0.16309219561086805
+    },
+    "promptPose": {
+     "yaw": -32.05990794883645,
+     "pitch": -4.556376875504188,
+     "roll": null,
+     "chinX": 0.5200624332229339,
+     "chinY": 0.16309219561086805,
+     "faceW": 0.08547080246520815
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DRHypPhjCF7_1.jpg": {
+   "md5": "G5Snp42m0knO8mCNNWe+lA==",
+   "size": 821502,
+   "ms": {
+    "prep": 388,
+    "pose": 518,
+    "hat": 560,
+    "finish": 2870,
+    "total": 4338
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.15,
+    "blurScore": null,
+    "w": 992,
+    "h": 1323
+   },
+   "pose2d": {
+    "yaw": 0.63,
+    "yawSigned": 0.48
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 34.5,
+    "pitch": -20.9,
+    "roll": -3.9,
+    "chinX": 0.576,
+    "chinY": 0.364,
+    "faceW": 0.132
+   },
+   "promptPose": {
+    "yaw": 34.527,
+    "pitch": -20.932,
+    "roll": null,
+    "chinX": 0.576,
+    "chinY": 0.364,
+    "faceW": 0.132
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 29.5,
+    "ringL": 52.6,
+    "faceMinusRing": -23.1,
+    "gu": 1.46,
+    "gv": -0.7,
+    "skinA": 13.3,
+    "skinB": 13.5,
+    "neckMinusFace": -10.4,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.216
+   },
+   "glowGate": {
+    "bgL": 45.6,
+    "gate": 0.15,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1501847130637015,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.6323798399967928,
+     "yawSigned": 0.48212568648083365
+    },
+    "pose3d": {
+     "yaw": 34.526980055147895,
+     "pitch": -20.931662007027334,
+     "roll": -3.861832981884079,
+     "src": "mesh",
+     "agree": 0.12065284490062184,
+     "faceW": 0.1317854921768119,
+     "chinX": 0.5760869845610975,
+     "chinY": 0.36353173722309995
+    },
+    "promptPose": {
+     "yaw": 34.526980055147895,
+     "pitch": -20.931662007027334,
+     "roll": null,
+     "chinX": 0.5760869845610975,
+     "chinY": 0.36353173722309995,
+     "faceW": 0.1317854921768119
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DRKhbeNDOfc_4.jpg": {
+   "md5": "/Y8xAil2CcQNI/TIo3q2lA==",
+   "size": 267703,
+   "ms": {
+    "prep": 256,
+    "pose": 639,
+    "hat": 647,
+    "finish": 2792,
+    "total": 4335
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.162,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1920
+   },
+   "pose2d": {
+    "yaw": 0.45,
+    "yawSigned": -0.49
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -27.8,
+    "pitch": -1.9,
+    "roll": 5.2,
+    "chinX": 0.413,
+    "chinY": 0.307,
+    "faceW": 0.139
+   },
+   "promptPose": {
+    "yaw": -27.828,
+    "pitch": -1.909,
+    "roll": null,
+    "chinX": 0.413,
+    "chinY": 0.307,
+    "faceW": 0.139
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 35.4,
+    "ringL": 44.5,
+    "faceMinusRing": -9.1,
+    "gu": -0.55,
+    "gv": -2.8,
+    "skinA": 12.8,
+    "skinB": 8.5,
+    "neckMinusFace": null,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.243
+   },
+   "glowGate": {
+    "bgL": 22.7,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.16229307651519775,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.44531978938522154,
+     "yawSigned": -0.4873952042762989
+    },
+    "pose3d": {
+     "yaw": -27.82830298486403,
+     "pitch": -1.908718017511257,
+     "roll": 5.241988187006553,
+     "src": "mesh",
+     "agree": 0.06037036741383363,
+     "faceW": 0.13940355985143355,
+     "chinX": 0.41337483164492544,
+     "chinY": 0.3068733830197864
+    },
+    "promptPose": {
+     "yaw": -27.82830298486403,
+     "pitch": -1.908718017511257,
+     "roll": null,
+     "chinX": 0.41337483164492544,
+     "chinY": 0.3068733830197864,
+     "faceW": 0.13940355985143355
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 2,
+    "rejects": 2,
+    "gates": {
+     "yaw-over-rotate": 2
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DRPRTrpjIkO_6.jpg": {
+   "md5": "Z/r0uLasU98q+77ltAICnw==",
+   "size": 409041,
+   "ms": {
+    "prep": 252,
+    "pose": 574,
+    "hat": 602,
+    "finish": 3323,
+    "total": 4753
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.132,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1920
+   },
+   "pose2d": {
+    "yaw": 0.63,
+    "yawSigned": -0.59
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -34.8,
+    "pitch": -13.6,
+    "roll": 3.8,
+    "chinX": 0.534,
+    "chinY": 0.509,
+    "faceW": 0.102
+   },
+   "promptPose": {
+    "yaw": -34.779,
+    "pitch": -13.588,
+    "roll": null,
+    "chinX": 0.534,
+    "chinY": 0.509,
+    "faceW": 0.102
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 29.2,
+    "ringL": 3.7,
+    "faceMinusRing": 25.5,
+    "gu": -3.48,
+    "gv": -1.21,
+    "skinA": 0,
+    "skinB": 0,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.367
+   },
+   "glowGate": {
+    "bgL": 7.7,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13246634602546692,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.6349368755833993,
+     "yawSigned": -0.5922024255351617
+    },
+    "pose3d": {
+     "yaw": -34.77908218147054,
+     "pitch": -13.588015911869027,
+     "roll": 3.750114887019738,
+     "src": "mesh",
+     "agree": 0.060059439576760916,
+     "faceW": 0.1023640740413928,
+     "chinX": 0.5336897272459581,
+     "chinY": 0.5092614847734022
+    },
+    "promptPose": {
+     "yaw": -34.77908218147054,
+     "pitch": -13.588015911869027,
+     "roll": null,
+     "chinX": 0.5336897272459581,
+     "chinY": 0.5092614847734022,
+     "faceW": 0.1023640740413928
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 3,
+    "gates": {
+     "yaw-over-rotate": 3
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DS2nHqrE8-k_3.jpg": {
+   "md5": "vyNrzubm2cN+VhczZWuuOA==",
+   "size": 204247,
+   "ms": {
+    "prep": 221,
+    "pose": 496,
+    "hat": 580,
+    "finish": 2159,
+    "total": 3458
+   },
+   "width": 1080,
+   "height": 1350,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.143,
+    "blurScore": null,
+    "w": 1080,
+    "h": 1350
+   },
+   "pose2d": {
+    "yaw": 0.73,
+    "yawSigned": -0.66
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -35.4,
+    "pitch": -12.7,
+    "roll": 3.4,
+    "chinX": 0.634,
+    "chinY": 0.387,
+    "faceW": 0.121
+   },
+   "promptPose": {
+    "yaw": -35.435,
+    "pitch": -12.733,
+    "roll": null,
+    "chinX": 0.634,
+    "chinY": 0.387,
+    "faceW": 0.121
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 18.7,
+    "ringL": 28.6,
+    "faceMinusRing": -9.8,
+    "gu": -3.18,
+    "gv": -1.63,
+    "skinA": 7.6,
+    "skinB": 7.3,
+    "neckMinusFace": -7.1,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.334
+   },
+   "glowGate": {
+    "bgL": 27.1,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14258801937103271,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.7309775097170537,
+     "yawSigned": -0.664762059111361
+    },
+    "pose3d": {
+     "yaw": -35.43534024610708,
+     "pitch": -12.733164497135151,
+     "roll": 3.4367662020167167,
+     "src": "mesh",
+     "agree": 0.08746136279121543,
+     "faceW": 0.12069684987675973,
+     "chinX": 0.634133898704451,
+     "chinY": 0.387345207799392
+    },
+    "promptPose": {
+     "yaw": -35.43534024610708,
+     "pitch": -12.733164497135151,
+     "roll": null,
+     "chinX": 0.634133898704451,
+     "chinY": 0.387345207799392,
+     "faceW": 0.12069684987675973
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DTYadfSjPQJ_1.jpg": {
+   "md5": "fCTDIFUXtU2WlsfeiMhTeQ==",
+   "size": 384874,
+   "ms": {
+    "prep": 243,
+    "pose": 547,
+    "hat": 812,
+    "finish": 11447,
+    "total": 13051
+   },
+   "width": 1440,
+   "height": 1800,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.14,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1800
+   },
+   "pose2d": {
+    "yaw": 0.2,
+    "yawSigned": -0.28
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -22.9,
+    "pitch": -6.2,
+    "roll": 6.9,
+    "chinX": 0.642,
+    "chinY": 0.399,
+    "faceW": 0.1
+   },
+   "promptPose": {
+    "yaw": -22.853,
+    "pitch": -6.192,
+    "roll": 6.919,
+    "chinX": 0.642,
+    "chinY": 0.399,
+    "faceW": 0.1
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 40.8,
+    "ringL": 10.9,
+    "faceMinusRing": 29.9,
+    "gu": 0.27,
+    "gv": -2.69,
+    "skinA": 11.5,
+    "skinB": 15,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.42
+   },
+   "glowGate": {
+    "bgL": 6.8,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14038538932800293,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.20382802488823093,
+     "yawSigned": -0.2756905714320691
+    },
+    "pose3d": {
+     "yaw": -22.852774862229047,
+     "pitch": -6.191811472235074,
+     "roll": 6.918691287074037,
+     "src": "mesh",
+     "agree": 0.058483333003790744,
+     "faceW": 0.10012853380313524,
+     "chinX": 0.6420579865513337,
+     "chinY": 0.3993861037151059
+    },
+    "promptPose": {
+     "yaw": -22.852774862229047,
+     "pitch": -6.191811472235074,
+     "roll": 6.918691287074037,
+     "chinX": 0.6420579865513337,
+     "chinY": 0.3993861037151059,
+     "faceW": 0.10012853380313524
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DWEq74xDMUD_2.jpg": {
+   "md5": "9jDL79P2XsxpTlHtrizEYw==",
+   "size": 799770,
+   "ms": {
+    "prep": 382,
+    "pose": 513,
+    "hat": 728,
+    "finish": 3433,
+    "total": 5059
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.161,
+    "blurScore": null,
+    "w": 1001,
+    "h": 1335
+   },
+   "pose2d": {
+    "yaw": 0.69,
+    "yawSigned": -0.54
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -34.6,
+    "pitch": -7.4,
+    "roll": -0.1,
+    "chinX": 0.44,
+    "chinY": 0.242,
+    "faceW": 0.137
+   },
+   "promptPose": {
+    "yaw": -34.622,
+    "pitch": -7.399,
+    "roll": null,
+    "chinX": 0.44,
+    "chinY": 0.242,
+    "faceW": 0.137
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 27.7,
+    "ringL": 35.6,
+    "faceMinusRing": -7.9,
+    "gu": -0.1,
+    "gv": -1.45,
+    "skinA": 11.3,
+    "skinB": 11.6,
+    "neckMinusFace": -13.7,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.274
+   },
+   "glowGate": {
+    "bgL": 32.7,
+    "gate": 0.95,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.16050613128936495,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.6886707068663197,
+     "yawSigned": -0.5364407085809557
+    },
+    "pose3d": {
+     "yaw": -34.62169417858835,
+     "pitch": -7.399375939403669,
+     "roll": -0.08920673325684458,
+     "src": "mesh",
+     "agree": 0.03243835987305429,
+     "faceW": 0.1365266785444596,
+     "chinX": 0.4402786683695459,
+     "chinY": 0.24242621338266188
+    },
+    "promptPose": {
+     "yaw": -34.62169417858835,
+     "pitch": -7.399375939403669,
+     "roll": null,
+     "chinX": 0.4402786683695459,
+     "chinY": 0.24242621338266188,
+     "faceW": 0.1365266785444596
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DWjZLUzDHna_4.jpg": {
+   "md5": "CInuDK7S2Om8q57bjjbhPA==",
+   "size": 512829,
+   "ms": {
+    "prep": 349,
+    "pose": 502,
+    "hat": 706,
+    "finish": 3236,
+    "total": 4795
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.145,
+    "blurScore": null,
+    "w": 1148,
+    "h": 1530
+   },
+   "pose2d": {
+    "yaw": 0.72,
+    "yawSigned": -0.67
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -35.9,
+    "pitch": -3.9,
+    "roll": 0.7,
+    "chinX": 0.527,
+    "chinY": 0.214,
+    "faceW": 0.118
+   },
+   "promptPose": {
+    "yaw": -35.859,
+    "pitch": -3.931,
+    "roll": null,
+    "chinX": 0.527,
+    "chinY": 0.214,
+    "faceW": 0.118
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 24.4,
+    "ringL": 13.1,
+    "faceMinusRing": 11.3,
+    "gu": -1.76,
+    "gv": -1.73,
+    "skinA": 7.7,
+    "skinB": 10.4,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.298
+   },
+   "glowGate": {
+    "bgL": 10.5,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14542619525763215,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.7169123670380062,
+     "yawSigned": -0.6708014297173794
+    },
+    "pose3d": {
+     "yaw": -35.85888342249911,
+     "pitch": -3.9308116125686308,
+     "roll": 0.7359726528226075,
+     "src": "mesh",
+     "agree": 0.022779289874363742,
+     "faceW": 0.11781959961917449,
+     "chinX": 0.5266926138545629,
+     "chinY": 0.21435616278731004
+    },
+    "promptPose": {
+     "yaw": -35.85888342249911,
+     "pitch": -3.9308116125686308,
+     "roll": null,
+     "chinX": 0.5266926138545629,
+     "chinY": 0.21435616278731004,
+     "faceW": 0.11781959961917449
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DXHo3uLjF5k_1.jpg": {
+   "md5": "ZxUesr0KMJER6Pb3/OLv5A==",
+   "size": 500374,
+   "ms": {
+    "prep": 338,
+    "pose": 473,
+    "hat": 529,
+    "finish": 3295,
+    "total": 4639
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.119,
+    "blurScore": null,
+    "w": 928,
+    "h": 1237
+   },
+   "pose2d": {
+    "yaw": 0.27,
+    "yawSigned": 0.13
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 17.2,
+    "pitch": -21.8,
+    "roll": -0.3,
+    "chinX": 0.631,
+    "chinY": 0.222,
+    "faceW": 0.094
+   },
+   "promptPose": {
+    "yaw": 17.201,
+    "pitch": -21.757,
+    "roll": null,
+    "chinX": 0.631,
+    "chinY": 0.222,
+    "faceW": 0.094
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 28.1,
+    "ringL": 7.1,
+    "faceMinusRing": 21,
+    "gu": -0.22,
+    "gv": -2.71,
+    "skinA": 10.9,
+    "skinB": 11,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.28
+   },
+   "glowGate": {
+    "bgL": 21.3,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11883360558542712,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.2739116441329259,
+     "yawSigned": 0.12653344508170528
+    },
+    "pose3d": {
+     "yaw": 17.20118317242532,
+     "pitch": -21.757060753154217,
+     "roll": -0.27462170204957875,
+     "src": "mesh",
+     "agree": 0.08096727583877712,
+     "faceW": 0.09409182216130796,
+     "chinX": 0.6312845822031252,
+     "chinY": 0.22165020824691425
+    },
+    "promptPose": {
+     "yaw": 17.20118317242532,
+     "pitch": -21.757060753154217,
+     "roll": null,
+     "chinX": 0.6312845822031252,
+     "chinY": 0.22165020824691425,
+     "faceW": 0.09409182216130796
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "vision-gaze": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DXHo3uLjF5k_4.jpg": {
+   "md5": "zouueS6Nm7rwH71TFTCryQ==",
+   "size": 399717,
+   "ms": {
+    "prep": 241,
+    "pose": 562,
+    "hat": 757,
+    "finish": 2717,
+    "total": 4288
+   },
+   "width": 1440,
+   "height": 1920,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.149,
+    "blurScore": null,
+    "w": 1440,
+    "h": 1920
+   },
+   "pose2d": {
+    "yaw": 0.82,
+    "yawSigned": -0.45
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -39.2,
+    "pitch": -7.8,
+    "roll": -9.4,
+    "chinX": 0.422,
+    "chinY": 0.316,
+    "faceW": 0.124
+   },
+   "promptPose": {
+    "yaw": -39.21,
+    "pitch": -7.826,
+    "roll": null,
+    "chinX": 0.422,
+    "chinY": 0.316,
+    "faceW": 0.124
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 27.3,
+    "ringL": 11.7,
+    "faceMinusRing": 15.6,
+    "gu": 0.38,
+    "gv": -1.41,
+    "skinA": 11.3,
+    "skinB": 10.9,
+    "neckMinusFace": -14.3,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.273
+   },
+   "glowGate": {
+    "bgL": 15.5,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14851504564285278,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.8242787163283323,
+     "yawSigned": -0.45171224055674075
+    },
+    "pose3d": {
+     "yaw": -39.21001623127186,
+     "pitch": -7.826224242910602,
+     "roll": -9.416643003384301,
+     "src": "mesh",
+     "agree": 0.04813460945707404,
+     "faceW": 0.12374975959868957,
+     "chinX": 0.42175576825232025,
+     "chinY": 0.3158848155913243
+    },
+    "promptPose": {
+     "yaw": -39.21001623127186,
+     "pitch": -7.826224242910602,
+     "roll": null,
+     "chinX": 0.42175576825232025,
+     "chinY": 0.3158848155913243,
+     "faceW": 0.12374975959868957
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DYee9S8jHIv_1.jpg": {
+   "md5": "6oGqD2B2BOlfSxIiqKaGDg==",
+   "size": 495605,
+   "ms": {
+    "prep": 343,
+    "pose": 476,
+    "hat": 4989,
+    "finish": 3235,
+    "total": 9044
+   },
+   "width": 1440,
+   "height": 1917,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.131,
+    "blurScore": null,
+    "w": 1033,
+    "h": 1375
+   },
+   "pose2d": {
+    "yaw": 0.2,
+    "yawSigned": -0.29
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -20.7,
+    "pitch": -0.4,
+    "roll": 7.3,
+    "chinX": 0.399,
+    "chinY": 0.217,
+    "faceW": 0.133
+   },
+   "promptPose": {
+    "yaw": -20.707,
+    "pitch": -0.434,
+    "roll": 7.308,
+    "chinX": 0.399,
+    "chinY": 0.217,
+    "faceW": 0.133
+   },
+   "hat": {
+    "hat": true,
+    "reason": null,
+    "area": 0.931,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 18.9,
+    "ringL": 6.6,
+    "faceMinusRing": 12.3,
+    "gu": -0.58,
+    "gv": -1.81,
+    "skinA": 6.8,
+    "skinB": 8.2,
+    "neckMinusFace": null,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.383
+   },
+   "glowGate": {
+    "bgL": 24.6,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": true,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13062192763617517,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.20340238075295525,
+     "yawSigned": -0.29060259941624467
+    },
+    "pose3d": {
+     "yaw": -20.706543342258914,
+     "pitch": -0.43392429479974537,
+     "roll": 7.308084023502237,
+     "src": "mesh",
+     "agree": 0.049837529818555375,
+     "faceW": 0.1330446847072026,
+     "chinX": 0.3988396760940252,
+     "chinY": 0.21723460467014072
+    },
+    "promptPose": {
+     "yaw": -20.706543342258914,
+     "pitch": -0.43392429479974537,
+     "roll": 7.308084023502237,
+     "chinX": 0.3988396760940252,
+     "chinY": 0.21723460467014072,
+     "faceW": 0.1330446847072026
+    },
+    "hat": null
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 7,
+    "rejects": 6,
+    "gates": {
+     "head-dx": 1,
+     "yaw-over-rotate": 4,
+     "yaw-drift": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_DYxNVOqjEeb_3.jpg": {
+   "md5": "aHDe/MZPLUFGamU4KYn2cw==",
+   "size": 3093323,
+   "ms": {
+    "prep": 424,
+    "pose": 819,
+    "hat": 1069,
+    "finish": 9358,
+    "total": 11676
+   },
+   "width": 3024,
+   "height": 4032,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.143,
+    "blurScore": null,
+    "w": 3024,
+    "h": 4032
+   },
+   "pose2d": {
+    "yaw": 0,
+    "yawSigned": -0.06
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -3.4,
+    "pitch": -5.1,
+    "roll": 4.2,
+    "chinX": 0.517,
+    "chinY": 0.486,
+    "faceW": 0.126
+   },
+   "promptPose": {
+    "yaw": -3.366,
+    "pitch": -5.07,
+    "roll": 4.249,
+    "chinX": 0.517,
+    "chinY": 0.486,
+    "faceW": 0.126
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 57.8,
+    "ringL": 47.3,
+    "faceMinusRing": 10.6,
+    "gu": -0.9,
+    "gv": -1.22,
+    "skinA": 24.4,
+    "skinB": 27.7,
+    "neckMinusFace": -30,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.167
+   },
+   "glowGate": {
+    "bgL": 44.1,
+    "gate": 0.24,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14342832565307617,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.003448286117150312,
+     "yawSigned": -0.059185467514054624
+    },
+    "pose3d": {
+     "yaw": -3.3664207372482675,
+     "pitch": -5.0701261351204305,
+     "roll": 4.249132610763557,
+     "src": "mesh",
+     "agree": 0.03205938169524855,
+     "faceW": 0.12552947883687077,
+     "chinX": 0.517073485845074,
+     "chinY": 0.486181863809248
+    },
+    "promptPose": {
+     "yaw": -3.3664207372482675,
+     "pitch": -5.0701261351204305,
+     "roll": 4.249132610763557,
+     "chinX": 0.517073485845074,
+     "chinY": 0.486181863809248,
+     "faceW": 0.12552947883687077
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_DZc5_qnjFl3_2.jpg": {
+   "md5": "4r8dfHfcexqLzlEGraKqZg==",
+   "size": 2667945,
+   "ms": {
+    "prep": 710,
+    "pose": 611,
+    "hat": 806,
+    "finish": 7064,
+    "total": 9195
+   },
+   "width": 2815,
+   "height": 3518,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.111,
+    "blurScore": null,
+    "w": 2109,
+    "h": 2636
+   },
+   "pose2d": {
+    "yaw": 0.16,
+    "yawSigned": 0.19
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 6.2,
+    "pitch": 10,
+    "roll": 1.2,
+    "chinX": 0.501,
+    "chinY": 0.162,
+    "faceW": 0.088
+   },
+   "promptPose": {
+    "yaw": 6.24,
+    "pitch": 10.039,
+    "roll": 1.194,
+    "chinX": 0.501,
+    "chinY": 0.162,
+    "faceW": 0.088
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 52.7,
+    "ringL": 10.2,
+    "faceMinusRing": 42.5,
+    "gu": -1.06,
+    "gv": -1.46,
+    "skinA": 16.9,
+    "skinB": 31.2,
+    "neckMinusFace": 2.7,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.275
+   },
+   "glowGate": {
+    "bgL": 26.1,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11060036298447505,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.15730473436193693,
+     "yawSigned": 0.1898513281452585
+    },
+    "pose3d": {
+     "yaw": 6.239873668847161,
+     "pitch": 10.039407387055187,
+     "roll": 1.1935154436052708,
+     "src": "mesh",
+     "agree": 0.031064576045821184,
+     "faceW": 0.08808309814654765,
+     "chinX": 0.5009882033397459,
+     "chinY": 0.1618376358451936
+    },
+    "promptPose": {
+     "yaw": 6.239873668847161,
+     "pitch": 10.039407387055187,
+     "roll": 1.1935154436052708,
+     "chinX": 0.5009882033397459,
+     "chinY": 0.1618376358451936,
+     "faceW": 0.08808309814654765
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_Da-fLrXis4v_8.jpg": {
+   "md5": "Y3k5nI96g1fFdWQobivTjg==",
+   "size": 952543,
+   "ms": {
+    "prep": 528,
+    "pose": 556,
+    "hat": 799,
+    "finish": 5543,
+    "total": 7429
+   },
+   "width": 2567,
+   "height": 3422,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.117,
+    "blurScore": null,
+    "w": 1512,
+    "h": 2015
+   },
+   "pose2d": {
+    "yaw": 0.02,
+    "yawSigned": 0.17
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 7.8,
+    "pitch": -20.7,
+    "roll": -10.8,
+    "chinX": 0.489,
+    "chinY": 0.194,
+    "faceW": 0.103
+   },
+   "promptPose": {
+    "yaw": 7.802,
+    "pitch": -20.655,
+    "roll": null,
+    "chinX": 0.489,
+    "chinY": 0.194,
+    "faceW": 0.103
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 55.5,
+    "ringL": 37.6,
+    "faceMinusRing": 17.9,
+    "gu": -1.7,
+    "gv": -0.65,
+    "skinA": 18.3,
+    "skinB": 18.4,
+    "neckMinusFace": null,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.276
+   },
+   "glowGate": {
+    "bgL": 17.6,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11658261787323725,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.018261147249690413,
+     "yawSigned": 0.17298894482685645
+    },
+    "pose3d": {
+     "yaw": 7.802210098221835,
+     "pitch": -20.654549023687167,
+     "roll": -10.761432520918971,
+     "src": "mesh",
+     "agree": 0.03981098011580296,
+     "faceW": 0.10323096902348404,
+     "chinX": 0.48949699190346274,
+     "chinY": 0.19364165032921218
+    },
+    "promptPose": {
+     "yaw": 7.802210098221835,
+     "pitch": -20.654549023687167,
+     "roll": null,
+     "chinX": 0.48949699190346274,
+     "chinY": 0.19364165032921218,
+     "faceW": 0.10323096902348404
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 7,
+    "rejects": 3,
+    "gates": {
+     "yaw-over-rotate": 2,
+     "math-identity": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_Db7p013ilht_3.jpg": {
+   "md5": "YTp7MTrP3qmuUbEmvERZ9w==",
+   "size": 1048615,
+   "ms": {
+    "prep": 377,
+    "pose": 753,
+    "hat": 996,
+    "finish": 8515,
+    "total": 10643
+   },
+   "width": 3072,
+   "height": 4096,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.133,
+    "blurScore": null,
+    "w": 3072,
+    "h": 4096
+   },
+   "pose2d": {
+    "yaw": 0.67,
+    "yawSigned": 0.6
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 44.2,
+    "pitch": -5.7,
+    "roll": -1.6,
+    "chinX": 0.488,
+    "chinY": 0.585,
+    "faceW": 0.123
+   },
+   "promptPose": {
+    "yaw": 44.198,
+    "pitch": -5.658,
+    "roll": null,
+    "chinX": 0.488,
+    "chinY": 0.585,
+    "faceW": 0.123
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 49.5,
+    "ringL": 10.6,
+    "faceMinusRing": 38.9,
+    "gu": -0.62,
+    "gv": -1.25,
+    "skinA": 15.2,
+    "skinB": 18,
+    "neckMinusFace": 10.5,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.199
+   },
+   "glowGate": {
+    "bgL": 10.1,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13262447714805603,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.6730344368519883,
+     "yawSigned": 0.6004094317284556
+    },
+    "pose3d": {
+     "yaw": 44.19779232492577,
+     "pitch": -5.658139974766228,
+     "roll": -1.5504972177862395,
+     "src": "mesh",
+     "agree": 0.05087236008302981,
+     "faceW": 0.12336072869532497,
+     "chinX": 0.48802190421964997,
+     "chinY": 0.5849016742018076
+    },
+    "promptPose": {
+     "yaw": 44.19779232492577,
+     "pitch": -5.658139974766228,
+     "roll": null,
+     "chinX": 0.48802190421964997,
+     "chinY": 0.5849016742018076,
+     "faceW": 0.12336072869532497
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 2,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/ig_Db8Uz2zAIEL_8.jpg": {
+   "md5": "+Y1JeU5UpUAX1Oaww2bQQw==",
+   "size": 865386,
+   "ms": {
+    "prep": 372,
+    "pose": 517,
+    "hat": 712,
+    "finish": 3191,
+    "total": 4794
+   },
+   "width": 1600,
+   "height": 1600,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.112,
+    "blurScore": null,
+    "w": 1228,
+    "h": 1228
+   },
+   "pose2d": {
+    "yaw": 0.11,
+    "yawSigned": 0.04
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 2,
+    "pitch": -7.4,
+    "roll": -11.9,
+    "chinX": 0.524,
+    "chinY": 0.157,
+    "faceW": 0.071
+   },
+   "promptPose": {
+    "yaw": 1.978,
+    "pitch": -7.351,
+    "roll": -11.851,
+    "chinX": 0.524,
+    "chinY": 0.157,
+    "faceW": 0.071
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": false,
+    "faceL": null,
+    "ringL": 34.9,
+    "faceMinusRing": null,
+    "gu": null,
+    "gv": null,
+    "skinA": null,
+    "skinB": null,
+    "neckMinusFace": null,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.142
+   },
+   "glowGate": {
+    "bgL": 28.4,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": true,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11245451066703673,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.11049438017240953,
+     "yawSigned": 0.04022340608048647
+    },
+    "pose3d": {
+     "yaw": 1.977783333028511,
+     "pitch": -7.350515954767027,
+     "roll": -11.85129419121101,
+     "src": "mesh",
+     "agree": 0.07211809084808858,
+     "faceW": 0.07081544490017937,
+     "chinX": 0.5236357503739252,
+     "chinY": 0.15668660038120608
+    },
+    "promptPose": {
+     "yaw": 1.977783333028511,
+     "pitch": -7.350515954767027,
+     "roll": -11.85129419121101,
+     "chinX": 0.5236357503739252,
+     "chinY": 0.15668660038120608,
+     "faceW": 0.07081544490017937
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/ig_Dd_rO2eALF__1.jpg": {
+   "md5": "eOvWiKy08wPNA1q8WfhvPQ==",
+   "size": 384532,
+   "ms": {
+    "prep": 329,
+    "pose": 505,
+    "hat": 576,
+    "finish": 2273,
+    "total": 3685
+   },
+   "width": 1080,
+   "height": 1350,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.116,
+    "blurScore": null,
+    "w": 963,
+    "h": 1204
+   },
+   "pose2d": {
+    "yaw": 0.07,
+    "yawSigned": 0
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -1.9,
+    "pitch": -7.8,
+    "roll": 4.2,
+    "chinX": 0.604,
+    "chinY": 0.159,
+    "faceW": 0.092
+   },
+   "promptPose": {
+    "yaw": -1.881,
+    "pitch": -7.831,
+    "roll": 4.224,
+    "chinX": 0.604,
+    "chinY": 0.159,
+    "faceW": 0.092
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 60.3,
+    "ringL": 49.9,
+    "faceMinusRing": 10.5,
+    "gu": 0.22,
+    "gv": -1.1,
+    "skinA": 14.6,
+    "skinB": 20.8,
+    "neckMinusFace": -10.2,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.138
+   },
+   "glowGate": {
+    "bgL": 46.1,
+    "gate": 0.12,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.11630018180775865,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.0701894524255322,
+     "yawSigned": -0.0025379305835703247
+    },
+    "pose3d": {
+     "yaw": -1.8809367214138342,
+     "pitch": -7.830515696044137,
+     "roll": 4.224225671083931,
+     "src": "mesh",
+     "agree": 0.03410975680739118,
+     "faceW": 0.09216698540845665,
+     "chinX": 0.6044393279789011,
+     "chinY": 0.15858947066995616
+    },
+    "promptPose": {
+     "yaw": -1.8809367214138342,
+     "pitch": -7.830515696044137,
+     "roll": 4.224225671083931,
+     "chinX": 0.6044393279789011,
+     "chinY": 0.15858947066995616,
+     "faceW": 0.09216698540845665
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/la vita continua @belmondlaresidencia (1).jpg": {
+   "md5": "ncywwJ5QWKj+q7jyHVRKEQ==",
+   "size": 354748,
+   "ms": {
+    "prep": 333,
+    "pose": 517,
+    "hat": 585,
+    "finish": 2311,
+    "total": 3748
+   },
+   "width": 1170,
+   "height": 1463,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.138,
+    "blurScore": null,
+    "w": 819,
+    "h": 1024
+   },
+   "pose2d": {
+    "yaw": 0.06,
+    "yawSigned": -0.29
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -17.3,
+    "pitch": 2.3,
+    "roll": 14.4,
+    "chinX": 0.632,
+    "chinY": 0.197,
+    "faceW": 0.126
+   },
+   "promptPose": {
+    "yaw": -17.319,
+    "pitch": 2.295,
+    "roll": 14.412,
+    "chinX": 0.632,
+    "chinY": 0.197,
+    "faceW": 0.126
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 41.6,
+    "ringL": 48,
+    "faceMinusRing": -6.4,
+    "gu": -1.72,
+    "gv": -0.14,
+    "skinA": 17.1,
+    "skinB": 9.2,
+    "neckMinusFace": 0.5,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.219
+   },
+   "glowGate": {
+    "bgL": 39.7,
+    "gate": 0.52,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1378341751583552,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.05904613612553378,
+     "yawSigned": -0.2917268492595225
+    },
+    "pose3d": {
+     "yaw": -17.319089153475122,
+     "pitch": 2.295328500797582,
+     "roll": 14.412291475929514,
+     "src": "mesh",
+     "agree": 0.032293888712563716,
+     "faceW": 0.12607927525992313,
+     "chinX": 0.6320774428007812,
+     "chinY": 0.19729484007399425
+    },
+    "promptPose": {
+     "yaw": -17.319089153475122,
+     "pitch": 2.295328500797582,
+     "roll": 14.412291475929514,
+     "chinX": 0.6320774428007812,
+     "chinY": 0.19729484007399425,
+     "faceW": 0.12607927525992313
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 6,
+    "gates": {
+     "head-dx": 2,
+     "yaw-over-rotate": 4
+    }
+   }
+  },
+  "dating_templates/elegance/tall/madonna mia (1).jpg": {
+   "md5": "clXEqYZBHTi7eUw1GCB5IA==",
+   "size": 314069,
+   "ms": {
+    "prep": 324,
+    "pose": 484,
+    "hat": 608,
+    "finish": 2341,
+    "total": 3759
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.131,
+    "blurScore": null,
+    "w": 769,
+    "h": 1024
+   },
+   "pose2d": {
+    "yaw": 0.47,
+    "yawSigned": 0.43
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 28.7,
+    "pitch": -11.6,
+    "roll": -2.2,
+    "chinX": 0.537,
+    "chinY": 0.207,
+    "faceW": 0.112
+   },
+   "promptPose": {
+    "yaw": 28.653,
+    "pitch": -11.591,
+    "roll": null,
+    "chinX": 0.537,
+    "chinY": 0.207,
+    "faceW": 0.112
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 30.1,
+    "ringL": 37.2,
+    "faceMinusRing": -7.2,
+    "gu": 1.79,
+    "gv": -2.87,
+    "skinA": 9.5,
+    "skinB": 10.9,
+    "neckMinusFace": -8,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.314
+   },
+   "glowGate": {
+    "bgL": 35.8,
+    "gate": 0.76,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13069640506397595,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.47261125199073817,
+     "yawSigned": 0.43377813471069593
+    },
+    "pose3d": {
+     "yaw": 28.652976414453384,
+     "pitch": -11.591341334334988,
+     "roll": -2.153460464979866,
+     "src": "mesh",
+     "agree": 0.11249110428833481,
+     "faceW": 0.11163942676841311,
+     "chinX": 0.5367031470283147,
+     "chinY": 0.20749316834575232
+    },
+    "promptPose": {
+     "yaw": 28.652976414453384,
+     "pitch": -11.591341334334988,
+     "roll": null,
+     "chinX": 0.5367031470283147,
+     "chinY": 0.20749316834575232,
+     "faceW": 0.11163942676841311
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 2,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/mas vino porfa.jpg": {
+   "md5": "+TE9FiIuOuGhS1/uBgiWiQ==",
+   "size": 156636,
+   "ms": {
+    "prep": 237,
+    "pose": 531,
+    "hat": 572,
+    "finish": 2234,
+    "total": 3577
+   },
+   "width": 1170,
+   "height": 1507,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.135,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1507
+   },
+   "pose2d": {
+    "yaw": 0.03,
+    "yawSigned": 0.02
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 3.7,
+    "pitch": -4.3,
+    "roll": 0.2,
+    "chinX": 0.509,
+    "chinY": 0.54,
+    "faceW": 0.12
+   },
+   "promptPose": {
+    "yaw": 3.725,
+    "pitch": -4.284,
+    "roll": 0.238,
+    "chinX": 0.509,
+    "chinY": 0.54,
+    "faceW": 0.12
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 20,
+    "ringL": 16.4,
+    "faceMinusRing": 3.6,
+    "gu": -0.41,
+    "gv": 0.55,
+    "skinA": 18.2,
+    "skinB": 14.9,
+    "neckMinusFace": -3.5,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.182
+   },
+   "glowGate": {
+    "bgL": 9.5,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13493525981903076,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.025530399212429833,
+     "yawSigned": 0.01853229388416766
+    },
+    "pose3d": {
+     "yaw": 3.7254476260396188,
+     "pitch": -4.283516564344475,
+     "roll": 0.2381805146094829,
+     "src": "mesh",
+     "agree": 0.03176743587042783,
+     "faceW": 0.12017971460670884,
+     "chinX": 0.5087119556653986,
+     "chinY": 0.5397302876580351
+    },
+    "promptPose": {
+     "yaw": 3.7254476260396188,
+     "pitch": -4.283516564344475,
+     "roll": 0.2381805146094829,
+     "chinX": 0.5087119556653986,
+     "chinY": 0.5397302876580351,
+     "faceW": 0.12017971460670884
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 7,
+    "rejects": 1,
+    "gates": {
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/night out.jpg": {
+   "md5": "r04QhUYgQIaK43b73OJFEQ==",
+   "size": 191712,
+   "ms": {
+    "prep": 279,
+    "pose": 456,
+    "hat": 630,
+    "finish": 2265,
+    "total": 3631
+   },
+   "width": 1170,
+   "height": 1462,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.141,
+    "blurScore": null,
+    "w": 899,
+    "h": 1123
+   },
+   "pose2d": {
+    "yaw": 0.72,
+    "yawSigned": -0.69
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -40.6,
+    "pitch": -1.6,
+    "roll": -0.6,
+    "chinX": 0.417,
+    "chinY": 0.21,
+    "faceW": 0.13
+   },
+   "promptPose": {
+    "yaw": -40.568,
+    "pitch": -1.56,
+    "roll": null,
+    "chinX": 0.417,
+    "chinY": 0.21,
+    "faceW": 0.13
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 27.5,
+    "ringL": 48.7,
+    "faceMinusRing": -21.2,
+    "gu": -0.68,
+    "gv": 0.39,
+    "skinA": 17.3,
+    "skinB": 16.6,
+    "neckMinusFace": 7.7,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.213
+   },
+   "glowGate": {
+    "bgL": 31.9,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14063814192910878,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.7160605772024982,
+     "yawSigned": -0.6876650687269988
+    },
+    "pose3d": {
+     "yaw": -40.56759805407778,
+     "pitch": -1.5599518053629051,
+     "roll": -0.5822980642407055,
+     "src": "mesh",
+     "agree": 0.03838774159952836,
+     "faceW": 0.13009553928113615,
+     "chinX": 0.41706359769182005,
+     "chinY": 0.20966058788432143
+    },
+    "promptPose": {
+     "yaw": -40.56759805407778,
+     "pitch": -1.5599518053629051,
+     "roll": null,
+     "chinX": 0.41706359769182005,
+     "chinY": 0.20966058788432143,
+     "faceW": 0.13009553928113615
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-drift": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/one like and I’ll get a harley.jpg": {
+   "md5": "K0DODnqoR08XPcp1YW0Y5g==",
+   "size": 187371,
+   "ms": {
+    "prep": 244,
+    "pose": 530,
+    "hat": 599,
+    "finish": 2087,
+    "total": 3470
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.142,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1560
+   },
+   "pose2d": {
+    "yaw": 0.19,
+    "yawSigned": 0.34
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 16.2,
+    "pitch": -9.3,
+    "roll": -8,
+    "chinX": 0.375,
+    "chinY": 0.386,
+    "faceW": 0.142
+   },
+   "promptPose": {
+    "yaw": 16.158,
+    "pitch": -9.329,
+    "roll": -8.018,
+    "chinX": 0.375,
+    "chinY": 0.386,
+    "faceW": 0.142
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 35.4,
+    "ringL": 60.4,
+    "faceMinusRing": -25,
+    "gu": -0.08,
+    "gv": -0.09,
+    "skinA": 19.1,
+    "skinB": 14.9,
+    "neckMinusFace": -1.5,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.164
+   },
+   "glowGate": {
+    "bgL": 64.1,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14198555052280426,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.18681521411977453,
+     "yawSigned": 0.34481628902585615
+    },
+    "pose3d": {
+     "yaw": 16.15819626161124,
+     "pitch": -9.329055221262847,
+     "roll": -8.018190883784753,
+     "src": "mesh",
+     "agree": 0.04284373713442757,
+     "faceW": 0.14155971626197683,
+     "chinX": 0.3745814489059075,
+     "chinY": 0.3857669248914519
+    },
+    "promptPose": {
+     "yaw": 16.15819626161124,
+     "pitch": -9.329055221262847,
+     "roll": -8.018190883784753,
+     "chinX": 0.3745814489059075,
+     "chinY": 0.3857669248914519,
+     "faceW": 0.14155971626197683
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/rooftop cocktails perhaps 🥃 (1).jpg": {
+   "md5": "KLp8SCYpMBXPr2/RTx+yqA==",
+   "size": 123719,
+   "ms": {
+    "prep": 299,
+    "pose": 498,
+    "hat": 533,
+    "finish": 2054,
+    "total": 3386
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.125,
+    "blurScore": null,
+    "w": 917,
+    "h": 1224
+   },
+   "pose2d": {
+    "yaw": 1,
+    "yawSigned": 0.95
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 54.2,
+    "pitch": -3.8,
+    "roll": 1.4,
+    "chinX": 0.311,
+    "chinY": 0.415,
+    "faceW": 0.094
+   },
+   "promptPose": {
+    "yaw": 54.239,
+    "pitch": -3.798,
+    "roll": null,
+    "chinX": 0.311,
+    "chinY": 0.415,
+    "faceW": 0.094
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 31,
+    "ringL": 65.9,
+    "faceMinusRing": -34.9,
+    "gu": 0.77,
+    "gv": -1.4,
+    "skinA": 13.3,
+    "skinB": 7.8,
+    "neckMinusFace": -1.4,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.185
+   },
+   "glowGate": {
+    "bgL": 56.4,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": false,
+    "profile": true,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.125362962776858,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 1,
+     "yawSigned": 0.9517783092359042
+    },
+    "pose3d": {
+     "yaw": 54.23875411559025,
+     "pitch": -3.79793271264058,
+     "roll": 1.382910364898305,
+     "src": "mesh",
+     "agree": 0.12499325708811856,
+     "faceW": 0.09437168180140018,
+     "chinX": 0.3108285274433779,
+     "chinY": 0.4153355161781711
+    },
+    "promptPose": {
+     "yaw": 54.23875411559025,
+     "pitch": -3.79793271264058,
+     "roll": null,
+     "chinX": 0.3108285274433779,
+     "chinY": 0.4153355161781711,
+     "faceW": 0.09437168180140018
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 1,
+    "gates": {
+     "skin-tone": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/rooftop cocktails perhaps 🥃.jpg": {
+   "md5": "g96Gmws8TKXcqYyUaNF3Xw==",
+   "size": 114275,
+   "ms": {
+    "prep": 250,
+    "pose": 525,
+    "hat": 567,
+    "finish": 2398,
+    "total": 3742
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.157,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1560
+   },
+   "pose2d": {
+    "yaw": 0.31,
+    "yawSigned": 0.24
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 14.2,
+    "pitch": 1.1,
+    "roll": 5.1,
+    "chinX": 0.466,
+    "chinY": 0.515,
+    "faceW": 0.163
+   },
+   "promptPose": {
+    "yaw": 14.228,
+    "pitch": 1.081,
+    "roll": 5.143,
+    "chinX": 0.466,
+    "chinY": 0.515,
+    "faceW": 0.163
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 30.9,
+    "ringL": 72.5,
+    "faceMinusRing": -41.6,
+    "gu": 0.7,
+    "gv": -0.87,
+    "skinA": 11,
+    "skinB": 5.9,
+    "neckMinusFace": -10,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.2
+   },
+   "glowGate": {
+    "bgL": 58.2,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1565874218940735,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.30678524818896813,
+     "yawSigned": 0.24352976383918468
+    },
+    "pose3d": {
+     "yaw": 14.22766283060912,
+     "pitch": 1.080867127761227,
+     "roll": 5.143499204896528,
+     "src": "mesh",
+     "agree": 0.028613550349446452,
+     "faceW": 0.162929319026893,
+     "chinX": 0.46600303839200735,
+     "chinY": 0.5146759539796965
+    },
+    "promptPose": {
+     "yaw": 14.22766283060912,
+     "pitch": 1.080867127761227,
+     "roll": 5.143499204896528,
+     "chinX": 0.46600303839200735,
+     "chinY": 0.5146759539796965,
+     "faceW": 0.162929319026893
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 2,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/slow pace saturdays (1).jpg": {
+   "md5": "HVQlBs+09cn81Vv+kpVv8A==",
+   "size": 283316,
+   "ms": {
+    "prep": 304,
+    "pose": 478,
+    "hat": 564,
+    "finish": 1981,
+    "total": 3330
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.149,
+    "blurScore": null,
+    "w": 783,
+    "h": 1044
+   },
+   "pose2d": {
+    "yaw": 0.15,
+    "yawSigned": 0.21
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 10.6,
+    "pitch": 13.5,
+    "roll": -3,
+    "chinX": 0.418,
+    "chinY": 0.222,
+    "faceW": 0.153
+   },
+   "promptPose": {
+    "yaw": 10.637,
+    "pitch": 13.527,
+    "roll": -3.037,
+    "chinX": 0.418,
+    "chinY": 0.222,
+    "faceW": 0.153
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 42.4,
+    "ringL": 39.3,
+    "faceMinusRing": 3.1,
+    "gu": -0.32,
+    "gv": -1.9,
+    "skinA": 15.4,
+    "skinB": 14.5,
+    "neckMinusFace": -3.9,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.252
+   },
+   "glowGate": {
+    "bgL": 60.5,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14918814445364065,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.1529034126643105,
+     "yawSigned": 0.21369970640551772
+    },
+    "pose3d": {
+     "yaw": 10.636935663092942,
+     "pitch": 13.526540818698647,
+     "roll": -3.036678128558946,
+     "src": "mesh",
+     "agree": 0.03806371206334683,
+     "faceW": 0.15347744044799,
+     "chinX": 0.41805183374964733,
+     "chinY": 0.2220084059516033
+    },
+    "promptPose": {
+     "yaw": 10.636935663092942,
+     "pitch": 13.526540818698647,
+     "roll": -3.036678128558946,
+     "chinX": 0.41805183374964733,
+     "chinY": 0.2220084059516033,
+     "faceW": 0.15347744044799
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/southern spanish sunsets (1).jpg": {
+   "md5": "C9+4GMjTMDSAoFUt4FCeyw==",
+   "size": 113922,
+   "ms": {
+    "prep": 303,
+    "pose": 930,
+    "hat": 545,
+    "finish": 2117,
+    "total": 3897
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.17,
+    "blurScore": null,
+    "w": 819,
+    "h": 1091
+   },
+   "pose2d": {
+    "yaw": 0.02,
+    "yawSigned": 0
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -0.8,
+    "pitch": 5,
+    "roll": 1.7,
+    "chinX": 0.509,
+    "chinY": 0.406,
+    "faceW": 0.165
+   },
+   "promptPose": {
+    "yaw": -0.756,
+    "pitch": 4.954,
+    "roll": 1.714,
+    "chinX": 0.509,
+    "chinY": 0.406,
+    "faceW": 0.165
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 36,
+    "ringL": 75.5,
+    "faceMinusRing": -39.5,
+    "gu": 0.91,
+    "gv": -0.4,
+    "skinA": 16.8,
+    "skinB": 12.2,
+    "neckMinusFace": -9.2,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.221
+   },
+   "glowGate": {
+    "bgL": 72.7,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.1699021884373256,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.017014955898645212,
+     "yawSigned": -0.0033578329224026593
+    },
+    "pose3d": {
+     "yaw": -0.7555977366427323,
+     "pitch": 4.953815445349462,
+     "roll": 1.7143567343031276,
+     "src": "mesh",
+     "agree": 0.05088383749152321,
+     "faceW": 0.1645747273415685,
+     "chinX": 0.5087791861165548,
+     "chinY": 0.4063071084062126
+    },
+    "promptPose": {
+     "yaw": -0.7555977366427323,
+     "pitch": 4.953815445349462,
+     "roll": 1.7143567343031276,
+     "chinX": 0.5087791861165548,
+     "chinY": 0.4063071084062126,
+     "faceW": 0.1645747273415685
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 8,
+    "rejects": 2,
+    "gates": {
+     "yaw-drift": 1,
+     "yaw-over-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/southern spanish sunsets.jpg": {
+   "md5": "u3xmyorYJZYXhTATKLR0Fw==",
+   "size": 90106,
+   "ms": {
+    "prep": 241,
+    "pose": 627,
+    "hat": 603,
+    "finish": 1978,
+    "total": 3460
+   },
+   "width": 1170,
+   "height": 1560,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.132,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1560
+   },
+   "pose2d": {
+    "yaw": 1,
+    "yawSigned": 0.69
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 49.8,
+    "pitch": 7.2,
+    "roll": 13.5,
+    "chinX": 0.581,
+    "chinY": 0.561,
+    "faceW": 0.112
+   },
+   "promptPose": {
+    "yaw": 49.803,
+    "pitch": 7.199,
+    "roll": null,
+    "chinX": 0.581,
+    "chinY": 0.561,
+    "faceW": 0.112
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 26.5,
+    "ringL": 81.8,
+    "faceMinusRing": -55.3,
+    "gu": 1.18,
+    "gv": -1.48,
+    "skinA": 15.5,
+    "skinB": 9.8,
+    "neckMinusFace": -10,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": true
+   },
+   "structure": {
+    "rel": 0.276
+   },
+   "glowGate": {
+    "bgL": 74.1,
+    "gate": 0,
+    "applies": false
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": true,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": false,
+    "backlit": true,
+    "sideLight": true
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.13247887293497723,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 1,
+     "yawSigned": 0.6945228794757208
+    },
+    "pose3d": {
+     "yaw": 49.803280896992106,
+     "pitch": 7.199311082576837,
+     "roll": 13.505763399130522,
+     "src": "mesh",
+     "agree": 0.07892220071343124,
+     "faceW": 0.11249104703631736,
+     "chinX": 0.581111352159995,
+     "chinY": 0.5605810900523155
+    },
+    "promptPose": {
+     "yaw": 49.803280896992106,
+     "pitch": 7.199311082576837,
+     "roll": null,
+     "chinX": 0.581111352159995,
+     "chinY": 0.5605810900523155,
+     "faceW": 0.11249104703631736
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-under-rotate": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/sundays at @estellemanor (1).jpg": {
+   "md5": "VokvgOw8wBQwvSrj6aK0gA==",
+   "size": 119881,
+   "ms": {
+    "prep": 230,
+    "pose": 518,
+    "hat": 597,
+    "finish": 2307,
+    "total": 3656
+   },
+   "width": 1170,
+   "height": 1463,
+   "prep": {
+    "usable": true,
+    "cropped": false,
+    "faceRatio": 0.142,
+    "blurScore": null,
+    "w": 1170,
+    "h": 1463
+   },
+   "pose2d": {
+    "yaw": 0.03,
+    "yawSigned": -0.16
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": -11.1,
+    "pitch": -3.6,
+    "roll": 10.5,
+    "chinX": 0.62,
+    "chinY": 0.414,
+    "faceW": 0.123
+   },
+   "promptPose": {
+    "yaw": -11.101,
+    "pitch": -3.583,
+    "roll": 10.453,
+    "chinX": 0.62,
+    "chinY": 0.414,
+    "faceW": 0.123
+   },
+   "hat": {
+    "hat": false,
+    "reason": "seg-alan",
+    "area": 0,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 41.8,
+    "ringL": 19.1,
+    "faceMinusRing": 22.7,
+    "gu": -0.21,
+    "gv": -0.69,
+    "skinA": 14.3,
+    "skinB": 9.2,
+    "neckMinusFace": -4.5,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.189
+   },
+   "glowGate": {
+    "bgL": 19.6,
+    "gate": 1,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": false,
+    "darkScene": true,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.14163267612457275,
+    "cropped": false,
+    "pose2d": {
+     "yaw": 0.033020967461554473,
+     "yawSigned": -0.15967430944765526
+    },
+    "pose3d": {
+     "yaw": -11.100741533511876,
+     "pitch": -3.582696416164647,
+     "roll": 10.452568425060587,
+     "src": "mesh",
+     "agree": 0.04316000531293292,
+     "faceW": 0.12338808736053831,
+     "chinX": 0.6204708856066419,
+     "chinY": 0.41365799996281716
+    },
+    "promptPose": {
+     "yaw": -11.100741533511876,
+     "pitch": -3.582696416164647,
+     "roll": 10.452568425060587,
+     "chinX": 0.6204708856066419,
+     "chinY": 0.41365799996281716,
+     "faceW": 0.12338808736053831
+    },
+    "hat": {
+     "hat": false,
+     "reason": "seg-alan",
+     "score": null,
+     "hair": null,
+     "area": 0
+    }
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 0,
+    "gates": {}
+   }
+  },
+  "dating_templates/elegance/tall/swipe for a surprise (1).jpg": {
+   "md5": "toWXM3569Lq5CMSbJphi2A==",
+   "size": 125676,
+   "ms": {
+    "prep": 300,
+    "pose": 500,
+    "hat": 5237,
+    "finish": 2310,
+    "total": 8348
+   },
+   "width": 1170,
+   "height": 1463,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.154,
+    "blurScore": null,
+    "w": 820,
+    "h": 1024
+   },
+   "pose2d": {
+    "yaw": 0.62,
+    "yawSigned": -0.62
+   },
+   "pose3d": {
+    "src": "mesh",
+    "yaw": 3.1,
+    "pitch": 13.5,
+    "roll": 0.3,
+    "chinX": 0.407,
+    "chinY": 0.241,
+    "faceW": 0.164
+   },
+   "promptPose": {
+    "yaw": 3.054,
+    "pitch": 13.471,
+    "roll": 0.323,
+    "chinX": 0.407,
+    "chinY": 0.241,
+    "faceW": 0.164
+   },
+   "hat": {
+    "hat": true,
+    "reason": null,
+    "area": 0.374,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 32.2,
+    "ringL": 44.1,
+    "faceMinusRing": -12,
+    "gu": 0.36,
+    "gv": 0.17,
+    "skinA": 16.9,
+    "skinB": 23.1,
+    "neckMinusFace": -4.9,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.2
+   },
+   "glowGate": {
+    "bgL": 44.4,
+    "gate": 0.23,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": true,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": true,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.15447024093618428,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 0.6238531516879562,
+     "yawSigned": -0.623517548900079
+    },
+    "pose3d": {
+     "yaw": 3.054322901023528,
+     "pitch": 13.470868234677805,
+     "roll": 0.3228373949702803,
+     "src": "mesh",
+     "agree": 0.04209210138886274,
+     "faceW": 0.16397790934334405,
+     "chinX": 0.4067905053664455,
+     "chinY": 0.24103810415749533
+    },
+    "promptPose": {
+     "yaw": 3.054322901023528,
+     "pitch": 13.470868234677805,
+     "roll": 0.3228373949702803,
+     "chinX": 0.4067905053664455,
+     "chinY": 0.24103810415749533,
+     "faceW": 0.16397790934334405
+    },
+    "hat": null
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "math-identity": 1
+    }
+   }
+  },
+  "dating_templates/elegance/tall/swipe for a surprise.jpg": {
+   "md5": "mj13fo4l+pPOiHGbG6xEgg==",
+   "size": 135319,
+   "ms": {
+    "prep": 301,
+    "pose": 480,
+    "hat": 5155,
+    "finish": 3679,
+    "total": 9617
+   },
+   "width": 1170,
+   "height": 1463,
+   "prep": {
+    "usable": true,
+    "cropped": true,
+    "faceRatio": 0.169,
+    "blurScore": null,
+    "w": 873,
+    "h": 1092
+   },
+   "pose2d": {
+    "yaw": 1,
+    "yawSigned": 1
+   },
+   "pose3d": {
+    "src": "68",
+    "yaw": 55,
+    "pitch": null,
+    "roll": null,
+    "chinX": null,
+    "chinY": null,
+    "faceW": null
+   },
+   "promptPose": null,
+   "hat": {
+    "hat": true,
+    "reason": null,
+    "area": 0.652,
+    "owl": null
+   },
+   "light": {
+    "ok": true,
+    "faceL": 35.3,
+    "ringL": 46.9,
+    "faceMinusRing": -11.6,
+    "gu": 0.84,
+    "gv": -0.45,
+    "skinA": 19.2,
+    "skinB": 26.3,
+    "neckMinusFace": 0,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "structure": {
+    "rel": 0.22
+   },
+   "glowGate": {
+    "bgL": 44.5,
+    "gate": 0.22,
+    "applies": true
+   },
+   "flags": {
+    "bowed": false,
+    "frontal": false,
+    "angled": false,
+    "profile": false,
+    "smallFace": false,
+    "hat": true,
+    "darkScene": false,
+    "backlit": false,
+    "sideLight": false
+   },
+   "vision": {
+    "eyewear": null,
+    "mst": null,
+    "note": "ücretli Vision ölçümü — doldurulmadı"
+   },
+   "raw": {
+    "faceRatio": 0.16873415597935312,
+    "cropped": true,
+    "pose2d": {
+     "yaw": 1,
+     "yawSigned": 1
+    },
+    "pose3d": {
+     "yaw": 55,
+     "pitch": null,
+     "roll": null,
+     "src": "68"
+    },
+    "promptPose": null,
+    "hat": null
+   },
+   "history": {
+    "asOf": "2026-11-14",
+    "jobs": 1,
+    "rejects": 1,
+    "gates": {
+     "yaw-drift": 1
+    }
+   }
+  }
+ }
+}

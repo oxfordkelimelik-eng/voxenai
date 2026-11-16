@@ -441,4 +441,36 @@ async function trimTemplateHair(buf, selfieBuf, { debug = null } = {}) {
   }
 }
 
-module.exports = { eraseTemplateHair, trimTemplateHair, _testables: { templateHairMask, projectHead, trimMask, dropSmallParts, TRIM_MARGIN_FACE, TRIM_PROTECT_FACE, TRIM_MIN_FACE2 } };
+// KIRPMA KAPILARI (2026-11-04 inceleme, 2 selfie seti × 40 şablon yerelde):
+// kırpma dönük (|yaw| 28-60), aşağı bakan (pitch −12…−32) şablonlarda ve
+// kırpılan pay büyükken (0.29-0.77) kafanın arkasını/tepesini düz kesiyordu
+// (7e0 c3 ense dik çizgi, 7e0 c0 / b932 c3 düz tepe); izdüşüm kaynağı selfie
+// base açısından uzaksa (çevrilemedi) kırpma yanlış yere düşüyordu. Kullanıcı:
+// "direkt aynı şey yapılıyorsa bu riskin alınmaması lazım". Pay çok küçükse
+// (<0.05) kırpma kareyi neredeyse değiştirmiyor ama ghostClean'i kapatıyordu.
+// Kapı tutmazsa orijinal şablon gider ve ghostClean eskisi gibi çalışır.
+// Deploy öncesi doğrulamada (aynı 80 kare) yaw 25 / pitch −10 / pay 0.25
+// kapılarıyla bile önden şablonda iki kare kesildi (b93 c7 pitch −9.84 tepe
+// düz; 80f c0 yaw −11 ense basamak); aşağıdaki değerler 80 karede hiç kesmedi.
+// Kırpma şu an KAPALI (falPhotos TEMPLATE_HAIR_TRIM); açılırsa bu değerlerle.
+const TRIM_GATE = { maxAbsYaw: 8, minPitch: -9, maxSelfieGap: 6, maxShare: 0.20, minShare: 0.05 };
+
+/** Kırpmadan önce poz kapısı. SAF. Döner atlama sebebi ya da null. Ölçülemeyen poz kırpılmaz. */
+function trimPoseSkip(tplYaw, tplPitch, firstSelfieYaw) {
+  if (!Number.isFinite(tplYaw)) return "pose-unknown";
+  if (!Number.isFinite(tplPitch)) return "pitch-unknown";
+  if (Math.abs(tplYaw) > TRIM_GATE.maxAbsYaw) return "turned";
+  if (tplPitch < TRIM_GATE.minPitch) return "looking-down";
+  if (!Number.isFinite(firstSelfieYaw) || Math.abs(firstSelfieYaw - tplYaw) > TRIM_GATE.maxSelfieGap) return "selfie-pose-gap";
+  return null;
+}
+
+/** Kırpmadan sonra pay kapısı. SAF. Döner atlama sebebi ya da null. */
+function trimShareSkip(trimFrac) {
+  if (!Number.isFinite(trimFrac)) return null;
+  if (trimFrac > TRIM_GATE.maxShare) return "share-too-large";
+  if (trimFrac < TRIM_GATE.minShare) return "share-tiny";
+  return null;
+}
+
+module.exports = { eraseTemplateHair, trimTemplateHair, trimPoseSkip, trimShareSkip, TRIM_GATE, _testables: { templateHairMask, projectHead, trimMask, dropSmallParts, TRIM_MARGIN_FACE, TRIM_PROTECT_FACE, TRIM_MIN_FACE2 } };

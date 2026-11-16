@@ -27,10 +27,15 @@ const sharp = require("sharp");
 // Ölçülen farkın uygulanan payı (log alanda). 1.0 DENENDİ, ALINMADI
 // (2026-11-01, c2e8eff1'in 10 ham karesi): yüz vücuda göre base'den koyu
 // kaldı (|yüz/vücut − base| ortanca 0.22 → 0.30 stop).
-const GAIN_BETA = 0.85;
+// 0.85 → 0.4 (2026-11-08, 27deeec2, kullanıcı: "c5 ten rengi çok koyu"): yüz base
+// kişisinin yüz parlaklığına eşitleniyordu; pigment (MST) iki kişiyi çoğunlukla
+// aynı sayıyor, bronz base kişinin koyuluğu kullanıcıya geçiyordu (c5 base 35.0 →
+// teslim 35.1 L, ham 39.5; bu işte kazançlar ×0.40-0.80). Modelin kendi tonu esas.
+const GAIN_BETA = 0.4;
 // ×0.55 karanlık sahnede yetmiyordu (c2e8eff1 c1: yüz L 31 → hedef 18, kazanç
 // sınırda kaldı, yüz göğüsten açık kaldı).
-const GAIN_MIN = Math.log(0.4);
+// 0.4 → 0.8 (2026-11-08, aynı gerekçe): karartma en çok %20.
+const GAIN_MIN = Math.log(0.8);
 const GAIN_MAX = Math.log(1.2);
 // Bundan küçük fark dokunulmaz (|log| ≈ %4).
 const GAIN_DEADBAND = 0.04;
@@ -46,6 +51,57 @@ const SLOPE_MAX_V = 0.4;
 const SLOPE_DEADBAND = 0.08;
 // Eğim kafanın bu yarıçapı dışında büyümez (yüz kutusu birimi).
 const SLOPE_UV_MAX = 0.75;
+// KARANLIK SAHNEDE DAHA DERİN KARARTMA (2026-11-13, kullanıcı: "doğal, hatları belirgin, ışıklı
+// yüz"; ölçüm 79956cb2: renkli 8 karede son yüz şablon yüzünden ort. +9.1 L, ×0.80 sınırına
+// 5/10 karede dayandı, c7 ~×0.48 isterdi). Üç bağımsız işaret birlikteyse: şablon kişisinin
+// teni kullanıcıdan koyu değil (albedo ≤ 1 → şablon yüzünün koyuluğu IŞIK, pigment değil;
+// 11-08 c5 bronz base tuzağı) ve şablonda yüz çevresindeki arka plan halkası koyu (L ≤
+// RING_MAX_L: gece/loş iç mekân). "Yüz çevresinden koyu" ölçüsü DENENDİ, ALINMADI: arkası
+// parlak gündüz karelerini (c0 duvar, c3/c4 gökyüzü, yüz−çevre −25…−39) karanlık sanıyordu.
+// 0.7/×0.65 → 0.85/×0.50 (aynı gün, kör + göz incelemesi: c7 L42→34, c8 34→25 sahneye oturdu,
+// çamurlaşma yok; ×0.65 c7'yi +19 parlak bırakıyordu).
+const DARK_SCENE = { ON: true, BETA: 0.85, MIN: Math.log(0.5), RING_MAX_L: 30 };
+// GÜÇLÜ YAN IŞIK (2026-11-13, 79956cb2 c1: şablon gu −1.82, çıktı −0.07 → −0.66, ±0.9 sınırı).
+// Yalnız şablon yüzünde ölçülen yatay eğim büyükse aktarım payı ve sınırı açılır; ışığı
+// olmayan/düz şablonda eğim zaten küçük → hiçbir şey değişmez.
+const SIDE_LIGHT = { ON: true, MIN_TPL_GU: 1.0, BETA: 0.85, MAX: 1.3 };
+// YÜZ DERİSİ YÜZÜN YANINDA (2026-11-13, 79956cb2 c5 siyah-beyaz şablon: segmentasyon koyu
+// arka planı/ceketi "yüz derisi" saydı — 13.254 pikselin 10.201'i yüz kutusu dışında, şablon
+// yüzü L1 ölçüldü, gerçeği L29; ışıklı yüz boşuna karartılıyordu). Ölçü yalnız yüz kutusunun
+// yakınından; diğer 9 karede değer ±0.4 L içinde kaldı.
+const SKIN_BOX = { ON: true, SIDE: 0.25, UP: 0.35, DOWN: 0.15 };
+// YÜZ KENDİ BOYNUNA GÖRE (2026-11-13, kullanıcı: "ortama ve vücuda uygun ton"; 79956cb2):
+// şablonda boyun−yüz farkı (aynı kişi, aynı ışık) çıktıda da korunmalı. Çıktıda yüz kendi
+// boynundan şablondakinden ≥3 L fazla parlaksa (c4 −1.4/−8.8, c2 −12.7/−23.1, c8 −3.5/−8.2)
+// GAIN_BETA 0.4'ün bıraktığı farkı kapatır: hedef = iki tam ölçünün (şablon yüzü, boyun)
+// YUMUŞAĞI, en çok ×0.65. Pigmentten bağımsız (yüz ve boyun aynı kişi) — 11-08 bronz c5
+// tuzağı burada yok. 10-22 "boyun oranı güvenilmez" MUTLAK boyun içindi (c3 gölgeli boyun
+// güneşteki yüzü kararttı); göreli fark c3'te 0.5 L → dokunmaz. Renkte aynı işaret zayıf
+// (çıktı ile şablon boyun−yüz a*/b* farkı ≤4) → renge uygulanmadı.
+const NECK_MATCH = { ON: true, MIN_EXCESS: 3, MIN: Math.log(0.65) };
+// ARKADAN IŞIKLI GÜNDÜZ (2026-11-14, 43c2e739 c4: şablon yüzü 31, yüz çevresi 66 — yüz parlak gökyüzüne
+// karşı gölgede; ton sonrası yüz 39.7, ×0.80 sınırında). Şablonda yüz çevresinden ≥ FACE_RING_MIN L koyu,
+// çevre ≥ RING_MIN_L (gündüz) ve ten farkı yok (albedo ≤ 1) → pay BETA, en çok ×MIN. Bronz şablon tuzağı
+// (11-08) tümüyle kapanmaz: koyu tenli manken de parlak arka plana karşı koyu görünür → sınır ×0.70.
+const BACKLIT = { ON: true, FACE_RING_MIN: 25, RING_MIN_L: 50, BETA: 0.7, MIN: Math.log(0.7) };
+
+/**
+ * VÜCUT IŞIĞI TEK ORAN (2026-11-06, kullanıcı kararı: "tüm vücut aynı oranda
+ * almalı"). Eskiden yüzün ışık düzlemi (yatay gu + dikey gv) vücuda da
+ * uzatılıyordu; vücut zaten şablonun sahne ışığını taşıdığı için yatay terim
+ * ışığı iki kez sayıyor, uzak kol/eli bir yanda patlatıp öbür yanda
+ * karartıyordu (10ee6a46 c6 ön kol +22 L, 0eeb75c8 c3 beyaza kesik, 3b4f51cb
+ * c3 −17.8 L; düzlem ±0.75'te kesildiği için uzak uzuv hep uç değeri alıyordu).
+ * Artık kafa (ah) tam düzlemi alır; vücut derisi — boyna bağlı ya da kopuk —
+ * x'ten bağımsız tek oranı alır: düzlemin dikey bileşeni (çene altında
+ * SLOPE_UV_MAX'ta sabit). Boyun-göğüs geçişi sürekli kalır (10-30 c2e8eff1
+ * "boynun altında ışık kesilmiş" çözümü korunur); toplam ağırlık eskisi gibi
+ * max(ah, ab). Döner log kazanç katkısı. SAF.
+ */
+function bodyLightLog(plan, slopeFull, y, fcy, fh, ah, ab) {
+  const slopeBody = plan.gv ? plan.gv * clamp((y - fcy) / fh, -SLOPE_UV_MAX, SLOPE_UV_MAX) : 0;
+  return slopeFull * ah + slopeBody * Math.max(0, ab - ah);
+}
 const WORK_MAX = 640;
 
 const SRGB2LIN = new Float32Array(256);
@@ -71,10 +127,26 @@ function trimmedMean(arr, q0 = 0.15, q1 = 0.85) {
  * Kazanç ve renk planı. tpl/out: { Y (doğrusal), a, b } yüz derisi ölçüleri;
  * albedo: kullanıcı/şablon ten pigmenti oranı (doğrusal). SAF.
  */
-function planTone(tpl, out, albedo = 1) {
+function planTone(tpl, out, albedo = 1, { darkScene = false, neck = null, backlit = false } = {}) {
   if (!tpl || !out || !(tpl.Y > 0) || !(out.Y > 0)) return { ok: false, reason: "no-measure" };
   const raw = Math.log(tpl.Y) - Math.log(out.Y) + Math.log(albedo || 1);
-  let logGain = clamp(GAIN_BETA * raw, GAIN_MIN, GAIN_MAX);
+  const deep = darkScene && DARK_SCENE.ON && raw < 0;
+  let logGain = clamp((deep ? DARK_SCENE.BETA : GAIN_BETA) * raw, deep ? DARK_SCENE.MIN : GAIN_MIN, GAIN_MAX);
+  const back = !deep && backlit && BACKLIT.ON && raw < 0;
+  if (back) logGain = Math.min(logGain, clamp(BACKLIT.BETA * raw, BACKLIT.MIN, 0));
+  // Boyun işareti: şablonla aynı yönde ve en az onun kadar ise iki ölçünün YUMUŞAK olanına kadar.
+  let neckLog = null, neckUsed = false;
+  if (NECK_MATCH.ON && neck && Number.isFinite(neck.excess) && Number.isFinite(neck.outL) && Math.abs(neck.excess) >= NECK_MATCH.MIN_EXCESS) {
+    const Yof = (l) => ((Math.max(8, l) + 16) / 116) ** 3;
+    neckLog = Math.log(Yof(neck.outL - neck.excess) / Yof(neck.outL));
+    if (raw < 0 && neckLog < 0) {
+      const g = Math.max(Math.max(raw, neckLog), NECK_MATCH.MIN);
+      if (g < logGain) { logGain = g; neckUsed = true; }
+    } else if (raw > 0 && neckLog > 0) {
+      const g = Math.min(Math.min(raw, neckLog), GAIN_MAX);
+      if (g > logGain) { logGain = g; neckUsed = true; }
+    }
+  }
   if (Math.abs(logGain) < GAIN_DEADBAND) logGain = 0;
   let da = clamp(CHROMA_BETA * (tpl.a - out.a), -CHROMA_MAX, CHROMA_MAX);
   let db = clamp(CHROMA_BETA * (tpl.b - out.b), -CHROMA_MAX, CHROMA_MAX);
@@ -84,12 +156,35 @@ function planTone(tpl, out, albedo = 1) {
   // verir). Ortalama değişmez (düzlem yüz merkezinde sıfır).
   let gu = 0, gv = 0;
   if (tpl.slope && out.slope) {
-    gu = clamp(SLOPE_BETA_U * (tpl.slope.gu - out.slope.gu), -SLOPE_MAX_U, SLOPE_MAX_U);
+    const side = SIDE_LIGHT.ON && Math.abs(tpl.slope.gu) >= SIDE_LIGHT.MIN_TPL_GU;
+    const bu = side ? SIDE_LIGHT.BETA : SLOPE_BETA_U, mu = side ? SIDE_LIGHT.MAX : SLOPE_MAX_U;
+    gu = clamp(bu * (tpl.slope.gu - out.slope.gu), -mu, mu);
     gv = clamp(SLOPE_BETA_V * (tpl.slope.gv - out.slope.gv), -SLOPE_MAX_V, SLOPE_MAX_V);
     if (Math.abs(gu) < SLOPE_DEADBAND) gu = 0;
     if (Math.abs(gv) < SLOPE_DEADBAND) gv = 0;
   }
-  return { ok: true, logGain, da, db, gu, gv, raw };
+  return { ok: true, logGain, da, db, gu, gv, raw, deep, neckLog, neckUsed, backlit: back };
+}
+
+/**
+ * Yüz çevresindeki arka plan halkasının ortalama L*'ı (yüz merkezinden 0.85-1.5 yüz eni,
+ * arka plan olasılığı > 0.55). Yetersiz örnekte null.
+ */
+function sceneRingL(S) {
+  const { rgbToLab } = require("./skinTone");
+  const { P, CLASSES, W, H, work, box } = S;
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2, fw = box.width;
+  let sum = 0, n = 0;
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const d = Math.hypot(x - cx, y - cy) / fw;
+      if (d < 0.85 || d > 1.5) continue;
+      const i = y * W + x;
+      if (P[CLASSES.background][i] <= 0.55) continue;
+      sum += rgbToLab(work[i * 3], work[i * 3 + 1], work[i * 3 + 2])[0]; n++;
+    }
+  }
+  return n >= 40 ? sum / n : null;
 }
 
 /** Kişinin yüz çevresinde sınıf olasılıkları (çalışma çözünürlüğü). */
@@ -122,6 +217,11 @@ function skinStats(S) {
   let s11 = 0, s12 = 0, s13 = 0, s22 = 0, s23 = 0, s33 = 0, t1 = 0, t2 = 0, t3 = 0;
   for (let i = 0; i < W * H; i++) {
     if (P[CLASSES.faceSkin][i] <= 0.6 || P[CLASSES.hair][i] >= 0.25 || P[CLASSES.others][i] >= 0.3) continue;
+    if (SKIN_BOX.ON) {
+      const x = i % W, y = (i - x) / W;
+      if (x < box.x - SKIN_BOX.SIDE * box.width || x > box.x + (1 + SKIN_BOX.SIDE) * box.width
+        || y < box.y - SKIN_BOX.UP * box.height || y > box.y + (1 + SKIN_BOX.DOWN) * box.height) continue;
+    }
     const r = work[i * 3], g = work[i * 3 + 1], b = work[i * 3 + 2];
     const Y = 0.2126 * SRGB2LIN[r] + 0.7152 * SRGB2LIN[g] + 0.0722 * SRGB2LIN[b];
     Ys.push(Y);
@@ -243,8 +343,8 @@ function headAlpha(S, ref = null, pm = null) {
       const notCloth = 1 - clamp((P[CLASSES.clothes][i] - 0.4) / 0.3, 0, 1);
       let h = 0, s = 0;
       if (inHead) { h = Math.max(face, hair, oth * (y < chin ? 1 : 0)) * notCloth; s = face; }
-      // Işık eğimi tüm açık tene (boyun, göğüs, kol, el): yalnız yüze yapılan
-      // gölgelendirme boyunda kesiliyordu.
+      // Işık tüm açık tene (boyun, göğüs, kol, el): yalnız yüze yapılan
+      // gölgelendirme boyunda kesiliyordu. Vücutta tek oran (bkz. bodyLightLog).
       if (y > chin - 0.1 * box.height) body[i] = clamp((Math.max(body_(P, CLASSES, i), face) - 0.5) / 0.25, 0, 1) * notCloth;
       if (inNeck) {
         // Boyun derisi yalnız kesin olduğunda (922f1371 c4: koyu yaka kısmen
@@ -419,12 +519,18 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   if (!out || !tpl) return { buf: null, applied: false, reason: "no-skin" };
   const albedo = albedoRatio(mstUser, mstTpl);
   const adj = bodyAdjustedTarget(tpl, bodyRatioOf(So, St));
-  const plan = planTone(adj.tpl, out, albedo);
   const L = (Y) => (Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y);
-  const sl = (q) => (q.slope ? `${q.slope.gu.toFixed(2)}/${q.slope.gv.toFixed(2)}` : "null");
+  // Şablonda yüz − çevre (arka plan halkası) L: karanlık sahne işareti.
+  const ringT = sceneRingL(St);
+  const tplFaceRing = ringT != null ? L(tpl.Y) - ringT : null;
+  const darkScene = albedo <= 1.001 && ringT != null && ringT <= DARK_SCENE.RING_MAX_L;
   const neckBefore = neckFaceDelta(So, (i) => [So.work[i * 3], So.work[i * 3 + 1], So.work[i * 3 + 2]]);
   const neckTpl = neckFaceDelta(St, (i) => [St.work[i * 3], St.work[i * 3 + 1], St.work[i * 3 + 2]]);
-  const info2 = { outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, ...plan };
+  const neckArg = neckBefore && neckTpl ? { excess: neckTpl.delta - neckBefore.delta, outL: neckBefore.face } : null;
+  const backlit = albedo <= 1.001 && ringT != null && ringT >= BACKLIT.RING_MIN_L && tplFaceRing != null && tplFaceRing <= -BACKLIT.FACE_RING_MIN;
+  const plan = planTone(adj.tpl, out, albedo, { darkScene, neck: neckArg, backlit });
+  const sl = (q) => (q.slope ? `${q.slope.gu.toFixed(2)}/${q.slope.gv.toFixed(2)}` : "null");
+  const info2 = { tplRingL: ringT, tplFaceRing, darkScene, outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, ...plan };
   if (!plan.ok) return { buf: null, applied: false, reason: plan.reason, ...info2 };
   if (!plan.logGain && !plan.da && !plan.db && !plan.gu && !plan.gv) return { buf: null, applied: false, reason: "already-matched", ...info2 };
   // Kesin pikseller tohum: kafa/boyun (değer = alfa), vücut derisi (eğim için
@@ -491,12 +597,11 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
     let r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
     const x = i % FW, y = (i - x) / FW;
     let lg = plan.logGain * ah;
-    // Eğim düzlemi yüz merkezinde sıfır; vücutta aynı düzlem sürer (yatay
-    // uçta sınırlı), dikey bileşen boyun altında sabit kalır.
+    // Eğim düzlemi yüz merkezinde sıfır; kafada tam düzlem.
     const slope = (plan.gu || plan.gv)
       ? plan.gu * clamp((x - fcx) / fb.w, -SLOPE_UV_MAX, SLOPE_UV_MAX) + plan.gv * clamp((y - fcy) / fb.h, -SLOPE_UV_MAX, SLOPE_UV_MAX)
       : 0;
-    if (bodyA) lg += slope * Math.max(ah, ab);
+    if (bodyA) lg += bodyLightLog(plan, slope, y, fcy, fb.h, ah, ab);
     if (lg) {
       const k = Math.exp(lg);
       r = linToSrgb(SRGB2LIN[r] * k); g = linToSrgb(SRGB2LIN[g] * k); b = linToSrgb(SRGB2LIN[b] * k);
@@ -540,4 +645,4 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   return { buf, applied: true, reason: null, changed, matted, ms: Date.now() - t0, ...info2, neckDeltaAfter: neckAfter ? neckAfter.delta : null };
 }
 
-module.exports = { matchFaceToScene, _testables: { probsOf, skinStats, soften, upsample, planTone, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX } };
+module.exports = { matchFaceToScene, _testables: { DARK_SCENE, SIDE_LIGHT, SKIN_BOX, NECK_MATCH, BACKLIT, sceneRingL, probsOf, skinStats, soften, upsample, planTone, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, bodyLightLog, SLOPE_UV_MAX, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX } };

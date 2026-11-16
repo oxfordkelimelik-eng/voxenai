@@ -42,7 +42,9 @@ function modelPath() {
       const dest = path.join(os.tmpdir(), "owlv2_base_patch16_q.onnx");
       if (fs.existsSync(dest)) return dest;
       const { bucket } = require("./_shared");
-      const part = `${dest}.${process.pid}.part`;
+      // İş parçacığı kimliği de adda: ghostDetect.js aynı modeli son katman
+      // worker'larından indirir (aynı pid, eşzamanlı indirme aynı dosyaya yazmasın).
+      const part = `${dest}.${process.pid}.${require("worker_threads").threadId}.part`;
       await bucket().file(EARBUD_GCS_PATH).download({ destination: part });
       const hash = crypto.createHash("sha256");
       await new Promise((resolve, reject) => {
@@ -181,6 +183,7 @@ async function removeEarbuds(buf) {
 module.exports = {
   removeEarbuds,
   pickEarbuds,
+  modelPath, // ghostDetect.js aynı OWLv2 modelini kullanır
   POS: ["earbuds", "earphones", "headphones", "headset", "wireless earbuds"],
   EARBUD_GCS_PATH,
   EARBUD_SHA256,

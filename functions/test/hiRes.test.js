@@ -51,3 +51,15 @@ test("recompositeIntoOriginal: scale ile tuval büyür, yama doğru konumda", as
   const r1 = await recompositeIntoOriginal(out, orig, geo);
   assert.equal((await sharp(r1).metadata()).width, 200);
 });
+
+// 2026-11-08 (27deeec2 c7, OUTPUT_ASPECT_LOCK): auto alanında şablon oranı; 16'ya yuvarlama
+// oranı EN-BOY DÜZELTME eşiğini (%0.5) aşacak kadar kaydırmamalı.
+test("hiResSize: auto alanında şablon oranı, oran hatası %0.4 altında (EN-BOY eşiği %0.5)", () => {
+  const A = 1024 * 1536;
+  for (const [w, h] of [[1170, 1560], [1170, 1559], [1086, 1448], [1080, 1350], [1080, 1920], [1920, 1080], [1000, 1000], [1179, 2556]]) {
+    const [W, H] = dims(_testables.hiResSize(w, h, A));
+    assert.equal(W % 16, 0); assert.equal(H % 16, 0);
+    assert.ok(Math.abs(W / H - w / h) / (w / h) < 0.004, `${w}x${h} → ${W}x${H}`);
+    assert.ok(Math.abs(W * H - A) / A < 0.08, `alan ${W * H}`);
+  }
+});

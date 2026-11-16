@@ -66,6 +66,7 @@ const MOUTH_BAND_BOTTOM = 0.84;
 // (bkz. generateWithOpenAI) — ama onarım tek ve küçük bir bölge, buradaki
 // fark kuruşlar, kazanç ise kusurun tekrarlamaması.
 const REPAIR_QUALITY = "high";
+const REPAIR_TIMEOUT_MS = 150 * 1000;
 
 const REPAIR_PROMPT =
   "Repaint ONLY the masked facial skin so it becomes clean, continuous, " +
@@ -191,10 +192,14 @@ async function repairFaceArtifact(buf, faceBox, apiKey) {
     form.append("image", new Blob([pngBuf], { type: "image/png" }), "frame.png");
     form.append("mask", new Blob([mask], { type: "image/png" }), "mask.png");
 
+    // ZAMAN AŞIMI (2026-11-04): ana üretimle aynı tavan (POST_AI_TIMEOUT_MS
+    // 150 sn); asılı istek 900 sn iş bütçesini yemesin. Aşımda kare olduğu
+    // gibi kalır (catch), retry yok.
     const r = await fetch(OPENAI_IMAGE_EDIT_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
+      signal: AbortSignal.timeout(REPAIR_TIMEOUT_MS),
     });
     if (!r.ok) {
       const t = await r.text().catch(() => "");
@@ -202,6 +207,14 @@ async function repairFaceArtifact(buf, faceBox, apiKey) {
       return { ok: false, reason: `http-${r.status}` };
     }
     const j = await r.json();
+    // MALİYET DEFTERİ (2026-11-04 inceleme): onarım (gpt-image-2, high)
+    // defterde görünmüyordu; costUsd ve iş sınırı onu saymıyordu.
+    if (j && j.usage) {
+      try {
+        const usd = require("./jobContext").recordUsage(OPENAI_MODEL_ID, j.usage);
+        console.log(`MALİYET YÜZ ONARIMI: $${Number(usd || 0).toFixed(4)}`);
+      } catch (e) { /* jobContext yoksa (yerel test) sessiz geç */ }
+    }
     const b64 = j && j.data && j.data[0] && j.data[0].b64_json;
     if (!b64) return { ok: false, reason: "empty-response" };
     return { ok: true, buf: Buffer.from(b64, "base64") };

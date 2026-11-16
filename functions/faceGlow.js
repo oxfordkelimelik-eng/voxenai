@@ -54,6 +54,17 @@ const SHARPEN_M2_PER_STRENGTH = 0.9;
 // Ortalama kroma bunun altındaysa kare siyah-beyaz sayılır: renk kayması
 // uygulanmaz, yalnız ton eğrisi + netlik.
 const GRAYSCALE_CHROMA = 3;
+// YÜZE DUYARLI (2026-11-13, ölçüm 79956cb2): kişi gücü arka plandan büyük olduğu için yüz
+// çevresinden fazla açılıyordu — yüz − çevre L: c5 +18→+37, c7 +16→+38, c8 +3→+14, c9
+// +18→+28 ("flaşla çekilmiş, yapıştırılmış yüz"). Kafa (yüz derisi + saç) ve boyuna verilen
+// açma, yüz çevresindeki arka plan halkasının aldığı ortalama açmayı FACE_CAP.MARGIN'den
+// fazla geçemez; sahne ve vücut eğriyi aynen alır, ışıklı görünüm sürer.
+const FACE_CAP = { ON: true, MARGIN: 2, RING_IN: 0.85, RING_OUT: 1.6, NECK_FH: 1.0 };
+// ŞABLON YÜZÜ TAVANI (2026-11-14, 43c2e739 c9: ton adımı yüzü şablona eşitledi 56.1/55.5, ışıklı
+// +4.9 ekledi → teslim +8.9 L; arka plan medyanı koyu koltuk/ceketten 17, yüzün arkası gri duvar).
+// Çağıran şablon yüz L'si + TPL_MARGIN − şimdiki yüz L'sini (faceTone ölçüsü) verirse yüz bundan fazla
+// açılmaz; arka plan ve vücut aynı kalır. Yüz şablondan koyuysa (c6 −8) eski sınır geçerli.
+const TPL_FACE_CAP = { ON: true, MARGIN: 3 };
 
 function curveAt(curve, x) {
   if (x <= curve[0][0]) return curve[0][1];
@@ -112,7 +123,7 @@ function labToRgb(L, a, b) {
  * @returns {Promise<{buf: Buffer|null, applied: boolean, reason?: string, bgL?: number, gate?: number, grayscale?: boolean, skinShare?: number}>}
  *   applied=false iken buf null — çağıran kendi karesini korur.
  */
-async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = DEFAULT_BG_STRENGTH } = {}) {
+async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = DEFAULT_BG_STRENGTH, faceHeadroom = null } = {}) {
   const { data: rgb, info } = await sharp(buf).rotate().removeAlpha().raw()
     .toBuffer({ resolveWithObject: true });
   const W = info.width, H = info.height, N = W * H;
@@ -168,6 +179,7 @@ async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = 
 
   const tDL = tabulate(DL_CURVE), tDA = tabulate(DA_CURVE), tDB = tabulate(DB_CURVE);
   const tSL = tabulate(SKIN_DL_EXTRA), tSB = tabulate(SKIN_DB_EXTRA);
+  const cap = FACE_CAP.ON ? faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, faceHeadroom) : null;
   const out = Buffer.alloc(N * 3);
   let skinSum = 0;
   for (let i = 0; i < N; i++) {
@@ -176,7 +188,11 @@ async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = 
     const s = Math.min(1, skinW[i]);
     skinSum += s;
     const w = wMap[i];
-    const dL = tDL[k] + s * tSL[k];
+    let dL = tDL[k] + s * tSL[k];
+    if (cap && cap.c[i] > 0) {
+      const lim = cap.limit / Math.max(w, 1e-3);
+      if (dL > lim) dL = dL - cap.c[i] * (dL - lim);
+    }
     const da = colorK * (tDA[k] + s * SKIN_DA_EXTRA);
     const db = colorK * (tDB[k] + s * tSB[k]);
     const o = labToRgb(Math.min(100, L + w * dL), a + w * da, b + w * db);
@@ -186,7 +202,52 @@ async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = 
   // Keskinleştirme kapalı: faceDetail zaten yüzü netleştiriyor; ikinci unsharp
   // yüz kenarında çizgi bırakıyordu (b2a9537d c7).
   const res = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
-  return { buf: res, applied: true, bgL, gate, grayscale, skinShare: skinSum / N };
+  return { buf: res, applied: true, bgL, gate, grayscale, skinShare: skinSum / N, faceCap: cap ? { ringLift: cap.ringLift, limit: cap.limit, n: cap.n, tplCapped: !!cap.tplCapped, headroom: faceHeadroom } : null };
+}
+
+/**
+ * Yüze duyarlı sınır: kafa+boyun ağırlığı c (0..1) ve yüze verilebilecek en çok açma (L).
+ * Yüz kutusu yüz derisi olasılığının yüzdeliklerinden; halka arka plan pikselleri. Yüz ya da
+ * halka yoksa null (eski davranış).
+ */
+function faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, faceHeadroom = null) {
+  const xs = [], ys = [];
+  for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (P[CLASSES.faceSkin][y * W + x] > 0.6) { xs.push(x); ys.push(y); }
+  if (xs.length < 60) return null;
+  xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+  const q = (a, p) => a[Math.min(a.length - 1, Math.floor(p * a.length))];
+  const x0 = q(xs, 0.03), x1 = q(xs, 0.97), y0 = q(ys, 0.03), y1 = q(ys, 0.97);
+  const fw = Math.max(8, x1 - x0), fh = Math.max(8, y1 - y0), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  let lift = 0, n = 0;
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const d = Math.hypot((x - cx) / fw, (y - cy) / fh);
+      if (d < FACE_CAP.RING_IN || d > FACE_CAP.RING_OUT) continue;
+      const i = y * W + x;
+      if (P[CLASSES.background][i] <= 0.55) continue;
+      const L = rgbToLab(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2])[0];
+      lift += wMap[i] * tDL[Math.max(0, Math.min(400, Math.round(L * 4)))]; n++;
+    }
+  }
+  if (n < 40) return null;
+  const ringLift = lift / n;
+  const c = new Float32Array(W * H);
+  const neckY1 = y1 + FACE_CAP.NECK_FH * fh;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      // Kafa: yüz derisi + saç, yüz kutusunun 1.4 katı içinde (vücuttaki saç benzeri pikseller hariç).
+      const inHead = Math.abs(x - cx) <= 0.7 * fw * 1.4 && y >= y0 - 0.9 * fh && y <= y1 + 0.15 * fh;
+      let v = inHead ? Math.min(1, P[CLASSES.faceSkin][i] + P[CLASSES.hair][i]) : 0;
+      // Boyun: yüzün altında vücut derisi, aşağı doğru sönerek (yüz/boyun basamağı olmasın).
+      if (y > y1 && y < neckY1 && Math.abs(x - cx) <= fw) v = Math.max(v, P[CLASSES.bodySkin][i] * (1 - (y - y1) / (neckY1 - y1)));
+      c[i] = v;
+    }
+  }
+  let limit = ringLift + FACE_CAP.MARGIN;
+  const tplCapped = TPL_FACE_CAP.ON && Number.isFinite(faceHeadroom) && Math.max(0, faceHeadroom) < limit;
+  if (tplCapped) limit = Math.max(0, faceHeadroom);
+  return { c, ringLift, limit, n, tplCapped };
 }
 
 /** Arka plan L'sine göre güç çarpanı (0..1). */
@@ -196,5 +257,5 @@ function bgGate(bgL) {
 
 module.exports = {
   applyGlowFilter,
-  _testables: { curveAt, rgbToLab, labToRgb, bgGate, DL_CURVE, DEFAULT_STRENGTH, DEFAULT_BG_STRENGTH, BG_DARK_L, BG_BRIGHT_L },
+  _testables: { FACE_CAP, TPL_FACE_CAP, faceCapOf, curveAt, rgbToLab, labToRgb, bgGate, DL_CURVE, DEFAULT_STRENGTH, DEFAULT_BG_STRENGTH, BG_DARK_L, BG_BRIGHT_L },
 };

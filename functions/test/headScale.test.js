@@ -553,3 +553,14 @@ test("widthUsable: profil ve önden dönmüş çıktıda genişlik kullanılmaz"
   assert.equal(widthUsable(0.85, 0.80), false);
   assert.equal(widthUsable(null, 0.2), false);
 });
+
+// 2026-11-13 c4 (profil şablon, yaw 54°): 68 nokta yüz 1.39 diyordu, 3B ağ 1.15; hacim 1.02.
+test("plan: profilde (volFloor) küçültme kafa hacmini şablonun %97'sinin altına indirmez", () => {
+  const { planLandmarkScale, VOLUME_FLOOR } = require("../headScale");
+  const p = planLandmarkScale(1.189, { bodyIou: 0.94, volRatio: 1.058, volFloor: true });
+  assert.ok(Math.abs(p.rawS - VOLUME_FLOOR / 1.058) < 1e-9, `rawS=${p.rawS}`);
+  const q = planLandmarkScale(1.189, { bodyIou: 0.94, volRatio: 1.058 });
+  assert.ok(Math.abs(q.rawS - 1 / Math.sqrt(1.189 * 1.058)) < 1e-9);
+  const big = planLandmarkScale(1.39, { bodyIou: 0.94, volRatio: 1.02, volFloor: true });
+  assert.equal(big.volUsed, false); // hacim yüzden çok sapıyorsa taban da yok (eski davranış)
+});

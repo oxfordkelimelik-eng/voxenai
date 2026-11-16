@@ -157,6 +157,11 @@ async function layers({ buf, tpl, styleId, chunkIdx, faceLight = false, template
  * keskinlik + gren, yüzü yeniden çizmez) → SİYAH-BEYAZ. Eski ışık/ten
  * katmanları yüzü açıyordu (bkz. faceTone başlığı) — burada yoklar.
  */
+// ŞABLON İZİ DETEKTÖRÜ (2026-11-06, bkz. ghostDetect.js): kare iz skoru eşiği
+// geçerse ghostClean sıcak yamalarda beklenen kafanın içini de temizler.
+// false = 11-05 v28 davranışı (yalnız yarı saydam karışım).
+const GHOST_DETECT = true;
+
 // Selfie kafa profilleri (bkz. ghostClean.headProfileOf), iş başına bir kez —
 // worker aynı işin kareleri arasında önbellekte tutar. Selfie'ler iş bitince
 // silinir; boş sonuç önbelleğe alınmaz.
@@ -167,6 +172,10 @@ const EYE_OPEN_SIMPLE = false;
 // selfie'deki gibi doğal olsun"): köşe base'in altına iniyor, 5 karede kişi
 // somurtkan göründü. İfade artık yalnız promptla.
 const MOUTH_LOCK_ON = false;
+// BAKIŞ KİLİDİ (2026-11-06, c9, kullanıcı: "çıktı gözleri her zaman base ile
+// aynı yere bakmalı"): çıktının kendi irisi base'in iris konumuna kayar
+// (gazeLock.js). Geri dönüş: false.
+const GAZE_LOCK_ON = true;
 // VÜCUT TENİ YÜZE (2026-11-03, 7e04933e c5, kullanıcı: "yüz ten rengi ile el
 // uyuşmamış, yüz ten rengi ile tüm vücut teni uyuşmalı"): model base'in elini
 // değiştirmeden bırakıyor. skinTone yüz kilidiyle: yalnız el/kol yüzün rengine
@@ -204,7 +213,7 @@ function selfieProfiles(key, urls) {
   return p;
 }
 
-async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = false, mstUser = null, mstTpl = null, refUrls = null, jobKey = null, refDescriptor = null, hairErased = false }) {
+async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = false, mstUser = null, mstTpl = null, refUrls = null, jobKey = null, refDescriptor = null, hairErased = false, templateHat = false, deadline = null }) {
   let out = toBuf(buf);
   tpl = toBuf(tpl);
   const tag = `style=${styleId}, chunk=${chunkIdx}`;
@@ -220,16 +229,21 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   else try {
     const { cleanTemplateGhost } = require("./ghostClean");
     const profiles = Array.isArray(refUrls) && refUrls.length ? await selfieProfiles(jobKey, refUrls) : [];
-    const gc = await cleanTemplateGhost(out, tpl, { profiles });
+    // İz detektörü (bkz. ghostDetect.js): yerel OWLv2, ücretsiz; hata verirse v28 davranışı.
+    const { scoreGhost } = require("./ghostDetect");
+    // ŞABLONDA ŞAPKA (2026-11-06, falPhotos şablon şapka tespiti): model şapkayı
+    // tuttuysa şapka iz sayılmaz (bkz. ghostClean HAT_KEPT_SHARE).
+    const gc = await cleanTemplateGhost(out, tpl, { profiles, ghostScorer: GHOST_DETECT ? scoreGhost : null, templateHat: !!templateHat });
     if (gc.applied && gc.buf) out = gc.buf;
     const n = (v, d = 3) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    console.log(`ŞABLON İZİ (${tag}): ${gc.applied ? "TEMİZLENDİ" : `ATLANDI[${gc.reason}]`} izPx=${gc.ghostPx ?? "null"} iz/yüz²=${n(gc.ghostFace2)} kırıntı=${gc.crumbPx ?? 0} gözÜstü=${n(gc.ghostUp, 2)} kafayaBitişik=${n(gc.ghostAttached, 2)} yöntem=${gc.mode || "null"} selfieProfil=${profiles.length}${gc.ms != null ? ` ${gc.ms}ms` : ""}`);
+    console.log(`ŞABLON İZİ (${tag}): ${gc.applied ? "TEMİZLENDİ" : `ATLANDI[${gc.reason}]`} izPx=${gc.ghostPx ?? "null"} iz/yüz²=${n(gc.ghostFace2)} kırıntı=${gc.crumbPx ?? 0} gözÜstü=${n(gc.ghostUp, 2)} kafayaBitişik=${n(gc.ghostAttached, 2)} yöntem=${gc.mode || "null"} selfieProfil=${profiles.length} dedektör=${n(gc.detScore, 2)}${gc.detHot ? `[İZ +${n(gc.hotAdded)}]` : ""}${gc.hatShare != null ? ` şapka=${gc.hatKept ? "KORUNDU" : "yok"}(pay=${n(gc.hatShare, 2)} alan=${n(gc.hatArea, 2)})` : ""}${gc.ms != null ? ` ${gc.ms}ms` : ""}`);
   } catch (e) {
     console.error("Sade akış: şablon izi temizliği hata verdi (atlanıyor):", e);
   }
   try {
     const { correctHeadByWarp } = require("./headWarp");
-    const hw = await correctHeadByWarp(out, tpl, { templateEyewear });
+    // Çizgi koruma (headWarp/lineKeep) iş süresi azsa atlanır (900 sn bütçe).
+    const hw = await correctHeadByWarp(out, tpl, { templateEyewear, deadline });
     if (hw.applied && hw.buf) out = hw.buf;
     console.log(`KAFA BÜKME (${tag}): ${hw.applied ? "UYGULANDI" : `ATLANDI[${hw.reason}]`} ${hw.ölçü || ""}`);
   } catch (e) {
@@ -239,7 +253,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const { matchFaceToScene } = require("./faceTone");
     const ft = await matchFaceToScene(out, tpl, { mstUser, mstTpl });
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} şablonBoyunYüz=${n(ft.neckDeltaTpl)}`;
+    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} şablonBoyunYüz=${n(ft.neckDeltaTpl)} şablonÇevreL=${n(ft.tplRingL)} karanlıkSahne=${ft.darkScene ? (ft.deep ? "derin" : "evet") : "hayır"} arkadanIşık=${ft.backlit ? "evet" : "hayır"} boyunİşareti=${ft.neckLog != null ? "×" + n(Math.exp(ft.neckLog), 2) + (ft.neckUsed ? " uygulandı" : " yok") : "—"}`;
     if (ft.applied && ft.buf) out = ft.buf;
     console.log(`YÜZ SAHNE IŞIĞI (${tag}): ${ft.applied ? "UYGULANDI" : `ATLANDI[${ft.reason}]`} ${ölçü}${ft.ms != null ? ` ${ft.ms}ms` : ""}`);
   } catch (e) {
@@ -267,6 +281,15 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   } catch (e) {
     console.error("Sade akış: ağız köşesi hata verdi (atlanıyor):", e);
   }
+  if (GAZE_LOCK_ON) try {
+    const { lockGazeToBase } = require("./gazeLock");
+    const gl = await lockGazeToBase(out, tpl, { templateEyewear });
+    if (gl.applied && gl.buf) out = gl.buf;
+    const f = (a) => (Array.isArray(a) ? a.map((x) => (x == null ? "-" : x.toFixed(2))).join("/") : "-");
+    console.log(`BAKIŞ KİLİDİ (${tag}): ${gl.applied ? "UYGULANDI" : `ATLANDI[${gl.reason}]`} base=${f(gl.base)} çıktı=${f(gl.before)}→${f(gl.after)} kayma=${f(gl.du)} telafi=${gl.comp != null ? gl.comp.toFixed(2) : "-"}${gl.camera ? " kamera" : ""} ${gl.ms}ms`);
+  } catch (e) {
+    console.error("Sade akış: bakış kilidi hata verdi (atlanıyor):", e);
+  }
   // GÖZ AÇIKLIĞI (2026-10-30, kullanıcı: "uykulu gibi duruyorsa gözleri
   // açmalı, base ile aynı yere bakmalı"): eyeOpen.js yalnız üst kapağı en çok
   // açıklığın %25'i kadar kaldırır (iris ve bakış yönü yerinde), kimlik
@@ -282,6 +305,15 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     } catch (e) {
       console.error("Sade akış: göz açıklığı hata verdi (atlanıyor):", e);
     }
+  }
+  try {
+    const { matchFaceStructure } = require("./faceDetail");
+    const fs2 = await matchFaceStructure(out, tpl);
+    const n = (v) => (v != null ? v.toFixed(3) : "null");
+    if (fs2.applied && fs2.buf) out = fs2.buf;
+    console.log(`YÜZ YAPISI (${tag}): ${fs2.applied ? "UYGULANDI" : `ATLANDI[${fs2.reason}]`} şablon=${n(fs2.tpl)} yüz=${n(fs2.before)}->${n(fs2.after)} kazanç=${n(fs2.gain)}`);
+  } catch (e) {
+    console.error("Sade akış: yüz yapısı hata verdi (atlanıyor):", e);
   }
   try {
     const { matchFaceDetail } = require("./faceDetail");
@@ -370,13 +402,23 @@ async function fringePrep({ buf, tpl }) {
  */
 const GLOW_PERSON = 0.45;
 const GLOW_SCENE = 0.45;
-async function glow({ buf }) {
-  const { applyGlowFilter } = require("./faceGlow");
-  const gl = await applyGlowFilter(toBuf(buf), { strength: GLOW_PERSON, bgStrength: GLOW_SCENE });
+async function glow({ buf, tpl = null }) {
+  const { applyGlowFilter, _testables: GT } = require("./faceGlow");
+  const sharp = require("sharp");
+  // Şablon yüzü tavanı: iki yüzün L'si faceTone'un ölçüsüyle (yüz kutusu yakını, kırpılmış ortalama).
+  let headroom = null, tplL = null, curL = null;
+  if (tpl && GT.TPL_FACE_CAP.ON) try {
+    const T = require("./faceTone")._testables;
+    const Lab = (Y) => (Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y);
+    const lOf = async (b) => { const m = await sharp(b).metadata(); const S = await T.probsOf(await sharp(b).png().toBuffer(), m.width, m.height); const st = S && T.skinStats(S); return st ? Lab(st.Y) : null; };
+    tplL = await lOf(toBuf(tpl)); curL = await lOf(toBuf(buf));
+    if (tplL != null && curL != null) headroom = tplL + GT.TPL_FACE_CAP.MARGIN - curL;
+  } catch { /* ölçülemezse eski sınır */ }
+  const gl = await applyGlowFilter(toBuf(buf), { strength: GLOW_PERSON, bgStrength: GLOW_SCENE, faceHeadroom: headroom });
   const n = (v) => (v != null ? v.toFixed(1) : "null");
   const applied = !!(gl.applied && gl.buf);
   const ölçü = applied
-    ? `arkaPlanL=${n(gl.bgL)} güç=${gl.gate.toFixed(2)} gri=${gl.grayscale ? 1 : 0}`
+    ? `arkaPlanL=${n(gl.bgL)} güç=${gl.gate.toFixed(2)} gri=${gl.grayscale ? 1 : 0} yüzSınırı=${gl.faceCap ? `halka+${n(gl.faceCap.ringLift)}→en çok ${n(gl.faceCap.limit)}${gl.faceCap.tplCapped ? " (şablon yüzü tavanı)" : ""}` : "yok"} yüzL=${n(curL)} şablonYüzL=${n(tplL)}`
     : `ATLANDI[${gl.reason}] arkaPlanL=${n(gl.bgL)}`;
   return { applied, buf: applied ? gl.buf : null, ölçü };
 }
@@ -422,9 +464,42 @@ async function flattenSelfie({ buf }) {
   return require("./selfieLight").flattenSelfieLight(toBuf(buf));
 }
 
+/** SELFIE KAFA KIRPIMI (2026-11-08, bkz. selfieCrop.js) — segmentasyon havuzda. */
+async function cropSelfieHead({ buf }) {
+  return require("./selfieCrop").cropSelfieHead(toBuf(buf));
+}
+
 /** GÜNEŞ GÖZLÜĞÜNÜ BASE'DEN TAŞIMA (2026-11-03, bkz. sunglassTransfer.js). */
 async function sunglassTransfer({ buf, tpl }) {
   return require("./sunglassTransfer").transferSunglasses(toBuf(buf), toBuf(tpl));
 }
 
-module.exports = { _testables: { SKIN_FIELD_SIMPLE }, layers, simpleFinish, reposeSelfie, flattenSelfie, sunglassTransfer, headScale, surroundPrep, curlRemnantPrep, fringePrep, glow, selfieDetail, finishInpaint, toBuf };
+/**
+ * GÖZLÜKTE KENDİ GÖZ + CAM TONU (2026-11-12, bkz. eyewearOwnEye.js,
+ * eyewearLensTint.js) — gözlük bileşiminden sonra, havuzda, tek gidiş-dönüş:
+ * önce kendi göz, sonra cam tonu/çerçeve rengi. png: son görüntü (hiçbiri
+ * uygulanmadıysa null).
+ */
+async function eyewearOwnEye({ preBuf, fixBuf, W, H, rect, geom, tplBuf, ownEyeOn = true, lensTintOn = true }) {
+  const sharp = require("sharp");
+  preBuf = toBuf(preBuf); fixBuf = toBuf(fixBuf); tplBuf = toBuf(tplBuf);
+  const [preRgb, fixRgb] = await Promise.all([preBuf, fixBuf].map((b) => sharp(b).removeAlpha().raw().toBuffer()));
+  const r = await require("./eyewearLensTint").ownEyeThenTint({ preBuf, preRgb, fixBuf, fixRgb, W, H, rect, geom, tplBuf, ownEyeOn, lensTintOn });
+  return { png: r.png, ownEye: r.ownEye, lensTint: r.lensTint };
+}
+
+/** ŞABLON GÖZÜNDE GÖZLÜK PAYI (2026-11-12, ZIT BAKIŞ kapısı; bkz. gazeGate.IRIS_TPL_GLASS_SKIP). */
+async function eyeGlassShare({ tpl }) {
+  return { share: await require("./sunglassTransfer").eyeGlassShare(toBuf(tpl)) };
+}
+
+/**
+ * ŞABLON ŞAPKA (2026-11-06, bkz. hatDetect.js) — üretimden önce, şablon başına
+ * bir kez: prompt seçer; şapka maskesi geri yerleştirmede, sonuç bitirmede
+ * (ghostClean) kullanılır. Segmentasyon + (alan geçerse) OWLv2 havuzda.
+ */
+async function templateHat({ tpl }) {
+  return require("./hatDetect").detectTemplateHat(toBuf(tpl));
+}
+
+module.exports = { _testables: { SKIN_FIELD_SIMPLE }, layers, simpleFinish, reposeSelfie, flattenSelfie, cropSelfieHead, sunglassTransfer, eyeGlassShare, eyewearOwnEye, templateHat, headScale, surroundPrep, curlRemnantPrep, fringePrep, glow, selfieDetail, finishInpaint, toBuf };

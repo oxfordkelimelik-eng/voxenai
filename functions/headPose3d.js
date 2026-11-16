@@ -298,7 +298,19 @@ async function headPose3dOf(buf, { loose = true } = {}) {
   try {
     const { data, W, H } = await normalized(buf, 1600);
     const r = await meshPose(data, W, H, { loose });
-    if (r.pose) return { ...r.pose, src: "mesh", agree: r.agree };
+    if (r.pose) {
+      // Yüz eni ve çene ucu görüntüye oran (2026-11-08, prompt pozu): 68 noktalı
+      // çene hattı dönük başta yakın yanağı arka plana taşıyor (+%25, 27deeec2 c0).
+      const ext = {};
+      if (Array.isArray(r.mesh) && r.mesh.length > 152 && W > 0 && H > 0) {
+        let x0 = Infinity, x1 = -Infinity;
+        for (const p of r.mesh) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; }
+        ext.faceW = (x1 - x0) / W;
+        ext.chinX = r.mesh[152][0] / W;
+        ext.chinY = r.mesh[152][1] / H;
+      }
+      return { ...r.pose, src: "mesh", agree: r.agree, ...ext };
+    }
     if (r.lo) {
       const { signedYawFromLandmarks } = require("./faceQuality");
       const s = signedYawFromLandmarks({ positions: r.lo.pts });

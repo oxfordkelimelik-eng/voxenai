@@ -34,8 +34,8 @@ test("küçük fark dokunulmaz, renk kayması yarım güç ve sınırlı", () =>
 
 test("ışık yönü: şablon yüzünün sol-sağ eğimi çıktıya aktarılır, dikey yarım", () => {
   const p = tone.planTone(
-    { Y: 0.2, a: 10, b: 15, slope: { gu: -1.0, gv: 0 } },
-    { Y: 0.2, a: 10, b: 15, slope: { gu: 0.2, gv: 0 } }, 1);
+    { Y: 0.2, a: 10, b: 15, slope: { gu: -0.9, gv: 0 } },
+    { Y: 0.2, a: 10, b: 15, slope: { gu: 0.6, gv: 0 } }, 1);
   assert.ok(p.gu < 0);
   assert.ok(Math.abs(p.gu) <= 0.9 + 1e-12);
   assert.strictEqual(p.gv, 0);
@@ -174,7 +174,9 @@ test("ton: hedef şablon yüzü × karedeki vücudun şablona oranı (sınırlı
   assert.strictEqual(tone.bodyAdjustedTarget(tpl, null).tpl.Y, 0.1, "vücut yoksa eski hedef");
   assert.ok(Math.abs(tone.bodyAdjustedTarget(tpl, { ratio: 0.9 }).tpl.Y - 0.09) < 1e-12);
   assert.strictEqual(tone.bodyAdjustedTarget(tpl, { ratio: 5 }).bodyRatio, 2);
-  assert.ok(tone.GAIN_MIN <= Math.log(0.42), "karanlık sahnede ×0.42 yapılabilmeli (c1, c9)");
+  // 2026-11-08 (27deeec2 c5, kullanıcı: "ten çok koyu"): karartma en çok ×0.8, payı 0.4.
+  assert.ok(Math.abs(tone.GAIN_MIN - Math.log(0.8)) < 1e-12, "karartma en çok ×0.8");
+  assert.ok(tone.GAIN_BETA <= 0.4 + 1e-12, "farkın en çok 0.4'ü uygulanır");
 });
 
 test("ton: kararsız pikseller komşu değerle dolar, kıyafet tohumu sıfırda tutar", () => {
@@ -274,4 +276,103 @@ test("ton kenarı: yerel kafa/zemin rengi ağırlıklı ortalama, kapsama yoksa 
   assert.ok(Math.abs(m.F[10 * 3] - 0.05) < 1e-6 && Math.abs(m.B[10 * 3] - 0.6) < 1e-6);
   assert.strictEqual(m.ok[10], 1);
   assert.strictEqual(m.ok[0], 0, "zemin uzakta");
+});
+
+// VÜCUT IŞIĞI TEK ORAN (2026-11-06, kullanıcı: "tüm vücut aynı oranda almalı").
+test("vücut ışığı: kopuk el ve boyna bağlı göğüs aynı oranı alır, yatay terim vücuda gitmez", () => {
+  const plan = { gu: 0.8, gv: 0.3 };
+  const fcy = 100, fh = 100;
+  // Vücut pikselleri (ah=0, ab=1): sağ uçta el, ortada göğüs — x hesaba girmez.
+  const handFar = tone.bodyLightLog(plan, 0.8 * 0.75 + 0.3 * 0.75, 400, fcy, fh, 0, 1);
+  const chest = tone.bodyLightLog(plan, 0.3 * 0.75, 400, fcy, fh, 0, 1);
+  assert.ok(Math.abs(handFar - chest) < 1e-12, `el ${handFar} göğüs ${chest}`);
+  assert.ok(Math.abs(chest - 0.3 * tone.SLOPE_UV_MAX) < 1e-12);
+});
+
+test("vücut ışığı: yüzde tam düzlem, boyun bandında sürekli geçiş", () => {
+  const plan = { gu: 0.8, gv: 0.3 };
+  const fcy = 100, fh = 100, full = 0.5;
+  assert.strictEqual(tone.bodyLightLog(plan, full, 120, fcy, fh, 1, 1), full, "yüz bugünküyle aynı");
+  // ah 1 → 0 boyunca katkı sıçramadan değişir.
+  let prev = null;
+  for (let k = 0; k <= 20; k++) {
+    const ah = 1 - k / 20;
+    const v = tone.bodyLightLog(plan, full, 160, fcy, fh, ah, 1);
+    if (prev != null) assert.ok(Math.abs(v - prev) <= Math.abs(full - 0.3 * 0.6) / 20 + 1e-9);
+    prev = v;
+  }
+  assert.strictEqual(tone.bodyLightLog({ gu: 0, gv: 0 }, 0, 300, fcy, fh, 0, 1), 0);
+});
+
+// 2026-11-13: güçlü yan ışıklı şablonda (|gu| ≥ 1.0) pay 0.85, sınır ±1.3 (79956cb2 c1: −1.82).
+test("ışık yönü: güçlü yan ışık daha çok aktarılır, düz şablonda değişmez", () => {
+  const p = tone.planTone({ Y: 0.2, a: 10, b: 15, slope: { gu: -1.82, gv: 0 } }, { Y: 0.2, a: 10, b: 15, slope: { gu: -0.07, gv: 0 } }, 1);
+  assert.ok(Math.abs(p.gu - -1.3) < 1e-9, String(p.gu));
+  const q = tone.planTone({ Y: 0.2, a: 10, b: 15, slope: { gu: -0.5, gv: 0 } }, { Y: 0.2, a: 10, b: 15, slope: { gu: 0, gv: 0 } }, 1);
+  assert.ok(Math.abs(q.gu - -0.35) < 1e-9, String(q.gu));
+});
+
+// 2026-11-13: karanlık sahne (şablonda yüz çevresi koyu, ten aynı) → ×0.50'ye kadar.
+test("karartma: yalnız karanlık sahnede ×0.50'ye iner", () => {
+  const t = { Y: 0.03, a: 10, b: 15 }, o = { Y: 0.2, a: 10, b: 15 };
+  assert.ok(Math.abs(Math.exp(tone.planTone(t, o, 1).logGain) - 0.8) < 1e-9);
+  const d = tone.planTone(t, o, 1, { darkScene: true });
+  assert.ok(Math.abs(Math.exp(d.logGain) - 0.5) < 1e-9 && d.deep === true);
+  assert.strictEqual(tone.planTone({ Y: 0.4, a: 10, b: 15 }, o, 1, { darkScene: true }).deep, false);
+});
+
+// 2026-11-13 (79956cb2 c5 siyah-beyaz): yüz kutusundan uzak "yüz derisi" pikselleri ölçüye girmez.
+test("yüz derisi ölçüsü: yüz kutusu dışındaki yanlış deri sayılmaz", () => {
+  const { skinStats, SKIN_BOX } = tone;
+  const W = 100, H = 100, CLASSES = { faceSkin: 0, hair: 1, others: 2 };
+  const P = [new Float32Array(W * H), new Float32Array(W * H), new Float32Array(W * H)];
+  const work = new Uint8Array(W * H * 3);
+  const box = { x: 40, y: 40, width: 20, height: 20 };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, inFace = x >= 40 && x < 60 && y >= 40 && y < 60;
+    if (inFace || y > 80) { P[0][i] = 0.9; const v = inFace ? 180 : 10; work[i * 3] = work[i * 3 + 1] = work[i * 3 + 2] = v; }
+  }
+  const st = skinStats({ P, CLASSES, W, H, work, box });
+  assert.strictEqual(st.n, 400);
+  SKIN_BOX.ON = false;
+  try { assert.ok(skinStats({ P, CLASSES, W, H, work, box }).n > 400); } finally { SKIN_BOX.ON = true; }
+});
+
+// 2026-11-13 (79956cb2 c4/c2): çıktıda yüz kendi boynundan şablondakinden ≥3 L parlaksa iki ölçünün yumuşağına kadar.
+test("boyun işareti: yüz boynundan fazla parlaksa karartma açılır, küçük farkta değişmez", () => {
+  const t = { Y: 0.06, a: 10, b: 15 }, o = { Y: 0.13, a: 10, b: 15 };
+  const base = tone.planTone(t, o, 1);
+  assert.ok(Math.abs(Math.exp(base.logGain) - 0.8) < 1e-9);
+  const n = tone.planTone(t, o, 1, { neck: { excess: 7.4, outL: 43 } });
+  assert.ok(n.neckUsed && n.logGain < base.logGain && n.logGain >= tone.NECK_MATCH.MIN - 1e-12, String(n.logGain));
+  assert.ok(n.logGain >= n.raw - 1e-12, "şablon ölçüsünden derine inmez");
+  assert.strictEqual(tone.planTone(t, o, 1, { neck: { excess: 2, outL: 43 } }).logGain, base.logGain);
+  // Ters yön (boyun yüzü parlatmak istiyor, şablon karartmak istiyor) → dokunmaz.
+  assert.strictEqual(tone.planTone(t, o, 1, { neck: { excess: -6, outL: 43 } }).logGain, base.logGain);
+});
+
+// 2026-11-14 (43c2e739 c4): arkadan ışıklı gündüz şablonunda karartma ×0.70'e kadar; işaret yoksa değişmez.
+test("arkadan ışık: yalnız işaretli karede ×0.80 sınırı ×0.70'e açılır", () => {
+  const t = { Y: 0.05, a: 10, b: 15 }, o = { Y: 0.14, a: 10, b: 15 };
+  const base = tone.planTone(t, o, 1);
+  assert.ok(Math.abs(Math.exp(base.logGain) - 0.8) < 1e-9 && base.backlit === false);
+  const b = tone.planTone(t, o, 1, { backlit: true });
+  assert.ok(b.backlit && Math.abs(Math.exp(b.logGain) - 0.7) < 1e-9, String(Math.exp(b.logGain)));
+  // Açma yönünde (raw > 0) arkadan ışık işareti hiçbir şey yapmaz.
+  assert.strictEqual(tone.planTone(o, t, 1, { backlit: true }).logGain, tone.planTone(o, t, 1).logGain);
+});
+
+// 2026-11-14 (43c2e739 c9): ışıklı, yüzü şablon yüzü + pay üstüne açmaz; pay büyükse eski sınır.
+test("ışıklı yüz sınırı: şablon yüzü tavanı yalnız daha sıkıysa uygulanır", () => {
+  const { faceCapOf, FACE_CAP } = require("../faceGlow")._testables;
+  const W = 120, H = 120, N = W * H, CLASSES = { background: 0, faceSkin: 1, hair: 2, bodySkin: 3 };
+  const P = [new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (x >= 45 && x < 75 && y >= 45 && y < 75) P[1][i] = 1; else P[0][i] = 1; }
+  const rgb = Buffer.alloc(N * 3, 80), wMap = new Float32Array(N).fill(1), tDL = new Float32Array(401).fill(5);
+  const free = faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL);
+  assert.ok(Math.abs(free.limit - (5 + FACE_CAP.MARGIN)) < 1e-6 && !free.tplCapped);
+  const tight = faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, 1);
+  assert.ok(tight.tplCapped && Math.abs(tight.limit - 1) < 1e-9);
+  assert.strictEqual(faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, -4).limit, 0);
+  assert.ok(!faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, 20).tplCapped);
 });
