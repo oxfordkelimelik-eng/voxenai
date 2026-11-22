@@ -83,7 +83,8 @@ test("onarım chunk başına BÜTÇELİ (tek seferlik bayrak geri gelmemiş)", (
 test("bütçe deneme sayısından AYRI ve ondan küçük (kredi koruması)", () => {
   const budget = Number(/const ARTIFACT_REPAIR_MAX_PER_CHUNK = (\d+);/.exec(FAL)[1]);
   const attempts = Number(/const OPENAI_DIRECT_MAX_ATTEMPTS = (\d+);/.exec(FAL)[1]);
-  assert.ok(budget >= 1 && budget < attempts, `bütçe=${budget} deneme=${attempts}`);
+  // 2026-11-19 sade akış: onarım KAPALI (0). Açılırsa deneme sayısından küçük kalmalı.
+  assert.ok(budget >= 0 && budget < attempts, `bütçe=${budget} deneme=${attempts}`);
 });
 
 // TAM KARE Vision artefakt reddi (27 ret) onarım yoluna HİÇ uğramıyordu:

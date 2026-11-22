@@ -134,6 +134,21 @@ const _turnBands = <CaptureAngle, (double, double)>{
   CaptureAngle.turnL4: (-60, -40),
 };
 
+/// AI çekiminde ön ve dönme karelerinde telefon göz hizasında olsun
+/// (ML Kit headEulerAngleX, yukarı+/aşağı−). 2026-11-17: 10'lu setin 9
+/// selfie'si hafif yukarı bakıyordu (sunucu 3B ölçüm +1..+6°) ve model başı
+/// her karede şablondan ortalama +9° yukarı kaldırdı. Eskiden ±12.
+const _levelPitchMin = -8.0;
+const _levelPitchMax = 4.0;
+
+String? _levelPitchMessage(double pitch) {
+  if (pitch > _levelPitchMax) {
+    return 'Telefonu göz hizana kaldır, çenen düz dursun';
+  }
+  if (pitch < _levelPitchMin) return 'Çeneni biraz kaldır, düz bak';
+  return null;
+}
+
 /// Sırayla açı fotoğraflarını canlı hizalama rehberiyle çeken ekran.
 /// Her açı çizgiye "oturmadan" çekim kabul edilmez. Oturunca çerçeve yeşile
 /// döner (uymuyorsa kırmızı) ve otomatik çeker.
@@ -363,7 +378,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
         if (pitch > -12) return (false, 'Başını biraz daha ÖNE eğ (çene aşağı)');
         if (pitch < -30) return (false, 'Biraz kaldır (fazla eğdin)');
       } else {
-        if (pitch.abs() > 12) return (false, 'Başını dik tut, çene düz');
+        final levelMsg = _levelPitchMessage(pitch);
+        if (levelMsg != null) return (false, levelMsg);
         final (lo, hi) = _turnBands[_angle]!;
         final toRight = hi > 0;
         if (yaw < lo) {
@@ -390,6 +406,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
         // AI çekiminde ön kare daha dar (ilk azıcık-dönük kare 6°'den başlıyor).
         if (yaw.abs() > (widget.angles == kAiFaceAngles ? 5 : 8)) {
           return (false, 'Dümdüz kameraya bak');
+        }
+        if (widget.angles == kAiFaceAngles) {
+          final levelMsg = _levelPitchMessage(pitch);
+          if (levelMsg != null) return (false, levelMsg);
         }
       case CaptureAngle.right:
         // Net bir sağ profil için BELİRGİN dönüş şart — dönerken anlık geçen

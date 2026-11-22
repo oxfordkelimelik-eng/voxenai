@@ -1674,6 +1674,17 @@ const HEIGHT_RANGE_TO_BAND = {
   "190+": "tall",
 };
 
+// BOYUN PARAGRAFI YALNIZ UZUN BOYDA (2026-11-17, kullanıcı: "genel fotolarda boyun uzatma var
+// gibi, bu sadece uzun boylu kişiler için çalışmalı"). naturalSwap.describeHeadAndNeck (11-15,
+// "boyun içe kaçmasın", 11-13 "uzun boylunun boynu uzun olur") boyu bilmeden her kareye
+// gidiyordu. f8c1718b (170-175, short): ham çene 8 karenin 7'sinde şablondan YUKARIDA (c6
+// −0.16, c2 −0.13, c4 −0.12 yüz eni; paragraftan önce 7 iş ortanca +0.057 aşağıdaydı) → boyun
+// uzuyor, c4'te kafa "yapışık" duruyor. Uzun boy bandı dışında prompt 11-15 öncesiyle bayt
+// bayt aynı tek cümle.
+function isTallNeck(bodyProfile) {
+  return !!(bodyProfile && HEIGHT_RANGE_TO_BAND[bodyProfile.heightRange] === "tall");
+}
+
 // STİLLER (2026-09-28, yeniden eklendi — kullanıcı kararı). İstemci
 // `style` alanıyla gönderir; lib/core/constants/dating_constants.dart
 // PhotoStyle.coreStyles ile EL İLE senkron tutulmalı.
@@ -2447,7 +2458,7 @@ const OPENAI_IMAGE_TIMEOUT_MS = 300000;
 // Her chunk çalışması bitiş zamanını AsyncLocalStorage ile taşır; isteğe bağlı
 // AI adımları süre azalınca atlanır (kare onlarsız teslim edilir), yeni üretim
 // denemesi başlatılmaz, her OpenAI çağrısı kalan süreyle sınırlanır.
-const { jobClock, recordUsage, tryReserveOptional, waitReserveOptional, runOptional, ledgerSummary, releaseMandatoryReserve, createLedger, chunkContext } = require("./jobContext");
+const { jobClock, recordUsage, tryReserveOptional, waitReserveOptional, runOptional, hardCapAllows, ledgerSummary, releaseMandatoryReserve, createLedger, chunkContext } = require("./jobContext");
 const JOB_TIME_LIMIT_MS = 900 * 1000; // startPhotoGeneration timeoutSeconds ile senkron
 const JOB_FINALIZE_RESERVE_MS = 45 * 1000; // son kayıt/teslim için pay
 const GEN_ATTEMPT_MIN_LEFT_MS = 300 * 1000; // yeni üretim denemesi için gereken süre
@@ -2467,7 +2478,22 @@ function jobTimeLeftMs() {
   return st && st.deadline ? st.deadline - Date.now() : Infinity;
 }
 
+// MUTLAK MALİYET TAVANI (2026-11-19, bkz. jobContext.hardCapAllows): çağrının
+// tahmini, kendi kalite ayarından (ölçülen: low ~$0.015, medium ~$0.10,
+// high ~$0.21 çağrı başına) × aday sayısı. Tavanı aşacaksa çağrı yapılmaz.
+const IMAGE_CALL_EST_USD = { low: 0.02, medium: 0.11, high: 0.22 };
+function imageCallEstUsd(form) {
+  const q = String((form && form.get && form.get("quality")) || "medium");
+  const n = Math.max(1, Number((form && form.get && form.get("n")) || 1) || 1);
+  return (IMAGE_CALL_EST_USD[q] ?? IMAGE_CALL_EST_USD.high) * n;
+}
 async function postOpenAiImageEdit(form, refCount, { timeoutMs = OPENAI_IMAGE_TIMEOUT_MS, all = false } = {}) {
+  const est = imageCallEstUsd(form);
+  if (!hardCapAllows(est)) {
+    const L = ledgerSummary();
+    console.warn(`MALİYET TAVANI: görüntü çağrısı yapılmadı (tahmin $${est.toFixed(3)}, harcanan $${L ? L.spentUsd.toFixed(3) : "?"}, tavan $${L ? L.limitUsd.toFixed(2) : "?"})`);
+    return null;
+  }
   await acquireOpenAiImageSlot();
   try {
     const maxAttempts = 3;
@@ -3636,7 +3662,11 @@ const DEBUG_SAVE_RESAMPLE = false;
 // aynı mantıkta ekleyelim"): kişi 0.6 / sahne 0.3, yalnız koyu sahnede, en son
 // (gözlükten sonra). 21e56b20'de yerelde 10 karenin 7'sine uygulandı; tüm
 // kareye ton eğrisi olduğu için faceTone'un yüz-vücut uyumu bozulmuyor.
-const GLOW_ON = true;
+// 2026-11-22 OTOMATİK KAPALI (kullanıcı: "ışıklı kısmı da bizim çıktılara manuel ekleyebileceğimiz bir
+// filtre haline getir"): yan yana karşılaştırmada fark görülmedi (18 karede ort. +0.6..+3.2 L, yüz
+// tavanları yüzünden FaceApp etkisinin ~üçte biri). Artık onay ekranında ☀ ile elle, tüm sahneye 0.6
+// (faceGlow.applyManualGlow, opsPanel.opsToggleGlow). Geri dönüş: true.
+const GLOW_ON = false;
 // SELFIE'DEN YÜZ DETAYI (2026-10-22, bkz. faceDetailTransfer.js) — kapatmak
 // için false. Süre bütçesinde bu kadar kalmadıysa atlanır (yerel, ~5 sn).
 // KAPATILDI (2026-10-25, b7cd18da 10/10 karede uygulandı): telefon
@@ -3699,6 +3729,7 @@ const REJECTION_REASON_LABELS = {
   "limb-ghost": "El/kol yarı saydam, bozuk ya da sıvanmış çıktı",
   "yaw-under-rotate": "Baş, tabandaki profil dönüşünü bitirmemiş",
   "gaze-opposite": "Gözler tabandakinin tersi yöne bakıyor",
+  "hat-lost": "Şablondaki şapka/bere çıktıda yok, kafa şapka hacmine uzamış",
   "vision-face-light": "Yüz ışığı kol/el ışığıyla uyuşmuyor",
   // NOT: no-face-* etiketleri KALDIRILDI (2026-08-22) — artık eleme sebebi
   // değiller (bkz. KONUM KAPISI'ndaki geri alma gerekçesi). O kuralın kısa
@@ -3744,9 +3775,21 @@ function withPostLayerLock(fn) {
 // WORKER HAVUZU (2026-10-11, bkz. postPool.js): ağır son katman görevi
 // (postTasks.js) havuz açıksa ayrı iş parçacığında paralel, değilse aynı kod
 // bu kilitle ana iş parçacığında sırayla çalışır.
+// SÜRE SINIRI (2026-11-18, 156fa173 c0): havuz görevinin zaman aşımı yoktu;
+// istek 900 sn'de kapanınca Cloud Run CPU'yu kısıyor (cpuIdle), asılı görev
+// fiilen donuyor ve iş %97'de kalıyordu. Her görev işin kalan süresiyle
+// sınırlı (kuyruk dahil); bitirme görevleri teslim/onay adımlarına
+// FINISH_RESERVE_MS bırakır. Süre dolarsa görev hata döner, çağıran katmanı
+// atlar (bitirme atlanırsa kare ham hâliyle gider, bkz. CHUNK_FINISH_REGRESSED).
+const FINISH_RESERVE_MS = 60 * 1000;
+const FINISH_TASKS = new Set(["simpleFinish", "layers", "handRepairPrep", "handRepairFinish"]);
 function runPostTask(name, payload) {
   const pool = require("./postPool");
-  if (pool.enabled()) return pool.run(name, payload);
+  if (pool.enabled()) {
+    const left = jobTimeLeftMs();
+    const timeoutMs = Number.isFinite(left) ? left - (FINISH_TASKS.has(name) ? FINISH_RESERVE_MS : 0) : null;
+    return pool.run(name, payload, { timeoutMs });
+  }
   return withPostLayerLock(() => require("./postTasks")[name](payload));
 }
 const chunkTemplateKey = (jobId, styleId, chunkIdx) => `${jobId}/${styleId}/${chunkIdx}`;
@@ -3898,7 +3941,11 @@ const GATE_REPEAT_DISABLE_AFTER = 2;
 // hâlâ yamalıysa kusur karede daha derindir, dördüncüsü para yakar.
 // (Bu, OPENAI_DIRECT_MAX_ATTEMPTS'ten AYRI bir sayaçtır ve deneme hakkı
 // tüketmez — bkz. o sabitin başlığındaki kredi yakma uyarısı.)
-const ARTIFACT_REPAIR_MAX_PER_CHUNK = 3;
+// 2026-11-19 KAPALI (sade akış, kullanıcı: "fazlalıkları çıkar"): onarım yüzü OpenAI ile yeniden
+// çizen ikinci bir üretim ($0.23, kimlik 0.58'e kadar izinli); patlamaları üreten selfie ışığı
+// dikey hatası 11-18'de düzeldi. Yamalı kare artık onarılmaz, face-artifact etiketiyle onaya
+// düşer. Geri dönüş: 3.
+const ARTIFACT_REPAIR_MAX_PER_CHUNK = 0;
 
 // KİMLİK: MUTLAK EŞİK DEĞİL, SÜRÜKLENME ÖLÇÜLÜR.
 //
@@ -3926,7 +3973,103 @@ const REPAIR_IDENTITY_HARD_MAX = 0.58;
  *        { ok:false, why }      — çağıran ESKİ kareyle normal redde düşer
  * ASLA throw etmez.
  */
-async function tryArtifactRepair({ buf, faceBox, apiKey, refDescriptor, preDist }) {
+// YÜZ ONARIMI BÜTÇEDEN (2026-11-19, 248a0e72: 4 onarım × ~$0.20 zorunlu
+// sayılıp iş $2.36 tuttu). Onarım + yeniden yargı isteğe bağlı adım gibi yer
+// ayırır; yer yoksa onarılmaz, kare onarımın başarısız olduğu hâldeki gibi elenir.
+// EL ONARIMI ADIMI (2026-11-20, kullanıcı: "eller siyahi kişinin elleri kalmış … 1.50 sınırına
+// yaklaşabilirsin"; bkz. handRepair.js). Sıra (inceleme): ucuz koşul (pigment) → süre → YEREL
+// hazırlık (worker; ücretsiz eleme, maske) → bütçe ayırması (süre bittikçe beklemez) → süre
+// yeniden → görsel kuyruğu + ücretli çağrı (kalan süreye bağlı zaman aşımı) → YEREL bitiş
+// (worker; hizalama, yapıştırma, doğrulama). Reddedilen karelerde yapılmaz (teslim edilecek
+// karelerle bütçe yarışmasın). Döner: onarılmış kare ya da null.
+const HAND_REPAIR_MIN_LEFT_MS = 180 * 1000;
+const HAND_REPAIR_BUDGET_WAIT_MS = 60 * 1000;
+// Ücretli çağrıdan sonra bitiş görevi + kalan teslim adımları için bırakılan süre.
+const HAND_REPAIR_AFTER_MS = 90 * 1000;
+const HAND_REPAIR_MIN_CALL_MS = 60 * 1000;
+async function handRepairStep({ buf, tpl, chunkIdx, styleId, rawBuf, mstUser, mstTpl, rejected = false }) {
+  const tag = `style=${styleId}, chunk=${chunkIdx}`;
+  const hr = require("./handRepair");
+  const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
+  const t0 = Date.now();
+  try {
+    if (!hr.HAND_REPAIR.ON) return null;
+    if (!hr._testables.eligible(mstUser, mstTpl)) {
+      console.log(`EL ONARIMI (${tag}): ATLANDI[pigment] MST ${mstUser ?? "?"}/${mstTpl ?? "?"}`);
+      return null;
+    }
+    if (rejected) {
+      console.log(`EL ONARIMI (${tag}): ATLANDI[reddedilen-kare] MST ${mstUser}/${mstTpl}`);
+      return null;
+    }
+    if (jobTimeLeftMs() < HAND_REPAIR_MIN_LEFT_MS) {
+      console.log(`EL ONARIMI (${tag}): ATLANDI[süre] kalan=${Math.round(jobTimeLeftMs() / 1000)}sn`);
+      return null;
+    }
+    const prep = await runPostTask("handRepairPrep", { buf, rawBuf, tpl: Buffer.isBuffer(tpl) ? tpl : null });
+    const pre = `MST ${mstUser}/${mstTpl} hamFark=${n(prep && prep.rawGap)} önceFark=${n(prep && prep.gapBefore)} alan=${n(prep && prep.areaVsFace, 2)}`;
+    if (!prep || !prep.ok) {
+      console.log(`EL ONARIMI (${tag}): ATLANDI[${(prep && prep.reason) || "hazırlık"}] ${pre} ${Date.now() - t0}ms`);
+      return null;
+    }
+    const keepWaiting = () => jobTimeLeftMs() >= HAND_REPAIR_AFTER_MS + HAND_REPAIR_MIN_CALL_MS;
+    const { slot, waitedMs } = await waitReserveOptional(hr.HAND_REPAIR.EST_USD, { maxWaitMs: HAND_REPAIR_BUDGET_WAIT_MS, keepWaiting });
+    if (!slot) {
+      const L = ledgerSummary();
+      console.log(`EL ONARIMI (${tag}): ATLANDI[bütçe] ${pre} ${Math.round(waitedMs / 1000)}sn beklendi, harcanan $${L ? L.spentUsd.toFixed(3) : "?"} tavan $${L ? L.limitUsd.toFixed(2) : "?"}`);
+      return null;
+    }
+    let edited;
+    try {
+      const callMs = Math.min(hr.HAND_REPAIR.TIMEOUT_MS, jobTimeLeftMs() - HAND_REPAIR_AFTER_MS);
+      if (!(callMs >= HAND_REPAIR_MIN_CALL_MS)) {
+        console.log(`EL ONARIMI (${tag}): ATLANDI[süre] ${pre} kalan=${Math.round(jobTimeLeftMs() / 1000)}sn`);
+        return null;
+      }
+      const geo = prep.geo;
+      const size = hiResSize(geo.cw, geo.chh, AUTO_AREA);
+      await acquireOpenAiImageSlot();
+      try {
+        edited = await runOptional(() => hr.editHands({
+          cropPng: Buffer.from(prep.cropPng), maskPng: Buffer.from(prep.maskPng), faceJpg: Buffer.from(prep.faceJpg), geo,
+        }, { apiKey: OPENAI_KEY.value(), size, timeoutMs: callMs }));
+      } finally {
+        releaseOpenAiImageSlot();
+      }
+    } finally {
+      slot.release();
+    }
+    if (!Buffer.isBuffer(edited)) {
+      console.log(`EL ONARIMI (${tag}): ATLANDI[${(edited && edited.error) || "çıktı-yok"}] ${pre} ${Date.now() - t0}ms`);
+      return null;
+    }
+    const fin = await runPostTask("handRepairFinish", {
+      buf, edited, alpha8: prep.alpha8, geo: prep.geo, tpl: Buffer.isBuffer(tpl) ? tpl : null,
+    });
+    console.log(`EL ONARIMI (${tag}): ${fin && fin.applied ? "UYGULANDI" : `ATLANDI[${(fin && fin.reason) || "bitiş"}]`} ${pre} sonraFark=${n(fin && fin.gapAfter)} yapı=${n(fin && fin.struct, 2)} kayma=${fin && fin.shift ? fin.shift.join("/") : "-"} ${Date.now() - t0}ms`);
+    return fin && fin.applied && fin.buf ? (Buffer.isBuffer(fin.buf) ? fin.buf : Buffer.from(fin.buf)) : null;
+  } catch (e) {
+    console.error(`EL ONARIMI (${tag}) hata verdi (kare olduğu gibi):`, e.message || e);
+    return null;
+  }
+}
+
+const EST_REPAIR_USD = 0.23;
+const REPAIR_BUDGET_WAIT_MS = 90000; // diğer kareler zorunlu paylarını bıraktıkça yer açılır (kapılar 1.5-3 dk yayılır)
+async function tryArtifactRepair(args) {
+  const { slot, waitedMs } = await waitReserveOptional(EST_REPAIR_USD, { maxWaitMs: REPAIR_BUDGET_WAIT_MS });
+  if (!slot) {
+    const L = ledgerSummary();
+    console.warn(`YÜZ ONARIMI ATLANDI[bütçe]: ${Math.round(waitedMs / 1000)}sn beklendi, harcanan $${L ? L.spentUsd.toFixed(3) : "?"} ayrılan $${L ? L.reservedUsd.toFixed(3) : "?"} tavan $${L ? L.limitUsd.toFixed(2) : "?"}`);
+    return { ok: false, why: "bütçe" };
+  }
+  try {
+    return await runOptional(() => tryArtifactRepairInner(args));
+  } finally {
+    slot.release();
+  }
+}
+async function tryArtifactRepairInner({ buf, faceBox, apiKey, refDescriptor, preDist }) {
   try {
     const { repairFaceArtifact } = require("./faceRepair");
     const { judgeFaceArtifact } = require("./faceArtifactCrop");
@@ -4229,6 +4372,12 @@ const FIRST_REF_GAZE = true;
 // KOYU CAMLI GÖZLÜK BASE'DEN TAŞINIR (2026-11-03, 8ee5afa0 c4 tek cam + yanak bandı;
 // bkz. sunglassTransfer.js). false = her gözlük yapay zeka düzenlemesiyle.
 const SUNGLASS_TRANSFER_ON = true;
+// GÖZLÜK TÜM ÇIKTILARDAN KALDIRILDI (2026-11-17, kullanıcı kararı, f8c1718b: c4/c9 çerçeve
+// şablondan farklı ve yamuk, c5 cam yarım). Ana üretim gözlüğü zaten kaldırıyor; şablonun
+// gözlüğünü geri koyan son adım (koyu cam taşıma + yapay zeka ekleme + kendi göz/cam tonu)
+// hiç çalışmaz. Şablonda gözlük YARGISI sürer: kafa ölçeği, bakış kilidi ve bakış kapısı
+// "şablon gözü camın arkasında" bilgisini kullanıyor. Geri açmak için true.
+const EYEWEAR_ADD_ON = false;
 // DOĞAL YER DEĞİŞTİRME ÇEKİRDEĞİ (2026-11-01, bkz. naturalSwap.js): referans
 // base'e hazırlandıysa P800 yerine kısa "kişiyi değiştir, yüzü referanstaki
 // gibi kopyala" talimatı. false = eski P800 (tek satır geri dönüş).
@@ -4285,6 +4434,14 @@ function templateMetaFor(origBuf, cropped, faceRatio) {
 }
 
 const HAT_PROMPT_ON = true;
+// GÖZLÜKLÜ ŞABLON BAKIŞI (2026-11-20, bkz. naturalSwap GAZE_SENTENCE_EYEWEAR): şablonun gözü camın
+// arkasındaysa bakış yönü yazılmaz, iris yüz yönünde ortada istenir. false = eski cümle (bayt bayt).
+const EYEWEAR_GAZE_PROMPT_ON = true;
+/** SAF. Vision yargısı okunduysa o; okunamadıysa yerel gözlük payı ≥ IRIS_TPL_GLASS_SKIP. */
+function eyewearGazeOn(vision, share) {
+  if (vision && vision.ok) return vision.eyewear === true;
+  return share != null && Number.isFinite(share) && share >= require("./gazeGate").IRIS_TPL_GLASS_SKIP;
+}
 // Kalan süre bundan azsa tespit atlanır (hat=false = bugünkü prompt; bkz. jobTimeLeftMs).
 const HAT_DETECT_MIN_LEFT_MS = 300 * 1000;
 // Havuz meşgulse üretimi bekletmesin: bu sürede bitmezse hat=false.
@@ -4429,6 +4586,15 @@ const PRED_PITCH_WEIGHT = 0.5;
 // kareyi −44° dönük eğik şablonun (c2) ilk sırasına koyuyordu → baş düzleşirdi.
 const PRED_PITCH_EXCLUDE_DEG = 15;
 const PRED_PITCH_EXCLUDE_COST = 1000;
+// AŞAĞI BAKAN ŞABLONA EĞİMCE EN YAKIN SELFIE (2026-11-17, kullanıcı kararı; f8c1718b: 10
+// karenin 10'unda çıktı başı şablondan yukarıda, ort. +8.9°, c9 −20.9 → +5.4). Çene-aşağı
+// kare önden çekildiği için yön maliyeti onu dönük şablonun 5'lisine hiç sokmuyordu.
+// Şablon PITCH_ADD_TPL_DEG'den aşağı bakıyorsa eğimce en yakın selfie — 5'linin geri
+// kalanından en az MARGIN daha aşağı bakıyorsa — 2. sıraya girer (ilk sıra yönü belirlediği
+// için değişmez), 5'linin sonuncusu çıkar. 3/5'li eski setlerde çalışmaz (usePitch).
+const PITCH_ADD_ON = true;
+const PITCH_ADD_TPL_DEG = -7;
+const PITCH_ADD_MARGIN_DEG = 5;
 /**
  * Selfie açıları (derece; ölçülemeyen null) ve şablon açısından gönderim sırası.
  * predict=true: çizilecek açıya göre; false: ham açıya göre (eski kural). bestErr:
@@ -4436,7 +4602,87 @@ const PRED_PITCH_EXCLUDE_COST = 1000;
  * pitch: { selfie: [derece|null], tpl: derece } verilirse ve aday sayısı
  * FACE_PHOTO_COUNT'u aşarsa eğim farkı da maliyete eklenir. SAF.
  */
+// 10'LU HAVUZDA İLK SIRA + PROFİL KORUMASI (2026-11-19, kullanıcı: "5 selfie'yi şablonun baş
+// yönüne göre en mantıklı şekilde seç"; 12 iş, 117 kare, Onur + Kutay, iş-dışı-bırakma doğrulaması,
+// scratchpad sel5/). Yalnız aday > FACE_PHOTO_COUNT ve predict iken; 3/5'li setler bayt bayt eski.
+// (1) 30-40° selfie'ler büyütülmüyor: Kutay −36.6 ilk → çıktı −35.1 (n=7), +39.9 → +38.0 (n=6);
+//     eski eğri −40.5/+42.2 bekliyordu. Kazancın bittiği yer 44° değil 36° (iki kişide ayrı ayrı
+//     30-37°). Yaw MAE 3.46 → 3.11 (iç içe doğrulamada da 3.12; 30-44° bandında 4.62 → 2.18).
+//     Bu eğri YALNIZ ilk sırayı seçer: maliyetin tamamına uygulanınca Onur'un +34.9'u düz
+//     şablonların 5'lisine giriyordu. Terfi ancak yalnız yönce de kesin daha yakınsa — selfie
+//     eğimi (seviyeli karelerde etkisiz) tek başına ilk sırayı değiştirmesin (çürütme: Onur
+//     T +38 eğim yüzünden 34.9 → 40.8, üç modelde de kötü). Örnek: Kutay T 37-40, +28.1 ilkken
+//     çıktı ort. +32.8 (az dönük), +39.9 ilkken +38.0.
+// (2) Düz şablonda (|T| ≤ 20) 2-5. sırada ≥35° selfie gitmez, yerine sıradaki seviyeli kare
+//     (profil çekmesi, bkz. 10-26 bulgusu; bu veride n=3, hepsi profile doğru +11.5° fazla dönük —
+//     tek başına anlamlı değil, bu yüzden ayrı bayrak + log). Seviyeli şablona yedek olarak
+//     çene-aşağı kare konmaz. Yeterli yedek yoksa profil geri girer.
+const POOL_RANK1_ON = true;
+const POOL_GAIN_NONE_DEG = 36;
+const PROFILE_GUARD_ON = true;
+const PROFILE_GUARD_TPL_DEG = 20;
+const PROFILE_GUARD_SELFIE_DEG = 35;
+const CHIN_DOWN_SELFIE_DEG = -10;
+function predictedOutYawPool(deg) {
+  if (!Number.isFinite(deg)) return null;
+  const t = Math.min(1, Math.max(0, (Math.abs(deg) - PRED_GAIN_FULL_DEG) / (POOL_GAIN_NONE_DEG - PRED_GAIN_FULL_DEG)));
+  return deg * (PRED_GAIN_MID + (1 - PRED_GAIN_MID) * t);
+}
 function selfieOrderForYaw(selfieDegs, tYaw, predict = true, pitch = null) {
+  const plan = selfieOrderCore(selfieDegs, tYaw, predict, pitch);
+  const n = selfieDegs.length;
+  if (n <= FACE_PHOTO_COUNT || !predict || !Number.isFinite(tYaw)) return plan;
+  const usePitch = !!(pitch && Array.isArray(pitch.selfie) && Number.isFinite(pitch.tpl));
+  const sp = (i) => (usePitch && Number.isFinite(pitch.selfie[i]) ? pitch.selfie[i] : null);
+  const excluded = (i) => sp(i) != null && pitch.tpl - sp(i) > PRED_PITCH_EXCLUDE_DEG;
+  const yawErr = (i) => (Number.isFinite(selfieDegs[i]) ? Math.abs(predictedOutYawPool(selfieDegs[i]) - tYaw) : Infinity);
+  const poolCost = (i) => {
+    const e = yawErr(i);
+    if (!Number.isFinite(e) || sp(i) == null) return e;
+    return e + PRED_PITCH_WEIGHT * Math.abs(sp(i) - pitch.tpl) + (excluded(i) ? PRED_PITCH_EXCLUDE_COST : 0);
+  };
+  let order = plan.order.slice();
+  const extra = {};
+  if (POOL_RANK1_ON) {
+    let r1 = order[0];
+    for (const i of order) if (poolCost(i) < poolCost(r1) || (poolCost(i) === poolCost(r1) && i < r1)) r1 = i;
+    if (r1 !== order[0] && Number.isFinite(poolCost(r1)) && yawErr(r1) < yawErr(order[0])) {
+      const from = order.indexOf(r1);
+      order.splice(from, 1);
+      order.unshift(r1);
+      // Eğim eki (çene-aşağı kare) 2. sırada kalır.
+      if (plan.pitchAdd && plan.pitchAdd.idx !== r1) {
+        order.splice(order.indexOf(plan.pitchAdd.idx), 1);
+        order.splice(1, 0, plan.pitchAdd.idx);
+      }
+      extra.promoted = { idx: r1, from };
+    }
+  }
+  if (PROFILE_GUARD_ON && Math.abs(tYaw) <= PROFILE_GUARD_TPL_DEG) {
+    const isProfile = (i) => Number.isFinite(selfieDegs[i]) && Math.abs(selfieDegs[i]) >= PROFILE_GUARD_SELFIE_DEG;
+    const levelTpl = usePitch && pitch.tpl > PITCH_ADD_TPL_DEG;
+    const top = order.slice(0, FACE_PHOTO_COUNT);
+    if (top.slice(1).some(isProfile)) {
+      const keep = [top[0], ...top.slice(1).filter((i) => !isProfile(i))];
+      for (const i of order.slice(FACE_PHOTO_COUNT)) {
+        if (keep.length >= FACE_PHOTO_COUNT) break;
+        if (isProfile(i) || !Number.isFinite(selfieDegs[i]) || excluded(i)) continue;
+        if (levelTpl && sp(i) != null && sp(i) < CHIN_DOWN_SELFIE_DEG) continue;
+        keep.push(i);
+      }
+      for (const i of top) if (keep.length < FACE_PHOTO_COUNT && !keep.includes(i)) keep.push(i);
+      const five = keep.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      const dropped = top.filter((i) => !five.includes(i));
+      if (dropped.length) {
+        order = [...five, ...order.filter((i) => !five.includes(i))];
+        extra.profileGuard = dropped;
+      }
+    }
+  }
+  return { ...plan, order, ...extra };
+}
+/** Eski kural (3/5'li setler ve 10'lu havuzun temeli). SAF. */
+function selfieOrderCore(selfieDegs, tYaw, predict = true, pitch = null) {
   const n = selfieDegs.length;
   const idx = Array.from({ length: n }, (_, i) => i);
   if (!Number.isFinite(tYaw)) return { order: idx, bestErr: null };
@@ -4456,7 +4702,22 @@ function selfieOrderForYaw(selfieDegs, tYaw, predict = true, pitch = null) {
   };
   const order = idx.slice().sort((a, b) => cost(a) - cost(b) || a - b);
   const best = Math.min(...idx.map((i) => err(i, true)));
-  return { order, bestErr: Number.isFinite(best) ? best : null };
+  // Aşağı bakan şablon: eğimce en yakın (ve 5'liden belirgin aşağı bakan) selfie 2. sıraya.
+  let pitchAdd = null;
+  if (usePitch && PITCH_ADD_ON && pitch.tpl <= PITCH_ADD_TPL_DEG) {
+    const sp = (i) => (Number.isFinite(pitch.selfie[i]) ? pitch.selfie[i] : null);
+    const cand = idx.filter((i) => sp(i) != null && Number.isFinite(selfieDegs[i]));
+    const j = cand.length ? cand.reduce((a, b) => (Math.abs(sp(b) - pitch.tpl) < Math.abs(sp(a) - pitch.tpl) ? b : a)) : null;
+    const top = order.slice(0, FACE_PHOTO_COUNT);
+    const topMin = Math.min(...top.filter((i) => i !== j).map((i) => (sp(i) == null ? Infinity : sp(i))));
+    if (j != null && order[0] !== j && sp(j) <= topMin - PITCH_ADD_MARGIN_DEG) {
+      const k = order.indexOf(j);
+      order.splice(k, 1);
+      order.splice(1, 0, j);
+      pitchAdd = { idx: j, from: k };
+    }
+  }
+  return { order, bestErr: Number.isFinite(best) ? best : null, ...(pitchAdd ? { pitchAdd } : {}) };
 }
 
 /**
@@ -4536,7 +4797,7 @@ async function prepareSelfieSet(refUrls, tplPose3d, styleId, chunkIdx, attempt, 
       cropDesc = `[${crops.map((c) => (!c ? "hata" : c.applied ? `${c.box.width}x${c.box.height}(${f2(c.frac)}${c.seg ? "" : ",segsiz"})` : `ATLANDI[${c.reason}]`)).join(", ")}]`;
     }
     const notSent = many ? plan.order.slice(FACE_PHOTO_COUNT) : [];
-    console.log(`SELFIE SETİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${order.length}/${faces.length} selfie${notSent.length ? ` gitmeyen=[${notSent.map((i) => `${i}:${f1(poses[i] && poses[i].deg)}/${f1(poses[i] && poses[i].pitch)}`).join(", ")}]` : ""}${poseDropped.length ? ` pozaUzakÇıkarılan=[${poseDropped.map((i) => f1(poses[i] && poses[i].deg)).join(", ")}]` : ""} şablon=${f1(tYaw)}/${f1(tplPose3d && tplPose3d.pitch)} sıra=[${desc.join(", ")}] ilk=${firstDesc} kafaKırpım=${cropDesc} beklenen=${f1(predictedOutYaw(firstYaw))} enYakınÇizim=${plan.bestErr == null ? "-" : `${plan.bestErr.toFixed(1)}°`}`);
+    console.log(`SELFIE SETİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${order.length}/${faces.length} selfie${notSent.length ? ` gitmeyen=[${notSent.map((i) => `${i}:${f1(poses[i] && poses[i].deg)}/${f1(poses[i] && poses[i].pitch)}`).join(", ")}]` : ""}${poseDropped.length ? ` pozaUzakÇıkarılan=[${poseDropped.map((i) => f1(poses[i] && poses[i].deg)).join(", ")}]` : ""} şablon=${f1(tYaw)}/${f1(tplPose3d && tplPose3d.pitch)} sıra=[${desc.join(", ")}] ilk=${firstDesc} kafaKırpım=${cropDesc} beklenen=${f1((many && POOL_RANK1_ON ? predictedOutYawPool : predictedOutYaw)(firstYaw))} enYakınÇizim=${plan.bestErr == null ? "-" : `${plan.bestErr.toFixed(1)}°`}${plan.pitchAdd ? ` eğimEk=${plan.pitchAdd.idx}:${f1(poses[plan.pitchAdd.idx] && poses[plan.pitchAdd.idx].pitch)}(sıra ${plan.pitchAdd.from + 1}→2)` : ""}${plan.promoted ? ` ilkTerfi=${plan.promoted.idx}:${f1(poses[plan.promoted.idx] && poses[plan.promoted.idx].deg)}(sıra ${plan.promoted.from + 1}→1)` : ""}${plan.profileGuard ? ` profilKoruma=[${plan.profileGuard.map((i) => `${i}:${f1(poses[i] && poses[i].deg)}`).join(", ")}]` : ""}`);
     Object.defineProperty(out, "firstYaw", { value: firstYaw, enumerable: false });
     Object.defineProperty(out, "reachErr", { value: plan.bestErr, enumerable: false });
     return out;
@@ -4915,8 +5176,18 @@ function retryCorrectionBody(lastGate, gazeFacts = null, artifactWhere = null, y
  * üretir ve chooseCandidate ile ikisinden birini döndürür. Ölçülemezse,
  * bütçe/süre yetmezse ya da ikinci üretim başarısızsa ilk kare döner.
  */
-// YÖN DÜZELTMESİ AÇIK (2026-11-14, bkz. naturalSwap describeBasePose yawFix). Kapatmak için false.
-const YAW_FIX_ON = true;
+// İKİNCİ ÜRETİMLER KAPALI (2026-11-19, kullanıcı: "çok basit ve sade, fazlalıkları çıkar").
+// Yön ikinci üretimi 3B reddinden sonra 7 denemede 1 kurtardı; YAW_FIX cümlesi 11-15/11-16'da
+// gürültü ölçüldü; şapka ikinci üretimi bir günden kısa canlıydı, kanıtlı başarısı yok. Her biri
+// ~$0.11 + 150 sn'ye kadar bekleme ve bütçe bekleme kodunun çoğunu sürüyordu. Kare her karede
+// tek üretim; yön/şapka kapıları yalnız ELER (onay panelinde etiket). Geri dönüş: true.
+const SECOND_GEN_ON = false;
+// Şablon ten pigmenti (gpt-4.1-mini) yalnız yüz sahne ışığı (postTasks FINISH.FACE_TONE) içindi; o
+// kapalıyken sorulmaz. FACE_TONE geri açılırsa bu da true yapılmalı.
+// 2026-11-20: true. FACE_TONE 13:20'de açıldı, bu false kaldı → 64bff386'da siyahi şablonların koyu
+// yüzü "loş ışık" sayıldı, kullanıcının yüzü ×0.73-0.89 karardı (log pigment[MST 5/?]).
+const TPL_MST_FOR_FACE_TONE = true;
+const YAW_FIX_ON = SECOND_GEN_ON;
 // KARŞILIĞI OLMAYAN AÇIDA İKİNCİ ÜRETİM YOK (2026-11-16, kullanıcı onayı): selfie setinde
 // şablon açısına çizilebilecek kare yoksa ikinci üretim aynı girdiyle aynı yöne sapıyor.
 // Ölçüm (11-13..11-16, ilk kare 3B'den elenecekken yapılan ikinci üretimler): c1 (en yakın
@@ -4925,8 +5196,21 @@ const YAW_FIX_ON = true;
 // karede eski akış aynen. Eşik: karşılığı olan şablonlar ≤5.4°, olmayanlar ≥8.3°.
 // 0 = kapalı.
 const UNREACHABLE_SKIP_DEG = 8;
+// ŞAPKA KAPISI (2026-11-19, bkz. üretim döngüsü "ŞAPKA KAPISI"). Kapatmak için false.
+const HAT_GATE_ON = true;
+// ÜRETİM SONRASI KAPILAR KAPALI (2026-11-22, kullanıcı: "14 hariç diğerlerini üretim kısmından
+// kaldıralım"). Onay akışında kare başına tek üretim (HOLD_MAX_ATTEMPTS 1) ve ikinci üretimler
+// kapalı (SECOND_GEN_ON) olduğu için kapılar kareyi düzeltmiyor, yalnız "elendi" etiketi koyuyordu;
+// 64bff386'da iki etiketin ikisi de Vision bakış satırındandı (c5 yanlış ret). Kapanan: kimlik/
+// netlik/kafa oranı (assessOutputFace), yaw + 3B poz, zıt bakış, ten kapısı, Vision denetimi
+// (~$0.16/iş gpt-4o), göz kapalı, yüz artefakt kırpımı, kafa konumu (dx), şapka kapısı. Her kare
+// geçmiş sayılır ve onay paneline gider; geri yerleştirme (hizalama + dikiş kapısı, döngü sonrası)
+// ve D bitirme adımları aynen çalışır. Kaybedilen: panelde kapı etiketi (kimlik kapısı engelli
+// sınıftaydı, artık admin gözü tek güvence), POZ 3B ÖLÇÜM logu, eksik teslimde otomatik iade.
+// Geri dönüş: true.
+const OUTPUT_GATES_ON = false;
 
-async function resampleIfYawDrifts(first, { templateYawSigned, templatePose3d = null, refDescriptor, styleId, chunkIdx, attempt, uid, jobId, regenerate, reachErr = null }) {
+async function resampleIfYawDrifts(first, { templateYawSigned, templateYawUnsigned = null, templatePose3d = null, refDescriptor, styleId, chunkIdx, attempt, uid, jobId, regenerate, reachErr = null }) {
   const { headPoseOf } = require("./faceQuality");
   const tag = `style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}`;
   const f = (v) => (v == null || !isFinite(v) ? "null" : v.toFixed(2));
@@ -4971,11 +5255,35 @@ async function resampleIfYawDrifts(first, { templateYawSigned, templatePose3d = 
       // ZATEN elenecekse pay ANGLED_REJECT_HEADROOM_USD'ye iner; geçecekse eski kural.
       // İş sınırı (takeSlot) aynen geçerli.
       if (a.over3d === undefined) await gate3d(a);
-      const headroom = a.over3d ? ANGLED_REJECT_HEADROOM_USD : ANGLED_RESAMPLE_HEADROOM_USD;
+      // EKSİK DÖNME DE ELENECEK SAYILIR (2026-11-19, 6a02687c c2): ilk kare yaw
+      // kapısında RED[yaw-under-rotate] aldı (şablon 0.88 → 0.55) ama burada yalnız
+      // 3B fazla dönmeye bakıldığı için pay 0.20 istendi, ikinci üretim atlandı ve
+      // iş $0.25 boş bitti. Kapıyla aynı ölçü (headYawOf, işaretsiz) ve aynı kural.
+      if (!a.over3d && templateYawUnsigned != null) {
+        try {
+          const { headYawOf } = require("./faceQuality");
+          const u = (await headYawOf(a.b)) ?? (await headYawOf(a.b, LOW_CONF_FACE));
+          a.under = require("./headBodyGate").isUnderRotated(templateYawUnsigned, u);
+        } catch (e) { a.under = false; }
+      }
+      const willReject = !!(a.over3d || a.under);
+      const headroom = willReject ? ANGLED_REJECT_HEADROOM_USD : ANGLED_RESAMPLE_HEADROOM_USD;
       const L0 = ledgerSummary();
-      if (L0 && L0.spentUsd + L0.reservedUsd + EST_RESAMPLE_USD + headroom > L0.limitUsd) {
+      const fits = () => !L0 || L0.spentUsd + L0.reservedUsd + EST_RESAMPLE_USD + headroom <= L0.limitUsd;
+      // ELENECEK KARE BEKLER (2026-11-19, 6a02687c c2): o anda diğer karelerin
+      // zorunlu payları (0.13/kare) henüz serbest değildi, iş sonunda $0.25 boş kaldı.
+      // Kare zaten elenecekse paylar boşalana dek (süre sınırı içinde) beklenir;
+      // mutlak tavan (hardCapAllows) çağrı öncesi yine denetler.
+      if (willReject && !fits()) {
+        const t0 = Date.now();
+        while (!fits() && Date.now() - t0 + 3000 <= RESAMPLE_WAIT_MAX_MS && jobTimeLeftMs() >= GEN_ATTEMPT_MIN_LEFT_MS) {
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+        if (fits()) console.log(`YÖN İKİNCİ ÜRETİM (${tag}): elenecek kare, pay için ${Math.round((Date.now() - t0) / 1000)}sn beklendi`);
+      }
+      if (!fits()) {
         L0.skipped++;
-        console.log(`YÖN İKİNCİ ÜRETİM (${tag}): ATLANDI[düz-şablon-payı] şablon=${f(templateYawSigned)} yön=${f(a.s)} kapı3B=${a.over3d ? "red" : "geçer"} Δ3B=${f(a.d3)} harcanan=${L0.spentUsd.toFixed(3)} ayrılan=${L0.reservedUsd.toFixed(3)} sınır=${L0.limitUsd.toFixed(2)}`);
+        console.log(`YÖN İKİNCİ ÜRETİM (${tag}): ATLANDI[düz-şablon-payı] şablon=${f(templateYawSigned)} yön=${f(a.s)} kapı3B=${a.over3d ? "red" : "geçer"} eksikDönme=${a.under ? "red" : "geçer"} Δ3B=${f(a.d3)} harcanan=${L0.spentUsd.toFixed(3)} ayrılan=${L0.reservedUsd.toFixed(3)} sınır=${L0.limitUsd.toFixed(2)}`);
         return first;
       }
     }
@@ -5105,7 +5413,7 @@ async function generateForMode(mode, templateUrl, refUrls, identityCaption, body
   // DOĞAL YER DEĞİŞTİRME (2026-11-01, bkz. naturalSwap.js): referans base'in
   // açı/bakış/ifadesine hazırlandıysa kısa "kişiyi değiştir" talimatı; yoksa P800.
   const prompt = retryHint + (swapRefs > 0 && mode === PHOTO_MODE_P800
-    ? require("./naturalSwap").buildNaturalSwapPrompt(Math.min(swapRefs, faceUrls.length), { prepared: !SELFIE_SET_ALL, hat: !!(swapOpts && swapOpts.hat), pose: (swapOpts && swapOpts.pose) || null })
+    ? require("./naturalSwap").buildNaturalSwapPrompt(Math.min(swapRefs, faceUrls.length), { prepared: !SELFIE_SET_ALL, hat: !!(swapOpts && swapOpts.hat), pose: (swapOpts && swapOpts.pose) || null, eyewear: !!(swapOpts && swapOpts.eyewear) })
     : build(identityCaption, bodyProfile));
   return await generateWithOpenAI(prompt, fullSet, imageModel);
 }
@@ -5339,7 +5647,20 @@ async function runOpenAiDirectChunk(uid, jobId, styleId, chunkIdx, templateUrls,
     } } } },
   }, { merge: true }).catch(() => {});
   chunkBeat({ startedAt: admin.firestore.FieldValue.serverTimestamp() });
-  const heartbeatTimer = setInterval(() => chunkBeat(), 90 * 1000);
+  // NABIZ SÜRE DOLUNCA DURUR (2026-11-18, 156fa173 c0): istek 900 sn'de
+  // kapandıktan sonra örnek yaşamaya devam etti, asılı chunk nabız atmayı
+  // sürdürdü ve temizlik onu "canlı" sanıp iş %97'de kaldı. İşin süresi
+  // dolunca nabız kesilir; chunk hâlâ bitmediyse temizlik onu kapatır.
+  const leftAtStart = jobTimeLeftMs();
+  const beatUntil = Date.now() + (Number.isFinite(leftAtStart) ? leftAtStart + JOB_FINALIZE_RESERVE_MS : JOB_TIME_LIMIT_MS);
+  const heartbeatTimer = setInterval(() => {
+    if (Date.now() > beatUntil) {
+      clearInterval(heartbeatTimer);
+      console.warn(`NABIZ DURDU (style=${styleId}, chunk=${chunkIdx}): iş süresi doldu, chunk hâlâ bitmedi`);
+      return;
+    }
+    chunkBeat();
+  }, 90 * 1000);
   try {
     return await runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, templateUrls, refUrls, identityCaption, bodyProfile, refDescriptor, jobRef, mode, refEyeOpenness, refSkinTone, refHasFaceShine, holdForApproval, imageModel, templateNames, refSkinLight, refSkinMst);
   } finally {
@@ -5470,6 +5791,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
   // Şablon iris ölçümü (ZIT BAKIŞ kapısı) — templateYaw gibi şablon başına bir kez.
   let templateIris;
   let templateEyeGlass; // ZIT BAKIŞ: şablon gözünde gözlük payı (bkz. gazeGate.IRIS_TPL_GLASS_SKIP)
+  let templateEyeGlassP = null; // aynı ölçü, üretimden önce başlatılır (bkz. EYEWEAR_GAZE_PROMPT_ON)
+  // Şablon gözlük yargısı (headGhost.judgeEyewear) üretimden önce; bitirmedeki GÖZLÜK adımı aynısını kullanır.
+  let templateEyewearPreP = null;
+  let templateEyewearPre = null;
   let finalBuf = null;
   // Modele giden taban (saçı silinmiş kopya) ve hangi şablon için hazırlandığı.
   let genTemplateInput = null;
@@ -5565,6 +5890,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         templatePromptPose = null;
         templateMeta = null;
         templateIris = undefined;
+        templateEyeGlass = undefined;
+        templateEyeGlassP = null;
+        templateEyewearPreP = null;
+        templateEyewearPre = null;
         noteRestore();
         noteTemplate(next.idx);
         console.log(`ŞABLON DEĞİŞTİRİLDİ (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): önceki şablon kalite kapısını geçemedi, yedekle deneniyor`);
@@ -5645,6 +5974,29 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         templateHatP = templateHatOf(Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf, styleId, chunkIdx);
       }
     }
+    // Gözlüklü şablon bakışı: iki ölçü selfie hazırlığıyla paralel koşar. Karar Vision yargısı
+    // (yerel gözlük payı 0.23-0.42 aralığında gözlüklü ve gözlüksüz şablonları ayıramadı, kütüphane
+    // taraması 11-20); Vision okunamazsa yerel pay ≥ IRIS_TPL_GLASS_SKIP. ZIT BAKIŞ kapısı yerel payı kullanır.
+    if (!templateEyewearPreP && EYEWEAR_GAZE_PROMPT_ON && NATURAL_SWAP_ON && SELFIE_SET_ALL) {
+      const src = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+      if (templateEyeGlass === undefined && !templateEyeGlassP) {
+        templateEyeGlassP = Buffer.isBuffer(src)
+          ? runPostTask("eyeGlassShare", { tpl: src }).then((r) => (r ? r.share : null)).catch(() => null)
+          : Promise.resolve(null);
+      }
+      templateEyewearPreP = !Buffer.isBuffer(src) ? Promise.resolve({ ok: false, reason: "no-template" }) : (async () => {
+        try {
+          const { detectMainFace } = require("./faceQuality");
+          const fd = (await detectMainFace(src)) || (await detectMainFace(src, LOW_CONF_FACE));
+          return fd && fd.box
+            ? await require("./headGhost").judgeEyewear(src, fd.box, OPENAI_KEY.value())
+            : { ok: false, reason: "no-face-template" };
+        } catch (e) {
+          console.error("Üretim öncesi şablon gözlük yargısı hata verdi:", e.message || e);
+          return { ok: false, reason: "error" };
+        }
+      })();
+    }
     const genRefUrls = SELFIE_SET_ALL
       ? await prepareSelfieSet(refUrls, templatePose3d, styleId, chunkIdx, attempt, templateRefMatch)
       : await orderRefsByPose(refUrls, templateYaw, styleId, chunkIdx, attempt, templateYawSigned, templatePose3d, templateRefMatch);
@@ -5703,7 +6055,14 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
       : templateRefMatch && genRefUrls.every((r) => Buffer.isBuffer(r)) ? genRefUrls.length : 0;
     console.log(`ÇEKİRDEK (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ${swapRefs ? `DOĞAL-YER-DEĞİŞTİRME referans=${swapRefs}${SELFIE_SET_ALL ? " [tüm set]" : ""}` : `P800[${!NATURAL_SWAP_ON ? "kapalı" : !templateRefMatch ? "base-ölçülemedi" : "referans-hazırlanamadı"}]`}`);
     const tplHat = swapRefs && templateHatP ? await templateHatP : null;
-    const swapOpts = { hat: !!(tplHat && tplHat.hat), pose: templatePromptPose };
+    if (templateEyeGlass === undefined && templateEyeGlassP) templateEyeGlass = await templateEyeGlassP;
+    if (!templateEyewearPre && templateEyewearPreP) templateEyewearPre = await templateEyewearPreP;
+    const eyewearGaze = !!(swapRefs && EYEWEAR_GAZE_PROMPT_ON && eyewearGazeOn(templateEyewearPre, templateEyeGlass));
+    if (swapRefs && EYEWEAR_GAZE_PROMPT_ON && attempt === 1) {
+      const ew = templateEyewearPre;
+      console.log(`GÖZLÜK BAKIŞI (style=${styleId}, chunk=${chunkIdx}): ${eyewearGaze ? "ORTADA" : "ŞABLONDAN"} vision=${ew && ew.ok ? (ew.eyewear ? "var" : "yok") : `?[${(ew && ew.reason) || "-"}]`} gözGörünür=${ew && ew.ok ? ew.eyesVisible : "null"} gözlükPayı=${templateEyeGlass != null ? templateEyeGlass.toFixed(2) : "null"}`);
+    }
+    const swapOpts = { hat: !!(tplHat && tplHat.hat), pose: templatePromptPose, eyewear: eyewearGaze };
     let buf = await generateForMode(
       mode, genTemplateInput, genRefUrls, identityCaption, bodyProfile, styleId, chunkIdx,
       refDescriptor, retryHint, imageModel, swapRefs, swapOpts
@@ -5722,9 +6081,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // ama başın yatıklığını bozdu (fark 2.1° → 3.8°; 13° yatık şablonda baş
     // dikleşip ters yana döndü). Kullanıcı: "doğru yere bakan görseli cümleyle
     // yanlış seçiyor".
-    if (buf && mode !== PHOTO_MODE_STAGED && templateYawSigned != null) {
+    if (SECOND_GEN_ON && buf && mode !== PHOTO_MODE_STAGED && templateYawSigned != null) {
       buf = await resampleIfYawDrifts(buf, {
-        templateYawSigned, templatePose3d, refDescriptor, styleId, chunkIdx, attempt, uid, jobId,
+        templateYawSigned, templateYawUnsigned: Number.isFinite(templateYaw) ? templateYaw : null, templatePose3d, refDescriptor, styleId, chunkIdx, attempt, uid, jobId,
         reachErr: genRefUrls && Number.isFinite(genRefUrls.reachErr) ? genRefUrls.reachErr : null,
         // fix: ilk karenin ölçülen 3B fazla dönmesi (bkz. naturalSwap describeBasePose yawFix).
         regenerate: (fix) => generateForMode(
@@ -5733,6 +6092,56 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           fix && swapOpts && swapOpts.pose ? { ...swapOpts, pose: { ...swapOpts.pose, yawFix: fix } } : swapOpts
         ),
       });
+    }
+    // ŞAPKA KAPISI (2026-11-19, 6a02687c c1, kullanıcı: "berenin olmadığı yerde
+    // kafayı uzatmış, bu şekilde yapmamalı"). Model şablonun şapkasını/beresini
+    // düşürünce kafayı şapka hacmine uzatıyor. Aynı bereli şablonda 8 işte bere
+    // yalnız 2 kez korundu; hiçbir kapı bakmıyordu, kare teslim ediliyordu.
+    // Ölçü ücretsiz/yerel (ghostClean.measureHatKept: korunan 0.84-0.90, düşen
+    // 0.00). Düşmüşse bir kez daha üretilir (kare zaten elenecek: elenecek kare
+    // payı, paylar boşalana dek süre içinde beklenir; mutlak tavan çağrıda
+    // denetlenir). İkincisinde de yoksa kare elenir (hat-lost, onayda engelli).
+    if (buf && OUTPUT_GATES_ON && HAT_GATE_ON && tplHat && tplHat.hat) {
+      const tplBufForHat = Buffer.isBuffer(templateInput) ? templateInput : templateSourceBuf;
+      const measureHat = (b) => (Buffer.isBuffer(tplBufForHat)
+        ? runPostTask("hatKept", { out: b, tpl: tplBufForHat }).catch((e) => { console.error("Şapka kapısı ölçümü başarısız:", e.message || e); return null; })
+        : Promise.resolve(null));
+      const tagH = `style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}`;
+      const fh = (h) => (h ? `pay=${h.share.toFixed(2)} alan=${h.area.toFixed(2)}` : "ölçülemedi");
+      let h = await measureHat(buf);
+      if (SECOND_GEN_ON && h && !h.kept) {
+        const L0 = ledgerSummary();
+        const fits = () => !L0 || L0.spentUsd + L0.reservedUsd + EST_RESAMPLE_USD + ANGLED_REJECT_HEADROOM_USD <= L0.limitUsd;
+        const t0 = Date.now();
+        while (!fits() && Date.now() - t0 + 3000 <= RESAMPLE_WAIT_MAX_MS && jobTimeLeftMs() >= GEN_ATTEMPT_MIN_LEFT_MS) {
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+        const slot = fits() && jobTimeLeftMs() >= GEN_ATTEMPT_MIN_LEFT_MS ? tryReserveOptional(EST_RESAMPLE_USD) : null;
+        if (!slot) {
+          if (L0) L0.skipped++;
+          console.log(`ŞAPKA İKİNCİ ÜRETİM (${tagH}): ATLANDI[${fits() ? "süre" : "bütçe"}] ilk=${fh(h)}${L0 ? ` harcanan=${L0.spentUsd.toFixed(3)} ayrılan=${L0.reservedUsd.toFixed(3)}` : ""}`);
+        } else {
+          try {
+            // İkinci üretimde şapka promptta açıkça (bkz. naturalSwap hatFixLine).
+            const b2 = await runOptional(() => generateForMode(
+              mode, genTemplateInput, genRefUrls, identityCaption, bodyProfile, styleId, chunkIdx,
+              refDescriptor, retryHint, imageModel, swapRefs, { ...swapOpts, hatFix: (tplHat && tplHat.q) || true }
+            ));
+            const h2 = b2 ? await measureHat(b2) : null;
+            console.log(`ŞAPKA İKİNCİ ÜRETİM (${tagH}): şapkaCümlesi=${(tplHat && tplHat.q) || "hat"} ilk=${fh(h)} ikinci=${b2 ? fh(h2) : "üretilemedi"} → ${h2 && h2.kept ? "ikinci alındı" : "ilk kaldı"} (${Math.round((Date.now() - t0) / 1000)}sn)`);
+            if (h2 && h2.kept) { buf = b2; h = h2; }
+          } finally { slot.release(); }
+        }
+      }
+      console.log(`ŞAPKA KAPISI (${tagH}): ${h ? (h.kept ? "GEÇTİ" : "RED[hat-lost]") : "ÖLÇÜLEMEDİ"} ${fh(h)}`);
+      if (h && !h.kept) {
+        lastRejectGate = "hat-lost";
+        await saveRejectedFrame(uid, jobId, styleId, chunkIdx, attempt, buf, {
+          mode, gate: lastRejectGate, distance: null, detail: `şapka ${fh(h)}`,
+        });
+        if (attempt < maxAttempts) continue;
+        break;
+      }
     }
     if (!buf) {
       // ÖNCEDEN BURADA HİÇ LOG YOKTU (2026-08-13 gerçek olay): bir chunk
@@ -5763,7 +6172,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // Vision kontrolü de HİÇ ÇALIŞMADAN chunk sessizce kabul ediliyordu —
     // yani TEK bir katmandaki hata İKİ katmanı da devre dışı bırakıyordu.
     // Şimdi bir katman patlarsa sadece O katman atlanır, diğeri yine çalışır.
-    if (refDescriptor) {
+    if (buf && !OUTPUT_GATES_ON && attempt === 1) {
+      console.log(`KAPILAR (style=${styleId}, chunk=${chunkIdx}): KAPALI[OUTPUT_GATES_ON=false] kare elenmeden geri yerleştirmeye gidiyor`);
+    }
+    if (OUTPUT_GATES_ON && refDescriptor) {
       let mathOk = true;
       let mathDist = null;
       let mathReason = null;
@@ -6440,7 +6852,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
             } else {
               console.log(
                 `YÜZ ONARIMI (style=${styleId}, chunk=${chunkIdx}, deneme=${attempt}): ` +
-                `ATLANDI — chunk onarım bütçesi doldu (${ARTIFACT_REPAIR_MAX_PER_CHUNK})`
+                (ARTIFACT_REPAIR_MAX_PER_CHUNK === 0 ? "ATLANDI[kapalı]" : `ATLANDI — chunk onarım bütçesi doldu (${ARTIFACT_REPAIR_MAX_PER_CHUNK})`)
               );
             }
             if (repaired) {
@@ -6882,13 +7294,16 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // yerine/boyuna/tenine dokunmaz.
     let templateEyewear = { ok: false, reason: "no-template" };
     let tplFaceBox = null;
+    // Üretimden önce aynı şablon kişisi için sorulduysa (bkz. EYEWEAR_GAZE_PROMPT_ON) Vision yeniden
+    // sorulmaz — kırpım ya da orijinal, kişi aynı. Yüz kutusu (yerel) yine bu kare için bulunur.
     if (Buffer.isBuffer(tplForEyewear)) {
       try {
         const { detectMainFace } = require("./faceQuality");
         const { judgeEyewear } = require("./headGhost");
         const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
         tplFaceBox = fdT && fdT.box ? fdT.box : null;
-        templateEyewear = tplFaceBox ? await judgeEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+        templateEyewear = templateEyewearPre && templateEyewearPre.ok ? templateEyewearPre
+          : tplFaceBox ? await judgeEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
       } catch (e) {
         console.error("OpenAI yolu: şablon gözlük yargısı hata verdi:", e);
         templateEyewear = { ok: false, reason: "error" };
@@ -6898,8 +7313,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // ŞABLON PİGMENTİ (bkz. skinPigment.js): sade akışın yüz sahne ışığı ya da
     // eski akışın pozlaması için; selfie pigmenti yoksa sorulmaz — kare başına
     // bir küçük çağrı (gpt-4.1-mini, düşük çözünürlük).
+    // 2026-11-19: sade akışta tek tüketicisi yüz sahne ışığıydı (postTasks FINISH.FACE_TONE kapalı);
+    // kare başına ücretli, zaman aşımsız çağrı boşuna yapılmasın.
     let tplSkinMst = null;
-    if ((SIMPLE_PIPELINE || require("./faceRelight").EXPOSURE_ON) && refSkinMst && tplFaceBox) {
+    if (((SIMPLE_PIPELINE && TPL_MST_FOR_FACE_TONE) || require("./faceRelight").EXPOSURE_ON) && refSkinMst && tplFaceBox) {
       tplSkinMst = await require("./skinPigment").estimateMst([tplForEyewear], OPENAI_KEY.value(), [tplFaceBox]);
       console.log(`ŞABLON TEN PİGMENTİ (style=${styleId}, chunk=${chunkIdx}): ${tplSkinMst != null ? `MST ${tplSkinMst}` : "ölçülemedi"} kullanıcı=MST ${refSkinMst}`);
     }
@@ -7011,8 +7428,18 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
         } catch (e) {
           console.error("Bitirme sonrası kimlik ölçümü hata verdi (kare bitirilmiş hâliyle kalıyor):", e.message || e);
         }
+        // EL ONARIMI (2026-11-20, bkz. handRepair.js): şablon kişisi kullanıcıdan koyu tenliyse
+        // görünen el/kol/göğüs derisi maskeli düzenlemeyle kullanıcının tenine çizilir.
+        // Bütçe ayırması + mutlak tavan; sığmazsa ya da doğrulama tutmazsa kare olduğu gibi.
+        await handRepairStep({ buf: deliverBuf, tpl: tplForEyewear, chunkIdx, styleId, rawBuf: rawBeforeFinish, mstUser: refSkinMst, mstTpl: tplSkinMst, rejected: !!rejectedFinishPath })
+          .then((b) => { if (b) deliverBuf = b; });
       } catch (e) {
         console.error("OpenAI yolu: sade akış son adımları hata verdi (atlanıyor):", e);
+        // Kare bitirme adımlarından geçmeden (ham) teslim ediliyor — panelde görünsün.
+        CHUNK_FINISH_REGRESSED.add(chunkTemplateKey(jobId, styleId, chunkIdx));
+        if (/süre sınırı/.test(String(e && e.message))) {
+          console.warn(`BİTİRME ATLANDI[süre] (style=${styleId}, chunk=${chunkIdx}): ${e.message} kalan=${Math.round(jobTimeLeftMs() / 1000)}sn`);
+        }
       }
     } else try {
       const r = await runPostTask("layers", {
@@ -7341,7 +7768,9 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // eyewear.js). FAIL-SAFE: yargı/ekleme başarısızsa kare gözlüksüz teslim
     // edilir, retry yok.
     try {
-      if (Buffer.isBuffer(tplForEyewear)) {
+      if (!EYEWEAR_ADD_ON) {
+        console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): KAPALI[tüm çıktılar gözlüksüz] şablonda=${templateEyewear.ok ? (templateEyewear.eyewear ? "var" : "yok") : "?"}`);
+      } else if (Buffer.isBuffer(tplForEyewear)) {
         const ew = templateEyewear; // kafa ölçeğinden önce soruldu
         if (!ew.ok) {
           console.log(`GÖZLÜK (style=${styleId}, chunk=${chunkIdx}): ATLANDI[şablon-belirlenemedi:${ew.reason || "?"}]`);
@@ -7923,8 +8352,16 @@ exports.startPhotoGeneration = onCall(
     // üretimde "Memory limit of 8192 MiB exceeded with 8429 MiB used"; 9 kare
     // kayboldu. Önceki iş (d0d4c001) bu modeller olmadan %77-81'de geziyordu.
     // Ek maliyet iş başına ~0.01 $ (bellek GiB-saniye).
-    memory: "16GiB",
-    cpu: 4,
+    // 16GiB/4 → 32GiB/8 (2026-11-18, iş 156fa173): 10 karenin son adımları
+    // 3 worker'da sıraya girip CPU %100'de ~10 dk sürdü (bellek tepe %64 ≈
+    // 10 GiB). 7 worker (bkz. postPool.POST_WORKERS_MAX) ile kareler ~2 kat
+    // paralel biter; saniye başı ücret 2 kat, süre ~yarı → iş başı maliyet ~aynı.
+    // maxInstances 12 (2026-11-18, kullanıcı kararı): bölge bellek kotası 400 GiB;
+    // 32 GiB × 20 örnek = 640 GiB deploy'u reddetti. 12 × 32 = 384 GiB. Örnek başına
+    // tek iş (concurrency 1) → en fazla 12 üretim aynı anda; artış için kota iste.
+    memory: "32GiB",
+    cpu: 8,
+    maxInstances: 12,
     concurrency: 1,
     timeoutSeconds: JOB_TIME_LIMIT_MS / 1000, // 900 — süre bütçesi bununla senkron (bkz. jobTimeLeftMs)
   },
@@ -8024,7 +8461,9 @@ exports.startPhotoGeneration = onCall(
     if (mode !== undefined && !PHOTO_MODES.includes(mode)) {
       throw new HttpsError("invalid-argument", `Bilinmeyen mod: ${mode}`);
     }
-    const photoMode = mode || PHOTO_MODE_FULL;
+    // SADE AKIŞ (2026-11-19): her istemci tek prompt yoluna (p800 + doğal yer değiştirme) gider;
+    // eski mod değerleri hâlâ kabul edilir (eski istemci invalid-argument almasın) ama yok sayılır.
+    const photoMode = PHOTO_MODE_P800;
 
     const walletRef = db.doc(`users/${uid}/private/wallet`);
     const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
@@ -9162,6 +9601,26 @@ exports.cleanupStuckGenJobs = onSchedule(
     for (const doc of stuck.docs) {
       const uid = doc.ref.parent.parent.parent.parent.id; // users/{uid}/private/genData/genJobs/{jobId}
       const job = doc.data();
+      // BİTMİŞ KARELER KORUNUR (2026-11-18): nabız artık süre dolunca
+      // kesildiği için (bkz. NABIZ SÜRE DOLUNCA DURUR) tek bir asılı chunk işi
+      // bayatlatabilir. Chunk'ı başlamış işte önce bekleyen chunk'lar tek tek
+      // kapatılır — finalizeChunk biten kareleri teslim eder, eksik kadar iade
+      // eder. Hiç chunk yoksa ya da iş hâlâ kapanmadıysa eski tam iade.
+      if (job.status === "generating") {
+        let closed = 0;
+        for (const [styleId, r] of Object.entries(job.results || {})) {
+          for (const [idx, c] of Object.entries((r && r.chunks) || {})) {
+            if (!c || c.status !== "pending" || !c.startedAt) continue;
+            console.warn(`Takılı chunk kapatılıyor (bayat iş): ${doc.ref.path} ${styleId}/c${idx}`);
+            await finalizeChunk(uid, doc.id, styleId, idx, { failed: true });
+            closed++;
+          }
+        }
+        if (closed) {
+          const after = (await doc.ref.get()).data() || {};
+          if (after.status !== "generating" && after.status !== "uploading") continue;
+        }
+      }
       console.warn(`Takılı iş temizleniyor: ${doc.ref.path}`);
       await refundAndFail(uid, doc.id, job.packUnitsCharged || 0, "Zaman aşımı — işlem tamamlanamadı.");
     }
@@ -9186,8 +9645,13 @@ exports.cleanupStuckGenJobs = onSchedule(
           if (!c || c.status !== "pending") continue;
           const beat = c.lastHeartbeatAt || c.startedAt;
           if (!beat || typeof beat.toMillis !== "function") continue;
-          if (Date.now() - beat.toMillis() < staleMs) continue;
-          console.warn(`Takılı chunk kapatılıyor: ${doc.ref.path} ${styleId}/c${idx} sonNabız=${Math.round((Date.now() - beat.toMillis()) / 1000)}sn önce`);
+          // SÜRESİ GEÇMİŞ CHUNK (2026-11-18, 156fa173 c0): nabız atsa bile
+          // fonksiyon süresini aşmış chunk artık sonuç üretemez (istek kapandı,
+          // CPU kısıldı) — nabza bakmadan kapatılır.
+          const started = c.startedAt && typeof c.startedAt.toMillis === "function" ? c.startedAt.toMillis() : null;
+          const overdue = started != null && Date.now() - started > CHUNK_MAX_AGE_MS;
+          if (!overdue && Date.now() - beat.toMillis() < staleMs) continue;
+          console.warn(`Takılı chunk kapatılıyor: ${doc.ref.path} ${styleId}/c${idx} sonNabız=${Math.round((Date.now() - beat.toMillis()) / 1000)}sn önce${overdue ? ` başlangıç=${Math.round((Date.now() - started) / 1000)}sn önce (süre aşıldı)` : ""}`);
           await finalizeChunk(uid, doc.id, styleId, idx, { failed: true });
         }
       }
@@ -9198,6 +9662,9 @@ exports.cleanupStuckGenJobs = onSchedule(
 // bir atar; 6 dk = dört kaçırılmış atış, tek bir Firestore yazım hatasıyla
 // yanlış kapanmaz.
 const CHUNK_HEARTBEAT_STALE_MS = 6 * 60 * 1000;
+// Fonksiyon süresi (900 sn) + 2 dk pay: bundan yaşlı pending chunk nabızdan
+// bağımsız kapatılır (bkz. SÜRESİ GEÇMİŞ CHUNK).
+const CHUNK_MAX_AGE_MS = JOB_TIME_LIMIT_MS + 2 * 60 * 1000;
 
 /**
  * 'ready' işlerin KVKK temizliği — cleanupStuckGenJobs'tan ayrı tutuldu
@@ -9361,6 +9828,7 @@ exports._testables = {
   prepareSelfieSet,
   predictedOutYaw,
   selfieOrderForYaw,
+  selfieOrderCore,
   UNREACHABLE_SKIP_DEG,
   generateForMode,
   PHOTO_MODE_P800,

@@ -29,6 +29,15 @@ const MIN_SKIN_PX = 200;
 // Kalan düzlem eğiminin kaldırılan payı ve u,v sınırı (yüz kutusu birimi).
 const PLANE_STRENGTH = 0.85;
 const UV_MAX = 0.75;
+// YALNIZ SAĞ-SOL IŞIK (2026-11-19). Yeni 10'lu çekim tavan lambası altında:
+// alın parlak, sakallı alt yüz koyu. Dikey düzeltme koyu sakalı gölge sanıp
+// ~×2 açıyordu → selfie'de gri/tebeşir sakal ve çene, model bunu çiziyordu.
+// 11-16 akşamından (yeni selfie seti) beri yüz onarımı 15 işte 1'den 4 işte
+// 7'ye çıktı; bölgelerin çoğu "chin and jawline". Eşitlemenin amacı tek
+// yandan vuran ışıktı (8ee5afa0); dikey bileşen satır ortalaması çıkarılarak
+// atılır, sağ-sol fark ve renk kayması aynen düzeltilir. Kullanıcı kararı
+// (11-18): "dikey ışığa gerek yok".
+let HORIZONTAL_ONLY = true;
 
 const SRGB2LIN = new Float32Array(256);
 for (let i = 0; i < 256; i++) { const c = i / 255; SRGB2LIN[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }
@@ -50,6 +59,42 @@ function weightedQuantile(vals, ws, q) {
   let acc = 0;
   for (const i of idx) { acc += ws[i]; if (acc >= q * tot) return vals[i]; }
   return vals[idx[idx.length - 1]];
+}
+
+/**
+ * D'nin (W*H*3 log düzeltme) dikey bileşenini atar: her satırda deri ağırlıklı
+ * ortalama (derisi az satırda en yakın derili satırınki) çıkarılır, satır
+ * profili dikeyde yumuşatılır. Kafa alfasıyla ölçeklenir. SAF, yerinde.
+ */
+function removeVerticalComponent(D, ws, head, W, H, r) {
+  const MIN_ROW_W = 3;
+  for (let c = 0; c < 3; c++) {
+    const m = new Float32Array(H), ok = new Uint8Array(H);
+    for (let y = 0; y < H; y++) {
+      let s = 0, n = 0;
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (ws[i] > 0.5 && head[i] > 0) { s += ws[i] * D[i * 3 + c] / head[i]; n += ws[i]; }
+      }
+      if (n >= MIN_ROW_W) { m[y] = s / n; ok[y] = 1; }
+    }
+    let first = -1, last = -1;
+    for (let y = 0; y < H; y++) if (ok[y]) { if (first < 0) first = y; last = y; }
+    if (first < 0) return;
+    for (let y = 0; y < first; y++) m[y] = m[first];
+    for (let y = last + 1; y < H; y++) m[y] = m[last];
+    for (let y = first + 1; y < last; y++) if (!ok[y]) m[y] = m[y - 1];
+    const R = Math.max(1, Math.round(r / 2)), sm = new Float32Array(H);
+    for (let y = 0; y < H; y++) {
+      let s = 0, n = 0;
+      for (let k = Math.max(0, y - R); k <= Math.min(H - 1, y + R); k++) { s += m[k]; n++; }
+      sm[y] = s / n;
+    }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (head[i]) D[i * 3 + c] -= head[i] * sm[y];
+    }
+  }
 }
 
 /**
@@ -130,6 +175,7 @@ function planFlatten(lin, ws, head, W, H, r, { boxBlur }, box = null) {
       }
     }
   }
+  if (HORIZONTAL_ONLY) removeVerticalComponent(D, ws, head, W, H, r);
   // Uygulama sonrası yayılım (aynı alan üzerinden): deride F + D.
   const lumA = new Float32Array(N);
   for (let i = 0; i < N; i++) lumA[i] = 0.2126 * (F[0][i] + D[i * 3]) + 0.7152 * (F[1][i] + D[i * 3 + 1]) + 0.0722 * (F[2][i] + D[i * 3 + 2]);
@@ -190,4 +236,4 @@ async function flattenSelfieLight(input) {
   }
 }
 
-module.exports = { flattenSelfieLight, _testables: { planFlatten, weightedQuantile, FIELD_R, STRENGTH, MIN_SPREAD } };
+module.exports = { flattenSelfieLight, _testables: { planFlatten, weightedQuantile, removeVerticalComponent, FIELD_R, STRENGTH, MIN_SPREAD, setHorizontalOnly: (v) => { HORIZONTAL_ONLY = v; } } };

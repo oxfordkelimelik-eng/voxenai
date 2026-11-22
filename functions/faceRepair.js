@@ -67,6 +67,7 @@ const MOUTH_BAND_BOTTOM = 0.84;
 // fark kuruşlar, kazanç ise kusurun tekrarlamaması.
 const REPAIR_QUALITY = "high";
 const REPAIR_TIMEOUT_MS = 150 * 1000;
+const REPAIR_EST_USD = 0.22; // gpt-image-2 high, ölçülen $0.198-0.211 (2026-11-18)
 
 const REPAIR_PROMPT =
   "Repaint ONLY the masked facial skin so it becomes clean, continuous, " +
@@ -195,6 +196,14 @@ async function repairFaceArtifact(buf, faceBox, apiKey) {
     // ZAMAN AŞIMI (2026-11-04): ana üretimle aynı tavan (POST_AI_TIMEOUT_MS
     // 150 sn); asılı istek 900 sn iş bütçesini yemesin. Aşımda kare olduğu
     // gibi kalır (catch), retry yok.
+    // MUTLAK MALİYET TAVANI (2026-11-19, bkz. jobContext.hardCapAllows): onarım
+    // (high) ~$0.20-0.21; tavanı aşacaksa çağrı yapılmaz.
+    try {
+      if (!require("./jobContext").hardCapAllows(REPAIR_EST_USD)) {
+        console.warn(`MALİYET TAVANI: yüz onarımı yapılmadı (tahmin $${REPAIR_EST_USD})`);
+        return { ok: false, reason: "cost-cap" };
+      }
+    } catch (e) { /* jobContext yoksa (yerel test) sınırsız */ }
     const r = await fetch(OPENAI_IMAGE_EDIT_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },

@@ -85,6 +85,39 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   final Set<String> _selected = {};
   bool _busy = false;
 
+  // IŞIKLI FİLTRE (2026-11-22): karedeki ☀ düğmesi filtreyi ekler/çıkarır.
+  // Sunucu karenin kendisini değiştirir; burada yalnız son durum ve yeni
+  // imzalı adres tutulur (detay yeniden yüklenene kadar).
+  final Map<String, bool> _glowOverride = {};
+  final Map<String, String> _urlOverride = {};
+  final Set<String> _glowBusy = {};
+
+  bool _isGlow(String ref) => _glowOverride[ref] ?? data.glowRefs.contains(ref);
+  String _urlOf(_Frame f) =>
+      f.ref == null ? f.url : (_urlOverride[f.ref!] ?? f.url);
+
+  Future<void> _toggleGlow(String ref) async {
+    if (_glowBusy.contains(ref)) return;
+    final next = !_isGlow(ref);
+    setState(() => _glowBusy.add(ref));
+    try {
+      final r = await opsToggleGlow(
+          uid: data.uid, jobId: data.jobId, ref: ref, on: next);
+      if (!mounted) return;
+      setState(() {
+        _glowOverride[ref] = r.on;
+        if (r.url != null) _urlOverride[ref] = r.url!;
+      });
+      _snack(r.on ? 'Işıklı filtre eklendi.' : 'Işıklı filtre kaldırıldı.');
+    } on FirebaseFunctionsException catch (e) {
+      _snack('Filtre değiştirilemedi: ${e.message ?? e.code}', error: true);
+    } catch (e) {
+      _snack('Filtre değiştirilemedi: $e', error: true);
+    } finally {
+      if (mounted) setState(() => _glowBusy.remove(ref));
+    }
+  }
+
   OpsJobDetail get data => widget.data;
 
   /// Üretilen tüm kareler: (gösterim URL'i, gs:// adresi) çiftleri.
@@ -382,7 +415,9 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           final item = items[i];
           final ref = item.ref;
           final isSelected = ref != null && _selected.contains(ref);
-          final urls = items.map((e) => e.url).toList();
+          final glow = ref != null && _isGlow(ref);
+          final glowBusy = ref != null && _glowBusy.contains(ref);
+          final urls = items.map(_urlOf).toList();
           final templates = items.map((e) => e.template).toList();
           return GestureDetector(
             onTap: ref == null ? null : () => _toggle(ref),
@@ -394,7 +429,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: CachedNetworkImage(
-                    imageUrl: item.url,
+                    imageUrl: _urlOf(item),
                     fit: BoxFit.cover,
                     placeholder: (c, u) =>
                         const ColoredBox(color: AppColors.surfaceElevated),
@@ -407,6 +442,43 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 ),
                 if (item.template != null)
                   Positioned(top: 4, left: 4, child: _templateThumb(item.template!)),
+                // IŞIKLI FİLTRE düğmesi: kısa dokunuş seçime ayrılmış olduğu
+                // için filtre ayrı düğmede (sağ alt).
+                if (ref != null)
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _toggleGlow(ref),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: glow
+                              ? AppColors.gold
+                              : Colors.black.withValues(alpha: 0.5),
+                          border: Border.all(color: Colors.white70, width: 1),
+                        ),
+                        child: glowBusy
+                            ? const Padding(
+                                padding: EdgeInsets.all(6),
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : Icon(
+                                glow
+                                    ? Icons.wb_sunny_rounded
+                                    : Icons.wb_sunny_outlined,
+                                size: 16,
+                                color: glow
+                                    ? AppColors.textOnGold
+                                    : Colors.white,
+                              ),
+                      ),
+                    ),
+                  ),
                 if (item.gate != null)
                   Positioned(
                     left: 4,

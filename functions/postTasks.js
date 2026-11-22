@@ -182,6 +182,35 @@ const GAZE_LOCK_ON = true;
 // gelir (ışık/gölge sahneden), yüz ve boyun değişmez, kıyafet yüze göre deri
 // kapısıyla korunur.
 const SKIN_FIELD_SIMPLE = true;
+// KAFA BÜKME / KATMANLI KAFA ÖLÇEĞİ KAPALI (2026-11-19, kullanıcı: "kafa küçük, yapışmış, boyun
+// uzamış, sakal kesilmiş... fazlalıkları çıkar"). Kör A/B (30 kare, 2 hakem, scratchpad simp/): ham
+// kare 32, teslim 21 kez daha doğal; teslimdeki "kafa küçük" 10 (hamda 0), "yapışık" 10 (2), bükülmüş
+// arka plan 6 (0), sakal/saç kesik 4 (1). 185655bf c9 ×0.882 küçüldü, sakal kesildi. Hedef ölçüsü
+// şablon tespit varyansını ölçüyordu (head-grew-measures-template). Model yüzü %6-11 büyük çizebilir;
+// o durumda yeni küçültme katmanı EKLENMEZ, Vision oran kapısı eler. Geri dönüş: true.
+// Katman katman kör A/B (2026-11-19, 30 ham kare yerelde yeniden oynatıldı, scratchpad simp/replay):
+// - GHOST_CLEAN AÇIK: açık 12 (6 açık farkla) / kapalı 7 (1); kapalıyken şablon saç izi kalıyor.
+// - FACE_TONE KAPALI: açık 14 / kapalı 15 (açık farkla 1 / 3), yani ortalamada etkisiz; açıkken
+//   gökyüzünde dikdörtgen gri yama (248a0e72 c5), siyah-beyaz karede sepya yüz + boyunda çizgi
+//   (cd3c9a1c c7), kül grisi yüz (6a02687c c5). Geri dönüş: true.
+// Kalan katmanlar tek tek kapatıldı (aynı 30 kare, tek değişken; sayılar açık / kapalı / aynı):
+// - SKIN 3 / 6 / 2, ama açık farkla 2 / 1: şablon kişinin koyu kollarını yüze getiriyor (185655bf c3,
+//   kullanıcının şikâyeti), kırmızı eli düzeltiyor; bir karede yakaya soluk leke bırakıyor → AÇIK.
+// - LIP 10 karenin 10'unda görünmez (bu karelerde ruj kırmızısı yok; 156fa173 kusurunu düzeltir) → AÇIK.
+// - GAZE 1 / 7 / 5, açık farkla 0 / 2: irisi göz köşesine itiyor, bir karede bulanıklaştırıyor
+//   (6a02687c c1, 248a0e72 c5) → KAPALI.
+// - STRUCT 25 karenin 25'inde görünmez (ortalama 3-6 gri seviye) → KAPALI.
+// - DETAIL 10 / 1 / 7: keskinlik + gren olmadan yüz pürüzsüz ve yapışık → AÇIK.
+// 2026-11-20 YENİDEN AÇILANLAR (kullanıcı kararı, ücretsiz yeniden oynatma, aynı 30 kare):
+// - GAZE: 11-19 kararı test hatasıydı — replay simpleFinish'e templateEyewear geçmiyordu, 30 karenin
+//   11'i gözlüklü şablon; kilit camın arkasını iris sanıp gözü köşeye itti (6a02687c c1 kayma −0.25).
+//   Canlıdaki gibi gözlüklü şablon atlanınca 8 karede uygulandı, bozulma yok; 248a0e72 c5,
+//   cd3c9a1c c7, 6a02687c c6'da iris şablon yönüne.
+// - FACE_TONE: yalnız parlaklık + ışık yönü (faceTone CHROMA kapalı). Koyu şablonda model yüzü
+//   +8..+27 L açıyor (8ac66d45 c5: yüz parlak, göğüs gölgede). Tam katman kör 9/14 kaybetti (gri,
+//   sepya); yalnız parlaklık 11/13 (açık fark 4/1), kullanıcı gözle beğendi. Gri yama (others
+//   sınıfı gökyüzünde) headAlpha'da kişi maskesiyle düzeltildi.
+const FINISH = { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: false, DETAIL: true };
 const PROFILE_CACHE = new Map();
 const PROFILE_CACHE_MAX = 4;
 const PROFILE_FETCH_MS = 15000;
@@ -225,7 +254,8 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   // iz şablonla piksel hizasındayken bulunur. Modele saçı silinmiş base gittiyse
   // (falPhotos.TEMPLATE_HAIR_ERASE) iz kaynağı yok; büyük dolgu yalnız zarar
   // veriyordu (80fc7ec4 c0: bulanık leke, kesik kafa tepesi) — atlanır.
-  if (hairErased) console.log(`ŞABLON İZİ (${tag}): ATLANDI[hair-erased]`);
+  if (!FINISH.GHOST_CLEAN) console.log(`ŞABLON İZİ (${tag}): KAPALI`);
+  else if (hairErased) console.log(`ŞABLON İZİ (${tag}): ATLANDI[hair-erased]`);
   else try {
     const { cleanTemplateGhost } = require("./ghostClean");
     const profiles = Array.isArray(refUrls) && refUrls.length ? await selfieProfiles(jobKey, refUrls) : [];
@@ -236,11 +266,12 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const gc = await cleanTemplateGhost(out, tpl, { profiles, ghostScorer: GHOST_DETECT ? scoreGhost : null, templateHat: !!templateHat });
     if (gc.applied && gc.buf) out = gc.buf;
     const n = (v, d = 3) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    console.log(`ŞABLON İZİ (${tag}): ${gc.applied ? "TEMİZLENDİ" : `ATLANDI[${gc.reason}]`} izPx=${gc.ghostPx ?? "null"} iz/yüz²=${n(gc.ghostFace2)} kırıntı=${gc.crumbPx ?? 0} gözÜstü=${n(gc.ghostUp, 2)} kafayaBitişik=${n(gc.ghostAttached, 2)} yöntem=${gc.mode || "null"} selfieProfil=${profiles.length} dedektör=${n(gc.detScore, 2)}${gc.detHot ? `[İZ +${n(gc.hotAdded)}]` : ""}${gc.hatShare != null ? ` şapka=${gc.hatKept ? "KORUNDU" : "yok"}(pay=${n(gc.hatShare, 2)} alan=${n(gc.hatArea, 2)})` : ""}${gc.ms != null ? ` ${gc.ms}ms` : ""}`);
+    console.log(`ŞABLON İZİ (${tag}): ${gc.applied ? "TEMİZLENDİ" : `ATLANDI[${gc.reason}]`} izPx=${gc.ghostPx ?? "null"} iz/yüz²=${n(gc.ghostFace2)} kırıntı=${gc.crumbPx ?? 0} tutam=${gc.tuftN ?? 0} gözÜstü=${n(gc.ghostUp, 2)} kafayaBitişik=${n(gc.ghostAttached, 2)} yöntem=${gc.mode || "null"} selfieProfil=${profiles.length} dedektör=${n(gc.detScore, 2)}${gc.detHot ? `[İZ +${n(gc.hotAdded)}]` : ""}${gc.hatShare != null ? ` şapka=${gc.hatKept ? "KORUNDU" : "yok"}(pay=${n(gc.hatShare, 2)} alan=${n(gc.hatArea, 2)})` : ""}${gc.ms != null ? ` ${gc.ms}ms` : ""}`);
   } catch (e) {
     console.error("Sade akış: şablon izi temizliği hata verdi (atlanıyor):", e);
   }
-  try {
+  if (!FINISH.HEAD_WARP) console.log(`KAFA BÜKME (${tag}): KAPALI`);
+  else try {
     const { correctHeadByWarp } = require("./headWarp");
     // Çizgi koruma (headWarp/lineKeep) iş süresi azsa atlanır (900 sn bütçe).
     const hw = await correctHeadByWarp(out, tpl, { templateEyewear, deadline });
@@ -249,25 +280,38 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   } catch (e) {
     console.error("Sade akış: kafa bükme hata verdi (atlanıyor):", e);
   }
-  try {
+  if (!FINISH.FACE_TONE) console.log(`YÜZ SAHNE IŞIĞI (${tag}): KAPALI`);
+  else try {
     const { matchFaceToScene } = require("./faceTone");
     const ft = await matchFaceToScene(out, tpl, { mstUser, mstTpl });
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} şablonBoyunYüz=${n(ft.neckDeltaTpl)} şablonÇevreL=${n(ft.tplRingL)} karanlıkSahne=${ft.darkScene ? (ft.deep ? "derin" : "evet") : "hayır"} arkadanIşık=${ft.backlit ? "evet" : "hayır"} boyunİşareti=${ft.neckLog != null ? "×" + n(Math.exp(ft.neckLog), 2) + (ft.neckUsed ? " uygulandı" : " yok") : "—"}`;
+    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)}/${n(ft.albedoLight, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)}${ft.lightCap ? ` açıkŞablonSınırı=×${n(Math.exp(ft.lightCap.from), 2)}→×${n(Math.exp(ft.lightCap.to), 2)}` : ""} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} boyunRenk=${ft.neckAB ? `${n(ft.neckAB[0])}/${n(ft.neckAB[1])}` : "-"}→yüz${ft.faceUpperAB ? `${n(ft.faceUpperAB[0])}/${n(ft.faceUpperAB[1])}` : "-"} kayma=${ft.neckShift ? `${n(ft.neckShift[0])}/${n(ft.neckShift[1])}` : "-"} şablonBoyunYüz=${n(ft.neckDeltaTpl)} şablonÇevreL=${n(ft.tplRingL)} karanlıkSahne=${ft.darkScene ? (ft.deep ? "derin" : "evet") : "hayır"} arkadanIşık=${ft.backlit ? "evet" : "hayır"} boyunİşareti=${ft.neckLog != null ? "×" + n(Math.exp(ft.neckLog), 2) + (ft.neckUsed ? " uygulandı" : " yok") : "—"}`;
     if (ft.applied && ft.buf) out = ft.buf;
     console.log(`YÜZ SAHNE IŞIĞI (${tag}): ${ft.applied ? "UYGULANDI" : `ATLANDI[${ft.reason}]`} ${ölçü}${ft.ms != null ? ` ${ft.ms}ms` : ""}`);
   } catch (e) {
     console.error("Sade akış: yüz sahne ışığı hata verdi (atlanıyor):", e);
   }
-  if (SKIN_FIELD_SIMPLE) try {
+  if (SKIN_FIELD_SIMPLE && FINISH.SKIN) try {
     const t0 = Date.now();
     const { correctSkinToneField } = require("./skinTone");
-    const st = await correctSkinToneField(out, { templateBuf: tpl, faceLocked: true });
+    const pigmentGap = Number.isFinite(mstTpl) && Number.isFinite(mstUser) ? mstTpl - mstUser : null;
+    const st = await correctSkinToneField(out, { templateBuf: tpl, faceLocked: true, pigmentGap });
     if (st.applied && st.buf) out = st.buf;
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    console.log(`TEN ALANI (${tag}): ${st.applied ? "UYGULANDI" : `ATLANDI[${st.reason}]`} yüzKilidi=evet açıklıkFarkı=${n(st.deltaLBefore)}→${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}→${n(st.chromaAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVeto=${n(st.clothVeto, 2)} değişenPx=${st.changedPx ?? 0} ${Date.now() - t0}ms`);
+    console.log(`TEN ALANI (${tag}): ${st.applied ? "UYGULANDI" : `ATLANDI[${st.reason}]`} yüzKilidi=evet açıklıkFarkı=${n(st.deltaLBefore)}→${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}→${n(st.chromaAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVeto=${n(st.clothVeto, 2)} şablonGölgesi=${st.shadeDropped ? `yok[MST farkı ${pigmentGap}]` : "var"} değişenPx=${st.changedPx ?? 0} ${Date.now() - t0}ms`);
   } catch (e) {
     console.error("Sade akış: ten alanı hata verdi (atlanıyor):", e);
+  }
+  // DUDAK KIRMIZILIĞI (2026-11-18, 156fa173 c7, bkz. lipTone.js): ten adımları
+  // dudağa dokunmuyor; model bazı kişilerde ruj sürülmüş gibi kırmızı çiziyor.
+  if (FINISH.LIP) try {
+    const { limitLipRedness } = require("./lipTone");
+    const lp = await limitLipRedness(out);
+    if (lp.applied && lp.buf) out = lp.buf;
+    const n = (v) => (v != null && Number.isFinite(v) ? v.toFixed(1) : "null");
+    console.log(`DUDAK RENGİ (${tag}): ${lp.applied ? "UYGULANDI" : `ATLANDI[${lp.reason}]`} dudak−yanak a*=${n(lp.diff)} dudak=${n(lp.lipA)} yanak=${n(lp.cheekA)} kaydırma=${n(lp.shift)} px=${lp.px ?? "null"} ${lp.ms ?? "-"}ms`);
+  } catch (e) {
+    console.error("Sade akış: dudak rengi hata verdi (atlanıyor):", e);
   }
   // AĞIZ KÖŞESİ (2026-11-01, 831a00a4 c0, kullanıcı: "gereksiz bir
   // gülümseme eklenmiş … kişiye gereksiz gülümseme katma"): base gülmüyorsa
@@ -281,7 +325,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   } catch (e) {
     console.error("Sade akış: ağız köşesi hata verdi (atlanıyor):", e);
   }
-  if (GAZE_LOCK_ON) try {
+  if (GAZE_LOCK_ON && FINISH.GAZE) try {
     const { lockGazeToBase } = require("./gazeLock");
     const gl = await lockGazeToBase(out, tpl, { templateEyewear });
     if (gl.applied && gl.buf) out = gl.buf;
@@ -306,7 +350,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
       console.error("Sade akış: göz açıklığı hata verdi (atlanıyor):", e);
     }
   }
-  try {
+  if (FINISH.STRUCT) try {
     const { matchFaceStructure } = require("./faceDetail");
     const fs2 = await matchFaceStructure(out, tpl);
     const n = (v) => (v != null ? v.toFixed(3) : "null");
@@ -315,7 +359,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
   } catch (e) {
     console.error("Sade akış: yüz yapısı hata verdi (atlanıyor):", e);
   }
-  try {
+  if (FINISH.DETAIL) try {
     const { matchFaceDetail } = require("./faceDetail");
     const fd = await matchFaceDetail(out, tpl);
     const n = (v) => (v != null ? v.toFixed(2) : "null");
@@ -489,6 +533,11 @@ async function eyewearOwnEye({ preBuf, fixBuf, W, H, rect, geom, tplBuf, ownEyeO
 }
 
 /** ŞABLON GÖZÜNDE GÖZLÜK PAYI (2026-11-12, ZIT BAKIŞ kapısı; bkz. gazeGate.IRIS_TPL_GLASS_SKIP). */
+/** ŞAPKA KAPISI (2026-11-19): şablon şapkası çıktıda duruyor mu (ghostClean.measureHatKept). */
+async function hatKept({ out, tpl }) {
+  return require("./ghostClean").measureHatKept(toBuf(out), toBuf(tpl));
+}
+
 async function eyeGlassShare({ tpl }) {
   return { share: await require("./sunglassTransfer").eyeGlassShare(toBuf(tpl)) };
 }
@@ -502,4 +551,9 @@ async function templateHat({ tpl }) {
   return require("./hatDetect").detectTemplateHat(toBuf(tpl));
 }
 
-module.exports = { _testables: { SKIN_FIELD_SIMPLE }, layers, simpleFinish, reposeSelfie, flattenSelfie, cropSelfieHead, sunglassTransfer, eyeGlassShare, eyewearOwnEye, templateHat, headScale, surroundPrep, curlRemnantPrep, fringePrep, glow, selfieDetail, finishInpaint, toBuf };
+// EL ONARIMI yerel parçaları (bkz. handRepair.js): ücretli çağrı ana iş parçacığında, analiz ve
+// yapıştırma worker havuzunda.
+async function handRepairPrep(p) { return require("./handRepair").prepareHands(p); }
+async function handRepairFinish(p) { return require("./handRepair").finishHands(p); }
+
+module.exports = { _testables: { SKIN_FIELD_SIMPLE, FINISH }, layers, simpleFinish, handRepairPrep, handRepairFinish, reposeSelfie, flattenSelfie, cropSelfieHead, sunglassTransfer, eyeGlassShare, hatKept, eyewearOwnEye, templateHat, headScale, surroundPrep, curlRemnantPrep, fringePrep, glow, selfieDetail, finishInpaint, toBuf };

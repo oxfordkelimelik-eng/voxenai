@@ -9,27 +9,12 @@ const { buildNaturalSwapPrompt } = require("../naturalSwap");
 const { hatMaskFromProbs, owlHatDecision, HAT_MIN_FACE2 } = require("../hatDetect")._testables;
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
-// 2026-11-06 öncesi buildSelfieSetPrompt(n) çıktısının sha256'sı (repo naturalSwap.js db409f1f…).
-const BEFORE = {
-  1: "46317599e4a58473a1256c82bcff390c11cbc10674324540878b4692217d11c7",
-  2: "d28400f4dce8e80da1f523fdab5af4f7008a60177610807609b84c6a23ff49be",
-  3: "0195054cf558fbe671d1cf6b96568e74b8abcf96fd3f7ab1844cf895a39dd2ae",
-  4: "1a4c4e5da2f884b1f78fb45b569876bb6cf8e1d6b077ba2609b02b103c715623",
-  5: "f9c47f61ebc52429a2a734dc3b8004419dd67b935823e6b903c799d37f7e9240",
-  6: "cdb128e9ce35779f7e78f586c15d49cdd87d7e86ecf6f76e8c5c527d0e154d3b",
-};
 const HAT_LINE = " If the first person wears a hat, cap or beanie, the new person wears that same one, exactly where and as large as it is; only the hair that shows below it comes from them.";
 
-test("şapkasız şablon: selfie seti promptu bugünküyle bayt bayt aynı (hat yok / hat:false)", () => {
-  // 2026-11-15: baş-boyun paragrafı (naturalSwap.describeHeadAndNeck) eski tek cümlenin yerini
-  // aldı; o paragraf eski cümleye geri çevrilince metin 11-06 öncesiyle bayt bayt aynı.
-  const { describeHeadAndNeck } = require("../naturalSwap")._testables;
-  const OLD_NECK = " The new head sits exactly where the old head was, on the same neck and no larger against the shoulders.";
-  const old = (q) => q.replace(describeHeadAndNeck(null), OLD_NECK);
+test("şapkasız şablon: hat:false ile şapkasız prompt aynı, hazırlanmış yol şapkadan etkilenmez", () => {
   for (let n = 1; n <= 6; n++) {
-    assert.ok(buildNaturalSwapPrompt(n, { prepared: false }).includes(describeHeadAndNeck(null)));
-    assert.strictEqual(sha(old(buildNaturalSwapPrompt(n, { prepared: false }))), BEFORE[n], `n=${n}`);
-    assert.strictEqual(sha(old(buildNaturalSwapPrompt(n, { prepared: false, hat: false }))), BEFORE[n], `n=${n} hat:false`);
+    assert.strictEqual(buildNaturalSwapPrompt(n, { prepared: false, hat: false }), buildNaturalSwapPrompt(n, { prepared: false }), `n=${n}`);
+    assert.ok(!buildNaturalSwapPrompt(n, { prepared: false }).includes(HAT_LINE));
   }
   // Hazırlanmış referans yolu (11-01) şapkadan etkilenmez.
   assert.strictEqual(sha(buildNaturalSwapPrompt(1)), "255da465c1a88b57ad4d7bb823150538ebb82c1b987520f191247e9d0ced2407");
@@ -40,8 +25,8 @@ test("şapkalı şablon: şapka cümlesi saç paragrafında yerinde, arka plan c
   const p = buildNaturalSwapPrompt(5, { prepared: false, hat: true });
   const base = buildNaturalSwapPrompt(5, { prepared: false });
   // Başa yazılmaz (hafıza gaze-tell-direction-upfront: baştaki cümle şapka/gözlüğü sildirmişti).
-  assert.ok(p.startsWith("Replace the person in the first photo (the BASE)"));
-  assert.ok(p.includes("Bald or balding stays so." + HAT_LINE + "\n\nLight and skin:"));
+  assert.ok(p.startsWith("Replace the person in the first photo with the person"));
+  assert.ok(p.includes("Bald or balding stays so." + HAT_LINE + "\n\nLight the face"));
   assert.ok(p.includes("Where the first person's bare hair reached further than the new hair"));
   // Tek fark bu iki ekleme.
   assert.strictEqual(p.replace(HAT_LINE, "").replace("person's bare hair", "person's hair"), base);

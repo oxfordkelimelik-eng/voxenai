@@ -59,6 +59,13 @@ const MAX_TOUCH = 0.22;
 // Kafa dışındaki korunan piksel (boyun derisi, yaka, el) korumasının sınırdan
 // tama çıktığı uzaklık (yüz boyunun payı) — bkz. warpHead.
 const PROT_RAMP_FACE = 0.15;
+// KATMANLI YOLDA KIYAFET RAMPASIZ KORUNUR (2026-11-17, f8c1718b c5): rampa yüzünden kafa
+// sınırına PROT_RAMP içinde yaklaşan yaka ucu (çene/kulak altı) kafayla birlikte bükülüyordu:
+// yaka iç kenarı + boyun pikseli yakanın içine kahverengi şerit olarak çekildi, dış kenar
+// hamla karışıp tırtıklandı. Katmanlı yolda arka plan kaydırılmaz, kafanın açtığı yer plakayla
+// dolar → yakanın kafayla esnemesine gerek yok. Bükmeli (eski) yol değişmez.
+const FIELD_CLOTH_FULL = true;
+const FIELD_CLOTH_RAMP = 0.12; // kafa dışı alan kıyafete bu uzaklıkta (yüz boyu) tama çıkar
 // Segmentasyon çalışma boyu.
 const SEG_MAX_DIM = 768;
 // Eğim düzeltmesi üst sınırı (radyan, ~6°).
@@ -389,6 +396,10 @@ async function headMasks(rgb, FW, FH, box, chinY, { headCrop = false } = {}) {
  * kırpım içinde bununla değişir, kırpım kenarına doğru eskisine karışır.
  */
 const HEAD_CROP = { side: 1.0, up: 1.7, down: 0.5, ramp: 0.08 };
+// Kıyafet de kafa kırpımından (2026-11-17, f8c1718b c5): kişi kırpımında beyaz yaka ucu
+// kıyafet 0.36-0.39 çıkıyordu → plakaya girip LaMa'yla ten rengi doldu, kafayla bükülüp
+// iç kenarı yakanın içine şerit çekti.
+const CROP_CLOTH_ON = true;
 async function refineHeadCrop(m, rgb, FW, FH, box, chinY) {
   const { classProbs, CLASSES } = require("./skinSeg");
   const x0 = Math.max(0, Math.floor(box.x - HEAD_CROP.side * box.width));
@@ -415,6 +426,7 @@ async function refineHeadCrop(m, rgb, FW, FH, box, chinY) {
       const pp = Math.max(hh, 1 - C[CLASSES.background][i]);
       m.head[g] = k * hh + (1 - k) * m.head[g];
       m.person[g] = k * pp + (1 - k) * m.person[g];
+      if (CROP_CLOTH_ON) { const cc = hh >= 0.5 ? 0 : Math.max(C[CLASSES.clothes][i], oth); m.cloth[g] = k * cc + (1 - k) * m.cloth[g]; }
     }
   }
 }
@@ -499,6 +511,15 @@ async function warpHead(outputBuf, plan, lm, { deadline = null, debug = false, l
   const m = new Uint8Array(RW * RH);
   for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) m[y * RW + x] = head[(y + ry0) * FW + x + rx0] >= 0.5 ? 1 : 0;
   const dist = distanceTo(m, RW, RH);
+  // Katmanlı yolda kafa dışı (boyun) alan kıyafete yaklaştıkça söner: sabit yakanın yanında
+  // tam bükülen boyun yakanın iç kenarını boyuna kopyalıyordu (çift kenar, f8c1718b c5).
+  let clothDist = null;
+  if (field && FIELD_CLOTH_FULL) {
+    const cb = new Uint8Array(RW * RH);
+    for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) { const g = (y + ry0) * FW + x + rx0; cb[y * RW + x] = cloth[g] >= 0.5 && head[g] < 0.5 ? 1 : 0; }
+    clothDist = distanceTo(cb, RW, RH);
+  }
+  const clothRamp = Math.max(4, FIELD_CLOTH_RAMP * faceH);
   // Dokunma: kafa sınırının (çene üstü) el/kıyafet/nesneye değen payı.
   let edge = 0, touch = 0;
   for (let y = 1; y < RH - 1; y++) for (let x = 1; x < RW - 1; x++) {
@@ -551,7 +572,8 @@ async function warpHead(outputBuf, plan, lm, { deadline = null, debug = false, l
       // kulak altı-çene hattında basamaklı yırtık bıraktı).
       // Katmanlı yolda (field) arka plan kaydırılmaz: boyun derisi de korunmaz, yalnız dikeyde
       // söner (11-10, 7bbdad12 c4 profil: korunan boyun kulak altında çentik/düz kesik yapıyordu).
-      if (!m[i]) w *= 1 - clamp(field ? cloth[g] : !moveOn || gy <= chinY ? prot[g] : cloth[g], 0, 1) * smooth(dist[i] / protRamp);
+      if (!m[i]) w *= 1 - clamp(field ? cloth[g] : !moveOn || gy <= chinY ? prot[g] : cloth[g], 0, 1) * (field && FIELD_CLOTH_FULL ? 1 : smooth(dist[i] / protRamp));
+      if (!m[i] && clothDist) w *= smooth(clothDist[i] / clothRamp);
       if (w <= 0.002) continue;
       // Ters dönüşüm: hedef → kaynak (çene ucu çevresinde dönme + ölçek, sonra öteleme).
       const qx = gx - A.x - T.x, qy = gy - A.y - T.y;
@@ -1407,7 +1429,7 @@ async function correctHeadByWarp(outputBuf, templateBuf, { templateEyewear = fal
       console.error("Katı kafa ölçeği hata verdi (atlanıyor):", e.message || e);
     }
   }
-  return { ...r, ölçü: `${ölçü} ${çene} uygulanan=${n(r.s)}${r.rollDeg != null ? ` dönüş=${n(r.rollDeg, 1)}°` : ""}${r.tx != null ? ` kayma=${n(r.tx, 2)}/${n(r.ty, 2)} boyun=${n(r.neck, 2)}` : ""}${r.rigid ? ` katı halka=${r.ringPx}px base=${r.tplPx}px` : ""}${r.keepBg ? ` arkaPlanSabit dolgu=${r.fillPx}px base=${r.basePx}px` : ""}${r.layered ? ` KATMANLI[halka=${r.layered.ringPx}px şablon=${r.layered.tplPx}px lama=${r.layered.lamaPx}/${r.layered.lama2Px}px tel=${r.layered.strandPx}px düz=${r.layered.flatPx}px hiza=${r.layered.shift}]` : ""}${r.rollOnlyStructured ? " yalnızEğim" : ""}${r.structShrink ? " düzÇizgiliKüçültme" : ""}${r.layerReason ? ` katmanlıYok=${r.layerReason}` : ""}${r.reduced ? ` AZALTILMIŞ[güç=${r.reduced.strength} tamGüçEğilme=${n(r.reduced.fullBend, 1)}px]` : ""}${r.reducedReason ? ` azaltılmış=${r.reducedReason}${r.reducedBend != null ? `/${n(r.reducedBend, 1)}px` : ""}` : ""}${r.bendGate && r.bendGate.accepted ? " eğilmeKabul" : ""}${r.bendGate ? ` ${r.layered ? "bükmeOlsaydı" : "bükmeDenetimi"}=${r.bendGate.error ? "HATA" : n(r.bendGate.max, 1) + "px"}/${r.bendGate.n}çizgi${r.bendGate.repair ? ` onarım[${r.bendGate.repair.ok ? `${r.bendGate.repair.n}çizgi dolgu=${r.bendGate.repair.fillPx}px kalan=${n(r.bendGate.repair.after, 1)}px` : r.bendGate.repair.reason}]` : ""}` : ""}${r.lines != null ? ` düzÇizgi=${n(100 * r.lines, 1)}%` : ""}${r.touch != null ? ` dokunma=${n(r.touch, 2)}` : ""}${r.band != null ? ` bant=${r.band}px` : ""}${r.border && r.border.ov > BORDER_TOL ? ` kenar[taşma=${n(r.border.ov, 1)}→${n(r.border.after, 1)}px rampa=${r.border.ramp.join("/")}]` : ""}${lkLog(r.lk)}${r.ms != null ? ` ${r.ms}ms` : ""}` };
+  return { ...r, ölçü: `${ölçü} ${çene} uygulanan=${n(r.s)}${r.rollDeg != null ? ` dönüş=${n(r.rollDeg, 1)}°` : ""}${r.tx != null ? ` kayma=${n(r.tx, 2)}/${n(r.ty, 2)} boyun=${n(r.neck, 2)}` : ""}${r.rigid ? ` katı halka=${r.ringPx}px base=${r.tplPx}px` : ""}${r.keepBg ? ` arkaPlanSabit dolgu=${r.fillPx}px base=${r.basePx}px` : ""}${r.layered ? ` KATMANLI[halka=${r.layered.ringPx}px şablon=${r.layered.tplPx}px lama=${r.layered.lamaPx}/${r.layered.lama2Px}px tel=${r.layered.strandPx}px düz=${r.layered.flatPx}px hale=${r.layered.haloPx}px hiza=${r.layered.shift}]` : ""}${r.rollOnlyStructured ? " yalnızEğim" : ""}${r.structShrink ? " düzÇizgiliKüçültme" : ""}${r.layerReason ? ` katmanlıYok=${r.layerReason}` : ""}${r.reduced ? ` AZALTILMIŞ[güç=${r.reduced.strength} tamGüçEğilme=${n(r.reduced.fullBend, 1)}px]` : ""}${r.reducedReason ? ` azaltılmış=${r.reducedReason}${r.reducedBend != null ? `/${n(r.reducedBend, 1)}px` : ""}` : ""}${r.bendGate && r.bendGate.accepted ? " eğilmeKabul" : ""}${r.bendGate ? ` ${r.layered ? "bükmeOlsaydı" : "bükmeDenetimi"}=${r.bendGate.error ? "HATA" : n(r.bendGate.max, 1) + "px"}/${r.bendGate.n}çizgi${r.bendGate.repair ? ` onarım[${r.bendGate.repair.ok ? `${r.bendGate.repair.n}çizgi dolgu=${r.bendGate.repair.fillPx}px kalan=${n(r.bendGate.repair.after, 1)}px` : r.bendGate.repair.reason}]` : ""}` : ""}${r.lines != null ? ` düzÇizgi=${n(100 * r.lines, 1)}%` : ""}${r.touch != null ? ` dokunma=${n(r.touch, 2)}` : ""}${r.band != null ? ` bant=${r.band}px` : ""}${r.border && r.border.ov > BORDER_TOL ? ` kenar[taşma=${n(r.border.ov, 1)}→${n(r.border.after, 1)}px rampa=${r.border.ramp.join("/")}]` : ""}${lkLog(r.lk)}${r.ms != null ? ` ${r.ms}ms` : ""}` };
 }
 
 /** Log: çizgiKoru[UYGULANDI|ATLANDI[neden] çizgi=N bükülme=yeni/bugün bağımsız=yeni/bugün katlanma=yeni/bugün yeniKatlanma=N esneme=yeni/bugün it ms]. SAF. */

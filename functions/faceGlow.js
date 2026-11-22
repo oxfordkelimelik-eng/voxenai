@@ -59,7 +59,12 @@ const GRAYSCALE_CHROMA = 3;
 // +18→+28 ("flaşla çekilmiş, yapıştırılmış yüz"). Kafa (yüz derisi + saç) ve boyuna verilen
 // açma, yüz çevresindeki arka plan halkasının aldığı ortalama açmayı FACE_CAP.MARGIN'den
 // fazla geçemez; sahne ve vücut eğriyi aynen alır, ışıklı görünüm sürer.
-const FACE_CAP = { ON: true, MARGIN: 2, RING_IN: 0.85, RING_OUT: 1.6, NECK_FH: 1.0 };
+// SKIN_ALL (2026-11-17, kullanıcı: "yüz tonu ile ten tamamen aynı tonda olmalı"; f8c1718b c0):
+// sınır boyunda 1 yüz boyunda sönüyor, vücut derisinde hiç yoktu → yüz şablon tavanında
+// kalırken boyun +8 L açıldı (gözlük öncesi boyun−yüz −1.5 → teslim +9.0). Artık sınır her
+// deri pikseline (yüz, boyun, göğüs, el) aynı ağırlıkla: deri yüzle aynı açılır; kıyafet ve
+// arka plan eğriyi aynen alır (ışıklı görünüm sahnede kalır).
+const FACE_CAP = { ON: true, MARGIN: 2, RING_IN: 0.85, RING_OUT: 1.6, NECK_FH: 1.0, SKIN_ALL: true };
 // ŞABLON YÜZÜ TAVANI (2026-11-14, 43c2e739 c9: ton adımı yüzü şablona eşitledi 56.1/55.5, ışıklı
 // +4.9 ekledi → teslim +8.9 L; arka plan medyanı koyu koltuk/ceketten 17, yüzün arkası gri duvar).
 // Çağıran şablon yüz L'si + TPL_MARGIN − şimdiki yüz L'sini (faceTone ölçüsü) verirse yüz bundan fazla
@@ -123,7 +128,16 @@ function labToRgb(L, a, b) {
  * @returns {Promise<{buf: Buffer|null, applied: boolean, reason?: string, bgL?: number, gate?: number, grayscale?: boolean, skinShare?: number}>}
  *   applied=false iken buf null — çağıran kendi karesini korur.
  */
-async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = DEFAULT_BG_STRENGTH, faceHeadroom = null } = {}) {
+// ELLE FİLTRE (2026-11-22, kullanıcı: "ışıklıyı çıktılara manuel ekleyebileceğimiz bir filtre haline
+// getir ... filtre eklenince tüm sahneye 0.6 ışık uygulansın"). Otomatik akışta kapalı (falPhotos
+// GLOW_ON=false); onay ekranında ☀ ile kareye eklenir/çıkarılır (opsPanel.opsToggleGlow). Elle
+// modda koyu sahne kapısı, çok koyu sahne yükseltmesi ve yüz tavanları YOK: kişi ve sahne aynı güçte.
+const MANUAL_STRENGTH = 0.6;
+async function applyManualGlow(buf) {
+  return applyGlowFilter(buf, { strength: MANUAL_STRENGTH, bgStrength: MANUAL_STRENGTH, manual: true });
+}
+
+async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = DEFAULT_BG_STRENGTH, faceHeadroom = null, manual = false } = {}) {
   const { data: rgb, info } = await sharp(buf).rotate().removeAlpha().raw()
     .toBuffer({ resolveWithObject: true });
   const W = info.width, H = info.height, N = W * H;
@@ -144,12 +158,12 @@ async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = 
   bgSamples.sort((a, b) => a - b);
   const meanL = bgW / allN >= MIN_BG_SHARE ? bgSum / bgW : allSum / allN;
   const bgL = bgSamples.length >= 80 ? bgSamples[bgSamples.length >> 1] : meanL;
-  const gate = bgGate(bgL);
+  const gate = manual ? 1 : bgGate(bgL);
   if (gate <= 0) return { buf: null, applied: false, reason: "bright-bg", bgL, gate };
   strength *= gate;
   bgStrength *= gate;
   // Çok koyu sahnede (lunapark/restoran) yüz hâlâ sönük kalıyordu.
-  if (bgL <= 22 && gate >= 1) {
+  if (!manual && bgL <= 22 && gate >= 1) {
     strength = Math.max(strength, 0.75);
     bgStrength = Math.max(bgStrength, 0.38);
   }
@@ -179,7 +193,7 @@ async function applyGlowFilter(buf, { strength = DEFAULT_STRENGTH, bgStrength = 
 
   const tDL = tabulate(DL_CURVE), tDA = tabulate(DA_CURVE), tDB = tabulate(DB_CURVE);
   const tSL = tabulate(SKIN_DL_EXTRA), tSB = tabulate(SKIN_DB_EXTRA);
-  const cap = FACE_CAP.ON ? faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, faceHeadroom) : null;
+  const cap = FACE_CAP.ON && !manual ? faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, faceHeadroom) : null;
   const out = Buffer.alloc(N * 3);
   let skinSum = 0;
   for (let i = 0; i < N; i++) {
@@ -240,7 +254,8 @@ function faceCapOf(rgb, W, H, P, CLASSES, wMap, tDL, faceHeadroom = null) {
       const inHead = Math.abs(x - cx) <= 0.7 * fw * 1.4 && y >= y0 - 0.9 * fh && y <= y1 + 0.15 * fh;
       let v = inHead ? Math.min(1, P[CLASSES.faceSkin][i] + P[CLASSES.hair][i]) : 0;
       // Boyun: yüzün altında vücut derisi, aşağı doğru sönerek (yüz/boyun basamağı olmasın).
-      if (y > y1 && y < neckY1 && Math.abs(x - cx) <= fw) v = Math.max(v, P[CLASSES.bodySkin][i] * (1 - (y - y1) / (neckY1 - y1)));
+      if (FACE_CAP.SKIN_ALL) v = Math.max(v, Math.min(1, Math.max(0, (P[CLASSES.bodySkin][i] - 0.3) / 0.4)));
+      else if (y > y1 && y < neckY1 && Math.abs(x - cx) <= fw) v = Math.max(v, P[CLASSES.bodySkin][i] * (1 - (y - y1) / (neckY1 - y1)));
       c[i] = v;
     }
   }
@@ -257,5 +272,7 @@ function bgGate(bgL) {
 
 module.exports = {
   applyGlowFilter,
+  applyManualGlow,
+  MANUAL_STRENGTH,
   _testables: { FACE_CAP, TPL_FACE_CAP, faceCapOf, curveAt, rgbToLab, labToRgb, bgGate, DL_CURVE, DEFAULT_STRENGTH, DEFAULT_BG_STRENGTH, BG_DARK_L, BG_BRIGHT_L },
 };

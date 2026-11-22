@@ -698,7 +698,8 @@ async function analyzeSkin(buf, { lowConf = false, templateBuf = null, faceGate 
     if (region[i] <= 0.02) continue;
     limbW[i] = region[i] * smooth01((field.conf[i] - LIMB_CONF_ZERO) / LIMB_CONF_SPAN);
   }
-  return { ok: true, W, H, N, sc, faceTone, field, limbW, faceSkin, clothVeto, faceH: box.height };
+  // region/box: el onarımı maskesi için (handRepair.js) — vücut derisi bölgesi çalışma ölçeğinde.
+  return { ok: true, W, H, N, sc, faceTone, field, limbW, faceSkin, clothVeto, faceH: box.height, region, box };
 }
 
 /**
@@ -824,7 +825,13 @@ function templateShade(a, W, H) {
   return { shade, w, presence };
 }
 
-async function correctSkinToneField(outputBuf, { bodyLightRatio = null, templateBuf = null, localLight = LOCAL_LIGHT, faceLocked = false } = {}) {
+// KOYU ŞABLONDA ŞABLON GÖLGESİ TAŞINMAZ (2026-11-22, 185655bf c3, kullanıcı: "kol doğrudan yüzün
+// tenine çekilmeli"). templateShade şablondaki kol−yüz farkını ışık sayıyor; şablon kişisi kullanıcıdan
+// en az bu kadar MST koyuysa o fark kısmen tendir (siyahi şablonun kolu yüzünden koyu) ve %80'i
+// kullanıcının koluna taşınıyordu (kol 12.9 L "düzeldi" ama yüzden koyu kaldı). Bu durumda gölge
+// 0: hedef doğrudan yüz tonu; şablon deri varlığı kapısı (bej pantolon) aynen kalır.
+const SHADE_PIGMENT_GAP = 2;
+async function correctSkinToneField(outputBuf, { bodyLightRatio = null, templateBuf = null, localLight = LOCAL_LIGHT, faceLocked = false, pigmentGap = null } = {}) {
   const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, bodyLightRatio, ...extra });
   try {
     // Şablonun ten analizi: gölge (vücut − yüz) ve deri varlığı. 10-27'den beri
@@ -844,6 +851,8 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
     const { W, H, N, faceTone, field, faceSkin, clothVeto } = an;
     let limbW = an.limbW;
     const local = tA ? templateShade(tA, W, H) : null;
+    const shadeDropped = !!(local && Number.isFinite(pigmentGap) && pigmentGap >= SHADE_PIGMENT_GAP);
+    if (shadeDropped) local.shade.fill(0);
     let tplAbsent = null;
     if (local) {
       // Şablonda yakınında deri olmayan nokta boyanmaz (c3 bej pantolon).
@@ -868,8 +877,8 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
       ? [faceTone[0] + faceMatch.dL, faceTone[1] + faceMatch.dA, faceTone[2] + faceMatch.dB]
       : faceTone;
     const plan = planCorrection(field, limbW, bodyTone, N, bodyLightRatio, local);
-    if (!plan) return skip("no-limb-skin", { skinPx: field.count, clothVeto, tplAbsent });
-    const stats = { ...plan.stats, skinPx: field.count, clothVeto, tplAbsent };
+    if (!plan) return skip("no-limb-skin", { skinPx: field.count, clothVeto, tplAbsent, shadeDropped });
+    const stats = { ...plan.stats, skinPx: field.count, clothVeto, tplAbsent, shadeDropped };
     if (!plan.needed && !faceMatch.needed) return skip("tone-already-matches", stats);
 
     // Bölge ağırlığını hafifçe yumuşat (sınıf sınırı basamak bırakmasın).

@@ -39,6 +39,11 @@ const GRAIN_ALPHA = 14;
 // Gürültü genliği (gri ton ±). Yüksek olursa "bozuk görüntü" gibi durur.
 // 14 -> 9, aynı gerekçeyle.
 const GRAIN_AMPLITUDE = 9;
+// GREN KAPALI (2026-11-22, kullanıcı: "telefon dokusundaki greni kaldır, JPEG kaydı kalsın").
+// Üç kez kısıldıktan sonra yüz çevresinde tamamen kapalıydı; yüz dışında ortalama 3.6 gri seviye
+// (30 kare yerel ölçüm), telefon boyutunda görünmez. addPhoneCameraTexture artık yalnız son JPEG
+// kaydını yapar (JPEG_QUALITY, 4:4:4). Geri dönüş: true.
+const PHONE_GRAIN_ON = false;
 
 /**
  * Yüz bölgesinde grain'i YUMUŞAK KENARLI olarak söndürür (2026-08-16).
@@ -108,6 +113,11 @@ async function addPhoneCameraTexture(buf) {
     const image = sharp(buf);
     const meta = await image.metadata();
     if (!meta.width || !meta.height) return buf;
+    if (!PHONE_GRAIN_ON) {
+      return await image
+        .jpeg({ quality: JPEG_QUALITY, chromaSubsampling: JPEG_CHROMA_SUBSAMPLING, mozjpeg: true })
+        .toBuffer();
+    }
 
     let faceBox = null;
     try {

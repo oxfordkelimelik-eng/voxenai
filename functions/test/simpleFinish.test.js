@@ -23,13 +23,56 @@ test("koyu tenli kullanıcı açık tenli şablona eşitlenmez: pigment oranı h
   assert.ok(darker.logGain < 0);
 });
 
-test("küçük fark dokunulmaz, renk kayması yarım güç ve sınırlı", () => {
-  const p = tone.planTone({ Y: 0.2, a: 10, b: 30 }, { Y: 0.203, a: 10, b: 10 }, 1);
-  assert.strictEqual(p.logGain, 0);
-  assert.strictEqual(p.db, tone.CHROMA_MAX);
-  const q = tone.planTone({ Y: 0.2, a: 10.5, b: 15.5 }, { Y: 0.2, a: 10, b: 15 }, 1);
-  assert.strictEqual(q.da, 0);
-  assert.strictEqual(q.db, 0);
+test("küçük fark dokunulmaz, renk kayması yarım güç ve sınırlı (CHROMA.FACE açıkken)", () => {
+  tone.CHROMA.FACE = true;
+  try {
+    const p = tone.planTone({ Y: 0.2, a: 10, b: 30 }, { Y: 0.203, a: 10, b: 10 }, 1);
+    assert.strictEqual(p.logGain, 0);
+    assert.strictEqual(p.db, tone.CHROMA_MAX);
+    const q = tone.planTone({ Y: 0.2, a: 10.5, b: 15.5 }, { Y: 0.2, a: 10, b: 15 }, 1);
+    assert.strictEqual(q.da, 0);
+    assert.strictEqual(q.db, 0);
+  } finally {
+    tone.CHROMA.FACE = false;
+  }
+});
+
+test("yalnız parlaklık (11-20): varsayılan renk kayması yok, parlaklık aynen", () => {
+  assert.strictEqual(tone.CHROMA.FACE, false);
+  assert.strictEqual(tone.CHROMA.NECK, false);
+  const tpl = { Y: Lab2Y(35.4), a: 10, b: 30 }, out = { Y: Lab2Y(50.7), a: 10, b: 10 };
+  const off = tone.planTone(tpl, out, 1);
+  assert.strictEqual(off.da, 0);
+  assert.strictEqual(off.db, 0);
+  tone.CHROMA.FACE = true;
+  try {
+    const on = tone.planTone(tpl, out, 1);
+    assert.strictEqual(on.logGain, off.logGain);
+    assert.ok(on.db > 0);
+  } finally {
+    tone.CHROMA.FACE = false;
+  }
+});
+
+test("kafa alfası: kişi maskesi dışındaki 'others' (gökyüzü) kafa sayılmaz, içindeki (şapka) sayılır (248a0e72 c5)", () => {
+  const W = 40, H = 60, N = W * H;
+  const CLASSES = { background: 0, hair: 1, bodySkin: 2, faceSkin: 3, clothes: 4, others: 5 };
+  const P = Array.from({ length: 6 }, () => new Float32Array(N));
+  const box = { x: 15, y: 30, width: 10, height: 12 };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (y >= 30 && y < 42 && x >= 15 && x < 25) P[CLASSES.faceSkin][i] = 1;
+    if (y >= 12 && y < 30 && x >= 15 && x < 25) P[CLASSES.others][i] = 1; // kafanın üstü: others
+  }
+  const S = { P, CLASSES, W, H, box, work: new Uint8Array(N * 3).fill(128) };
+  const sky = new Float32Array(N); // kişi maskesi yalnız yüz + y≥24 (şapkanın alt yarısı)
+  for (let y = 24; y < 42; y++) for (let x = 15; x < 25; x++) sky[y * W + x] = 1;
+  const A = tone.headAlpha(S, null, sky);
+  assert.strictEqual(A.head[15 * W + 20], 0, "kişi dışı others (gökyüzü) kararmaz");
+  assert.strictEqual(A.head[26 * W + 20], 1, "kişi içindeki others (şapka) kafaya dahil");
+  assert.strictEqual(A.head[35 * W + 20], 1, "yüz");
+  const noPm = tone.headAlpha(S, null, null);
+  assert.strictEqual(noPm.head[15 * W + 20], 1, "kişi maskesi yoksa eski davranış");
 });
 
 test("ışık yönü: şablon yüzünün sol-sağ eğimi çıktıya aktarılır, dikey yarım", () => {

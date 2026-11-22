@@ -156,6 +156,28 @@ Future<({int approved, int skipped})> opsApprovePhotos({
   );
 }
 
+/// IŞIKLI FİLTRE (2026-11-22): onay karesine tüm sahneye 0.6 ışıklı filtreyi
+/// ekler (`on: true`) ya da filtresiz asıl kareyi geri yükler. Teslimde aynı
+/// dosya kopyalandığı için onaylanan kare filtreli/filtresiz hâliyle gider.
+/// Dönen `url` karenin yeni imzalı adresi (önbellek eski görseli göstermesin).
+Future<({bool on, String? url})> opsToggleGlow({
+  required String uid,
+  required String jobId,
+  required String ref,
+  required bool on,
+}) async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsToggleGlow');
+  final result = await callable.call(<String, dynamic>{
+    'uid': uid,
+    'jobId': jobId,
+    'ref': ref,
+    'on': on,
+  });
+  final data = Map<String, dynamic>.from(result.data as Map);
+  return (on: data['on'] as bool? ?? on, url: data['url'] as String?);
+}
+
 /// Panelden ELLE yüklenen fotoğrafı kullanıcının teslim listesine ekler.
 ///
 /// Dosya doğrudan Storage'a yüklenir (storage.rules yalnızca ops hesabına

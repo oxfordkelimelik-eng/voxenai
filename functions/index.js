@@ -36,6 +36,7 @@ for (const name of [
   "opsListPendingApprovalJobs",
   "opsApprovePhotos",
   "opsAttachUploadedPhoto",
+  "opsToggleGlow",
 ]) {
   exports[name] = opsPanel[name];
 }

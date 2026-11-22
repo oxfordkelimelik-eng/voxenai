@@ -44,9 +44,9 @@ test("güneş gözlüğü: afin eşleme benzerliği de kapsar, tersi geri döner
 test("talimat: tüm selfie setinde kimlik selfie'den, baş/bakış/ışık base'den", () => {
   const p = buildNaturalSwapPrompt(5, { prepared: false });
   assert.match(p, /the other 5 photos/);
-  assert.match(p, /Take nothing else from them/);
+  assert.match(p, /Use the other 5 photos only to see who this person is/);
   assert.match(p, /no smile, no frown/);
-  assert.match(p, /light the face only with the light of the first photo/i);
+  assert.match(p, /Light the face with the same light that falls on the body in the first photo/);
   assert.doesNotMatch(p, /Copy the face as it appears there/);
   // Hazırlanmış referans yolu değişmedi.
   assert.match(buildNaturalSwapPrompt(1), /Copy the face as it appears there/);

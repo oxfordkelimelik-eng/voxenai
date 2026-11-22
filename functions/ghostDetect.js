@@ -29,6 +29,15 @@ const STD = [0.26862954, 0.26130258, 0.27577711];
 const ZONE_MIN = 0.25;
 // Kare skoru (R yamalarının en yükseği) eşiği: iş bazında dışarıda bırakmalı
 // skorlarda izsiz 91 karenin 2'si üstünde (a4433ad1 c5 4.39, 3d1d2a71 c6 4.20).
+// 3.5 → 2.0 (2026-11-18, 156fa173 c4): yukarı bakan şablonda bukle izi kafa
+// tepesinde kaldı, skor 2.31. Son 4 işin 39 karesinde (teslim + reddedilen)
+// kör karşılaştırma: 2 net iyileşme (c4 bukleler, c5 tepede soluk iz), 2
+// görünmez fark (bukle içinde ~200 px), 2 aynı, 33 dokunulmadı; kafa kesiği yok.
+// 2.0 → 3.5 GERİ ALINDI (2026-11-19, 248a0e72 c8, kullanıcı: "yüzün sağ üstü
+// bulanmış"): skor 2.24'te sıcak yol kafa yanındaki köprü kafesi/ağaç dokusunu
+// yüz alanının %44'ü kadar iz sayıp LaMa ile doldurdu → bulanık leke. Test
+// kümesindeki kazanımlar düz zeminde (gök, taş duvar); dokulu zeminde LaMa
+// yeniden çizemiyor. Düşük eşik ancak zemin dokusu kapısıyla birlikte dönmeli.
 const FRAME_TAU = 3.5;
 // Yama eşiği (ghostClean.hotMaskOf histerezisi bunun HOT_HYST altına iner).
 const PATCH_TAU = 2.0;

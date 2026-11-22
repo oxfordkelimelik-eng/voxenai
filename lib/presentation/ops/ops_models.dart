@@ -402,6 +402,10 @@ class OpsJobDetail {
   /// için kaydedilmiş işlerde dolu (2026-11-01, falPhotos keepSelfiesForReview).
   final List<String> selfies;
 
+  /// Işıklı filtre eklenmiş onay karelerinin gs:// adresleri (2026-11-22,
+  /// opsPanel.opsToggleGlow).
+  final List<String> glowRefs;
+
   // DENETİM ALANLARI (2026-11-04, bkz. opsPanel.jobAuditFields).
   /// Onay beklemeye başladığı an; yalnız onay bekleyen işte otomatik iptal anı.
   final int? pendingApprovalAtMillis;
@@ -442,6 +446,7 @@ class OpsJobDetail {
     required this.approvedBy,
     this.templates = const {},
     this.selfies = const [],
+    this.glowRefs = const [],
     this.pendingApprovalAtMillis,
     this.autoCancelAtMillis,
     this.pendingApprovalOverdue = false,
@@ -502,6 +507,10 @@ class OpsJobDetail {
               e.key.toString(): OpsTemplate.fromJson(e.value)!,
         },
         selfies: ((j['selfies'] as List?) ?? [])
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .toList(),
+        glowRefs: ((j['glowRefs'] as List?) ?? [])
             .where((e) => e != null)
             .map((e) => e.toString())
             .toList(),

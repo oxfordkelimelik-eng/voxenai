@@ -70,6 +70,8 @@ const EXPECTED_BLOCKED = [
   "math-identity", "math-head-ratio", "math-head-grew", "vision-identity",
   "vision-proportion", "vision-attachment", "vision-no-evidence",
   "math-no-face+vision-inconclusive",
+  // 2026-11-19: şablon şapkası düştü, kafa şapka hacmine uzadı (deformasyon).
+  "hat-lost",
 ];
 
 test("isBlockedGate: kimlik, kafa oranı ve deformasyon kapıları engelli; poz/bakış kapıları serbest", () => {

@@ -35,9 +35,12 @@ async function cropFace(buf, box) {
   return sharp(buf).rotate().extract(region).resize(448, 448, { fit: "inside" }).jpeg({ quality: 88 }).toBuffer();
 }
 
+// Kare başına bitirme yolunda koşar; takılırsa yüz ışığı pigmentsiz sürer (null).
+const ASK_TIMEOUT_MS = 20000;
 async function askMst(apiKey, img) {
   const resp = await fetch(OPENAI_CHAT_URL, {
     method: "POST",
+    signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: MODEL,
@@ -65,10 +68,16 @@ async function estimateMst(buffers, apiKey, boxes = null) {
   if (!apiKey || !buffers || !buffers.length) return null;
   try {
     const vals = [];
+    // Her görsel kendi try/catch'inde (2026-11-20 inceleme): tek zaman aşımı selfie setinin
+    // tamamını düşürüp pigmenti (yüz ışığı + el onarımı) kapatmasın; medyan başarılı olanlardan.
     for (let i = 0; i < buffers.length; i++) {
-      const img = await cropFace(buffers[i], boxes ? boxes[i] : null);
-      const v = await askMst(apiKey, img);
-      if (v != null) vals.push(v);
+      try {
+        const img = await cropFace(buffers[i], boxes ? boxes[i] : null);
+        const v = await askMst(apiKey, img);
+        if (v != null) vals.push(v);
+      } catch (e) {
+        console.warn(`Ten pigmenti: görsel ${i} atlandı (${e.name || ""} ${e.message || e})`);
+      }
     }
     if (!vals.length) return null;
     vals.sort((a, b) => a - b);

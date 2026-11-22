@@ -76,6 +76,12 @@ const LAYER = {
   // Arka plan yalnız hizalı ŞABLONDAN bilinen plakada güvenilir; LaMa tahmini koyu saçla tesadüfen
   // eşleşip saçı saydamlaştırıyordu (7e04933e c5 kulak üstü bambu).
   MATTE_TPL_ONLY: true,
+  // AÇIK HALE (2026-11-17, f8c1718b c5 saç üstü kubbe): ham karede saçın çevresindeki açık hale
+  // segmentasyonda saç (≥0.9); küçültmede kafayla aşağı iniyor, tente bandının kenarı kubbe
+  // gibi kayıyordu. Plaka LaMa'dan olduğu için MATTE (yalnız şablon) çalışmıyordu. Bantta
+  // kaynak plakaya MATTE_T'den yakın ve dokusu (5×5 komşu farkı) HALO_TEX altındaysa α azalır.
+  // Kafa rengi koşulu yerine doku: saç teli dokulu (c5 ölçü 8-12), bulanık zemin değil (0.4-0.8).
+  HALO_ON: true, HALO_BAND: 0.3, HALO_TEX: 4,
   CLOTH_SKIN_ON: true,
   CLOTH_SKIN_NN_MAX: 0.5, CLOTH_SKIN_SURE: 0.8, CLOTH_SKIN_SIGMA: 0.06, CLOTH_SKIN_CONF: 0.05, CLOTH_SKIN_T: 40,
   FLAT_ON: false,
@@ -400,7 +406,10 @@ async function scaleHeadLayered(outputBuf, plan, lm, tplBuf, { deadline = null, 
     for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) { const i = y * RW + x, g = G(x, y); if (head[g] >= 0.9 && o[i] >= 0.9) { fw[i] = 1; for (let c = 0; c < 3; c++) fv[i * 3 + c] = rgb[g * 3 + c]; } }
     fgL = normConv(fv, fw, RW, RH, LAYER.MATTE_FG_SIGMA * faceH, 3);
   }
-  let mattePx = 0;
+  // Ham parlaklıkta yerel doku: 5×5 içinde komşu farkı ortalaması (saç teli yüksek, bulanık zemin düşük).
+  const lumAt = (x, y) => { const k = (clamp(y, 0, FH - 1) * FW + clamp(x, 0, FW - 1)) * 3; return 0.299 * rgb[k] + 0.587 * rgb[k + 1] + 0.114 * rgb[k + 2]; };
+  const texAt = (x, y) => { let s = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) s += Math.abs(lumAt(x + dx + 1, y + dy) - lumAt(x + dx, y + dy)) + Math.abs(lumAt(x + dx, y + dy + 1) - lumAt(x + dx, y + dy)); return s / 25; };
+  let mattePx = 0, haloPx = 0;
   for (let y = 0; y < RH; y++) for (let x = 0; x < RW; x++) {
     const i = y * RW + x; if (!act[i] && !ring[i]) continue;
     const gx = x + rx0, gy = y + ry0, g = (gy * FW + gx) * 3;
@@ -409,12 +418,16 @@ async function scaleHeadLayered(outputBuf, plan, lm, tplBuf, { deadline = null, 
     // Kaynak piksel plakanın arka plan tahminiyle aynıysa (segmentasyon kafayı arka plana
     // taşırmış) kişi katmanı onu taşımaz.
     const qlx = Math.round(qx - rx0), qly = Math.round(qy - ry0);
-    if (dEdge && act[i] && a > 0 && qlx >= 0 && qly >= 0 && qlx < RW && qly < RH && ring[qly * RW + qlx] && dEdge[i] <= LAYER.MATTE_BAND * faceH) {
+    if (dEdge && act[i] && a > 0 && qlx >= 0 && qly >= 0 && qlx < RW && qly < RH && ring[qly * RW + qlx] && dEdge[i] <= Math.max(LAYER.MATTE_BAND, LAYER.HALO_ON ? LAYER.HALO_BAND : 0) * faceH) {
       let d = 0, df = 0; const jq = qly * RW + qlx;
       for (let c = 0; c < 3; c++) { const r = Rq(qx, qy, c); d = Math.max(d, Math.abs(r - Bq(qx, qy, c))); df = Math.max(df, Math.abs(r - fgL.res[jq * 3 + c])); }
       // Kafa rengine de benziyorsa (koyu saç koyu zemin önünde) ayırt edilemez → kişi kalır
       // (11-12 kör A/B: 7e04933e c5 bambu çıtaları saçın içinden görünüyordu).
-      if (d < LAYER.MATTE_T && fgL.conf[jq] > 0.02 && df > LAYER.MATTE_FG_T && (!LAYER.MATTE_TPL_ONLY || fromTpl[jq])) { a *= smooth(d / LAYER.MATTE_T); mattePx++; }
+      if (dEdge[i] <= LAYER.MATTE_BAND * faceH && d < LAYER.MATTE_T && fgL.conf[jq] > 0.02 && df > LAYER.MATTE_FG_T && (!LAYER.MATTE_TPL_ONLY || fromTpl[jq])) { a *= smooth(d / LAYER.MATTE_T); mattePx++; }
+      // HALE (bkz. LAYER.HALO_*): kaynak plakaya yakın VE pürüzsüzse (saç teli dokusu yok) arka
+      // plandır — LaMa plakasında da. Kafa rengi (fgL) burada kullanılamaz: segmentasyon haleyi
+      // saç ≥0.9 saydığı için kafa rengi halenin kendisi.
+      else if (LAYER.HALO_ON && d < LAYER.MATTE_T && texAt(Math.round(qx), Math.round(qy)) < LAYER.HALO_TEX) { a *= smooth(d / LAYER.MATTE_T); haloPx++; }
     }
     // Kaynakta kişi yoksa (nn = q'daki kişi olasılığı ≈ 0) q'nun arkası ham görüntünün kendisi:
     // plaka orada sahneyi hamdan farklı çizdiyse (şablon plakası, genişletme payı) fark kafayla
@@ -428,7 +441,7 @@ async function scaleHeadLayered(outputBuf, plan, lm, tplBuf, { deadline = null, 
   const buf = await sharp(out, { raw: { width: FW, height: FH, channels: 3 } }).png().toBuffer();
   if (debugMasks) debugMasks.push({ roi, o, nn, ring, oldR, alpha, act, plate: B, head, person, cloth, warped, Dx, Dy, rgb, out });
   return {
-    buf, applied: true, reason: null, s: w.s, layered: { ringPx: ringN, tplPx, lamaPx, lama2Px, strandPx, flatPx, clothSkinPx, mattePx, shift: shift ? `${shift.dx}/${shift.dy}@${shift.ncc.toFixed(2)}` : null },
+    buf, applied: true, reason: null, s: w.s, layered: { ringPx: ringN, tplPx, lamaPx, lama2Px, strandPx, flatPx, clothSkinPx, mattePx, haloPx, shift: shift ? `${shift.dx}/${shift.dy}@${shift.ncc.toFixed(2)}` : null },
     rollDeg: w.rollDeg, lines: w.lines, band: w.band, touch: w.touch, border: w.border, ms: Date.now() - t0,
   };
 }

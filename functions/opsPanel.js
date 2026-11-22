@@ -613,6 +613,8 @@ exports.opsGetJobDetail = onCall(
       rejectedFrames,
       templates,
       selfies,
+      // IŞIKLI FİLTRE (2026-11-22, bkz. opsToggleGlow): filtre eklenmiş karelerin gs:// adresleri.
+      glowRefs: Array.isArray(job.glowRefs) ? job.glowRefs.filter((u) => typeof u === "string") : [],
       ...jobAuditFields(job),
     };
   }
@@ -989,6 +991,63 @@ exports.opsApprovePhotos = onCall(
 );
 
 /**
+ * IŞIKLI FİLTRE (2026-11-22, kullanıcı: "ışıklı kısmı da bizim çıktılara manuel ekleyebileceğimiz bir
+ * filtre haline getir. çıktıları görüp onayladığımız pencerede fotoğraflara tıklayınca bu filtreyi
+ * ekleyip çıkarabilelim; tüm sahneye 0.6 ışık uygulansın").
+ *
+ * Onay havuzundaki (staging ya da reddedilen) karenin KENDİSİ değişir: opsApprovePhotos aynı dosyayı
+ * kopyaladığı için teslim edilen kare filtreli olur. Filtresiz asıl kare yanına
+ * GLOW_BACKUP_SUFFIX ile saklanır (aynı iş klasörü → iptal/silme prefix temizliği onu da siler);
+ * kapatınca geri yüklenir. Açmak her zaman yedekten yapılır: iki kez açmak filtreyi üst üste bindirmez.
+ * Zaten teslim edilmiş kopyaya (dating_results) dokunmaz.
+ */
+const GLOW_BACKUP_SUFFIX = ".isiksiz.jpg";
+exports.opsToggleGlow = onCall(
+  { region: "europe-west1", memory: "2GiB", timeoutSeconds: 120 },
+  async (request) => {
+    await assertOps(request, "opsToggleGlow");
+    const { uid, jobId, ref, on } = request.data || {};
+    if (!uid || !jobId || typeof ref !== "string" || typeof on !== "boolean") {
+      throw new HttpsError("invalid-argument", "uid, jobId, ref ve on zorunlu.");
+    }
+    assertSafeId(uid, "uid");
+    assertSafeId(jobId, "jobId");
+    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+    const snap = await jobRef.get();
+    if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+    const job = snap.data();
+    const [path] = validateApprovalSelection({
+      selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
+    });
+    const file = bucket().file(path);
+    const backup = bucket().file(path + GLOW_BACKUP_SUFFIX);
+    const [hasBackup] = await backup.exists();
+    if (on) {
+      let src;
+      if (hasBackup) {
+        [src] = await backup.download();
+      } else {
+        [src] = await file.download();
+        await file.copy(backup);
+      }
+      const gl = await require("./faceGlow").applyManualGlow(src);
+      if (!gl.applied || !gl.buf) throw new HttpsError("internal", `Filtre uygulanamadı (${gl.reason || "?"}).`);
+      const out = await require("./postProcess").addPhoneCameraTexture(Buffer.from(gl.buf));
+      await file.save(out, { metadata: { contentType: "image/jpeg" } });
+      await jobRef.set({ glowRefs: admin.firestore.FieldValue.arrayUnion(ref) }, { merge: true });
+    } else {
+      if (hasBackup) {
+        await backup.copy(file);
+        await backup.delete().catch((e) => console.error("Işıklı yedeği silinemedi:", e.message || e));
+      }
+      await jobRef.set({ glowRefs: admin.firestore.FieldValue.arrayRemove(ref) }, { merge: true });
+    }
+    console.log(`IŞIKLI FİLTRE: ${on ? "EKLENDİ" : "ÇIKARILDI"} ${path} (uid=${uid}, job=${jobId}, by=${request.auth.token.email || "?"})`);
+    return { on, url: await signedDownloadUrl(file) };
+  }
+);
+
+/**
  * Panelden ELLE yüklenen fotoğrafı ONAY HAVUZUNA (staging) ekler.
  *
  * Yükleme, ops istemcisi tarafından doğrudan Storage'a yapılır (storage.rules
@@ -1052,6 +1111,7 @@ exports.opsAttachUploadedPhoto = onCall(
 // gerçek bir Cloud Function olarak deploy edilmez, sadece
 // functions/test/opsPanel.test.js bunları require eder.
 exports._testables = {
+  GLOW_BACKUP_SUFFIX,
   templateNameForRef,
   isAuthorizedOpsEmail,
   uidFromDocPath,

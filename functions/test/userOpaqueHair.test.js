@@ -48,3 +48,9 @@ test("userOpaqueHair: kafaya bağlı değilse (tohum yok) korunmaz", () => {
 test("USER_OPAQUE varsayılanı açık", () => {
   assert.strictEqual(USER_OPAQUE.ON, true);
 });
+
+test("ghostClean bileşimi korunan kafaya taşmaz (COMPOSE.CORE_PROTECT açık, kırıntı açık)", () => {
+  const { COMPOSE } = require("../ghostClean")._testables;
+  assert.strictEqual(COMPOSE.CORE_PROTECT, true);
+  assert.strictEqual(COMPOSE.CRUMB, true);
+});

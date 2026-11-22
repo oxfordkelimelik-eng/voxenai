@@ -31,11 +31,20 @@ const FALLBACK_CHAT = PRICES["gpt-4o"];
 // 2026-10-19 kullanıcı kararları: 1.50 → 1.55 $ (yön sapan karede ikinci
 // üretim, bkz. falPhotos resampleIfYawDrifts), aynı gün → 1.65 $ (ilk canlı
 // işte dd788c00 sapan kareler bütçeye sığmadı).
-const COST_LIMIT_PER_FRAME_USD = 0.165; // 10 kare = 1.65 $
+// 1.65 → 1.50 $ SERT TAVAN (2026-11-19, kullanıcı: "ne olursa olsun maliyet
+// 1.5$ geçmemeli, en üst sınır o"; 248a0e72 $2.36 tuttu: 4 yüz onarımı zorunlu
+// sayılıp sınırı atlıyordu). Artık yüz onarımı da bütçeden yer ayırır ve her
+// pahalı görüntü çağrısı hardCapAllows ile mutlak tavanı denetler.
+const COST_LIMIT_PER_FRAME_USD = 0.15; // 10 kare = 1.50 $
 const COST_LIMIT_MIN_USD = 0.2; // tek karelik işlerde (ücretsiz deneme) gözlük+dolguya yer kalsın
 // Chunk başına zorunlu pay: ana üretim (~0.100) + iki Vision çağrısı (~0.015)
 // + kalıntı yargısı (~0.004), üstüne küçük güvenlik payı.
 const MANDATORY_RESERVE_PER_CHUNK_USD = 0.13;
+// İsteğe bağlı adımlar (yön ikinci üretimi, yüz onarımı, dolgu) tavanın bu
+// kadar altında durur: zorunlu adımların tahminden sapması (Vision token
+// oynaması) tavanı aşmasın.
+const OPTIONAL_SAFETY_USD = 0.03;
+const PREP_COST_USD = 0.01;
 
 /** OpenAI usage nesnesinin USD maliyeti. SAF. */
 function usageCostUsd(model, usage) {
@@ -60,7 +69,9 @@ function costLimitFor(chunkCount) {
 
 /** Yeni defter: iş başında, tüm chunk'ların zorunlu payı ayrılmış hâlde. */
 function createLedger(chunkCount, limitUsd = costLimitFor(chunkCount)) {
-  return { limitUsd, spentUsd: 0, reservedUsd: MANDATORY_RESERVE_PER_CHUNK_USD * chunkCount, skipped: 0 };
+  // Hazırlık (prepareReferencePhotos: SafeSearch + ten pigmenti, ~$0.01) iş defterinin
+  // dışında koşuyor; tavan toplamı kapsasın diye baştan harcanmış sayılır.
+  return { limitUsd, spentUsd: PREP_COST_USD, reservedUsd: MANDATORY_RESERVE_PER_CHUNK_USD * chunkCount, skipped: 0 };
 }
 
 /** Chunk'ın kendi bağlam nesnesi (defter paylaşılır). */
@@ -129,7 +140,7 @@ function tryReserveOptional(estUsd) {
 }
 
 function takeSlot(L, estUsd) {
-  if (L.spentUsd + L.reservedUsd + estUsd > L.limitUsd + 1e-9) return null;
+  if (L.spentUsd + L.reservedUsd + estUsd > L.limitUsd - OPTIONAL_SAFETY_USD + 1e-9) return null;
   L.reservedUsd += estUsd;
   let done = false;
   return { release() { if (!done) { done = true; L.reservedUsd -= estUsd; } } };
@@ -159,6 +170,21 @@ async function waitReserveOptional(estUsd, { maxWaitMs = 120000, stepMs = 3000, 
   }
 }
 
+/**
+ * MUTLAK TAVAN (2026-11-19): pahalı bir çağrıdan hemen önce sorulur. Yalnız
+ * gerçekleşen harcamaya bakar (ayrılan paylara değil): zorunlu ana üretim kendi
+ * payıyla zaten içeride. false → çağrı YAPILMAZ (kare o adımsız devam eder ya
+ * da düşer). Bağlam yoksa (yerel test, başka fonksiyon) true.
+ */
+function hardCapAllows(estUsd) {
+  const st = jobClock.getStore();
+  if (!st || !st.ledger) return true;
+  const L = st.ledger;
+  if (L.spentUsd + estUsd <= L.limitUsd + 1e-9) return true;
+  L.capBlocked = (L.capBlocked || 0) + 1;
+  return false;
+}
+
 function ledgerSummary() {
   const st = jobClock.getStore();
   return st && st.ledger ? st.ledger : null;
@@ -175,7 +201,10 @@ module.exports = {
   tryReserveOptional,
   waitReserveOptional,
   runOptional,
+  hardCapAllows,
   ledgerSummary,
+  OPTIONAL_SAFETY_USD,
+  PREP_COST_USD,
   PRICES,
   COST_LIMIT_PER_FRAME_USD,
   MANDATORY_RESERVE_PER_CHUNK_USD,
