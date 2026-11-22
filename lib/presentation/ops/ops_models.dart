@@ -406,6 +406,11 @@ class OpsJobDetail {
   /// opsPanel.opsToggleGlow).
   final List<String> glowRefs;
 
+  /// Foto düzenleyici (2026-11-22, opsApplyEdits): gs:// adresi → kayıtlı düzenleme ve
+  /// düzenlenmiş karenin asıl hâlinin imzalı adresi (önizleme onun üzerine kurulur).
+  final Map<String, Map<String, dynamic>> photoEdits;
+  final Map<String, String> photoOriginals;
+
   // DENETİM ALANLARI (2026-11-04, bkz. opsPanel.jobAuditFields).
   /// Onay beklemeye başladığı an; yalnız onay bekleyen işte otomatik iptal anı.
   final int? pendingApprovalAtMillis;
@@ -447,6 +452,8 @@ class OpsJobDetail {
     this.templates = const {},
     this.selfies = const [],
     this.glowRefs = const [],
+    this.photoEdits = const {},
+    this.photoOriginals = const {},
     this.pendingApprovalAtMillis,
     this.autoCancelAtMillis,
     this.pendingApprovalOverdue = false,
@@ -514,6 +521,14 @@ class OpsJobDetail {
             .where((e) => e != null)
             .map((e) => e.toString())
             .toList(),
+        photoEdits: {
+          for (final e in ((j['photoEdits'] as Map?) ?? {}).entries)
+            if (e.value is Map) e.key.toString(): Map<String, dynamic>.from(e.value as Map),
+        },
+        photoOriginals: {
+          for (final e in ((j['photoOriginals'] as Map?) ?? {}).entries)
+            if (e.value is String) e.key.toString(): e.value as String,
+        },
         pendingApprovalAtMillis: (j['pendingApprovalAt'] as num?)?.toInt(),
         autoCancelAtMillis: (j['autoCancelAt'] as num?)?.toInt(),
         pendingApprovalOverdue: j['pendingApprovalOverdue'] as bool? ?? false,

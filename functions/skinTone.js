@@ -831,6 +831,13 @@ function templateShade(a, W, H) {
 // kullanıcının koluna taşınıyordu (kol 12.9 L "düzeldi" ama yüzden koyu kaldı). Bu durumda gölge
 // 0: hedef doğrudan yüz tonu; şablon deri varlığı kapısı (bej pantolon) aynen kalır.
 const SHADE_PIGMENT_GAP = 2;
+// GÜÇLÜ EŞLEME (aynı gün, kullanıcı: "parmaklar hâlâ siyahi ... eller kollar yüz ile tamamen aynı tonda
+// olmalı"). Gölge 0 olunca bile uzuv medyanı yüzden ~5 L koyu (185655bf c3: yüz 55.9, uzuv 50.7,
+// en koyu %10 41.4) kalıyordu: hedef karışımı (şablon güveni w<1 → kendi ışığı) ve koyu piksel kapısı
+// (PIX_DARK: yerel alandan 14-24 L koyu piksel "gölgede kumaş" sayılıp boyanmıyor → parmak gölgesi,
+// eklem). Koyu şablonda (shadeDropped) hedef tam yüz tonu, koyu piksel kapısı kapalı (siyah kumaşı
+// kroma kapısı PIX_AB + yüze göre deri kapısı tutar), uzuv içi kontrast CONTRAST kadar yumuşar.
+const STRONG = { FULL_TARGET: true, PIX_DARK_OFF: true, CONTRAST: 1.0 };
 async function correctSkinToneField(outputBuf, { bodyLightRatio = null, templateBuf = null, localLight = LOCAL_LIGHT, faceLocked = false, pigmentGap = null } = {}) {
   const skip = (reason, extra = {}) => ({ applied: false, reason, buf: null, bodyLightRatio, ...extra });
   try {
@@ -852,7 +859,7 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
     let limbW = an.limbW;
     const local = tA ? templateShade(tA, W, H) : null;
     const shadeDropped = !!(local && Number.isFinite(pigmentGap) && pigmentGap >= SHADE_PIGMENT_GAP);
-    if (shadeDropped) local.shade.fill(0);
+    if (shadeDropped) { local.shade.fill(0); if (STRONG.FULL_TARGET) local.w.fill(1); }
     let tplAbsent = null;
     if (local) {
       // Şablonda yakınında deri olmayan nokta boyanmaz (c3 bej pantolon).
@@ -908,7 +915,7 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
           if (local && w > 0.004) {
             const fl = sampleBilinear(field.fL, W, H, x, y);
             w *= ramp(Math.hypot(lab[1] - fa, lab[2] - fb), PIX_AB_FULL, PIX_AB_ZERO) *
-              ramp(Math.max(0, fl - lab[0]), PIX_DARK_FULL, PIX_DARK_ZERO);
+              (shadeDropped && STRONG.PIX_DARK_OFF ? 1 : ramp(Math.max(0, fl - lab[0]), PIX_DARK_FULL, PIX_DARK_ZERO));
           }
           if (w > 0.004) w *= skinLikeVsFace(lab, faceTone);
           soft[Y * FW + X] = w;
@@ -934,6 +941,7 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
             dL += sampleBilinear(plan.dL, W, H, x, y) * w;
             dA += sampleBilinear(plan.dA, W, H, x, y) * w;
             dB += sampleBilinear(plan.dB, W, H, x, y) * w;
+            if (shadeDropped && STRONG.CONTRAST !== 1) dL += (STRONG.CONTRAST - 1) * (lab[0] - sampleBilinear(field.fL, W, H, x, y)) * w;
           }
         } else if (plan.needed && w0 > 0.004) {
           const fa = sampleBilinear(field.fA, W, H, x, y), fb = sampleBilinear(field.fB, W, H, x, y);
@@ -943,7 +951,7 @@ async function correctSkinToneField(outputBuf, { bodyLightRatio = null, template
           if (local && w > 0.004) {
             const fl = sampleBilinear(field.fL, W, H, x, y);
             w *= ramp(Math.hypot(lab[1] - fa, lab[2] - fb), PIX_AB_FULL, PIX_AB_ZERO) *
-              ramp(Math.max(0, fl - lab[0]), PIX_DARK_FULL, PIX_DARK_ZERO);
+              (shadeDropped && STRONG.PIX_DARK_OFF ? 1 : ramp(Math.max(0, fl - lab[0]), PIX_DARK_FULL, PIX_DARK_ZERO));
           }
           if (w > 0.004) {
             dL += sampleBilinear(plan.dL, W, H, x, y) * w;
@@ -982,5 +990,5 @@ module.exports = {
   personCropProbs,
   rgbToLab,
   labToRgb,
-  _testables: { analyzeSkin, templateBodyLightRatio, blurField, maxField, mainPersonComponent, buildSkinField, planCorrection, planShadeCorrection, planFaceMatch, templateShade, bodyTargetL, faceToneOf, skinHue, TPL_SHADE_KEEP, TPL_SHADE_MIN },
+  _testables: { analyzeSkin, templateBodyLightRatio, blurField, maxField, mainPersonComponent, buildSkinField, planCorrection, planShadeCorrection, planFaceMatch, templateShade, bodyTargetL, faceToneOf, skinHue, TPL_SHADE_KEEP, TPL_SHADE_MIN, STRONG, SHADE_PIGMENT_GAP },
 };

@@ -210,7 +210,9 @@ const SKIN_FIELD_SIMPLE = true;
 //   +8..+27 L açıyor (8ac66d45 c5: yüz parlak, göğüs gölgede). Tam katman kör 9/14 kaybetti (gri,
 //   sepya); yalnız parlaklık 11/13 (açık fark 4/1), kullanıcı gözle beğendi. Gri yama (others
 //   sınıfı gökyüzünde) headAlpha'da kişi maskesiyle düzeltildi.
-const FINISH = { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: false, DETAIL: true };
+// 2026-11-22 STRUCT AÇIK (kullanıcı: "yüz hatları daha belli olsun"): faceDetail.STRUCT.BASE 1.5 taban
+// güç (şablondan bağımsız), MAX 1.7; 4 karede ×1.3/1.5/1.7 karşılaştırıldı, 1.5 seçildi.
+const FINISH = { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: true, DETAIL: true };
 const PROFILE_CACHE = new Map();
 const PROFILE_CACHE_MAX = 4;
 const PROFILE_FETCH_MS = 15000;
@@ -297,8 +299,16 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const pigmentGap = Number.isFinite(mstTpl) && Number.isFinite(mstUser) ? mstTpl - mstUser : null;
     const st = await correctSkinToneField(out, { templateBuf: tpl, faceLocked: true, pigmentGap });
     if (st.applied && st.buf) out = st.buf;
+    // KOYU ŞABLONDA İKİNCİ GEÇİŞ (2026-11-22, 185655bf c3): tek geçişte yumuşak ağırlıklar uzuv
+    // medyanını yüzden ~5 L koyu bırakıyordu (55.8 / 51.0); ikinci geçiş kalanı kapatır (54.6, en koyu %10
+    // 43.5 → 51.8). Yalnız şablon gölgesi düşürülmüş (pigment farkı ≥ SHADE_PIGMENT_GAP) karede.
+    let pass2 = null;
+    if (st.applied && st.shadeDropped) {
+      pass2 = await correctSkinToneField(out, { templateBuf: tpl, faceLocked: true, pigmentGap });
+      if (pass2.applied && pass2.buf) out = pass2.buf;
+    }
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    console.log(`TEN ALANI (${tag}): ${st.applied ? "UYGULANDI" : `ATLANDI[${st.reason}]`} yüzKilidi=evet açıklıkFarkı=${n(st.deltaLBefore)}→${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}→${n(st.chromaAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVeto=${n(st.clothVeto, 2)} şablonGölgesi=${st.shadeDropped ? `yok[MST farkı ${pigmentGap}]` : "var"} değişenPx=${st.changedPx ?? 0} ${Date.now() - t0}ms`);
+    console.log(`TEN ALANI (${tag}): ${st.applied ? "UYGULANDI" : `ATLANDI[${st.reason}]`} yüzKilidi=evet açıklıkFarkı=${n(st.deltaLBefore)}→${n(st.deltaLAfter)} kroma=${n(st.chromaBefore)}→${n(st.chromaAfter)} tenPx=${st.skinPx ?? "null"} kıyafetVeto=${n(st.clothVeto, 2)} şablonGölgesi=${st.shadeDropped ? `yok[MST farkı ${pigmentGap}]` : "var"}${pass2 ? ` ikinciGeçiş=${pass2.applied ? `${n(pass2.deltaLBefore)}→${n(pass2.deltaLAfter)}` : `ATLANDI[${pass2.reason}]`}` : ""} değişenPx=${st.changedPx ?? 0} ${Date.now() - t0}ms`);
   } catch (e) {
     console.error("Sade akış: ten alanı hata verdi (atlanıyor):", e);
   }

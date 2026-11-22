@@ -37,6 +37,8 @@ for (const name of [
   "opsApprovePhotos",
   "opsAttachUploadedPhoto",
   "opsToggleGlow",
+  "opsApplyEdits",
+  "opsFlashFields",
 ]) {
   exports[name] = opsPanel[name];
 }

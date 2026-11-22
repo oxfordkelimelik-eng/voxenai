@@ -293,7 +293,11 @@ function addFaceGrain(rgb, tRgb, W, H, Po, Pt, CLASSES) {
 // KENDİ çizdiği bant güçlendirilir (şablondan desen kopyalanmaz — 10-16 faceRelight lekeleri);
 // yalnız yüz derisinde (sakal/saç sınıfı dışarıda), yalnız artırma, şablon kadar ve en çok
 // STRUCT.MAX. Işığı olmayan/düz şablonda oran ≤ 1 → dokunulmaz.
-const STRUCT = { ON: true, S1: 0.02, S2: 0.08, MAX: 1.3, MIN_APPLY: 1.05, MASK_THR: 0.6 };
+// TABAN GÜÇ (2026-11-22, kullanıcı: "detay/gren maddesini sağlamlaştır, yüz hatları daha belli olsun;
+// şu anki çalışmada çok bir şey fark ettirmiyor"). Eskiden yalnız şablon kadar (düz ışıklı şablonda
+// hiç) ve en çok ×1.3 → 11-19'da 25 karede görünmez bulunup kapatılmıştı. Artık en az BASE: model
+// yüzün orta ölçek gölgesini (burun, elmacık, çene) hep yumuşak çiziyor; şablon daha dramatikse MAX'a kadar.
+const STRUCT = { ON: true, S1: 0.02, S2: 0.08, BASE: 1.5, MAX: 1.7, MIN_APPLY: 1.05, MASK_THR: 0.6 };
 
 function faceBoxOf(P, CLASSES, W, H) {
   const xs = [], ys = [];
@@ -344,7 +348,7 @@ async function matchFaceStructure(outputBuf, templateBuf) {
   if (!bo || !bt) return { buf: null, applied: false, reason: "no-face" };
   const so = structOf(o.data, W, H, Po, CLASSES, bo), st = structOf(t, W, H, Pt, CLASSES, bt);
   if (!so || !st) return { buf: null, applied: false, reason: "no-skin" };
-  const gain = Math.min(STRUCT.MAX, st.rel / so.rel);
+  const gain = Math.min(STRUCT.MAX, Math.max(STRUCT.BASE || 1, st.rel / so.rel));
   if (!(gain >= STRUCT.MIN_APPLY)) return { buf: null, applied: false, reason: "structured-enough", tpl: st.rel, before: so.rel, gain };
   const { cx0, cy0, cw, ch, D } = so;
   const m8 = Buffer.alloc(cw * ch);

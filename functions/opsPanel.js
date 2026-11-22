@@ -615,6 +615,10 @@ exports.opsGetJobDetail = onCall(
       selfies,
       // IŞIKLI FİLTRE (2026-11-22, bkz. opsToggleGlow): filtre eklenmiş karelerin gs:// adresleri.
       glowRefs: Array.isArray(job.glowRefs) ? job.glowRefs.filter((u) => typeof u === "string") : [],
+      // FOTO DÜZENLEYİCİ (bkz. opsApplyEdits): gs:// adresi → kayıtlı düzenleme.
+      photoEdits: photoEditsOf(job),
+      // Düzenlenmiş karenin ASIL hâli (önizleme bunun üzerine kurulur; staging dosyası düzenlenmiş hâldir).
+      photoOriginals: await originalUrlsOf(job),
       ...jobAuditFields(job),
     };
   }
@@ -1001,9 +1005,163 @@ exports.opsApprovePhotos = onCall(
  * kapatınca geri yüklenir. Açmak her zaman yedekten yapılır: iki kez açmak filtreyi üst üste bindirmez.
  * Zaten teslim edilmiş kopyaya (dating_results) dokunmaz.
  */
+const EDIT_BACKUP_SUFFIX = ".orijinal.jpg";
+// 11-22 ilk sürüm (yalnız ışıklı) bu adla yedekliyordu; varsa asıl kare odur.
 const GLOW_BACKUP_SUFFIX = ".isiksiz.jpg";
-exports.opsToggleGlow = onCall(
+
+/** Düzenlenmiş karelerin asıl hâli (yedek) için imzalı adresler: gs:// adresi → url. */
+async function originalUrlsOf(job) {
+  const out = {};
+  for (const ref of Object.keys(photoEditsOf(job))) {
+    const path = gsPathFromUrl(ref);
+    if (!path) continue;
+    try {
+      out[ref] = await signedDownloadUrl(bucket().file(path + EDIT_BACKUP_SUFFIX));
+    } catch (e) {
+      console.error("ops: düzenleme yedeği adresi üretilemedi (atlanıyor):", e.message || e);
+    }
+  }
+  return out;
+}
+
+/** İşin kayıtlı düzenlemeleri: gs:// adresi → düzenleme (photoEdits dizisinden). */
+function photoEditsOf(job) {
+  const out = {};
+  for (const r of Array.isArray(job.photoEdits) ? job.photoEdits : []) {
+    if (r && typeof r.ref === "string" && r.edits && typeof r.edits === "object") out[r.ref] = r.edits;
+  }
+  return out;
+}
+
+/**
+ * Onay karesine düzenlemeyi uygular (null → asıl kareye döner). Asıl kare her zaman yedekten
+ * işlenir (üst üste binmez). photoEdits + geriye uyum için glowRefs güncellenir.
+ */
+async function applyEditsToRef({ uid, jobId, ref, edits, by }) {
+  const { normalizeEdits, renderEdits } = require("./photoEdits");
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+  const snap = await jobRef.get();
+  if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+  const job = snap.data();
+  const [path] = validateApprovalSelection({
+    selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
+  });
+  const file = bucket().file(path);
+  const backup = bucket().file(path + EDIT_BACKUP_SUFFIX);
+  const legacy = bucket().file(path + GLOW_BACKUP_SUFFIX);
+  let [hasBackup] = await backup.exists();
+  if (!hasBackup) {
+    const [hasLegacy] = await legacy.exists();
+    if (hasLegacy) {
+      await legacy.copy(backup);
+      await legacy.delete().catch(() => {});
+      hasBackup = true;
+    }
+  }
+  const e = normalizeEdits(edits);
+  if (e) {
+    let src;
+    if (hasBackup) {
+      [src] = await backup.download();
+    } else {
+      [src] = await file.download();
+      await file.copy(backup);
+    }
+    const out = await renderEdits(src, e);
+    await file.save(out, { metadata: { contentType: "image/jpeg" } });
+  } else if (hasBackup) {
+    await backup.copy(file);
+    await backup.delete().catch((err) => console.error("Düzenleme yedeği silinemedi:", err.message || err));
+  }
+  const list = (Array.isArray(job.photoEdits) ? job.photoEdits : []).filter((r) => r && r.ref !== ref);
+  if (e) list.push({ ref, edits: e, by: by || null, at: admin.firestore.Timestamp.now() });
+  const glowRefs = list.filter((r) => r.edits && r.edits.glow).map((r) => r.ref);
+  await jobRef.set({ photoEdits: list, glowRefs }, { merge: true });
+  console.log(`FOTO DÜZENLEME: ${e ? `UYGULANDI ${JSON.stringify(e)}` : "ASIL KAREYE DÖNÜLDÜ"} ${path} (uid=${uid}, job=${jobId}, by=${by || "?"})`);
+  return {
+    edits: e,
+    url: await signedDownloadUrl(file),
+    originalUrl: e ? await signedDownloadUrl(backup).catch(() => null) : null,
+  };
+}
+
+/**
+ * FOTO DÜZENLEYİCİ (2026-11-22, kullanıcı: "onay ekranında instagramdaki gibi farklı filtreler ...
+ * ışık açma kapama, sürükleme tarzında ton değiştiriciler"). Onay havuzundaki karenin KENDİSİ değişir:
+ * opsApprovePhotos aynı dosyayı kopyaladığı için teslim edilen kare düzenlenmiş olur. Asıl kare
+ * EDIT_BACKUP_SUFFIX ile yanında (aynı iş klasörü → iptal/silme prefix temizliği onu da siler).
+ * edits: { preset, intensity, adj: {exposure, brightness, ...}, glow, flash } (bkz. photoEdits.js) ya da null.
+ */
+exports.opsApplyEdits = onCall(
+  // flaş 12.5 MP karede ~1.6 GB tepe (ışıklı + flaş + filtre ölçüldü) → 4GiB
+  { region: "europe-west1", memory: "4GiB", timeoutSeconds: 120 },
+  async (request) => {
+    await assertOps(request, "opsApplyEdits");
+    const { uid, jobId, ref, edits } = request.data || {};
+    if (!uid || !jobId || typeof ref !== "string") {
+      throw new HttpsError("invalid-argument", "uid, jobId ve ref zorunlu.");
+    }
+    assertSafeId(uid, "uid");
+    assertSafeId(jobId, "jobId");
+    return applyEditsToRef({ uid, jobId, ref, edits: edits ?? null, by: request.auth.token.email || null });
+  }
+);
+
+/**
+ * FLAŞ ÖNİZLEME ALANLARI (2026-11-22). Düzenleyici flaşı cihazda önizler ama kişi maskesi + derinlik
+ * çıkaramaz; bunlardan türeyen iki yumuşak alanı (ışık F, gölge SH) burada küçük PNG olarak verir
+ * (R = F, G = SH). Alanlar ASIL kareden (yedek varsa yedekten) hesaplanır; asıl kare değişmediği için
+ * sonuç karenin yanında FLASH_FIELDS_SUFFIX ile saklanır (aynı iş klasörü → prefix temizliği siler).
+ */
+const FLASH_FIELDS_SUFFIX = ".flas_alan.png";
+exports.opsFlashFields = onCall(
   { region: "europe-west1", memory: "2GiB", timeoutSeconds: 120 },
+  async (request) => {
+    await assertOps(request, "opsFlashFields");
+    const { uid, jobId, ref } = request.data || {};
+    if (!uid || !jobId || typeof ref !== "string") {
+      throw new HttpsError("invalid-argument", "uid, jobId ve ref zorunlu.");
+    }
+    assertSafeId(uid, "uid");
+    assertSafeId(jobId, "jobId");
+    const snap = await db.doc(`users/${uid}/private/genData/genJobs/${jobId}`).get();
+    if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+    const job = snap.data();
+    const [path] = validateApprovalSelection({
+      selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
+    });
+    const cache = bucket().file(path + FLASH_FIELDS_SUFFIX);
+    const [cached] = await cache.exists();
+    if (cached) {
+      const [buf] = await cache.download();
+      const [meta] = await cache.getMetadata();
+      const m = meta.metadata || {};
+      return { png: buf.toString("base64"), width: Number(m.width), height: Number(m.height), gray: m.gray === "1" };
+    }
+    const backup = bucket().file(path + EDIT_BACKUP_SUFFIX);
+    const legacy = bucket().file(path + GLOW_BACKUP_SUFFIX);
+    const [hasBackup] = await backup.exists();
+    const [hasLegacy] = hasBackup ? [false] : await legacy.exists();
+    const [src] = await (hasBackup ? backup : hasLegacy ? legacy : bucket().file(path)).download();
+    const t0 = Date.now();
+    const f = await require("./flashEffect").flashPreviewFields(src, 512);
+    console.log(`FLAŞ ALANLARI: ${path} ${f.width}x${f.height} gölge=${f.shK.toFixed(2)} gri=${f.gray} ${Date.now() - t0}ms${f.depthErr ? ` derinlikYok=${f.depthErr}` : ""}`);
+    if (!f.depthErr) {
+      await cache.save(f.png, {
+        metadata: { contentType: "image/png", metadata: { width: String(f.width), height: String(f.height), gray: f.gray ? "1" : "0" } },
+      }).catch((e) => console.error("Flaş alanı önbelleğe yazılamadı:", e.message || e));
+    }
+    return { png: f.png.toString("base64"), width: f.width, height: f.height, gray: f.gray };
+  }
+);
+
+/**
+ * IŞIKLI FİLTRE (2026-11-22, ilk sürüm; uygulama 1.0.11 bu düğmeyi kullanır). Artık opsApplyEdits'in
+ * glow alanını açar/kapatır; karedeki diğer düzenlemeler korunur.
+ */
+exports.opsToggleGlow = onCall(
+  // flaş 12.5 MP karede ~1.6 GB tepe (ışıklı + flaş + filtre ölçüldü) → 4GiB
+  { region: "europe-west1", memory: "4GiB", timeoutSeconds: 120 },
   async (request) => {
     await assertOps(request, "opsToggleGlow");
     const { uid, jobId, ref, on } = request.data || {};
@@ -1012,38 +1170,10 @@ exports.opsToggleGlow = onCall(
     }
     assertSafeId(uid, "uid");
     assertSafeId(jobId, "jobId");
-    const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
-    const snap = await jobRef.get();
-    if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
-    const job = snap.data();
-    const [path] = validateApprovalSelection({
-      selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
-    });
-    const file = bucket().file(path);
-    const backup = bucket().file(path + GLOW_BACKUP_SUFFIX);
-    const [hasBackup] = await backup.exists();
-    if (on) {
-      let src;
-      if (hasBackup) {
-        [src] = await backup.download();
-      } else {
-        [src] = await file.download();
-        await file.copy(backup);
-      }
-      const gl = await require("./faceGlow").applyManualGlow(src);
-      if (!gl.applied || !gl.buf) throw new HttpsError("internal", `Filtre uygulanamadı (${gl.reason || "?"}).`);
-      const out = await require("./postProcess").addPhoneCameraTexture(Buffer.from(gl.buf));
-      await file.save(out, { metadata: { contentType: "image/jpeg" } });
-      await jobRef.set({ glowRefs: admin.firestore.FieldValue.arrayUnion(ref) }, { merge: true });
-    } else {
-      if (hasBackup) {
-        await backup.copy(file);
-        await backup.delete().catch((e) => console.error("Işıklı yedeği silinemedi:", e.message || e));
-      }
-      await jobRef.set({ glowRefs: admin.firestore.FieldValue.arrayRemove(ref) }, { merge: true });
-    }
-    console.log(`IŞIKLI FİLTRE: ${on ? "EKLENDİ" : "ÇIKARILDI"} ${path} (uid=${uid}, job=${jobId}, by=${request.auth.token.email || "?"})`);
-    return { on, url: await signedDownloadUrl(file) };
+    const snap = await db.doc(`users/${uid}/private/genData/genJobs/${jobId}`).get();
+    const cur = snap.exists ? photoEditsOf(snap.data())[ref] || {} : {};
+    const r = await applyEditsToRef({ uid, jobId, ref, edits: { ...cur, glow: on }, by: request.auth.token.email || null });
+    return { on: !!(r.edits && r.edits.glow), url: r.url };
   }
 );
 
@@ -1111,7 +1241,7 @@ exports.opsAttachUploadedPhoto = onCall(
 // gerçek bir Cloud Function olarak deploy edilmez, sadece
 // functions/test/opsPanel.test.js bunları require eder.
 exports._testables = {
-  GLOW_BACKUP_SUFFIX,
+  GLOW_BACKUP_SUFFIX, EDIT_BACKUP_SUFFIX, photoEditsOf,
   templateNameForRef,
   isAuthorizedOpsEmail,
   uidFromDocPath,

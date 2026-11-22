@@ -10,7 +10,9 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/constants/app_colors.dart';
 import 'ops_gate.dart';
 import 'ops_models.dart';
+import 'ops_photo_editor_screen.dart';
 import 'ops_providers.dart';
+import 'photo_edits.dart';
 
 /// Onay ızgarasındaki bir kare: gösterim URL'i, gs:// kimliği, ret kapısı
 /// (reddedildiyse) ve üretildiği şablon (biliniyorsa).
@@ -85,37 +87,45 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   final Set<String> _selected = {};
   bool _busy = false;
 
-  // IŞIKLI FİLTRE (2026-11-22): karedeki ☀ düğmesi filtreyi ekler/çıkarır.
-  // Sunucu karenin kendisini değiştirir; burada yalnız son durum ve yeni
-  // imzalı adres tutulur (detay yeniden yüklenene kadar).
-  final Map<String, bool> _glowOverride = {};
+  // FOTO DÜZENLEYİCİ (2026-11-22): kareye dokununca düzenleyici açılır (filtre,
+  // ışıklı, ayarlar). Sunucu karenin kendisini değiştirir; burada yalnız son
+  // düzenleme, yeni imzalı adres ve asıl hâlin adresi tutulur (detay yenilenene kadar).
+  final Map<String, PhotoEdits> _editOverride = {};
   final Map<String, String> _urlOverride = {};
-  final Set<String> _glowBusy = {};
+  final Map<String, String?> _originalOverride = {};
 
-  bool _isGlow(String ref) => _glowOverride[ref] ?? data.glowRefs.contains(ref);
+  PhotoEdits _editsOf(String ref) =>
+      _editOverride[ref] ?? PhotoEdits.fromJson(data.photoEdits[ref]);
   String _urlOf(_Frame f) =>
       f.ref == null ? f.url : (_urlOverride[f.ref!] ?? f.url);
 
-  Future<void> _toggleGlow(String ref) async {
-    if (_glowBusy.contains(ref)) return;
-    final next = !_isGlow(ref);
-    setState(() => _glowBusy.add(ref));
-    try {
-      final r = await opsToggleGlow(
-          uid: data.uid, jobId: data.jobId, ref: ref, on: next);
-      if (!mounted) return;
-      setState(() {
-        _glowOverride[ref] = r.on;
-        if (r.url != null) _urlOverride[ref] = r.url!;
-      });
-      _snack(r.on ? 'Işıklı filtre eklendi.' : 'Işıklı filtre kaldırıldı.');
-    } on FirebaseFunctionsException catch (e) {
-      _snack('Filtre değiştirilemedi: ${e.message ?? e.code}', error: true);
-    } catch (e) {
-      _snack('Filtre değiştirilemedi: $e', error: true);
-    } finally {
-      if (mounted) setState(() => _glowBusy.remove(ref));
-    }
+  Future<void> _openEditor(_Frame f) async {
+    final ref = f.ref;
+    if (ref == null) return;
+    final edits = _editsOf(ref);
+    final original = _originalOverride.containsKey(ref)
+        ? _originalOverride[ref]
+        : data.photoOriginals[ref];
+    final r = await Navigator.of(context).push<OpsPhotoEditResult>(
+      MaterialPageRoute(
+        builder: (_) => OpsPhotoEditorScreen(
+          uid: data.uid,
+          jobId: data.jobId,
+          ref: ref,
+          imageUrl: _urlOf(f),
+          originalUrl: edits.isEmpty ? null : original,
+          initial: edits,
+        ),
+      ),
+    );
+    if (r == null || !mounted) return;
+    setState(() {
+      _editOverride[ref] = r.edits;
+      if (r.url != null) _urlOverride[ref] = r.url!;
+      // Asıl hâl: sunucunun verdiği yedek adresi; yoksa düzenlenmemiş ilk görsel.
+      _originalOverride[ref] = r.edits.isEmpty ? null : (r.originalUrl ?? original ?? f.url);
+    });
+    _snack(r.edits.isEmpty ? 'Asıl kareye dönüldü.' : 'Düzenleme kaydedildi; teslimde bu hâli gider.');
   }
 
   OpsJobDetail get data => widget.data;
@@ -399,8 +409,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
         ],
       );
 
-  /// Seçilebilir kare ızgarası. Dokunmak SEÇER; büyütmek için uzun bas —
-  /// onay ekranında asıl eylem seçim olduğu için kısa dokunuş ona ayrıldı.
+  /// Seçilebilir kare ızgarası. Dokunmak DÜZENLER (2026-11-22, foto düzenleyici);
+  /// seçmek için sağ üstteki yuvarlağa dokun; büyütmek için uzun bas.
   Widget _selectableGrid(List<_Frame> items) =>
       GridView.builder(
         shrinkWrap: true,
@@ -415,12 +425,11 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           final item = items[i];
           final ref = item.ref;
           final isSelected = ref != null && _selected.contains(ref);
-          final glow = ref != null && _isGlow(ref);
-          final glowBusy = ref != null && _glowBusy.contains(ref);
+          final edited = ref != null && !_editsOf(ref).isEmpty;
           final urls = items.map(_urlOf).toList();
           final templates = items.map((e) => e.template).toList();
           return GestureDetector(
-            onTap: ref == null ? null : () => _toggle(ref),
+            onTap: ref == null ? null : () => _openEditor(item),
             onLongPress: () =>
                 _openFullscreenViewer(context, urls, i, templates: templates),
             child: Stack(
@@ -442,40 +451,22 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 ),
                 if (item.template != null)
                   Positioned(top: 4, left: 4, child: _templateThumb(item.template!)),
-                // IŞIKLI FİLTRE düğmesi: kısa dokunuş seçime ayrılmış olduğu
-                // için filtre ayrı düğmede (sağ alt).
-                if (ref != null)
+                if (edited)
                   Positioned(
                     right: 4,
                     bottom: 4,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _toggleGlow(ref),
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: glow
-                              ? AppColors.gold
-                              : Colors.black.withValues(alpha: 0.5),
-                          border: Border.all(color: Colors.white70, width: 1),
-                        ),
-                        child: glowBusy
-                            ? const Padding(
-                                padding: EdgeInsets.all(6),
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : Icon(
-                                glow
-                                    ? Icons.wb_sunny_rounded
-                                    : Icons.wb_sunny_outlined,
-                                size: 16,
-                                color: glow
-                                    ? AppColors.textOnGold
-                                    : Colors.white,
-                              ),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.gold,
+                      ),
+                      child: Icon(
+                        _editsOf(ref).flash > 0
+                            ? Icons.flash_on_rounded
+                            : (_editsOf(ref).glow ? Icons.wb_sunny_rounded : Icons.tune_rounded),
+                        size: 14,
+                        color: AppColors.textOnGold,
                       ),
                     ),
                   ),
@@ -511,22 +502,29 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     ),
                   ),
                 Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isSelected
-                          ? AppColors.gold
-                          : Colors.black.withValues(alpha: 0.45),
-                      border: Border.all(color: Colors.white70, width: 1),
+                  top: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: ref == null ? null : () => _toggle(ref),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected
+                              ? AppColors.gold
+                              : Colors.black.withValues(alpha: 0.45),
+                          border: Border.all(color: Colors.white70, width: 1),
+                        ),
+                        child: isSelected
+                            ? const Icon(Icons.check_rounded,
+                                size: 17, color: AppColors.textOnGold)
+                            : null,
+                      ),
                     ),
-                    child: isSelected
-                        ? const Icon(Icons.check_rounded,
-                            size: 15, color: AppColors.textOnGold)
-                        : null,
                   ),
                 ),
               ],

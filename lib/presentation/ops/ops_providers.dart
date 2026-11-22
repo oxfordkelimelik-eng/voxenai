@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'ops_models.dart';
@@ -154,6 +157,44 @@ Future<({int approved, int skipped})> opsApprovePhotos({
     approved: (data['approved'] as num?)?.toInt() ?? 0,
     skipped: (data['skipped'] as num?)?.toInt() ?? 0,
   );
+}
+
+/// FOTO DÜZENLEYİCİ (2026-11-22): onay karesine düzenlemeyi uygular (edits null → asıl kare).
+/// Dönen url karenin yeni imzalı adresi; originalUrl asıl hâlin adresi (düzenleme varsa).
+Future<({String? url, Map<String, dynamic>? edits, String? originalUrl})> opsApplyEdits({
+  required String uid,
+  required String jobId,
+  required String ref,
+  required Map<String, dynamic>? edits,
+}) async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsApplyEdits', options: HttpsCallableOptions(timeout: const Duration(seconds: 120)));
+  final result = await callable.call(<String, dynamic>{
+    'uid': uid,
+    'jobId': jobId,
+    'ref': ref,
+    'edits': edits,
+  });
+  final data = Map<String, dynamic>.from(result.data as Map);
+  return (
+    url: data['url'] as String?,
+    edits: data['edits'] is Map ? Map<String, dynamic>.from(data['edits'] as Map) : null,
+    originalUrl: data['originalUrl'] as String?,
+  );
+}
+
+/// FLAŞ ÖNİZLEME ALANLARI (2026-11-22): düzenleyicinin cihazda flaş önizlemesi için
+/// sunucunun kişi maskesi + derinlikten çıkardığı iki yumuşak alan (PNG; R ışık, G gölge).
+Future<({Uint8List png, bool gray})> opsFlashFields({
+  required String uid,
+  required String jobId,
+  required String ref,
+}) async {
+  final callable = FirebaseFunctions.instanceFor(region: _opsRegion)
+      .httpsCallable('opsFlashFields', options: HttpsCallableOptions(timeout: const Duration(seconds: 120)));
+  final result = await callable.call(<String, dynamic>{'uid': uid, 'jobId': jobId, 'ref': ref});
+  final data = Map<String, dynamic>.from(result.data as Map);
+  return (png: base64Decode(data['png'] as String), gray: data['gray'] == true);
 }
 
 /// IŞIKLI FİLTRE (2026-11-22): onay karesine tüm sahneye 0.6 ışıklı filtreyi
