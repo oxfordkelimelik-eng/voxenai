@@ -26,11 +26,15 @@ enum AiFlowKind {
 
   /// Fotoğraf analizi & seçimi — kullanıcının seçtiği fotoğraflar.
   photoAnalysis,
+
+  /// RizzGPT — sohbet ya da eşleşme profili ekran görüntüsü (üçüncü kişinin mesajlarını içerir).
+  chatReply,
 }
 
 String _prefsKeyFor(AiFlowKind kind) => switch (kind) {
       AiFlowKind.photoGeneration => DatingKeys.aiConsentPhoto,
       AiFlowKind.photoAnalysis => DatingKeys.aiConsentAnalysis,
+      AiFlowKind.chatReply => DatingKeys.aiConsentChat,
     };
 
 /// Fotoğraflar gönderilmeden ÖNCE çağrılır. Kullanıcı daha önce bu akış için
@@ -96,12 +100,20 @@ class _AiConsentSheet extends StatelessWidget {
           'Analiz için seçtiğin fotoğraflar, çok kriterli skorlama '
               'modelimiz üzerinden işlenmek üzere OpenAI altyapısına '
               'iletilir.',
+        AiFlowKind.chatReply =>
+          'Seçtiğin sohbet ya da profil ekran görüntüleri, yazdığın kısa '
+              'not ve başta seçtiğin cinsiyet (yalnız cevapta kendinden '
+              'doğru söz edilsin diye), cevap önerisi üretmek için OpenAI\'a '
+              'iletilir.',
         null =>
           'Foto üretiminde çektiğin yüz fotoğrafları ile foto '
               'analizinde seçtiğin fotoğraflar; kompozisyon, kalite kontrolü '
               've skorlama içeren işleme hatlarımızdan geçirilip OpenAI '
-              'altyapısına iletilir.',
+              'altyapısına iletilir. RizzGPT\'de seçtiğin sohbet/profil ekran '
+              'görüntüleri ve notun, cevap önerisi için OpenAI\'a iletilir.',
       };
+
+  bool get _isChat => kind == AiFlowKind.chatReply;
 
   Future<void> _openPolicy() async {
     final uri = Uri.parse(DatingConfig.privacyPolicyUrl);
@@ -116,11 +128,12 @@ class _AiConsentSheet extends StatelessWidget {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(DatingKeys.aiConsentPhoto);
     await prefs.remove(DatingKeys.aiConsentAnalysis);
+    await prefs.remove(DatingKeys.aiConsentChat);
     if (!context.mounted) return;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
       content: Text(
-          'Rızan geri çekildi. Fotoğrafların gönderilmeyecek.'),
+          'Rızan geri çekildi. Yeniden onay vermeden hiçbir görsel gönderilmeyecek.'),
     ));
   }
 
@@ -151,7 +164,11 @@ class _AiConsentSheet extends StatelessWidget {
                   color: AppColors.gold, size: 40),
               const SizedBox(height: 14),
               Text(
-                _isSettingsMode ? 'Veri Paylaşımı' : 'Fotoğrafların gönderilecek',
+                _isSettingsMode
+                    ? 'Veri Paylaşımı'
+                    : _isChat
+                        ? 'Ekran görüntün gönderilecek'
+                        : 'Fotoğrafların gönderilecek',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontSize: 19,
@@ -176,18 +193,38 @@ class _AiConsentSheet extends StatelessWidget {
               _Row(
                 icon: Icons.photo_library_outlined,
                 title: 'Ne gönderiliyor, kime?',
-                body: '$_whatIsSent\nFirebase, işlem sürerken geçici '
-                    'depolama için kullanılır (altyapı sağlayıcımız).',
+                body: _isChat
+                    ? _whatIsSent
+                    : '$_whatIsSent\nFirebase, işlem sürerken geçici '
+                        'depolama için kullanılır (altyapı sağlayıcımız).',
               ),
               const _Divider(),
-              const _Row(
+              _Row(
                 icon: Icons.lock_clock_outlined,
                 title: 'Ne kadar saklanıyor?',
-                body: 'Kaynak fotoğrafların, işlem biter bitmez (başarılı ya '
-                    'da başarısız fark etmeksizin) sunucularımızdan kalıcı '
-                    'olarak silinir. Üretilen sonuçlar yalnızca sen silene '
-                    'kadar hesabında kalır.',
+                body: _isChat
+                    ? 'Ekran görüntülerin ve notun sunucularımıza kaydedilmez; '
+                        'yalnızca cevap üretilirken işlenir. OpenAI, kötüye '
+                        'kullanımı önlemek için gelen istekleri en fazla 30 gün '
+                        'tutabilir ve bunları model eğitiminde kullanmaz.'
+                    : 'Kaynak fotoğrafların, işlem biter bitmez (başarılı ya '
+                        'da başarısız fark etmeksizin) sunucularımızdan kalıcı '
+                        'olarak silinir. Üretilen sonuçlar yalnızca sen silene '
+                        'kadar hesabında kalır.',
               ),
+              if (_isChat) ...[
+                const _Divider(),
+                const _Row(
+                  icon: Icons.people_outline_rounded,
+                  title: 'Karşı tarafın bilgileri',
+                  body: 'Ekran görüntüsü karşındaki kişinin mesajlarını, adını '
+                      'ya da fotoğrafını içerebilir. Yalnızca paylaşmaya hakkın '
+                      'olan içerik gönder; göndermeden önce isim ve '
+                      'fotoğrafı kırp, telefon numarası ya da adres gibi '
+                      'bilgileri hiç gönderme. Bu bilgiler saklanmaz ve '
+                      'profil oluşturmak için kullanılmaz.',
+                ),
+              ],
               const _Divider(),
               const _Row(
                 icon: Icons.block_rounded,

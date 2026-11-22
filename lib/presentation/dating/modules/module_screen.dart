@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'module_flows.dart';
+import 'rizz_flow.dart';
 
 /// /module/:id dispatcher — her modül kendi özel ekranını açar.
 class ModuleScreen extends StatelessWidget {

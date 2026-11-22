@@ -17,6 +17,11 @@ const notifications = require("./notifications");
 
 Object.assign(exports, aiProxy, payments);
 
+// RIZZGPT (2026-11-22): ekran görüntüsünden mesaj cevabı + cevap bildirimi.
+const rizz = require("./rizz");
+exports.rizzReply = rizz.rizzReply;
+exports.rizzReport = rizz.rizzReport;
+
 // falPhotos'un yalnızca GERÇEK Cloud Function'larını dışa aç.
 for (const name of [
   "prepareReferencePhotos",

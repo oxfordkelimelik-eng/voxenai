@@ -22,7 +22,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Senin için üretilen AI dating fotoğraflarını telefonunun galerisine kaydetmek için erişim gerekir.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Selfie ve dating fotoğraflarını yükleyebilmen için galerine erişim gerekir.</string>
+	<string>Selfie ve dating fotoğraflarını, RizzGPT için de sohbet ekran görüntülerini yükleyebilmen için galerine erişim gerekir.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

@@ -118,7 +118,11 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   Widget _modules() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        return Padding(
+        // Küçük ekran / büyük sistem yazısı: kartlar sabit boyda, sayfa kayar (RizzGPT satırı eklenince
+        // sabit kısımlar kartları sıkıştırıp taşma şeridi çıkarıyordu).
+        final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
+        final scroll = constraints.maxHeight < 600 * scale;
+        final page = Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,7 +160,7 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'AI fotoğraf üret veya fotoğraflarını analiz et.',
+                'AI fotoğraf üret, fotoğraflarını analiz et, mesajına cevap bul.',
                 style: TextStyle(
                   fontSize: 13,
                   height: 1.35,
@@ -164,32 +168,40 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              // İki modül kartı tek ekrana sığar (scroll yok): kalan dikey
-              // alanı eşit bölüşürler.
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (int i = 0; i < DatingModule.all.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 12),
-                      Expanded(
-                        child: _FeatureCard(
-                          module: DatingModule.all[i],
-                          hasPack: _hasPack(DatingModule.all[i]),
-                          onTap: () => _openModule(DatingModule.all[i]),
-                        ),
-                      ),
+              // İki modül kartı normalde tek ekrana sığar (scroll yok): kalan
+              // dikey alanı eşit bölüşürler. Dar ekranda sabit 260 boy + kaydırma.
+              if (scroll)
+                for (int i = 0; i < DatingModule.all.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 12),
+                  SizedBox(height: 260, child: _featureCard(i)),
+                ]
+              else
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (int i = 0; i < DatingModule.all.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 12),
+                        Expanded(child: _featureCard(i)),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
+              const SizedBox(height: 12),
+              _RizzCard(onTap: () => _openModule(DatingModule.rizz)),
               const SizedBox(height: 10),
               const _HowItWorksStrip(),
             ],
           ),
         );
+        return scroll ? SingleChildScrollView(child: page) : page;
       },
     );
+  }
+
+  Widget _featureCard(int i) {
+    final m = DatingModule.all[i];
+    return _FeatureCard(module: m, hasPack: _hasPack(m), onTap: () => _openModule(m));
   }
 
   // === BİZE ULAŞIN ===
@@ -282,6 +294,73 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
             ),
             const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// RIZZGPT (2026-11-22): iki büyük kartın altında tek satırlık kart — üçüncü büyük kart, kaydırmasız
+/// düzende diğer ikisini sıkıştırırdı.
+class _RizzCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _RizzCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.borderGold, width: 0.8),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.gold.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.bolt_rounded, color: AppColors.gold, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text('RizzGPT — ne yazsam?',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+                        ),
+                        SizedBox(width: 8),
+                        Text('YENİ',
+                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: AppColors.gold)),
+                      ],
+                    ),
+                    SizedBox(height: 2),
+                    Text('Sohbetin ekran görüntüsünü yükle, 3 cevap önerisi al',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.gold),
+            ],
+          ),
         ),
       ),
     );

@@ -46,7 +46,7 @@
   <a class="back" href="./index.html"><img src="./assets/logo.png" alt=""> ← Ana Sayfa</a>
   <div class="eyebrow" style="margin-top:22px">Yasal</div>
   <h1>Gizlilik Politikası</h1>
-  <div class="meta">VOXEN AI · Son güncelleme: 29 Ağustos 2026</div>
+  <div class="meta">VOXEN AI · Son güncelleme: 22 Kasım 2026</div>
 
   <p>Bu Gizlilik Politikası, <strong>VOXEN AI</strong> ("Uygulama", "biz") mobil uygulamasını
   kullandığınızda kişisel verilerinizin nasıl işlendiğini açıklar. Uygulamayı kullanarak
@@ -63,6 +63,12 @@
     ekranında cihazınızın kamerasıyla çektiğiniz kareler veya sizin galeriden seçtiğiniz
     dosyalar. Kamera ve fotoğraf kitaplığı erişimi iOS izin diyaloglarıyla sizden ayrıca
     istenir.</li>
+    <li><strong>RizzGPT ekran görüntüleri ve notlar:</strong> mesaj cevabı ya da ilk mesaj
+    önerisi almak için sizin galeriden seçtiğiniz sohbet veya eşleşme profili ekran
+    görüntüleri ve isteğe bağlı olarak yazdığınız kısa not. Bu görüntüler karşınızdaki
+    kişinin mesajlarını, adını veya fotoğrafını içerebilir. <em>Nasıl toplanır:</em> yalnızca
+    siz seçip gönderdiğinizde; sunucularımıza kaydedilmez, yalnızca öneri üretilirken
+    işlenir (bkz. Bölüm 5).</li>
     <li><strong>Hesap bilgileri:</strong> Kullanıcı kimliği ve e-posta.
     <em>Nasıl toplanır:</em> "Apple ile Giriş" veya "Google ile Giriş" akışını
     tamamladığınızda ilgili kimlik sağlayıcısından aktarılır.</li>
@@ -92,6 +98,10 @@
   depolar; Firebase üzerinde yapay zekâ işleme yapılmaz. Bunlar dışında hiçbir
   üçüncü tarafla paylaşılmaz, satılmaz veya reklam/pazarlama amacıyla
   kullanılmaz.</p>
+  <p><strong>RizzGPT ekran görüntüleri:</strong> Profil ya da sohbet ekran görüntülerinde sizin veya
+  eşleşmenizin yüzü bulunabilir. Bu görseller yüz verisi olarak işlenmez: yüz analizi, yüz tanıma
+  veya kimlik eşleştirme yapılmaz; yalnızca görünen yazı ve detaylardan cevap önerisi üretmek için
+  OpenAI'a iletilir ve kaydedilmez (bkz. Bölüm 5).</p>
   <p><strong>Saklama ve silme:</strong> Yüklediğiniz kaynak selfie/yüz fotoğrafları, talep
   ettiğiniz üretim veya analiz işlemi tamamlanır tamamlanmaz (başarılı ya da başarısız
   fark etmeksizin) sunucularımızdan <strong>otomatik olarak ve kalıcı olarak silinir</strong> —
@@ -103,6 +113,7 @@
   <h2>3. İşleme Amaçları</h2>
   <ul>
     <li>AI fotoğraf üretimi ve fotoğraf analizi hizmetlerinin sağlanması,</li>
+    <li>RizzGPT ile mesaj cevabı ve ilk mesaj önerisi üretilmesi,</li>
     <li>Looksmaxxing önerileri ve yardımcı özelliklerin sunulması,</li>
     <li>Uygulama içi satın alımların doğrulanması ve hak/bakiye tanımlanması,</li>
     <li>Güvenlik, kötüye kullanımın önlenmesi ve yasal yükümlülüklerin yerine getirilmesi,</li>
@@ -113,7 +124,7 @@
   <p>Hizmeti sağlamak için verileriniz aşağıdaki hizmet sağlayıcılara işleme amacıyla
   aktarılabilir; yalnızca ilgili işlemi gerçekleştirmek için kullanılır:</p>
   <ul>
-    <li><strong>OpenAI</strong> — AI fotoğraf üretimi, üretilen görsellerin kalite kontrolü, fotoğraf analizi ve metin/öneri üretimi. Kullandığımız <em>tek</em> yapay zekâ sağlayıcısıdır.</li>
+    <li><strong>OpenAI</strong> — AI fotoğraf üretimi, üretilen görsellerin kalite kontrolü, fotoğraf analizi ve metin/öneri üretimi (RizzGPT ekran görüntüleri dahil). Kullandığımız <em>tek</em> yapay zekâ sağlayıcısıdır. OpenAI, API üzerinden gelen istekleri model eğitiminde kullanmaz; kötüye kullanım denetimi için en fazla 30 gün saklayabilir.</li>
     <li><strong>Google Firebase</strong> — kimlik doğrulama, veritabanı, dosya depolama ve sunucu fonksiyonları (yapay zekâ işleme yapmaz).</li>
     <li><strong>Apple / Google</strong> — uygulama içi satın alma ve dağıtım.</li>
     <li><strong>Meta (Facebook)</strong> — reklam performansı ölçümü. Bkz. Bölüm 4.1.</li>
@@ -151,6 +162,13 @@
   gerçekleştirmek için işlenir. Üretim işlemi tamamlandığında veya başarısız olduğunda,
   kaynak eğitim fotoğraflarınız sunucularımızdan <strong>otomatik olarak silinir</strong>.
   Ürettiğiniz sonuç görselleri, siz silene veya hesabınızı kapatana kadar hesabınızda saklanır.</p>
+  <p>RizzGPT'ye gönderdiğiniz ekran görüntüleri ve notlar sunucularımıza ya da veritabanımıza
+  <strong>hiç kaydedilmez</strong>; yalnızca öneri üretilirken bellekte işlenir. Hesabınızda
+  yalnızca içerik barındırmayan, kısa süreli kayıtlar tutulur: günlük hak ve deneme sayacı
+  (3 gün) ile ek öneri hakkı için isteğin zamanı, türü ve gönderilen görüntülerin tek yönlü,
+  tuzlanmış özeti (1 gün). Bu özetten görüntü geri elde edilemez. Süre dolunca kayıtlar otomatik
+  silinir. Bir öneriyi "Bildir" ile bildirirseniz, yalnızca bildirilen öneri metni ve seçtiğiniz
+  sebep inceleme için 180 gün saklanır, sonra otomatik silinir.</p>
 
   <h2>6. Haklarınız (KVKK / GDPR)</h2>
   <p>Kişisel verilerinize (yüz verisi dahil) erişme, düzeltme ve silinmesini talep etme

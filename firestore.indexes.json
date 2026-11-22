@@ -52,6 +52,9 @@
         { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
         { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
       ]
-    }
+    },
+    { "collectionGroup": "usage", "fieldPath": "expireAt", "ttl": true, "indexes": [] },
+    { "collectionGroup": "requests", "fieldPath": "expireAt", "ttl": true, "indexes": [] },
+    { "collectionGroup": "rizzReports", "fieldPath": "expireAt", "ttl": true, "indexes": [] }
   ]
 }

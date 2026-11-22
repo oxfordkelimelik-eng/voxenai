@@ -18,8 +18,12 @@ import '../providers/dating_providers.dart';
 /// Bu kapı, mağaza akışı HİÇ başlamadan önce girişi garantiler.
 Future<bool> ensureSignedInForPurchase(
   BuildContext context,
-  WidgetRef ref,
-) async {
+  WidgetRef ref, {
+  String title = 'Satın almadan önce giriş yap',
+  String body = 'Aldığın paketin hesabına tanımlanabilmesi ve cihaz değiştirsen '
+      'bile kaybolmaması için giriş yapman gerekiyor. Abonelik yok — '
+      'ödeme yine tek seferlik.',
+}) async {
   final auth = ref.read(authServiceProvider);
   if (auth.currentUser != null && !auth.isAnonymous) return true;
 
@@ -30,13 +34,15 @@ Future<bool> ensureSignedInForPurchase(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (_) => const _PurchaseAuthSheet(),
+    builder: (_) => _PurchaseAuthSheet(title: title, body: body),
   );
   return signedIn == true;
 }
 
 class _PurchaseAuthSheet extends ConsumerStatefulWidget {
-  const _PurchaseAuthSheet();
+  final String title;
+  final String body;
+  const _PurchaseAuthSheet({required this.title, required this.body});
 
   @override
   ConsumerState<_PurchaseAuthSheet> createState() => _PurchaseAuthSheetState();
@@ -98,21 +104,19 @@ class _PurchaseAuthSheetState extends ConsumerState<_PurchaseAuthSheet> {
             const Icon(Icons.lock_person_rounded,
                 color: AppColors.gold, size: 40),
             const SizedBox(height: 14),
-            const Text(
-              'Satın almadan önce giriş yap',
+            Text(
+              widget.title,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Aldığın paketin hesabına tanımlanabilmesi ve cihaz değiştirsen '
-              'bile kaybolmaması için giriş yapman gerekiyor. Abonelik yok — '
-              'ödeme yine tek seferlik.',
+            Text(
+              widget.body,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                   fontSize: 13,
                   color: AppColors.textSecondary,
                   height: 1.45),

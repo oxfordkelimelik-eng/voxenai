@@ -355,8 +355,8 @@ class DatingModule {
   );
   static const rizz = DatingModule(
     'rizz',
-    'RizzGPT — Witty Replies',
-    'Konuşma/mesaj için esprili, çekici cevap önerileri.',
+    'RizzGPT — Mesaj Cevabı',
+    'Sohbetin ekran görüntüsünü yükle, ne yazacağını 3 farklı tonda öğren.',
     Icons.bolt,
     DatingConfig.creditsText,
   );
@@ -375,8 +375,8 @@ class DatingModule {
     DatingConfig.creditsAnalysis,
   );
 
-  // Aktif modüller. Diğer modüllerin (coach, rizz, bio, looksmaxxing) kodları
-  // arka planda korunur ancak şu an pasif — sadece bu ikisi gösterilir.
+  // Aktif büyük kartlar. RizzGPT (2026-11-22) hub'da bunların altında küçük kart olarak gösterilir
+  // (module_hub.dart _RizzCard). coach, bio, looksmaxxing kodları korunur ama pasif (sahte çıktı).
   static const List<DatingModule> all = [aiPhoto, photoAnalysis];
 }
 
@@ -393,6 +393,8 @@ class DatingKeys {
   // akış başına ayrı tutulur (bkz. ai_consent_gate.dart).
   static const String aiConsentPhoto = 'dating_ai_consent_photo';
   static const String aiConsentAnalysis = 'dating_ai_consent_analysis';
+  // RizzGPT: sohbet/profil ekran görüntüsü (üçüncü kişinin mesajları içerir).
+  static const String aiConsentChat = 'dating_ai_consent_chat';
   // Modül başına ücretsiz deneme hakkı kullanıldı mı?
   static const String freePhotoUsed = 'dating_free_photo_used';
   static const String freeAnalysisUsed = 'dating_free_analysis_used';
