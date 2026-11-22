@@ -21,6 +21,7 @@ Object.assign(exports, aiProxy, payments);
 const rizz = require("./rizz");
 exports.rizzReply = rizz.rizzReply;
 exports.rizzReport = rizz.rizzReport;
+exports.profileDoctor = require("./profileDoctor").profileDoctor;
 
 // falPhotos'un yalnızca GERÇEK Cloud Function'larını dışa aç.
 for (const name of [

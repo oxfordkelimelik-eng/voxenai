@@ -331,6 +331,18 @@ exports.deleteAccount = onCall(
     }
     // Firestore'daki tüm alt koleksiyonları da temizle.
     await db.recursiveDelete(db.doc(`users/${uid}`));
+    // 2026-11-22: RizzGPT / Profil Doktoru bildirimleri üst düzey rizzReports'ta (uid alanıyla) duruyor;
+    // users/{uid} altında olmadığı için recursiveDelete onları silmiyordu.
+    try {
+      const reports = await db.collection("rizzReports").where("uid", "==", uid).get();
+      for (let i = 0; i < reports.docs.length; i += 400) {
+        const batch = db.batch();
+        reports.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error("deleteAccount rizzReports silme hatası:", e);
+    }
     // KVKK/GDPR: Storage'daki tüm fotoğrafları da kalıcı sil (eğitim
     // selfie'leri + üretilen sonuçlar). recursiveDelete yalnızca Firestore'u
     // sildiği icin bu adim olmadan fotograflar geride kaliyordu.

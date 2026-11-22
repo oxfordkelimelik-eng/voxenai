@@ -2,7 +2,7 @@
 //
 // Akış: mod (mesaja cevap / profilden ilk mesaj) → 1-3 ekran görüntüsü → ton (otomatik/esprili/flörtöz/
 // samimi/cesur) + isteğe bağlı not → giriş + OpenAI onayı → sunucu (functions/rizz.js rizzReply).
-// Sonuç: okunan konuşma (Sen / O — yanlışsa "taraflar ters"), 3 cevap kartı (dokun-kopyala, neden,
+// Sonuç: okunan konuşma (Sen / O — yanlışsa "taraflar ters"), Sohbet Röntgeni (chat_xray_card.dart), 3 cevap kartı (dokun-kopyala, neden,
 // bildir), ipucu, "daha fazla" ve ton değiştirme (aynı görüntü için 30 dk içinde 3 kez ücretsiz).
 // Eski sürüm (module_flows.dart) 2 sn bekleyip sabit cevap gösteriyordu; bu dosya onun yerini aldı.
 
@@ -22,6 +22,7 @@ import '../rizz_service.dart';
 import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
 import '../widgets/shared_widgets.dart' show AiLoadingView;
+import 'chat_xray_card.dart';
 import 'module_flows.dart' show ModuleScaffold;
 
 class RizzFlow extends ConsumerStatefulWidget {
@@ -200,14 +201,20 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       );
       if (!mounted) return;
       if (!r.charged || r.replies.isEmpty) {
-        setState(() => _followupsLeft = r.followupsLeft);
+        setState(() {
+          _followupsLeft = r.followupsLeft;
+          // Cevap çıkmasa da yeni bulunan dolandırıcılık riski (güvenlik bilgisi) eldeki sonuca eklenir.
+          final extra = r.insight?.risk;
+          if (extra != null) _result = current.withInsight(withMergedRisk(current.insight, extra));
+        });
         _snack(_statusMessage(r) ?? 'Bu sefer uygun öneri çıkmadı, tekrar dene. Hakkın düşmedi.');
         return;
       }
       setState(() {
         if (tone != null) _tone = tone;
         _swapFrom = swapFrom;
-        _result = r;
+        // Röntgen tona göre değişmesin: yalnız "taraflar ters"te yenilenir; yeni bulunan risk her durumda eklenir.
+        _result = swap ? r : r.withInsight(withMergedRisk(current.insight ?? r.insight, r.insight?.risk));
         _followupsLeft = r.followupsLeft;
         _shown.addAll(r.replies.map((e) => e.text));
       });
@@ -466,6 +473,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         ],
         if (msg != null) _infoCard(Icons.info_outline_rounded, msg),
         if (r.notice != null) _infoCard(Icons.help_outline_rounded, r.notice!),
+        if (r.insight != null) ChatXrayCard(insight: r.insight!, onReport: (t) => _report(t, xray: true)),
         if (r.tip != null) _infoCard(Icons.lightbulb_outline_rounded, r.tip!, gold: true),
         if (r.replies.isNotEmpty) ...[
           Row(
@@ -659,7 +667,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
                     tooltip: 'Bildir',
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.outlined_flag_rounded, color: AppColors.textMuted, size: 18),
-                    onPressed: () => _report(rep),
+                    onPressed: () => _report(rep.text),
                   ),
                 ],
               ),
@@ -670,14 +678,22 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     );
   }
 
-  Future<void> _report(RizzReply rep) async {
-    const reasons = {
-      'offensive': 'Kırıcı ya da saldırgan',
-      'sexual': 'Cinsel / uygunsuz',
-      'wrong_person': 'Yanlış kişiye cevap',
-      'bad_quality': 'Kötü / anlamsız',
-      'other': 'Diğer',
-    };
+  /// Bildirim: cevap kartı (feature 'rizz') ya da Sohbet Röntgeni (feature 'xray').
+  Future<void> _report(String text, {bool xray = false}) async {
+    final reasons = xray
+        ? const {
+            'unfair': 'Haksız / yanlış değerlendirme',
+            'offensive': 'Kırıcı ya da saldırgan',
+            'wrong_person': 'Taraflar yanlış okunmuş',
+            'other': 'Diğer',
+          }
+        : const {
+            'offensive': 'Kırıcı ya da saldırgan',
+            'sexual': 'Cinsel / uygunsuz',
+            'wrong_person': 'Yanlış kişiye cevap',
+            'bad_quality': 'Kötü / anlamsız',
+            'other': 'Diğer',
+          };
     final reason = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -702,7 +718,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     );
     if (reason == null) return;
     try {
-      await reportRizzReply(text: rep.text, reason: reason, requestId: _parentId);
+      await reportRizzReply(text: text, reason: reason, requestId: _parentId, feature: xray ? 'xray' : 'rizz');
       _snack('Teşekkürler, bildirimin alındı.');
     } catch (_) {
       _snack('Bildirim gönderilemedi. Lütfen tekrar dene.', error: true);

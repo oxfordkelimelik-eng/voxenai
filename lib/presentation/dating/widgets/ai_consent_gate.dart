@@ -29,12 +29,16 @@ enum AiFlowKind {
 
   /// RizzGPT — sohbet ya da eşleşme profili ekran görüntüsü (üçüncü kişinin mesajlarını içerir).
   chatReply,
+
+  /// Profil Doktoru — kullanıcının KENDİ dating profilinin ekran görüntüleri (kendi fotoğrafları dahil).
+  profileReview,
 }
 
 String _prefsKeyFor(AiFlowKind kind) => switch (kind) {
       AiFlowKind.photoGeneration => DatingKeys.aiConsentPhoto,
       AiFlowKind.photoAnalysis => DatingKeys.aiConsentAnalysis,
       AiFlowKind.chatReply => DatingKeys.aiConsentChat,
+      AiFlowKind.profileReview => DatingKeys.aiConsentProfile,
     };
 
 /// Fotoğraflar gönderilmeden ÖNCE çağrılır. Kullanıcı daha önce bu akış için
@@ -103,17 +107,31 @@ class _AiConsentSheet extends StatelessWidget {
         AiFlowKind.chatReply =>
           'Seçtiğin sohbet ya da profil ekran görüntüleri, yazdığın kısa '
               'not ve başta seçtiğin cinsiyet (yalnız cevapta kendinden '
-              'doğru söz edilsin diye), cevap önerisi üretmek için OpenAI\'a '
-              'iletilir.',
+              'doğru söz edilsin diye), cevap önerisi ve Sohbet Röntgeni '
+              '(karşı tarafın ekranda görünen mesaj davranışından anlık ilgi '
+              've emek değerlendirmesi ile dolandırıcılık risk işaretleri) '
+              'üretmek için OpenAI\'a iletilir.',
+        AiFlowKind.profileReview =>
+          'Seçtiğin kendi profil ekran görüntülerin (profil fotoğrafların ve '
+              'yazıların), seçtiğin hedef ve notun, profil önerileri üretmek '
+              'için OpenAI\'a iletilir. Fotoğrafların yalnızca fotoğraf '
+              'niteliği (ışık, kadraj, ifade) açısından yorumlanır; görünüşün '
+              'değerlendirilmez.',
         null =>
           'Foto üretiminde çektiğin yüz fotoğrafları ile foto '
               'analizinde seçtiğin fotoğraflar; kompozisyon, kalite kontrolü '
               've skorlama içeren işleme hatlarımızdan geçirilip OpenAI '
               'altyapısına iletilir. RizzGPT\'de seçtiğin sohbet/profil ekran '
-              'görüntüleri ve notun, cevap önerisi için OpenAI\'a iletilir.',
+              'görüntüleri ve notun cevap önerisi ve Sohbet Röntgeni (ilgi/emek '
+              'tahmini, dolandırıcılık risk işaretleri) için; Profil Doktoru\'nda '
+              'seçtiğin kendi profil ekran görüntülerin profil önerisi için '
+              'OpenAI\'a iletilir.',
       };
 
   bool get _isChat => kind == AiFlowKind.chatReply;
+
+  /// Ekran görüntüsü akışları (RizzGPT, Profil Doktoru): hiçbir yere kaydedilmez, Firebase'e yazılmaz.
+  bool get _isShot => _isChat || kind == AiFlowKind.profileReview;
 
   Future<void> _openPolicy() async {
     final uri = Uri.parse(DatingConfig.privacyPolicyUrl);
@@ -129,6 +147,8 @@ class _AiConsentSheet extends StatelessWidget {
     await prefs.remove(DatingKeys.aiConsentPhoto);
     await prefs.remove(DatingKeys.aiConsentAnalysis);
     await prefs.remove(DatingKeys.aiConsentChat);
+    await prefs.remove(DatingKeys.aiConsentChatLegacy);
+    await prefs.remove(DatingKeys.aiConsentProfile);
     if (!context.mounted) return;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -168,6 +188,8 @@ class _AiConsentSheet extends StatelessWidget {
                     ? 'Veri Paylaşımı'
                     : _isChat
                         ? 'Ekran görüntün gönderilecek'
+                        : kind == AiFlowKind.profileReview
+                        ? 'Profil ekran görüntülerin gönderilecek'
                         : 'Fotoğrafların gönderilecek',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -193,7 +215,7 @@ class _AiConsentSheet extends StatelessWidget {
               _Row(
                 icon: Icons.photo_library_outlined,
                 title: 'Ne gönderiliyor, kime?',
-                body: _isChat
+                body: _isShot
                     ? _whatIsSent
                     : '$_whatIsSent\nFirebase, işlem sürerken geçici '
                         'depolama için kullanılır (altyapı sağlayıcımız).',
@@ -202,9 +224,9 @@ class _AiConsentSheet extends StatelessWidget {
               _Row(
                 icon: Icons.lock_clock_outlined,
                 title: 'Ne kadar saklanıyor?',
-                body: _isChat
+                body: _isShot
                     ? 'Ekran görüntülerin ve notun sunucularımıza kaydedilmez; '
-                        'yalnızca cevap üretilirken işlenir. OpenAI, kötüye '
+                        'yalnızca öneri üretilirken işlenir. OpenAI, kötüye '
                         'kullanımı önlemek için gelen istekleri en fazla 30 gün '
                         'tutabilir ve bunları model eğitiminde kullanmaz.'
                     : 'Kaynak fotoğrafların, işlem biter bitmez (başarılı ya '
@@ -221,8 +243,19 @@ class _AiConsentSheet extends StatelessWidget {
                       'ya da fotoğrafını içerebilir. Yalnızca paylaşmaya hakkın '
                       'olan içerik gönder; göndermeden önce isim ve '
                       'fotoğrafı kırp, telefon numarası ya da adres gibi '
-                      'bilgileri hiç gönderme. Bu bilgiler saklanmaz ve '
-                      'profil oluşturmak için kullanılmaz.',
+                      'bilgileri hiç gönderme. Sohbet Röntgeni yalnızca ekranda '
+                      'görünen mesajlardan o an sana gösterilen bir tahmindir; '
+                      'saklanmaz ve bu kişi hakkında kalıcı profil oluşturulmaz.',
+                ),
+              ],
+              if (kind == AiFlowKind.profileReview) ...[
+                const _Divider(),
+                const _Row(
+                  icon: Icons.people_outline_rounded,
+                  title: 'Fotoğraflardaki diğer kişiler',
+                  body: 'Grup fotoğraflarında arkadaşların da görünebilir. '
+                      'Onlar değerlendirilmez, tarif edilmez ve saklanmaz; '
+                      'yalnızca "grup fotoğrafı" olarak anılır.',
                 ),
               ],
               const _Divider(),

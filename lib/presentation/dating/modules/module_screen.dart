@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'module_flows.dart';
+import 'profile_doctor_flow.dart';
 import 'rizz_flow.dart';
 
 /// /module/:id dispatcher — her modül kendi özel ekranını açar.
@@ -18,6 +19,8 @@ class ModuleScreen extends StatelessWidget {
         return const CoachChatFlow();
       case 'rizz':
         return const RizzFlow();
+      case 'profile_doctor':
+        return const ProfileDoctorFlow();
       case 'bio':
         return const BioFlow();
       case 'looksmaxxing':

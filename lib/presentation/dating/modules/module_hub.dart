@@ -121,7 +121,7 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
         // Küçük ekran / büyük sistem yazısı: kartlar sabit boyda, sayfa kayar (RizzGPT satırı eklenince
         // sabit kısımlar kartları sıkıştırıp taşma şeridi çıkarıyordu).
         final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
-        final scroll = constraints.maxHeight < 600 * scale;
+        final scroll = constraints.maxHeight < 660 * scale;
         final page = Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Column(
@@ -160,7 +160,7 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'AI fotoğraf üret, fotoğraflarını analiz et, mesajına cevap bul.',
+                'AI fotoğraf üret, profilini incelet, mesajına cevap bul.',
                 style: TextStyle(
                   fontSize: 13,
                   height: 1.35,
@@ -188,7 +188,19 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                   ),
                 ),
               const SizedBox(height: 12),
-              _RizzCard(onTap: () => _openModule(DatingModule.rizz)),
+              _ToolCard(
+                icon: Icons.bolt_rounded,
+                title: 'RizzGPT — ne yazsam?',
+                subtitle: 'Ekran görüntüsü → 3 cevap + röntgen',
+                onTap: () => _openModule(DatingModule.rizz),
+              ),
+              const SizedBox(height: 8),
+              _ToolCard(
+                icon: Icons.medical_services_outlined,
+                title: 'Profil Doktoru',
+                subtitle: 'Fotoğraf sırası, düzeltme, yeni bio',
+                onTap: () => _openModule(DatingModule.profileDoctor),
+              ),
               const SizedBox(height: 10),
               const _HowItWorksStrip(),
             ],
@@ -302,9 +314,13 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
 
 /// RIZZGPT (2026-11-22): iki büyük kartın altında tek satırlık kart — üçüncü büyük kart, kaydırmasız
 /// düzende diğer ikisini sıkıştırırdı.
-class _RizzCard extends StatelessWidget {
+/// Büyük kartların altındaki küçük araç satırı (RizzGPT, Profil Doktoru — 2026-11-22).
+class _ToolCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
-  const _RizzCard({required this.onTap});
+  const _ToolCard({required this.icon, required this.title, required this.subtitle, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -315,7 +331,7 @@ class _RizzCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.borderGold, width: 0.8),
@@ -323,16 +339,16 @@ class _RizzCard extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: AppColors.gold.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.bolt_rounded, color: AppColors.gold, size: 24),
+                child: Icon(icon, color: AppColors.gold, size: 22),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -340,21 +356,21 @@ class _RizzCard extends StatelessWidget {
                     Row(
                       children: [
                         Flexible(
-                          child: Text('RizzGPT — ne yazsam?',
+                          child: Text(title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
                         ),
-                        SizedBox(width: 8),
-                        Text('YENİ',
+                        const SizedBox(width: 8),
+                        const Text('YENİ',
                             style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: AppColors.gold)),
                       ],
                     ),
-                    SizedBox(height: 2),
-                    Text('Sohbetin ekran görüntüsünü yükle, 3 cevap önerisi al',
-                        maxLines: 2,
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3)),
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3)),
                   ],
                 ),
               ),

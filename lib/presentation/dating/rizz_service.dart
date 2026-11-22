@@ -53,6 +53,88 @@ class RizzMessage {
   const RizzMessage(this.speaker, this.text);
 }
 
+/// Sohbet Röntgeni: yalnız ekrandaki davranıştan ilgi, emek dengesi, işaretler, sıradaki adım.
+class RizzInsight {
+  final String interest; // low | medium | high | unclear
+  final String investment; // user_more | balanced | match_more | unclear
+  final List<String> greenFlags;
+  final List<String> redFlags;
+  final String nextStep; // ask_out | keep_building | slow_down | give_space | revive | unclear
+  final String? summary;
+  final RizzRisk? risk;
+  const RizzInsight(this.interest, this.investment, this.greenFlags, this.redFlags, this.nextStep, this.summary, this.risk);
+
+  static RizzInsight? fromJson(dynamic v) {
+    if (v is! Map) return null;
+    List<String> strs(dynamic x) => x is List ? x.whereType<String>().toList() : const [];
+    return RizzInsight(
+      (v['interest'] as String?) ?? 'unclear',
+      (v['investment'] as String?) ?? 'unclear',
+      strs(v['greenFlags']),
+      strs(v['redFlags']),
+      (v['nextStep'] as String?) ?? 'unclear',
+      v['summary'] as String?,
+      RizzRisk.fromJson(v['risk']),
+    );
+  }
+}
+
+/// Dolandırıcılık / güvenlik risk sinyali (seviye sunucuda sinyallerden hesaplanır).
+class RizzRisk {
+  final String level; // low | medium | high
+  final List<String> signals;
+  final String? note;
+  const RizzRisk(this.level, this.signals, this.note);
+
+  static RizzRisk? fromJson(dynamic v) {
+    if (v is! Map) return null;
+    final signals = v['signals'] is List ? (v['signals'] as List).whereType<String>().toList() : <String>[];
+    if (signals.isEmpty) return null;
+    return RizzRisk((v['level'] as String?) ?? 'low', signals, v['note'] as String?);
+  }
+}
+
+/// Ağır sinyaller (functions/rizz.js RISK_HARD ile aynı): biri varsa seviye "high".
+const Set<String> kRizzRiskHard = {
+  'money_request',
+  'crypto_investment',
+  'suspicious_link',
+  'personal_data_request',
+  'sextortion',
+};
+
+/// İki risk okumasını birleştirir (sinyaller birleşir, seviye sunucu kuralıyla yeniden hesaplanır).
+RizzRisk? mergeRizzRisk(RizzRisk? a, RizzRisk? b) {
+  if (a == null) return b;
+  if (b == null) return a;
+  final signals = {...a.signals, ...b.signals}.toList();
+  final level = signals.any(kRizzRiskHard.contains) ? 'high' : (signals.length >= 2 ? 'medium' : 'low');
+  return RizzRisk(level, signals, b.note ?? a.note);
+}
+
+/// Röntgen [base] korunur, risk [extra] ile birleşir (takipte yeni bulunan risk kaybolmasın).
+RizzInsight? withMergedRisk(RizzInsight? base, RizzRisk? extra) {
+  if (base == null) {
+    return extra == null ? null : RizzInsight('unclear', 'unclear', const [], const [], 'unclear', null, extra);
+  }
+  return RizzInsight(base.interest, base.investment, base.greenFlags, base.redFlags, base.nextStep, base.summary,
+      mergeRizzRisk(base.risk, extra));
+}
+
+/// Risk sinyali anahtarı → kullanıcıya gösterilen kısa açıklama.
+const Map<String, String> kRizzRiskSignals = {
+  'money_request': 'Para, hediye ya da ödeme istiyor',
+  'crypto_investment': 'Kripto / yatırım fırsatı öneriyor',
+  'suspicious_link': 'Şüpheli bağlantı ya da uygulama gönderiyor',
+  'personal_data_request': 'Doğrulama kodu, kimlik, kart ya da şifre istiyor',
+  'sextortion': 'Mahrem fotoğraf istiyor ya da tehdit ediyor',
+  'move_off_app': 'Çok erken başka uygulamaya çekmeye çalışıyor',
+  'love_bombing': 'Çok erken, çok yoğun ilgi gösteriyor',
+  'inconsistent_story': 'Anlattıkları birbirini tutmuyor',
+  'avoids_meeting': 'Görüntülü görüşmeden / buluşmadan kaçıyor',
+  'pressure_secrecy': 'Acele ettiriyor ya da gizlilik istiyor',
+};
+
 class RizzResult {
   final String? requestId;
   final bool charged;
@@ -65,6 +147,7 @@ class RizzResult {
   final List<RizzReply> replies;
   final String? tip;
   final String? notice;
+  final RizzInsight? insight;
   final int? freeLeft;
   final int? dailyFree;
   final int followupsLeft;
@@ -81,10 +164,30 @@ class RizzResult {
     required this.replies,
     required this.tip,
     required this.notice,
+    required this.insight,
     required this.freeLeft,
     required this.dailyFree,
     required this.followupsLeft,
   });
+
+  /// "Daha fazla" / ton takibinde Sohbet Röntgeni korunur (aynı sohbet; tona göre değişmemeli).
+  RizzResult withInsight(RizzInsight? keep) => RizzResult(
+        requestId: requestId,
+        charged: charged,
+        status: status,
+        userSide: userSide,
+        confidence: confidence,
+        transcript: transcript,
+        turn: turn,
+        stage: stage,
+        replies: replies,
+        tip: tip,
+        notice: notice,
+        insight: keep,
+        freeLeft: freeLeft,
+        dailyFree: dailyFree,
+        followupsLeft: followupsLeft,
+      );
 
   factory RizzResult.fromJson(Map<String, dynamic> d) {
     final quota = d['quota'] is Map ? Map<String, dynamic>.from(d['quota'] as Map) : null;
@@ -108,6 +211,7 @@ class RizzResult {
       ],
       tip: d['tip'] as String?,
       notice: d['notice'] as String?,
+      insight: RizzInsight.fromJson(d['insight']),
       freeLeft: (quota?['freeLeft'] as num?)?.toInt(),
       dailyFree: (quota?['dailyFree'] as num?)?.toInt(),
       followupsLeft: (d['followupsLeft'] as num?)?.toInt() ?? 0,
@@ -147,15 +251,20 @@ List<Uint8List> _shrinkToParts(Uint8List bytes) {
   return parts;
 }
 
-/// Seçilen görüntüleri (eskiden yeniye) kodlar. Parça sınırı aşılırsa EN YENİ kısım tutulur.
-Future<RizzImages> encodeRizzImages(List<File> files) async {
+/// Seçilen görüntüleri (eskiden yeniye) kodlar. Parça sınırı aşılırsa sohbette EN YENİ kısım tutulur
+/// ([keepNewest]); profilde (Profil Doktoru) baş kısım — ilk fotoğraf ve ilk izlenim — tutulur.
+Future<RizzImages> encodeRizzImages(List<File> files, {bool keepNewest = true}) async {
   final parts = <Uint8List>[];
   for (final f in files.take(kRizzMaxImages)) {
     final p = await compute(_shrinkToParts, await f.readAsBytes());
     if (p.isEmpty) throw const RizzImageException();
     parts.addAll(p);
   }
-  final kept = parts.length > kRizzMaxParts ? parts.sublist(parts.length - kRizzMaxParts) : parts;
+  final kept = parts.length <= kRizzMaxParts
+      ? parts
+      : keepNewest
+          ? parts.sublist(parts.length - kRizzMaxParts)
+          : parts.sublist(0, kRizzMaxParts);
   return RizzImages(
     [for (final b in kept) {'data': base64Encode(b), 'mimeType': 'image/jpeg'}],
     kept.length < parts.length,
@@ -189,7 +298,13 @@ Future<RizzResult> requestRizzReplies({
   return RizzResult.fromJson(Map<String, dynamic>.from(result.data as Map));
 }
 
-Future<void> reportRizzReply({required String text, required String reason, String? requestId}) async {
+/// Öneri bildirimi (RizzGPT cevabı ya da Profil Doktoru metni). feature: 'rizz' | 'profileDoctor'.
+Future<void> reportRizzReply({
+  required String text,
+  required String reason,
+  String? requestId,
+  String feature = 'rizz',
+}) async {
   final callable = FirebaseFunctions.instanceFor(region: _region).httpsCallable('rizzReport');
-  await callable.call(<String, dynamic>{'text': text, 'reason': reason, 'requestId': requestId});
+  await callable.call(<String, dynamic>{'text': text, 'reason': reason, 'requestId': requestId, 'feature': feature});
 }

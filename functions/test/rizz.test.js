@@ -106,29 +106,29 @@ test("hak: yalnız ok + cevap varsa düşer", () => {
 });
 
 test("hak kararı: önce günlük ücretsiz, sonra bakiye", () => {
-  assert.deepStrictEqual(R.quotaDecision({ usedToday: 0, dailyFree: 5, rizzBalance: 0 }), { source: "free" });
-  assert.deepStrictEqual(R.quotaDecision({ usedToday: 5, dailyFree: 5, rizzBalance: 2 }), { source: "balance" });
-  assert.deepStrictEqual(R.quotaDecision({ usedToday: 5, dailyFree: 5, rizzBalance: 0 }), { source: null });
+  assert.deepStrictEqual(R.quotaDecision({ usedToday: 0, dailyFree: 5, balance: 0 }), { source: "free" });
+  assert.deepStrictEqual(R.quotaDecision({ usedToday: 5, dailyFree: 5, balance: 2 }), { source: "balance" });
+  assert.deepStrictEqual(R.quotaDecision({ usedToday: 5, dailyFree: 5, balance: 0 }), { source: null });
 });
 
 test("takip: aynı görüntü şartı (tuzlu özet)", () => {
   const now = 10_000_000;
   const req = R.parseRequest({ images: [img], mode: "reply" });
-  const parent = { createdAtMs: now, followups: 0, salt: "tuz", digest: R.imagesDigest("tuz", req) };
-  assert.strictEqual(R.followupAllowed(parent, now, req).ok, true);
+  const parent = { createdAtMs: now, followups: 0, salt: "tuz", digest: R.digestOf(req)("tuz") };
+  assert.strictEqual(R.followupAllowed(parent, now, R.FOLLOWUP_MAX, R.digestOf(req)).ok, true);
   const other = R.parseRequest({ images: [{ data: "WFla".repeat(10), mimeType: "image/jpeg" }], mode: "reply" });
-  assert.strictEqual(R.followupAllowed(parent, now, other).reason, "parent-mismatch", "başka sohbetin görüntüsü");
-  assert.strictEqual(R.followupAllowed(parent, now, R.parseRequest({ images: [img], mode: "opener" })).reason, "parent-mismatch", "mod değişemez");
-  assert.strictEqual(R.followupAllowed({ createdAtMs: now, followups: 0 }, now, req).reason, "parent-mismatch", "özetsiz eski kayıt");
-  assert.notStrictEqual(R.imagesDigest("a", req), R.imagesDigest("b", req), "tuz farklı → özet farklı");
+  assert.strictEqual(R.followupAllowed(parent, now, R.FOLLOWUP_MAX, R.digestOf(other)).reason, "parent-mismatch", "başka sohbetin görüntüsü");
+  assert.strictEqual(R.followupAllowed(parent, now, R.FOLLOWUP_MAX, R.digestOf(R.parseRequest({ images: [img], mode: "opener" }))).reason, "parent-mismatch", "mod değişemez");
+  assert.strictEqual(R.followupAllowed({ createdAtMs: now, followups: 0 }, now, R.FOLLOWUP_MAX, R.digestOf(req)).reason, "parent-mismatch", "özetsiz eski kayıt");
+  assert.notStrictEqual(R.digestOf(req)("a"), R.digestOf(req)("b"), "tuz farklı → özet farklı");
 });
 
 test("takip: 30 dk ve 3 kez", () => {
   const now = 10_000_000;
-  assert.strictEqual(R.followupAllowed({ createdAtMs: now - 1000, followups: 0 }, now).ok, true);
-  assert.strictEqual(R.followupAllowed({ createdAtMs: now - R.FOLLOWUP_WINDOW_MS - 1, followups: 0 }, now).reason, "parent-expired");
-  assert.strictEqual(R.followupAllowed({ createdAtMs: now, followups: R.FOLLOWUP_MAX }, now).reason, "followup-limit");
-  assert.strictEqual(R.followupAllowed(null, now).reason, "parent-missing");
+  assert.strictEqual(R.followupAllowed({ createdAtMs: now - 1000, followups: 0 }, now, R.FOLLOWUP_MAX).ok, true);
+  assert.strictEqual(R.followupAllowed({ createdAtMs: now - R.FOLLOWUP_WINDOW_MS - 1, followups: 0 }, now, R.FOLLOWUP_MAX).reason, "parent-expired");
+  assert.strictEqual(R.followupAllowed({ createdAtMs: now, followups: R.FOLLOWUP_MAX }, now, R.FOLLOWUP_MAX).reason, "followup-limit");
+  assert.strictEqual(R.followupAllowed(null, now, R.FOLLOWUP_MAX).reason, "parent-missing");
 });
 
 test("gün anahtarı İstanbul saatine göre", () => {

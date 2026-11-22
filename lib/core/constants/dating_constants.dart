@@ -367,6 +367,13 @@ class DatingModule {
     Icons.edit_note,
     DatingConfig.creditsText,
   );
+  static const profileDoctor = DatingModule(
+    'profile_doctor',
+    'Profil Doktoru',
+    'Profilinin ekran görüntüsünü yükle; fotoğraf sırası, düzeltmeler ve yeni bio al.',
+    Icons.medical_services_outlined,
+    DatingConfig.creditsText,
+  );
   static const looksmaxxing = DatingModule(
     'looksmaxxing',
     'Looksmaxxing — Yüz & Vücut',
@@ -375,8 +382,9 @@ class DatingModule {
     DatingConfig.creditsAnalysis,
   );
 
-  // Aktif büyük kartlar. RizzGPT (2026-11-22) hub'da bunların altında küçük kart olarak gösterilir
-  // (module_hub.dart _RizzCard). coach, bio, looksmaxxing kodları korunur ama pasif (sahte çıktı).
+  // Aktif büyük kartlar. RizzGPT ve Profil Doktoru (2026-11-22) hub'da bunların altında küçük araç
+  // satırı olarak gösterilir (module_hub.dart _ToolCard). coach, bio, looksmaxxing kodları korunur ama
+  // pasif (sahte çıktı; bio'nun yerini Profil Doktoru aldı).
   static const List<DatingModule> all = [aiPhoto, photoAnalysis];
 }
 
@@ -394,7 +402,12 @@ class DatingKeys {
   static const String aiConsentPhoto = 'dating_ai_consent_photo';
   static const String aiConsentAnalysis = 'dating_ai_consent_analysis';
   // RizzGPT: sohbet/profil ekran görüntüsü (üçüncü kişinin mesajları içerir).
-  static const String aiConsentChat = 'dating_ai_consent_chat';
+  // v2 (2026-11-22): Sohbet Röntgeni eklendi (karşı tarafın görünen davranışının anlık değerlendirmesi) →
+  // eski onayı verenler güncel metni görsün diye anahtar değişti.
+  static const String aiConsentChat = 'dating_ai_consent_chat_v2';
+  static const String aiConsentChatLegacy = 'dating_ai_consent_chat';
+  // Profil Doktoru: kullanıcının KENDİ profilinin ekran görüntüleri (kendi fotoğrafları dahil).
+  static const String aiConsentProfile = 'dating_ai_consent_profile';
   // Modül başına ücretsiz deneme hakkı kullanıldı mı?
   static const String freePhotoUsed = 'dating_free_photo_used';
   static const String freeAnalysisUsed = 'dating_free_analysis_used';
