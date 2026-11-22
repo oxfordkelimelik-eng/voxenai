@@ -233,6 +233,7 @@ function parseEyewearReply(raw) {
   return { ok: true, eyewear: m[1].toUpperCase() === "YES", eyesVisible: v ? v[1].toUpperCase() === "YES" : null };
 }
 
+const EYEWEAR_TIMEOUT_MS = 20000;
 /**
  * Şablon kişisinin gözlüğü var mı? Yüz kutusu çevresi kırpılıp sorulur.
  * FAIL-SAFE: okunamazsa { ok:false } — çağıran gözlük YOK sayar (eski davranış).
@@ -249,8 +250,10 @@ async function judgeEyewear(templateBuf, faceBox, apiKey) {
     if (width < 16 || height < 16) return { ok: false, reason: "face-too-small" };
     const crop = await sharp(templateBuf).extract({ left, top, width, height })
       .resize({ width: 512, height: 512, fit: "inside" }).jpeg({ quality: 90 }).toBuffer();
+    // Zaman aşımı (2026-11-22): üretim öncesi koşuyor; takılan çağrı üretimi bekletmesin (yargı yok = gözlük yok).
     const resp = await fetch(OPENAI_CHAT_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(EYEWEAR_TIMEOUT_MS),
       headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
       body: JSON.stringify({
         model: HEAD_GHOST_MODEL,

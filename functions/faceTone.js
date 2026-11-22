@@ -99,6 +99,9 @@ const BACKLIT = { ON: true, FACE_RING_MIN: 25, RING_MIN_L: 50, BETA: 0.7, MIN: M
 //    AÇIKLIĞI boyaması yakaya taştı). Burada yalnız RENK (a*, b*) yüzün üst derisine (alın/yanak —
 //    sakal karışmasın) çekilir; parlaklık/gölge olduğu gibi kalır, kumaş ve koyu gölgeye gitmez.
 const NECK_TONE = { ON: true, CHROMA_MAX: 7, DEADBAND: 1.0, MIN_L: 22 };
+// Kullanıcı ile şablon kişisi arasında bu kadar MST adımı varsa: pigment farkı ölü bölgesiz tam
+// sayılır (±1 tahmin hatası yönü değiştirmez) ve boyun işareti kullanılmaz (bkz. matchFaceToScene).
+const PIGMENT_FULL_GAP = 3;
 
 /**
  * VÜCUT IŞIĞI TEK ORAN (2026-11-06, kullanıcı kararı: "tüm vücut aynı oranda
@@ -581,13 +584,29 @@ function upsample(src, w, h, W, H) {
 }
 
 /**
+ * Pigment oranları (doğrusal ışık). albedo ≥ 1: koyu şablon kişisi (şablon yüzü pigmentten arındırılıp
+ * açılır); albedoLight ≤ 1: açık şablon kişisi (haksız açma sınırı). Fark ≥ PIGMENT_FULL_GAP adımda ölü
+ * bölge yok ve pigmentApart (boyun işareti kullanılmaz). Vücut oranı tek sayım için bölünür. SAF.
+ */
+function pigmentAlbedos(mstUser, mstTpl, bodyRatio = 1) {
+  const { albedoRatio } = require("./faceRelight");
+  const known = Number.isFinite(mstUser) && Number.isFinite(mstTpl);
+  const tplDarker = known ? mstTpl - mstUser : 0;
+  const br = Number.isFinite(bodyRatio) && bodyRatio > 0 ? bodyRatio : 1;
+  return {
+    albedo: Math.max(1, albedoRatio(mstUser, mstTpl, tplDarker >= PIGMENT_FULL_GAP ? 0 : 1) / Math.max(1, br)),
+    albedoLight: Math.min(1, albedoRatio(mstUser, mstTpl, -tplDarker >= PIGMENT_FULL_GAP ? 0 : 1) / Math.min(1, br)),
+    pigmentApart: known && Math.abs(tplDarker) >= PIGMENT_FULL_GAP,
+  };
+}
+
+/**
  * Çıktının yüzünü şablonun sahne ışığına oturtur. Kareler aynı kadrajda
  * (geri yerleştirme + hizalama sonrası). mstUser/mstTpl: Monk ten skalası
  * (1-10); yoksa pigment farkı 1 sayılır. Döner { buf, applied, reason, ... }.
  */
 async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl = null } = {}) {
   const t0 = Date.now();
-  const { albedoRatio } = require("./faceRelight");
   const { rgbToLab, labToRgb } = require("./skinTone");
   const { data: rgb, info } = await sharp(outputBuf).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const FW = info.width, FH = info.height;
@@ -605,7 +624,12 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   const adj = bodyAdjustedTarget(tpl, bodyRatioOf(So, St));
   // TEK SAYIM (2026-11-20 inceleme): model vücudu kullanıcının teninde çizdiyse vücut oranı (>1) hedefi
   // zaten yükseltti; pigmentin o kadarı ikinci kez eklenmez.
-  const albedo = Math.max(1, albedoRatio(mstUser, mstTpl) / Math.max(1, adj.bodyRatio || 1));
+  // KOYU ŞABLON ≥3 ADIM ÖLÜ BÖLGESİZ (2026-11-22, kullanıcı: "base siyahi, selfie beyazsa yüz siyaha
+  // yaklaşmamalı; yalnız ışığın/gölgenin nereden geldiği alınmalı"). Ölü bölge farktan 1 adım
+  // ÇIKARIYORDU: açık tenli kullanıcı koyu şablonda hep bir MST adımı koyu hedeflenip karartılıyordu
+  // (MST 5 ↔ 8: ×0.91, karanlık sahnede ×0.81, boyun kuralıyla ×0.78; 2 ↔ 9: ×0.90-0.96). Açık şablon
+  // yönünde 11-21'de aynı gerekçeyle kaldırılmıştı; iki yön artık simetrik (bkz. PIGMENT_FULL_GAP).
+  const { albedo, albedoLight, pigmentApart } = pigmentAlbedos(mstUser, mstTpl, adj.bodyRatio);
   const L = (Y) => (Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y);
   // Şablonda yüz − çevre (arka plan halkası) L: karanlık sahne işareti.
   const ringT = sceneRingL(St);
@@ -618,7 +642,10 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   const darkScene = ringT != null && ringT <= DARK_SCENE.RING_MAX_L;
   const neckBefore = neckFaceDelta(So, (i) => [So.work[i * 3], So.work[i * 3 + 1], So.work[i * 3 + 2]]);
   const neckTpl = neckFaceDelta(St, (i) => [St.work[i * 3], St.work[i * 3 + 1], St.work[i * 3 + 2]]);
-  const neckArg = neckBefore && neckTpl ? { excess: neckTpl.delta - neckBefore.delta, outL: neckBefore.face } : null;
+  // BÜYÜK TEN FARKINDA BOYUN İŞARETİ YOK (2026-11-22): kural "yüz ve boyun aynı kişi" varsayıyor; model
+  // şablon kişisinin boynunu (ve elini) çoğu zaman olduğu gibi bırakıyor. Koyu tenli şablonda açık tenli
+  // kullanıcının yüzü bırakılan koyu boyna göre "fazla parlak" görünüp karartılıyordu (tersinde açılıyordu).
+  const neckArg = neckBefore && neckTpl && !pigmentApart ? { excess: neckTpl.delta - neckBefore.delta, outL: neckBefore.face } : null;
   const backlit = ringT != null && ringT >= BACKLIT.RING_MIN_L && tplFaceRing != null && tplFaceRing <= -BACKLIT.FACE_RING_MIN;
   const plan = planTone(adj.tpl, out, albedo, { darkScene, neck: neckArg, backlit });
   // AÇIK ŞABLON YÖNÜ (2026-11-22, kullanıcı: "koyu tenli selfie, açık tenli base'de de doğru çalışıyor
@@ -627,15 +654,13 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   // vücudu kullanıcının koyu teninde çizdi) pigmentin o kadarını zaten taşıyor → tek sayım.
   // Ölü bölge (±1 MST tahmin hatası) yalnız küçük farkta: ≥3 adımda bir adımlık hata yönü değiştirmez,
   // ölü bölge ise koyu uçta (MST 7→8 = 7 L) koyu yüzü yine ×1.15 açtırıyordu.
-  const userDarker = Number.isFinite(mstUser) && Number.isFinite(mstTpl) ? mstUser - mstTpl : 0;
-  const albedoLight = Math.min(1, albedoRatio(mstUser, mstTpl, userDarker >= 3 ? 0 : 1) / Math.min(1, adj.bodyRatio || 1));
   const lightCap = capLighterTemplate(plan, adj.tpl, out, albedoLight);
   // Boyun rengi yüzün üst derisine. Boyun yüzün renk kaymasını (da/db) zaten deri alfasıyla
   // alıyor (headAlpha boyun şeridi), bu yüzden hedef kaymasız üst yüz rengi.
   const neckC = neckChroma(So);
   const nplan = planNeckChroma(out.upper, {}, neckC);
   const sl = (q) => (q.slope ? `${q.slope.gu.toFixed(2)}/${q.slope.gv.toFixed(2)}` : "null");
-  const info2 = { tplRingL: ringT, tplFaceRing, darkScene, outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, albedoLight, lightCap, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, neckAB: neckC ? [neckC.a, neckC.b] : null, faceUpperAB: out.upper ? [out.upper.a, out.upper.b] : null, neckShift: [nplan.na, nplan.nb], ...plan };
+  const info2 = { tplRingL: ringT, tplFaceRing, darkScene, outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, albedoLight, lightCap, pigmentApart, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, neckAB: neckC ? [neckC.a, neckC.b] : null, faceUpperAB: out.upper ? [out.upper.a, out.upper.b] : null, neckShift: [nplan.na, nplan.nb], ...plan };
   if (!plan.ok) return { buf: null, applied: false, reason: plan.reason, ...info2 };
   if (!plan.logGain && !plan.da && !plan.db && !plan.gu && !plan.gv && !nplan.na && !nplan.nb) return { buf: null, applied: false, reason: "already-matched", ...info2 };
   // Kesin pikseller tohum: kafa/boyun (değer = alfa), vücut derisi (eğim için
@@ -769,4 +794,4 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   return { buf, applied: true, reason: null, changed, matted, ms: Date.now() - t0, ...info2, neckDeltaAfter: neckAfter ? neckAfter.delta : null };
 }
 
-module.exports = { matchFaceToScene, _testables: { NECK_TONE, sideLightWeight, neckChroma, planNeckChroma, DARK_SCENE, SIDE_LIGHT, SKIN_BOX, NECK_MATCH, BACKLIT, sceneRingL, probsOf, skinStats, soften, upsample, planTone, capLighterTemplate, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, bodyLightLog, SLOPE_UV_MAX, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX, CHROMA, headAlpha } };
+module.exports = { matchFaceToScene, _testables: { NECK_TONE, PIGMENT_FULL_GAP, pigmentAlbedos, sideLightWeight, neckChroma, planNeckChroma, DARK_SCENE, SIDE_LIGHT, SKIN_BOX, NECK_MATCH, BACKLIT, sceneRingL, probsOf, skinStats, soften, upsample, planTone, capLighterTemplate, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, bodyLightLog, SLOPE_UV_MAX, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX, CHROMA, headAlpha } };

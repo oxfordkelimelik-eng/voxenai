@@ -22,7 +22,9 @@ import '../../../data/sources/claude_api_service.dart' show PhotoScore;
 import '../../../data/sources/review_prompt_service.dart';
 import '../../providers/app_providers.dart'
     show authServiceProvider, claudeApiServiceProvider;
+import '../../ops/ops_photo_editor_screen.dart' show OpsPhotoEditorScreen, OpsPhotoEditResult;
 import '../../screens/analysis/guided_capture_screen.dart';
+import '../photo_edit_service.dart';
 import '../providers/dating_providers.dart';
 import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart';
@@ -2031,6 +2033,43 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
   late final PageController _controller;
   late int _index;
   bool _saving = false;
+  bool _openingEditor = false;
+  // Düzenleme kaydedilince sayfa yeniden kurulur: indirme adresi (yeni jeton) tazelenir.
+  int _rev = 0;
+
+  /// KULLANICI DÜZENLEYİCİSİ (2026-11-22): admin düzenleyicisinin aynısı (12 filtre, flaş, 11 ayar,
+  /// ışıklı); kaydetme teslim edilen karenin kendisini değiştirir, "Orijinale dön" her zaman mümkün.
+  Future<void> _edit() async {
+    if (_openingEditor) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final ref = widget.gsUrls[_index];
+    setState(() => _openingEditor = true);
+    try {
+      final st = await loadUserPhotoEditState(uid: uid, ref: ref);
+      if (!mounted) return;
+      final res = await Navigator.of(context).push<OpsPhotoEditResult>(MaterialPageRoute(
+        builder: (_) => OpsPhotoEditorScreen(
+          uid: uid,
+          jobId: st.jobId,
+          ref: ref,
+          imageUrl: st.imageUrl,
+          initial: st.edits,
+          originalUrl: st.originalUrl,
+          applyFn: (edits) => applyUserPhotoEdits(ref: ref, edits: edits),
+          flashFieldsFn: () => userPhotoFlashFields(ref: ref),
+        ),
+      ));
+      if (res != null && mounted) {
+        setState(() => _rev++);
+        _snack('Fotoğraf güncellendi ✓');
+      }
+    } catch (_) {
+      _snack('Düzenleyici açılamadı. Lütfen tekrar dene.', error: true);
+    } finally {
+      if (mounted) setState(() => _openingEditor = false);
+    }
+  }
 
   @override
   void initState() {
@@ -2154,33 +2193,57 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                 controller: _controller,
                 itemCount: widget.gsUrls.length,
                 onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (_, i) => _page(widget.gsUrls[i]),
+                itemBuilder: (_, i) => KeyedSubtree(
+                  key: ValueKey('${widget.gsUrls[i]}#$_rev'),
+                  child: _page(widget.gsUrls[i]),
+                ),
               ),
             ),
-            // Alt bar: indir
+            // Alt bar: düzenle + indir
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.download_rounded),
-                  label: Text(_saving ? 'Kaydediliyor…' : 'Telefona İndir'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.gold,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+              child: Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _openingEditor || _saving ? null : _edit,
+                    icon: _openingEditor
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
+                          )
+                        : const Icon(Icons.tune_rounded),
+                    label: const Text('Düzenle'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.gold,
+                      side: const BorderSide(color: AppColors.gold),
+                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.download_rounded),
+                      label: Text(_saving ? 'Kaydediliyor…' : 'Telefona İndir'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.gold,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

@@ -50,3 +50,52 @@ test("karartma ve koyu şablon yönü değişmez", () => {
   assert.strictEqual(T.capLighterTemplate(brighten, face(70), face(50), 1.9), null, "koyu şablon yönü ayrı yolda");
   assert.strictEqual(brighten.logGain, b);
 });
+
+// İKİ YÖN SİMETRİK (2026-11-22, kullanıcı: "base siyahi, selfie beyazsa yüz siyaha yaklaşmamalı; ya da
+// tersi"): ≥3 adımda ölü bölge iki yönde de yok, boyun işareti kapalı.
+const MST_L = [null, 75, 72, 69, 65, 60, 54, 47, 40, 33, 27];
+test("pigmentAlbedos: koyu şablon ≥3 adım tam oran, açık şablon ≥3 adım tam oran", () => {
+  const a = T.pigmentAlbedos(2, 9);
+  assert.ok(Math.abs(a.albedo - Yof(MST_L[2]) / Yof(MST_L[9])) < 1e-9, "beyaz kullanıcı / siyahi şablon: tam oran");
+  assert.strictEqual(a.albedoLight, 1);
+  assert.strictEqual(a.pigmentApart, true);
+  const b = T.pigmentAlbedos(9, 2);
+  assert.ok(Math.abs(b.albedoLight - Yof(MST_L[9]) / Yof(MST_L[2])) < 1e-9, "siyahi kullanıcı / beyaz şablon: tam oran");
+  assert.strictEqual(b.albedo, 1);
+  assert.strictEqual(b.pigmentApart, true);
+});
+
+test("pigmentAlbedos: 2 adımda ölü bölge sürer, boyun açık; ölçü yoksa nötr", () => {
+  const a = T.pigmentAlbedos(5, 7);
+  assert.ok(Math.abs(a.albedo - Yof(MST_L[6]) / Yof(MST_L[7])) < 1e-9);
+  assert.strictEqual(a.pigmentApart, false);
+  assert.deepStrictEqual(T.pigmentAlbedos(null, 7), { albedo: 1, albedoLight: 1, pigmentApart: false });
+  assert.deepStrictEqual(T.pigmentAlbedos(5, 5), { albedo: 1, albedoLight: 1, pigmentApart: false });
+});
+
+test("beyaz kullanıcı + siyahi şablon, aynı ışık, karanlık sahne: yüz karartılmaz", () => {
+  const tpl = face(MST_L[9]), out = face(MST_L[2]);
+  const { albedo } = T.pigmentAlbedos(2, 9);
+  const plan = T.planTone(tpl, out, albedo, { darkScene: true });
+  assert.strictEqual(plan.logGain, 0);
+  // Eski ölü bölgeli oran bir adım karartıyordu.
+  const old = T.planTone(tpl, out, albedoRatio(2, 9), { darkScene: true });
+  assert.ok(old.logGain < -0.05, `eski davranış karartıyordu (${old.logGain})`);
+});
+
+test("siyahi kullanıcı + beyaz şablon, aynı ışık: yüz açılmaz", () => {
+  const tpl = face(MST_L[2]), out = face(MST_L[9]);
+  const { albedo, albedoLight } = T.pigmentAlbedos(9, 2);
+  const plan = T.planTone(tpl, out, albedo);
+  assert.ok(plan.logGain > 0);
+  T.capLighterTemplate(plan, tpl, out, albedoLight);
+  assert.strictEqual(plan.logGain, 0);
+});
+
+test("ten farkı aynı ama sahne gerçekten karanlık: karartma kalır (ışık yine taşınır)", () => {
+  // Şablon sahnesi kullanıcının teninin 0.6 katı ışık veriyor.
+  const tpl = { Y: Yof(MST_L[9]) * 0.6, a: 12, b: 16 }, out = face(MST_L[2]);
+  const { albedo } = T.pigmentAlbedos(2, 9);
+  const plan = T.planTone(tpl, out, albedo, { darkScene: true });
+  assert.ok(plan.logGain < -0.3, `ışık farkı karartılmalı (${plan.logGain})`);
+});

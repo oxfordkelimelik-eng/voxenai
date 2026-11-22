@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("crypto");
-const { templateMetaIndex, templateMetaFor } = require("../falPhotos")._testables;
+const { templateMetaIndex, templateMetaFor, TEMPLATE_META_ON } = require("../falPhotos")._testables;
 
 // 2026-11-15: şablon bilgi tablosu — elegance/tall 45 şablon, tam değerlerle.
 test("şablon tablosu: elegance/tall kayıtları yüklenir, her kayıtta poz ve kırpım var", () => {
@@ -15,7 +15,16 @@ test("şablon tablosu: elegance/tall kayıtları yüklenir, her kayıtta poz ve 
   }
 });
 
-test("şablon tablosu: eşleşme md5 + kırpım + yüz oranıyla; tutmazsa ölçüme düşülür", () => {
+test("şablon tablosu kapalı (2026-11-22): hiçbir şablon tablodan okunmaz", () => {
+  if (TEMPLATE_META_ON) return;
+  const idx = templateMetaIndex();
+  const buf = Buffer.from("kapalı-tablo");
+  const md5 = crypto.createHash("md5").update(buf).digest("base64");
+  idx.set(md5, { name: "test/y.jpg", raw: { cropped: true, faceRatio: 0.125 } });
+  try { assert.equal(templateMetaFor(buf, true, 0.125), null); } finally { idx.delete(md5); }
+});
+
+test("şablon tablosu: eşleşme md5 + kırpım + yüz oranıyla; tutmazsa ölçüme düşülür", { skip: !TEMPLATE_META_ON && "tablo kapalı" }, () => {
   const idx = templateMetaIndex();
   const buf = Buffer.from("deneme-şablon-baytları");
   assert.equal(templateMetaFor(buf, false, 0.1), null, "tabloda olmayan şablon");

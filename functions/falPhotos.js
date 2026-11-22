@@ -4399,7 +4399,10 @@ const NATURAL_SWAP_ON = true;
 // tabloyla tutmalı (prepareTemplate değişirse tablo kendiliğinden devre dışı kalır).
 // Tablo yoksa/eşleşmezse eskisi gibi ölçülür. Şapkalı şablon (maske gerekir) her zaman
 // canlıda ölçülür. GERİ DÖNÜŞ: false + deploy (yedek: ciktilar/yedek/canli_2026-11-14_1337UTC_functions.tgz).
-const TEMPLATE_META_ON = true;
+// 2026-11-22 KAPATILDI (kullanıcı: "şablon bilgi tablosuna gerek yok, anlık hesaplansın; süre biraz
+// uzayabilir sıkıntı yok"): tüm şablonlar her karede canlı ölçülür (eskiden de elegance/tall dışı böyleydi).
+// Tablo dosyası ve kod duruyor; geri açmak için true + deploy.
+const TEMPLATE_META_ON = false;
 let TEMPLATE_META = null;
 function templateMetaIndex() {
   if (TEMPLATE_META) return TEMPLATE_META;
@@ -4487,21 +4490,40 @@ const REF_YAW_CACHE = new Map();
 function refYawOf(url) {
   if (!REF_YAW_CACHE.has(url)) {
     if (REF_YAW_CACHE.size > 200) REF_YAW_CACHE.clear();
-    REF_YAW_CACHE.set(url, (async () => {
+    // İNDİRME SAĞLAMLIĞI (2026-11-22, akış incelemesi): eskiden zaman aşımsız tek fetch; hata
+    // null olarak iş boyunca önbellekte kalıyordu → o selfie'nin açısı "bilinmiyor" sayılıp her
+    // karede sona gidiyordu (11-08 flatSelfieOf'taki aynı tuzak). Artık zaman aşımı + bir tekrar;
+    // indirme düşerse kayıt silinir, sonraki kare yeniden ölçer.
+    const p = (async () => {
+      let raw = null, lastErr = null;
+      for (let k = 0; k < SELFIE_FETCH_TRIES && !raw; k++) {
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(SELFIE_FETCH_MS) });
+          if (!r.ok) throw new Error(`selfie indirilemedi: ${r.status}`);
+          raw = Buffer.from(await r.arrayBuffer());
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!raw) {
+        console.error("Selfie yaw ölçümü: indirme başarısız (sonraki karede yeniden denenecek):", lastErr && (lastErr.message || lastErr));
+        return { failed: true };
+      }
       try {
-        const r = await fetch(url);
-        if (!r.ok) return null;
         // EXIF DÖNDÜRMESİ (2026-10-31, 21e56b20): Storage'daki selfie ham
         // telefon baytı; yüz ölçümü EXIF'i uygulamıyor (bkz. faceQuality
         // bufferToTensorScaled). Hazırlık [0.02,−0.33,0.39,−0.87,0.84]
         // ölçtü, burada [−0.53,null,0.11,1.00,−0.09] çıktı — düz şablonlara
         // sağa dönük selfie gitti, baş +20°'ye döndü. 3B poz (derece) da
         // burada, döndürülmüş görüntüde (bkz. headPose3d).
-        const raw = Buffer.from(await r.arrayBuffer());
         const b = await require("sharp")(raw).rotate().jpeg({ quality: 95 }).toBuffer();
         const { headPoseOf } = require("./faceQuality");
         const p = (await headPoseOf(b)) || (await headPoseOf(b, LOW_CONF_FACE));
-        const p3 = await require("./headPose3d").headPose3dOf(b, { loose: false });
+        // ŞABLONLA AYNI AĞ KABULÜ (2026-11-22): şablon ve çıktı gevşek uyumla (loose) ölçülüyor,
+        // selfie katıyla ölçülüyordu. Katı ölçüde güçlü profil selfie ağı reddedip 68 noktalı
+        // yedeğe düşüyordu: yaw ±55°'de tıkanıyor, eğim null (Kutay 03_tam_sag: katı +55.0/null,
+        // gevşek ağ +58.5/+4.2). Kutay'ın 15 selfie'sinin diğer 14'ünde iki ölçü aynı (0.1° içinde).
+        const p3 = await require("./headPose3d").headPose3dOf(b, { loose: true });
         if (!p && !p3) return null;
         return {
           yaw: p ? p.yaw : null, yawSigned: p && p.yawSigned != null ? p.yawSigned : null,
@@ -4511,7 +4533,12 @@ function refYawOf(url) {
         console.error("Selfie yaw ölçümü başarısız (atlanıyor):", e.message || e);
         return null;
       }
-    })());
+    })();
+    const q = p.then((v) => {
+      if (v && v.failed) { REF_YAW_CACHE.delete(url); return null; }
+      return v;
+    });
+    REF_YAW_CACHE.set(url, q);
   }
   return REF_YAW_CACHE.get(url);
 }
@@ -5989,7 +6016,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
           const { detectMainFace } = require("./faceQuality");
           const fd = (await detectMainFace(src)) || (await detectMainFace(src, LOW_CONF_FACE));
           return fd && fd.box
-            ? await require("./headGhost").judgeEyewear(src, fd.box, OPENAI_KEY.value())
+            ? await require("./templateVision").templateEyewear(src, fd.box, OPENAI_KEY.value())
             : { ok: false, reason: "no-face-template" };
         } catch (e) {
           console.error("Üretim öncesi şablon gözlük yargısı hata verdi:", e.message || e);
@@ -6060,7 +6087,7 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     const eyewearGaze = !!(swapRefs && EYEWEAR_GAZE_PROMPT_ON && eyewearGazeOn(templateEyewearPre, templateEyeGlass));
     if (swapRefs && EYEWEAR_GAZE_PROMPT_ON && attempt === 1) {
       const ew = templateEyewearPre;
-      console.log(`GÖZLÜK BAKIŞI (style=${styleId}, chunk=${chunkIdx}): ${eyewearGaze ? "ORTADA" : "ŞABLONDAN"} vision=${ew && ew.ok ? (ew.eyewear ? "var" : "yok") : `?[${(ew && ew.reason) || "-"}]`} gözGörünür=${ew && ew.ok ? ew.eyesVisible : "null"} gözlükPayı=${templateEyeGlass != null ? templateEyeGlass.toFixed(2) : "null"}`);
+      console.log(`GÖZLÜK BAKIŞI (style=${styleId}, chunk=${chunkIdx}): ${eyewearGaze ? "ORTADA" : "ŞABLONDAN"} vision=${ew && ew.ok ? (ew.eyewear ? "var" : "yok") : `?[${(ew && ew.reason) || "-"}]`} gözGörünür=${ew && ew.ok ? ew.eyesVisible : "null"} gözlükPayı=${templateEyeGlass != null ? templateEyeGlass.toFixed(2) : "null"} önbellek=${(ew && ew.cache) || "-"}`);
     }
     const swapOpts = { hat: !!(tplHat && tplHat.hat), pose: templatePromptPose, eyewear: eyewearGaze };
     let buf = await generateForMode(
@@ -7299,11 +7326,11 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     if (Buffer.isBuffer(tplForEyewear)) {
       try {
         const { detectMainFace } = require("./faceQuality");
-        const { judgeEyewear } = require("./headGhost");
+        const { templateEyewear } = require("./templateVision");
         const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
         tplFaceBox = fdT && fdT.box ? fdT.box : null;
         templateEyewear = templateEyewearPre && templateEyewearPre.ok ? templateEyewearPre
-          : tplFaceBox ? await judgeEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+          : tplFaceBox ? await templateEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
       } catch (e) {
         console.error("OpenAI yolu: şablon gözlük yargısı hata verdi:", e);
         templateEyewear = { ok: false, reason: "error" };
@@ -7317,8 +7344,10 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     // kare başına ücretli, zaman aşımsız çağrı boşuna yapılmasın.
     let tplSkinMst = null;
     if (((SIMPLE_PIPELINE && TPL_MST_FOR_FACE_TONE) || require("./faceRelight").EXPOSURE_ON) && refSkinMst && tplFaceBox) {
-      tplSkinMst = await require("./skinPigment").estimateMst([tplForEyewear], OPENAI_KEY.value(), [tplFaceBox]);
-      console.log(`ŞABLON TEN PİGMENTİ (style=${styleId}, chunk=${chunkIdx}): ${tplSkinMst != null ? `MST ${tplSkinMst}` : "ölçülemedi"} kullanıcı=MST ${refSkinMst}`);
+      // Üç kırpım medyanı + şablon başına önbellek (2026-11-22, bkz. templateVision.js).
+      const tm = await require("./templateVision").templateMst(tplForEyewear, tplFaceBox, OPENAI_KEY.value());
+      tplSkinMst = tm ? tm.mst : null;
+      console.log(`ŞABLON TEN PİGMENTİ (style=${styleId}, chunk=${chunkIdx}): ${tplSkinMst != null ? `MST ${tplSkinMst} oylar=[${(tm.votes || []).map((v) => v ?? "-").join(",")}] önbellek=${tm.cache}` : "ölçülemedi"} kullanıcı=MST ${refSkinMst}`);
     }
 
     // GÖZ AÇIKLIĞI (2026-10-27, bkz. eyeOpen.js): yüz netliğinden ÖNCE —
@@ -9820,6 +9849,7 @@ exports._testables = {
   chooseCandidate,
   templateMetaIndex,
   templateMetaFor,
+  TEMPLATE_META_ON,
   yawOver3d,
   pngToDeliverJpeg,
   buildEditPromptP800,

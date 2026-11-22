@@ -39,6 +39,8 @@ for (const name of [
   "opsToggleGlow",
   "opsApplyEdits",
   "opsFlashFields",
+  "applyPhotoEdits",
+  "photoFlashFields",
 ]) {
   exports[name] = opsPanel[name];
 }

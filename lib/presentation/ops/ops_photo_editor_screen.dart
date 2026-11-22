@@ -24,6 +24,13 @@ class OpsPhotoEditResult {
   const OpsPhotoEditResult(this.url, this.edits, [this.originalUrl]);
 }
 
+/// Kaydetme: düzenleme (null → asıl kare) sunucuda tam çözünürlükte uygulanır.
+typedef PhotoEditApplyFn = Future<({String? url, Map<String, dynamic>? edits, String? originalUrl})> Function(
+    Map<String, dynamic>? edits);
+
+/// Flaş önizleme alanları (R ışık, G gölge PNG).
+typedef PhotoFlashFieldsFn = Future<({Uint8List png, bool gray})> Function();
+
 class OpsPhotoEditorScreen extends StatefulWidget {
   final String uid;
   final String jobId;
@@ -35,6 +42,11 @@ class OpsPhotoEditorScreen extends StatefulWidget {
   /// asıl kareden kurulmalı. originalUrl verilmezse imageUrl asıl kare sayılır.
   final String? originalUrl;
 
+  /// KULLANICI DÜZENLEYİCİSİ (2026-11-22): verilirse kaydetme/flaş bu çağrılarla yapılır (teslim
+  /// edilen kare, kullanıcının kendi yetkisiyle); verilmezse admin çağrıları (onay karesi).
+  final PhotoEditApplyFn? applyFn;
+  final PhotoFlashFieldsFn? flashFieldsFn;
+
   const OpsPhotoEditorScreen({
     super.key,
     required this.uid,
@@ -43,6 +55,8 @@ class OpsPhotoEditorScreen extends StatefulWidget {
     required this.imageUrl,
     required this.initial,
     this.originalUrl,
+    this.applyFn,
+    this.flashFieldsFn,
   });
 
   @override
@@ -126,7 +140,9 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
     if (_flash != null || _flashLoading) return;
     setState(() => _flashLoading = true);
     try {
-      final r = await opsFlashFields(uid: widget.uid, jobId: widget.jobId, ref: widget.ref);
+      final r = widget.flashFieldsFn != null
+          ? await widget.flashFieldsFn!()
+          : await opsFlashFields(uid: widget.uid, jobId: widget.jobId, ref: widget.ref);
       final codec = await ui.instantiateImageCodec(r.png);
       final img = (await codec.getNextFrame()).image;
       final bd = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
@@ -239,12 +255,10 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
     setState(() => _saving = true);
     final edits = revert ? PhotoEdits.empty : _edits;
     try {
-      final r = await opsApplyEdits(
-        uid: widget.uid,
-        jobId: widget.jobId,
-        ref: widget.ref,
-        edits: edits.isEmpty ? null : edits.toJson(),
-      );
+      final json = edits.isEmpty ? null : edits.toJson();
+      final r = widget.applyFn != null
+          ? await widget.applyFn!(json)
+          : await opsApplyEdits(uid: widget.uid, jobId: widget.jobId, ref: widget.ref, edits: json);
       if (!mounted) return;
       Navigator.of(context).pop(OpsPhotoEditResult(r.url, PhotoEdits.fromJson(r.edits), r.originalUrl));
     } on FirebaseFunctionsException catch (e) {
@@ -272,7 +286,7 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
         actions: [
           TextButton(
             onPressed: _saving ? null : () => _save(revert: true),
-            child: const Text('Asıl kare', style: TextStyle(color: AppColors.textSecondary)),
+            child: const Text('Orijinale dön', style: TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
             onPressed: _saving || _base == null ? null : _save,

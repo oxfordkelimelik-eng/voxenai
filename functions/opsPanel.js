@@ -884,6 +884,7 @@ exports.opsApprovePhotos = onCall(
     // çözülür; boş/bozuk dosya teslim edilmez (eskiden yalnız kopyalama
     // hatası yakalanıyordu, bozuk ama var olan dosya teslim edilebilirdi).
     const approvedUrls = [];
+    const approvedFrom = new Map(); // teslim gs:// → onay karesi gs://
     const skipped = [];
     for (const path of paths) {
       const dest = resultPathForStaging(path);
@@ -894,7 +895,15 @@ exports.opsApprovePhotos = onCall(
           throw new Error(`bozuk/boş dosya (${buf.length} bayt, ${meta.width || 0}x${meta.height || 0})`);
         }
         await bucket().file(path).copy(bucket().file(dest));
+        // Asıl kare yedeği + flaş önbelleği teslim kopyasına (kullanıcı düzenleyicisi asıl kareden başlar).
+        // Aynalanamazsa düzenleme kaydı taşınmaz: yedeksiz kayıt kullanıcı düzenleyicisinde düzenlemeyi
+        // iki kez uygulatırdı (düzenlenmiş kare "asıl" sanılır).
+        const mirrored = await mirrorToResult(path, dest, { copyFile: false }).then(() => true).catch((err) => {
+          console.error(`ONAY: düzenleme yedeği teslim kopyasına aynalanamadı (${path}):`, err.message || err);
+          return false;
+        });
         approvedUrls.push(`gs://${bucket().name}/${dest}`);
+        if (mirrored) approvedFrom.set(`gs://${bucket().name}/${dest}`, `gs://${bucket().name}/${path}`);
       } catch (e) {
         skipped.push(path);
         console.error(`ONAY: kare teslim edilemedi (${path}):`, e.message || e);
@@ -914,8 +923,18 @@ exports.opsApprovePhotos = onCall(
     // Reddedilen kare teslimi kayıt altına alınır: hangi kare, hangi kapı,
     // kim, gerekçe (yalnız engelli kapılarda zorunlu). Tekrar onayda dizi
     // birikir (arrayUnion) — geçmiş silinmez.
+    // Admin düzenlemeleri teslim karelerine taşınır (kullanıcı düzenleyicisinde seçili gelir). Yeniden
+    // onayda yalnız elle yüklenenlerin kayıtları korunur; diğer kareler onay karesinin hâliyle yenilendi.
+    const stagingEdits = photoEditsOf(job);
+    const keptResultEdits = (Array.isArray(job[RESULT_EDITS_FIELD]) ? job[RESULT_EDITS_FIELD] : [])
+      .filter((r) => r && manualUrls.includes(r.ref));
+    const carried = [];
+    for (const [destUrl, srcUrl] of approvedFrom) {
+      if (stagingEdits[srcUrl]) carried.push({ ref: destUrl, edits: stagingEdits[srcUrl], by: request.auth.token.email || null, at: admin.firestore.Timestamp.now() });
+    }
     const approvalUpdate = {
       approvedPhotoUrls: [...approvedUrls, ...manualUrls],
+      [RESULT_EDITS_FIELD]: [...keptResultEdits, ...carried],
       status: "done",
       approvedAt: admin.firestore.FieldValue.serverTimestamp(),
       approvedBy: request.auth.token.email || null,
@@ -1037,15 +1056,12 @@ function photoEditsOf(job) {
  * Onay karesine düzenlemeyi uygular (null → asıl kareye döner). Asıl kare her zaman yedekten
  * işlenir (üst üste binmez). photoEdits + geriye uyum için glowRefs güncellenir.
  */
-async function applyEditsToRef({ uid, jobId, ref, edits, by }) {
+/**
+ * Bir karenin dosyasına düzenlemeyi uygular (null → asıl kareye döner). Asıl kare her zaman yedekten
+ * (EDIT_BACKUP_SUFFIX) işlenir, düzenlemeler üst üste binmez. Döner { e, file, backup }.
+ */
+async function renderEditsAtPath(path, edits) {
   const { normalizeEdits, renderEdits } = require("./photoEdits");
-  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
-  const snap = await jobRef.get();
-  if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
-  const job = snap.data();
-  const [path] = validateApprovalSelection({
-    selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
-  });
   const file = bucket().file(path);
   const backup = bucket().file(path + EDIT_BACKUP_SUFFIX);
   const legacy = bucket().file(path + GLOW_BACKUP_SUFFIX);
@@ -1073,11 +1089,60 @@ async function applyEditsToRef({ uid, jobId, ref, edits, by }) {
     await backup.copy(file);
     await backup.delete().catch((err) => console.error("Düzenleme yedeği silinemedi:", err.message || err));
   }
-  const list = (Array.isArray(job.photoEdits) ? job.photoEdits : []).filter((r) => r && r.ref !== ref);
-  if (e) list.push({ ref, edits: e, by: by || null, at: admin.firestore.Timestamp.now() });
+  return { e, file, backup };
+}
+
+/** Düzenleme kaydı listesinde ref'in kaydını değiştirir (e null → siler). SAF. */
+function upsertEditRecord(list, ref, e, by, at) {
+  const out = (Array.isArray(list) ? list : []).filter((r) => r && r.ref !== ref);
+  if (e) out.push({ ref, edits: e, by: by || null, at });
+  return out;
+}
+
+/**
+ * ONAY KARESİ → TESLİM KOPYASI AYNALAMA (2026-11-22, kullanıcı: "filtreler hem kullanıcı hem admin
+ * tarafında değiştirilebilsin"). Teslim kopyası (dating_results) onay karesinin aynısı olur: düzenlenmiş
+ * dosya, asıl kare yedeği (yoksa silinir — eski yedek "Orijinal"i yanlış kareye döndürmesin) ve flaş
+ * alanı önbelleği silinir. Kullanıcının düzenleyicisi asıl kareden başlar, admin düzenlemesi seçili gelir.
+ */
+async function mirrorToResult(stagingPath, destPath, { copyFile = true } = {}) {
+  const src = bucket().file(stagingPath), dst = bucket().file(destPath);
+  if (copyFile) await src.copy(dst);
+  const sBak = bucket().file(stagingPath + EDIT_BACKUP_SUFFIX), dBak = bucket().file(destPath + EDIT_BACKUP_SUFFIX);
+  const [hasBak] = await sBak.exists();
+  if (hasBak) await sBak.copy(dBak);
+  else await dBak.delete().catch(() => {});
+  await bucket().file(destPath + FLASH_FIELDS_SUFFIX).delete().catch(() => {});
+}
+
+/**
+ * Onay karesine düzenlemeyi uygular (null → asıl kareye döner). photoEdits + geriye uyum için
+ * glowRefs güncellenir. Kare zaten teslim edildiyse teslim kopyası da aynı hâle getirilir
+ * (kullanıcının o karedeki düzenlemesinin üzerine yazılır: son düzenleyen kazanır).
+ */
+async function applyEditsToRef({ uid, jobId, ref, edits, by }) {
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+  const snap = await jobRef.get();
+  if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+  const job = snap.data();
+  const [path] = validateApprovalSelection({
+    selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
+  });
+  const { e, file, backup } = await renderEditsAtPath(path, edits);
+  const at = admin.firestore.Timestamp.now();
+  const list = upsertEditRecord(job.photoEdits, ref, e, by, at);
   const glowRefs = list.filter((r) => r.edits && r.edits.glow).map((r) => r.ref);
-  await jobRef.set({ photoEdits: list, glowRefs }, { merge: true });
-  console.log(`FOTO DÜZENLEME: ${e ? `UYGULANDI ${JSON.stringify(e)}` : "ASIL KAREYE DÖNÜLDÜ"} ${path} (uid=${uid}, job=${jobId}, by=${by || "?"})`);
+  const update = { photoEdits: list, glowRefs };
+  const destPath = resultPathForStaging(path);
+  const destUrl = `gs://${bucket().name}/${destPath}`;
+  const delivered = Array.isArray(job.approvedPhotoUrls) && job.approvedPhotoUrls.includes(destUrl);
+  if (delivered) {
+    await mirrorToResult(path, destPath);
+    await signedDownloadUrl(bucket().file(destPath)); // yeni indirme jetonu: uygulamadaki önbellek eski kareyi göstermesin
+    update[RESULT_EDITS_FIELD] = upsertEditRecord(job[RESULT_EDITS_FIELD], destUrl, e, by, at);
+  }
+  await jobRef.set(update, { merge: true });
+  console.log(`FOTO DÜZENLEME: ${e ? `UYGULANDI ${JSON.stringify(e)}` : "ASIL KAREYE DÖNÜLDÜ"} ${path}${delivered ? " + teslim kopyası" : ""} (uid=${uid}, job=${jobId}, by=${by || "?"})`);
   return {
     edits: e,
     url: await signedDownloadUrl(file),
@@ -1130,6 +1195,12 @@ exports.opsFlashFields = onCall(
     const [path] = validateApprovalSelection({
       selected: [ref], staged: [...stagedPhotoUrls(job), ...rejectedPhotoUrls(job)], uid, jobId, maxCount: 1,
     });
+    return flashFieldsAtPath(path);
+  }
+);
+
+/** Karenin flaş önizleme alanları (asıl kareden; önbellekli). */
+async function flashFieldsAtPath(path) {
     const cache = bucket().file(path + FLASH_FIELDS_SUFFIX);
     const [cached] = await cache.exists();
     if (cached) {
@@ -1152,6 +1223,92 @@ exports.opsFlashFields = onCall(
       }).catch((e) => console.error("Flaş alanı önbelleğe yazılamadı:", e.message || e));
     }
     return { png: f.png.toString("base64"), width: f.width, height: f.height, gray: f.gray };
+}
+
+// ============================================================
+// KULLANICI FOTO DÜZENLEYİCİSİ (2026-11-22, kullanıcı: "12 filtre, flaş, 11 sürgülü ayar ve ışıklı hem
+// kullanıcı tarafında hem admin tarafında değiştirilebilsin"). Kullanıcı yalnız KENDİSİNE TESLİM
+// EDİLMİŞ kareyi (dating_results) düzenler; onay havuzuna dokunmaz. Kayıtlar iş belgesinde
+// RESULT_EDITS_FIELD; asıl kare yedeği karenin yanında. Önizleme cihazda (admin düzenleyicisiyle aynı).
+// ============================================================
+const RESULT_EDITS_FIELD = "resultPhotoEdits";
+// İş başına kullanıcı kaydı tavanı (kare başına sunucu işlemi ~2-13 sn, 4GiB) + kısa pencere hız sınırı.
+const USER_EDIT_MAX_PER_JOB = 300;
+const RL_USER_EDIT = { max: 40, windowMs: 10 * 60 * 1000, message: "Çok fazla düzenleme kaydedildi. Birkaç dakika sonra tekrar dene." };
+const RL_USER_FLASH = { max: 40, windowMs: 10 * 60 * 1000, message: "Çok fazla istek. Birkaç dakika sonra tekrar dene." };
+
+/** İşin kullanıcıya teslim edilmiş kareleri (uygulamadaki deliveredPhotoUrls ile aynı kural). SAF. */
+function deliveredUrlsOf(job) {
+  if (!job) return [];
+  if (Array.isArray(job.approvedPhotoUrls)) return job.approvedPhotoUrls.filter((u) => typeof u === "string");
+  const out = [];
+  for (const r of Object.values(job.results || {})) {
+    if (r && r.status === "done" && Array.isArray(r.photoUrls)) out.push(...r.photoUrls.filter((u) => typeof u === "string"));
+  }
+  return out;
+}
+
+/**
+ * Kullanıcının düzenleyeceği teslim karesini doğrular; { jobId, path } döner. Yol İSTEMCİDEN gelir:
+ * tam olarak dating_results/{uid}/{jobId}/{dosya} biçiminde ve o işin teslim listesinde olmalı. SAF
+ * (iş belgesi verilirse); job verilmezse yalnız biçim denetlenir.
+ */
+function parseUserResultRef(ref, uid, job = undefined) {
+  if (typeof ref !== "string") throw new HttpsError("invalid-argument", "ref zorunlu.");
+  const path = gsPathFromUrl(ref);
+  const m = path ? /^dating_results\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(path) : null;
+  if (!m || m[1] !== uid || path.includes("..") || m[3].endsWith(EDIT_BACKUP_SUFFIX) || m[3].endsWith(FLASH_FIELDS_SUFFIX)) {
+    throw new HttpsError("permission-denied", "Bu fotoğraf düzenlenemez.");
+  }
+  if (job !== undefined && !deliveredUrlsOf(job).includes(ref)) {
+    throw new HttpsError("permission-denied", "Bu fotoğraf sana teslim edilmemiş.");
+  }
+  return { jobId: m[2], path };
+}
+
+async function userEditContext(request, fnName, rl) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Giriş gerekli.");
+  checkAppAttestation(request, fnName);
+  const uid = request.auth.uid;
+  const { ref } = request.data || {};
+  const { jobId } = parseUserResultRef(ref, uid);
+  assertSafeId(jobId, "jobId");
+  await enforceRateLimit(uid, fnName, rl);
+  const jobRef = db.doc(`users/${uid}/private/genData/genJobs/${jobId}`);
+  const snap = await jobRef.get();
+  if (!snap.exists) throw new HttpsError("not-found", "İş bulunamadı.");
+  const job = snap.data();
+  const { path } = parseUserResultRef(ref, uid, job);
+  return { uid, jobId, ref, path, job, jobRef };
+}
+
+exports.applyPhotoEdits = onCall(
+  { region: "europe-west1", memory: "4GiB", timeoutSeconds: 120 },
+  async (request) => {
+    const { uid, jobId, ref, path, job, jobRef } = await userEditContext(request, "applyPhotoEdits", RL_USER_EDIT);
+    const count = Number(job.userEditCount) || 0;
+    if (count >= USER_EDIT_MAX_PER_JOB) {
+      throw new HttpsError("resource-exhausted", "Bu fotoğraflar için düzenleme sınırına ulaşıldı.");
+    }
+    const { e, file, backup } = await renderEditsAtPath(path, (request.data || {}).edits ?? null);
+    await jobRef.set({
+      [RESULT_EDITS_FIELD]: upsertEditRecord(job[RESULT_EDITS_FIELD], ref, e, "user", admin.firestore.Timestamp.now()),
+      userEditCount: admin.firestore.FieldValue.increment(1),
+    }, { merge: true });
+    console.log(`KULLANICI FOTO DÜZENLEME: ${e ? `UYGULANDI ${JSON.stringify(e)}` : "ASIL KAREYE DÖNÜLDÜ"} ${path} (uid=${uid}, job=${jobId}, kayıt=${count + 1})`);
+    return {
+      edits: e,
+      url: await signedDownloadUrl(file),
+      originalUrl: e ? await signedDownloadUrl(backup).catch(() => null) : null,
+    };
+  }
+);
+
+exports.photoFlashFields = onCall(
+  { region: "europe-west1", memory: "2GiB", timeoutSeconds: 120 },
+  async (request) => {
+    const { path } = await userEditContext(request, "photoFlashFields", RL_USER_FLASH);
+    return flashFieldsAtPath(path);
   }
 );
 
@@ -1242,6 +1399,7 @@ exports.opsAttachUploadedPhoto = onCall(
 // functions/test/opsPanel.test.js bunları require eder.
 exports._testables = {
   GLOW_BACKUP_SUFFIX, EDIT_BACKUP_SUFFIX, photoEditsOf,
+  deliveredUrlsOf, parseUserResultRef, upsertEditRecord, RESULT_EDITS_FIELD, USER_EDIT_MAX_PER_JOB,
   templateNameForRef,
   isAuthorizedOpsEmail,
   uidFromDocPath,
