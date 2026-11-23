@@ -162,3 +162,24 @@ test("maliyet: gpt-4.1 fiyatı", () => {
   assert.ok(Math.abs(R.costUsd("gpt-4.1", { prompt_tokens: 3000, completion_tokens: 500 }) - 0.01) < 1e-9);
   assert.strictEqual(R.costUsd("bilinmeyen", { prompt_tokens: 1 }), null);
 });
+
+test("2026-11-23 sınırlar: günlük 3 ücretsiz, sonuç başına 1 yenilerini getir, 1 taraflar ters", () => {
+  assert.strictEqual(R.DEFAULTS.dailyFree, 3);
+  assert.strictEqual(R.FOLLOWUP_MAX, 1);
+  assert.strictEqual(R.SWAP_FIX_MAX, 1);
+  const prev = [{ speaker: "user", text: "selam" }];
+  assert.strictEqual(R.parseRequest({ images: [img], parentId: "p1", swapFrom: prev, swap: true }).swapFix, true);
+  assert.strictEqual(R.parseRequest({ images: [img], parentId: "p1", swapFrom: prev }).swapFix, false,
+    "düzeltilmiş okuma sonraki takipte de gider; bayrak yoksa yenilerini getir sayılır");
+  assert.strictEqual(R.parseRequest({ images: [img], swapFrom: prev, swap: true }).swapFix, false, "ana istek düzeltme olamaz");
+  assert.strictEqual(R.parseRequest({ images: [img], parentId: "p1", swap: true }).swapFix, false, "okuma yoksa düzeltme yok");
+});
+
+test("takip sayacı alana bağlı: düzeltme hakkı yenilerini getir hakkını tüketmez", () => {
+  const T = require("../aiText");
+  const now = 1_000_000;
+  const parent = { createdAtMs: now, followups: 1, swaps: 0 };
+  assert.strictEqual(T.followupAllowed(parent, now, 1, null).reason, "followup-limit");
+  assert.strictEqual(T.followupAllowed(parent, now, 1, null, "swaps").ok, true);
+  assert.strictEqual(T.followupAllowed({ ...parent, swaps: 1 }, now, 1, null, "swaps").reason, "followup-limit");
+});

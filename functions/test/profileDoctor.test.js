@@ -220,3 +220,7 @@ test("risk: şemada ve promptta; sinyal listesi promptla uyumlu", () => {
   assert.ok(R.SYSTEM_PROMPT.includes("Asking for Instagram") && R.SYSTEM_PROMPT.includes("NOT a signal: splitting a shared bill"));
   assert.ok(!/home address/.test(R.SYSTEM_PROMPT), "ev adresi sinyal değil");
 });
+
+test("2026-11-23: başka reçete yaz hakkı sonuç başına 1", () => {
+  assert.strictEqual(P.FOLLOWUP_MAX, 1);
+});

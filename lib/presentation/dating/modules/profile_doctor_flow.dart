@@ -4,7 +4,7 @@
 // giriş + OpenAI onayı → sunucu (functions/profileDoctor.js).
 // Sonuç: ilk izlenim, güçlü yanlar, öncelikli düzeltmeler, fotoğraf fotoğraf karar (başa al / kalsın /
 // çıkar / yeniden çek), eksik fotoğraf türleri → AI Fotoğraf Üretimi ve Fotoğraf Analizi'ne geçiş, mevcut bio
-// yorumu, 3 yeni bio + 3 prompt cevabı (dokun-kopyala, bildir), "yeni bio önerileri" (aynı görüntü, 2 kez
+// yorumu, 3 yeni bio + 3 prompt cevabı (dokun-kopyala, bildir), "yeni bio önerileri" (aynı görüntü, 1 kez
 // ücretsiz; analiz korunur, yalnız metin yenilenir).
 
 import 'dart:io';
@@ -180,7 +180,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     }
   }
 
-  /// Yeni bio/prompt önerileri: aynı görüntü, analiz korunur (ücretsiz, en çok 2).
+  /// Yeni bio/prompt önerileri: aynı görüntü, analiz korunur (ücretsiz, sonuç başına 1).
   Future<void> _moreBios() async {
     final images = _images;
     final current = _result;

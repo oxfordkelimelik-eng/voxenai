@@ -91,11 +91,11 @@ function quotaDecision({ usedToday, dailyFree, balance }) {
  * Takip isteği bu ana isteğe bağlanabilir mi: pencere, sayı ve AYNI görüntüler (başka içerikle ücretsiz istek
  * yapılamasın). digestOf(salt) verilmezse görüntü denetimi atlanır. SAF.
  */
-function followupAllowed(parent, nowMs, max, digestOf) {
+function followupAllowed(parent, nowMs, max, digestOf, field = "followups") {
   if (!parent) return { ok: false, reason: "parent-missing" };
   const created = parent.createdAtMs || 0;
   if (nowMs - created > FOLLOWUP_WINDOW_MS) return { ok: false, reason: "parent-expired" };
-  if ((parent.followups || 0) >= max) return { ok: false, reason: "followup-limit" };
+  if ((parent[field] || 0) >= max) return { ok: false, reason: "followup-limit" };
   if (digestOf && (!parent.salt || digestOf(parent.salt) !== parent.digest)) return { ok: false, reason: "parent-mismatch" };
   return { ok: true };
 }
@@ -225,10 +225,12 @@ async function moderateTexts(key, texts) {
 
 /**
  * Modele gitmeden önce hak (yeni istek) ya da takip yeri ayırır + günlük deneme sayacı. Hak yoksa HttpsError.
- * opts: { uid, feature, balanceField, cfg, parentId, digestOf, followupMax, quotaMessage, now }
+ * opts: { uid, feature, balanceField, cfg, parentId, digestOf, followupMax, followupField, quotaMessage, now }
+ * followupField: takibin sayıldığı alan (varsayılan "followups"); rizz "taraflar ters"i ayrı "swaps" alanında sayar.
  */
 async function reserveUse(opts) {
   const { uid, feature, balanceField, cfg, parentId, digestOf, followupMax, quotaMessage, now } = opts;
+  const followupField = opts.followupField || "followups";
   const FV = admin.firestore.FieldValue;
   const base = db.doc(`users/${uid}/private/${feature}`);
   const usageRef = base.collection("usage").doc(dayKey(now));
@@ -244,12 +246,15 @@ async function reserveUse(opts) {
     const usageExpire = admin.firestore.Timestamp.fromMillis(now + 3 * DAY_MS);
     if (parentRef) {
       const p = second.exists ? second.data() : null;
-      const fa = followupAllowed(p, now, followupMax, digestOf);
+      const fa = followupAllowed(p, now, followupMax, digestOf, followupField);
       if (!fa.ok) throw followupError(fa.reason);
-      const followups = (Number(p.followups) || 0) + 1;
-      tx.set(parentRef, { followups }, { merge: true });
+      const used = (Number(p[followupField]) || 0) + 1;
+      tx.set(parentRef, { [followupField]: used }, { merge: true });
       tx.set(usageRef, { attempts: attempts + 1, expireAt: usageExpire }, { merge: true });
-      return { kind: "followup", followupsLeft: followupMax - followups };
+      return {
+        kind: "followup", followupField, followupsLeft: followupMax - used,
+        counts: { followups: Number(p.followups) || 0, swaps: Number(p.swaps) || 0, [followupField]: used },
+      };
     }
     const balance = second.exists ? Number(second.get(balanceField)) || 0 : 0;
     const source = quotaDecision({ usedToday, dailyFree: cfg.dailyFree, balance }).source;
@@ -274,7 +279,7 @@ async function reserveUse(opts) {
 async function refundUse(resv) {
   const FV = admin.firestore.FieldValue;
   try {
-    if (resv.kind === "followup") await resv.parentRef.update({ followups: FV.increment(-1) });
+    if (resv.kind === "followup") await resv.parentRef.update({ [resv.followupField || "followups"]: FV.increment(-1) });
     else if (resv.source === "free") await resv.usageRef.update({ count: FV.increment(-1) });
     else await resv.walletRef.update({ [resv.balanceField]: FV.increment(1) });
   } catch (e) {

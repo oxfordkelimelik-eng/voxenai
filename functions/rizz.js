@@ -33,8 +33,11 @@ const { str, oneOf, nullable, normText, similarity, NEAR_DUP } = T;
 
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 
-const DEFAULTS = { enabled: true, dailyFree: 5, dailyAttempts: 40, model: "gpt-4.1" };
-const FOLLOWUP_MAX = 3;
+// 2026-11-23 kullanıcı: günlük ücretsiz 5 → 3; sonuç başına "yenilerini getir" 3 → 1.
+const DEFAULTS = { enabled: true, dailyFree: 3, dailyAttempts: 40, model: "gpt-4.1" };
+const FOLLOWUP_MAX = 1;
+// "Taraflar ters mi?" düzeltmesi ayrı sayılır (yanlış okumayı düzeltmek "yenilerini getir" hakkını yemesin).
+const SWAP_FIX_MAX = 1;
 // Hak düşmeden cevap veren durumlar (declined/sensitive, en çok 1 cevap) için günlük tavan (2026-11-23):
 // tavan yokken günlük deneme sınırına (40) kadar ücretsiz cevap alınabiliyordu. Aşılınca cevap gizlenir,
 // durum mesajı ve röntgen/risk yine gösterilir.
@@ -263,6 +266,9 @@ function parseRequest(data) {
     avoid,
     swapFrom,
     parentId,
+    // Bu istek "taraflar ters" düzeltmesi mi (swapFrom sonraki takiplerde de gider; ayırt eden bu bayrak).
+    // Eski istemci göndermez: düzeltmesi "yenilerini getir" hakkından sayılır.
+    swapFix: !!parentId && d.swap === true && swapFrom.length > 0,
   };
 }
 
@@ -445,7 +451,7 @@ exports.rizzReply = onCall(
     const now = Date.now();
     const resv = await T.reserveUse({
       uid, feature: "rizz", balanceField: "rizzBalance", cfg, parentId: req.parentId, digestOf: digestOf(req),
-      followupMax: FOLLOWUP_MAX, now,
+      followupMax: req.swapFix ? SWAP_FIX_MAX : FOLLOWUP_MAX, followupField: req.swapFix ? "swaps" : "followups", now,
       quotaMessage: `Bugünkü ${cfg.dailyFree} ücretsiz RizzGPT hakkını kullandın. Yarın yenilenir.`,
     });
 
@@ -485,14 +491,15 @@ exports.rizzReply = onCall(
 
     // 3) Sonuç: hak kesinleşir ya da iade edilir.
     let requestId = req.parentId;
-    let followupsLeft = resv.followupsLeft;
+    // İstemciye dönen followupsLeft HER ZAMAN "yenilerini getir" hakkıdır (düzeltme isteğinde de).
+    let followupsLeft = req.swapFix ? Math.max(0, FOLLOWUP_MAX - ((resv.counts && resv.counts.followups) || 0)) : resv.followupsLeft;
     if (!chargeable) {
       // "ok" ama cevap kalmadı: ücretsiz sonuçta röntgen verilmez (declined'da tasarım gereği ücretsiz kalır);
       // dolandırıcılık riski güvenlik bilgisidir, her durumda gösterilir.
       if (result.status === "ok") result.insight = riskOnly(result.insight && result.insight.risk);
       if (result.replies.length && !(await T.takeFreebie(resv, FREE_RESULT_MAX))) result.replies = [];
       await T.refundUse(resv);
-      if (resv.kind === "followup") followupsLeft += 1;
+      if (resv.kind === "followup" && !req.swapFix) followupsLeft += 1;
     } else if (resv.kind === "new") {
       requestId = await T.recordParent(resv, { mode: req.mode, tag: req.mode, images: req.images, now });
     }
@@ -556,7 +563,7 @@ exports.rizzReport = onCall(
 );
 
 exports._testables = {
-  SYSTEM_PROMPT, RESPONSE_SCHEMA, DEFAULTS, FOLLOWUP_MAX, FOLLOWUP_WINDOW_MS: T.FOLLOWUP_WINDOW_MS, MAX_IMAGES, NOTE_MAX,
+  SYSTEM_PROMPT, RESPONSE_SCHEMA, DEFAULTS, FOLLOWUP_MAX, SWAP_FIX_MAX, FOLLOWUP_WINDOW_MS: T.FOLLOWUP_WINDOW_MS, MAX_IMAGES, NOTE_MAX,
   REPLY_MAX_CHARS, CANDIDATES, MODEL_BUDGET_MS: T.MODEL_BUDGET_MS, OPENAI_TIMEOUT_MS: T.OPENAI_TIMEOUT_MS, MAX_TOKENS,
   dayKey: T.dayKey, parseRequest, buildRequestText, postValidate, sanitizeInsight, sanitizeRisk, riskOnly, riskLevel, isChargeable,
   RISK_SIGNALS, RISK_HARD,

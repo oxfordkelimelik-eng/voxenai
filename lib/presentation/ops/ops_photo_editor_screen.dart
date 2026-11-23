@@ -76,7 +76,11 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
 
   // FLAŞ: ışık/gölge alanları sunucudan bir kez gelir (opsFlashFields); önizleme onlarla cihazda.
   FlashFields? _flash;
-  bool _flashLoading = false;
+  // FLAŞ BEKLEME (2026-11-23, kullanıcı: "flaşa basınca çok bekletiyor; ekranın ortasında loader çıksın, efekt
+  // bitene kadar kalsın"): flaş açıldığı andan, alanlarla çizilmiş önizleme ekrana gelene kadar true.
+  bool _flashApplying = false;
+  Future<bool>? _flashFuture;
+  String _flashError = '';
 
   late PhotoEdits _edits = widget.initial;
   String _tab = 'filtre';
@@ -117,7 +121,14 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
         _orig = img;
       });
       _schedule();
-      if (_edits.flash > 0) _loadFlash();
+      // Flaş alanları açılışta arka planda hazırlanır: kullanıcı flaşa bastığında çoğu zaman hazırdır
+      // (sunucu da karede bir kez hesaplayıp önbelleğe yazar). Kayıtlı düzenlemede flaş açıksa bekleme gösterilir.
+      if (_edits.flash > 0) {
+        setState(() => _flashApplying = true);
+        _ensureFlash();
+      } else {
+        _loadFlash();
+      }
       // Hazır filtre küçük resimleri (sırayla, arka planda).
       final (trgba, tw, th, timg) = await _decode(bytes, _thumbHeight);
       if (!mounted) return;
@@ -135,10 +146,14 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
     }
   }
 
-  /// Flaş alanlarını sunucudan alır (karede bir kez; sunucu da önbelleğe yazar).
-  Future<void> _loadFlash() async {
-    if (_flash != null || _flashLoading) return;
-    setState(() => _flashLoading = true);
+  /// Flaş alanlarını sunucudan alır (karede bir kez; sunucu da önbelleğe yazar). Aynı anda gelen çağrılar
+  /// tek isteği bekler. Hata sessizdir: kullanıcıya yalnız flaşı kendisi açtıysa söylenir (_ensureFlash).
+  Future<bool> _loadFlash() {
+    if (_flash != null) return Future.value(true);
+    return _flashFuture ??= _fetchFlash().whenComplete(() => _flashFuture = null);
+  }
+
+  Future<bool> _fetchFlash() async {
     try {
       final r = widget.flashFieldsFn != null
           ? await widget.flashFieldsFn!()
@@ -146,19 +161,27 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
       final codec = await ui.instantiateImageCodec(r.png);
       final img = (await codec.getNextFrame()).image;
       final bd = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (!mounted) return;
+      if (!mounted) return false;
       _flash = FlashFields(bd!.buffer.asUint8List(), img.width, img.height, r.gray);
       _schedule();
       _renderFlashThumb();
+      return true;
     } on FirebaseFunctionsException catch (e) {
-      _snack('Flaş hazırlanamadı: ${e.message ?? e.code}');
-      if (mounted) _update(_edits.copyWith(flash: 0));
+      _flashError = e.message ?? e.code;
+      return false;
     } catch (e) {
-      _snack('Flaş hazırlanamadı: $e');
-      if (mounted) _update(_edits.copyWith(flash: 0));
-    } finally {
-      if (mounted) setState(() => _flashLoading = false);
+      _flashError = '$e';
+      return false;
     }
+  }
+
+  /// Kullanıcı flaşı açtı: alanlar gelmezse uyarı verir ve flaşı kapatır.
+  Future<void> _ensureFlash() async {
+    final ok = await _loadFlash();
+    if (ok || !mounted) return;
+    _snack('Flaş hazırlanamadı: $_flashError');
+    setState(() => _flashApplying = false);
+    _update(_edits.copyWith(flash: 0));
   }
 
   Future<void> _renderFlashThumb() async {
@@ -215,10 +238,12 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
 
   void _toggleFlash() {
     if (_edits.flash > 0) {
+      setState(() => _flashApplying = false);
       _update(_edits.copyWith(flash: 0));
     } else {
+      setState(() => _flashApplying = true);
       _update(_edits.copyWith(flash: 100));
-      _loadFlash();
+      _ensureFlash();
     }
   }
 
@@ -232,10 +257,16 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
     _rendering = true;
     try {
       final edits = _edits;
-      final out = await compute(renderPreview, PreviewJob(_base!, _w, _h, edits.toJson(), _flash));
+      final ff = _flash;
+      final out = await compute(renderPreview, PreviewJob(_base!, _w, _h, edits.toJson(), ff));
       final img = await _toImage(out, _w, _h);
       if (!mounted) return;
-      setState(() => _preview = img);
+      setState(() {
+        _preview = img;
+        // Bekleme göstergesi ancak flaş alanlarıyla çizilmiş önizleme ekrana gelince kalkar.
+        // (Kapatma ve hata yolu bayrağı kendisi indirir; flaşsız eski bir çizim onu erken kaldırmamalı.)
+        if (_flashApplying && edits.flash > 0 && ff != null) _flashApplying = false;
+      });
     } finally {
       _rendering = false;
       if (_pending && mounted) {
@@ -351,6 +382,34 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
                 ),
               ),
             ),
+          if (_flashApplying)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.35),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 34,
+                          height: 34,
+                          child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.gold),
+                        ),
+                        SizedBox(height: 12),
+                        Text('Flaş patlıyor…',
+                            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: 12,
             top: 10,
@@ -461,7 +520,7 @@ class _OpsPhotoEditorScreenState extends State<OpsPhotoEditorScreen> {
       selected: on,
       thumb: _thumbs['flash'] ?? _thumbs['_'],
       onTap: _toggleFlash,
-      overlay: _flashLoading
+      overlay: _flashApplying
           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold))
           : Icon(on ? Icons.flash_on_rounded : Icons.flash_off_rounded,
               size: 20, color: on ? AppColors.gold : Colors.white70),

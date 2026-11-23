@@ -24,7 +24,8 @@ const { str, oneOf, nullable, similarity, NEAR_DUP } = T;
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 
 const DEFAULTS = { enabled: true, dailyFree: 2, dailyAttempts: 12, model: "gpt-4.1" };
-const FOLLOWUP_MAX = 2;
+// 2026-11-23 kullanıcı: "başka reçete yaz" sonuç başına yalnız 1 ek hak (2 → 1).
+const FOLLOWUP_MAX = 1;
 const MAX_IMAGES = 6;
 const NOTE_MAX = 300;
 const AVOID_MAX = 12;

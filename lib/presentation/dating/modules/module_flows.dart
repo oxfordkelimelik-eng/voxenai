@@ -2159,94 +2159,83 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     }
   }
 
+  // DÜZEN (2026-11-23, kullanıcı: "onaylanan fotoğrafa tıklayınca düzenleme yerini göremiyor, aşağısı siyah"):
+  // eylem çubuğu Scaffold.bottomNavigationBar'da — gövde ne olursa olsun her zaman ekranın altında görünür;
+  // fotoğraf kalan alanın ortasına sığdırılır.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Üst bar: kapat + sayaç
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        centerTitle: true,
+        title: Text(
+          '${_index + 1} / ${widget.gsUrls.length}',
+          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+      body: PageView.builder(
+        controller: _controller,
+        itemCount: widget.gsUrls.length,
+        onPageChanged: (i) => setState(() => _index = i),
+        itemBuilder: (_, i) => KeyedSubtree(
+          key: ValueKey('${widget.gsUrls[i]}#$_rev'),
+          child: _page(widget.gsUrls[i]),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _openingEditor || _saving ? null : _edit,
+                  icon: _openingEditor
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
+                        )
+                      : const Icon(Icons.auto_fix_high_rounded),
+                  label: const Text('Düzenle', style: TextStyle(fontWeight: FontWeight.w800)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.gold,
+                    side: const BorderSide(color: AppColors.gold),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  const Spacer(),
-                  Text(
-                    '${_index + 1} / ${widget.gsUrls.length}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600),
-                  ),
-                  const Spacer(),
-                  const SizedBox(width: 48), // sayacı ortalamak için denge
-                ],
-              ),
-            ),
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: widget.gsUrls.length,
-                onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (_, i) => KeyedSubtree(
-                  key: ValueKey('${widget.gsUrls[i]}#$_rev'),
-                  child: _page(widget.gsUrls[i]),
                 ),
               ),
-            ),
-            // Alt bar: düzenle + indir
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              child: Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _openingEditor || _saving ? null : _edit,
-                    icon: _openingEditor
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
-                          )
-                        : const Icon(Icons.tune_rounded),
-                    label: const Text('Düzenle'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.gold,
-                      side: const BorderSide(color: AppColors.gold),
-                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.download_rounded),
+                  label: Text(_saving ? 'Kaydediliyor…' : 'İndir',
+                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _saving ? null : _save,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Icon(Icons.download_rounded),
-                      label: Text(_saving ? 'Kaydediliyor…' : 'Telefona İndir'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.gold,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2261,15 +2250,19 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
             child: CircularProgressIndicator(color: AppColors.gold),
           );
         }
-        // Çift dokunuş/parmakla yakınlaştırma.
+        // Çift dokunuş/parmakla yakınlaştırma; fotoğraf alanın tamamına ortalanarak sığar.
         return InteractiveViewer(
           minScale: 1,
           maxScale: 4,
-          child: CachedNetworkImage(
-            imageUrl: snap.data!,
-            fit: BoxFit.contain,
-            errorWidget: (_, _, _) => const Center(
-              child: Icon(Icons.broken_image_outlined, color: Colors.white54),
+          child: SizedBox.expand(
+            child: CachedNetworkImage(
+              imageUrl: snap.data!,
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
+              placeholder: (_, _) => const Center(child: CircularProgressIndicator(color: AppColors.gold)),
+              errorWidget: (_, _, _) => const Center(
+                child: Icon(Icons.broken_image_outlined, color: Colors.white54),
+              ),
             ),
           ),
         );

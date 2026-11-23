@@ -3,7 +3,7 @@
 // Akış: mod (mesaja cevap / profilden ilk mesaj) → 1-3 ekran görüntüsü → ton (otomatik/esprili/flörtöz/
 // samimi/cesur) + isteğe bağlı not → giriş + OpenAI onayı → sunucu (functions/rizz.js rizzReply).
 // Sonuç: okunan konuşma (Sen / O — yanlışsa "taraflar ters"), Sohbet Röntgeni (chat_xray_card.dart), 3 cevap kartı (dokun-kopyala, neden,
-// bildir), ipucu, "daha fazla" ve ton değiştirme (aynı görüntü için 30 dk içinde 3 kez ücretsiz).
+// bildir), ipucu, "yenilerini getir" (seçili tonda, sonuç başına 1) ve "taraflar ters" (1); 30 dk içinde, ücretsiz.
 // Eski sürüm (module_flows.dart) 2 sn bekleyip sabit cevap gösteriyordu; bu dosya onun yerini aldı.
 
 import 'dart:io';
@@ -51,6 +51,10 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
   RizzResult? _result;
   String? _parentId;
   int _followupsLeft = 0;
+  // 2026-11-23 (kullanıcı): ton haplarına basmak yalnız SEÇER; üretim "Yenilerini getir" ile başlar.
+  String _moreTone = 'auto';
+  // "Taraflar ters mi?" sonuç başına bir kez (sunucuda ayrı sayaç; "yenilerini getir" hakkını yemez).
+  bool _swapUsed = false;
   final List<String> _shown = [];
   // "Taraflar ters" sonrası düzeltilen okuma: sonraki takiplerde de gönderilir ki düzeltme kalıcı olsun.
   List<RizzMessage> _swapFrom = const [];
@@ -68,6 +72,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     _result = r;
     _parentId = r.requestId;
     _followupsLeft = r.followupsLeft;
+    _moreTone = _tone;
     _freeLeft = r.freeLeft;
     _dailyFree = r.dailyFree;
     _stage = _Stage.result;
@@ -143,6 +148,8 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         _result = r;
         _parentId = r.requestId;
         _followupsLeft = r.requestId != null ? r.followupsLeft : 0;
+        _moreTone = _tone;
+        _swapUsed = false;
         _swapFrom = const [];
         _freeLeft = r.freeLeft;
         _dailyFree = r.dailyFree;
@@ -193,13 +200,14 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     });
   }
 
-  /// Daha fazla / taraflar ters / ton değiştir: aynı görüntü, ana isteğe bağlı (ücretsiz, en çok 3).
+  /// Yenilerini getir (seçili tonda) / taraflar ters: aynı görüntü, ana isteğe bağlı, ücretsiz.
+  /// Sonuç başına 1 "yenilerini getir" + 1 "taraflar ters" (sunucu: FOLLOWUP_MAX / SWAP_FIX_MAX).
   /// Sonuç gösterilemezse (cevap yok) eldeki sonuç KORUNUR, sunucu hakkı iade eder.
   Future<void> _followup({String? tone, bool swap = false}) async {
     final images = _images;
     final current = _result;
     if (images == null || current == null || _parentId == null || _followBusy) return;
-    if (_followupsLeft <= 0) {
+    if (swap ? _swapUsed : _followupsLeft <= 0) {
       _snack('Bu ekran görüntüsü için ek cevap hakkın doldu. Yeni bir istek başlat.');
       return;
     }
@@ -217,6 +225,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         avoid: swap ? const [] : _shown.reversed.take(9).toList(),
         swapFrom: swapFrom,
         parentId: _parentId,
+        swap: swap,
       );
       if (!mounted) return;
       if (!r.charged || r.replies.isEmpty) {
@@ -231,6 +240,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       }
       setState(() {
         if (tone != null) _tone = tone;
+        if (swap) _swapUsed = true;
         _swapFrom = swapFrom;
         // Röntgen tona göre değişmesin: yalnız "taraflar ters"te yenilenir; yeni bulunan risk her durumda eklenir.
         _result = swap ? r : r.withInsight(withMergedRisk(current.insight ?? r.insight, r.insight?.risk));
@@ -240,7 +250,18 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     } on FirebaseFunctionsException catch (e) {
       final reason = _reasonOf(e);
       if (mounted && (reason == 'followup-limit' || reason == 'parent-expired' || reason == 'parent-mismatch')) {
-        setState(() => _followupsLeft = 0);
+        setState(() {
+          if (swap) {
+            _swapUsed = true;
+          } else {
+            _followupsLeft = 0;
+          }
+          // Süre doldu / görüntü uyuşmadı: bu sonuçla hiçbir takip yapılamaz.
+          if (reason != 'followup-limit') {
+            _followupsLeft = 0;
+            _swapUsed = true;
+          }
+        });
       }
       _snack(e.message ?? 'Cevap şu an üretilemedi.', error: true);
     } catch (_) {
@@ -431,7 +452,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     );
   }
 
-  /// Başka ton (tek satır, kaydırmasız) + başlık satırında "daha fazla" düğmesi. Aynı görüntü, ücretsiz takip hakkı.
+  /// Başka ton: haplar yalnız tonu SEÇER, "Yenilerini getir" seçili tonda üretir (sonuç başına 1 hak).
   Widget _toneBar() {
     final can = !_followBusy && _followupsLeft > 0;
     return Padding(
@@ -442,30 +463,28 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
           Row(
             children: [
               const Expanded(
-                child: Text('Başka bir havada dene',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                child: ToolFitText('Başka bir havada dene',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
-              Text(_followupsLeft > 0 ? '$_followupsLeft hak' : 'Hak kalmadı',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-              const SizedBox(width: 6),
-              TextButton.icon(
-                onPressed: can ? () => _followup() : null,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  foregroundColor: AppColors.gold,
-                  disabledForegroundColor: AppColors.textMuted,
-                ),
-                icon: _followBusy
-                    ? const SizedBox(
-                        width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold))
-                    : const Icon(Icons.autorenew_rounded, size: 17),
-                label: const Text('Yenilerini getir', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-              ),
+              const SizedBox(width: 8),
+              Text(_followupsLeft > 0 ? '$_followupsLeft yenileme hakkı' : 'Yenileme hakkı kullanıldı',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
             ],
           ),
-          const SizedBox(height: 6),
-          ToolPills(options: kRizzTones, selected: _tone, onSelect: (t) => _followup(tone: t), enabled: can),
+          const SizedBox(height: 8),
+          ToolPills(
+            options: kRizzTones,
+            selected: _moreTone,
+            onSelect: (t) => setState(() => _moreTone = t),
+            enabled: can,
+          ),
+          const SizedBox(height: 12),
+          ToolSecondaryButton(
+            label: _followupsLeft > 0 ? 'Yenilerini getir' : 'Yeni sohbet atarak devam et',
+            icon: Icons.autorenew_rounded,
+            busy: _followBusy,
+            onPressed: can ? () => _followup(tone: _moreTone) : null,
+          ),
         ],
       ),
     );
@@ -477,7 +496,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     final last = r.transcript.length > 2 ? r.transcript.sublist(r.transcript.length - 2) : r.transcript;
     final canSwap = _parentId != null &&
         _mode == 'reply' &&
-        _followupsLeft > 0 &&
+        !_swapUsed &&
         !_followBusy &&
         r.transcript.any((m) => m.speaker != 'unknown');
     final low = r.confidence == 'low' && _mode == 'reply';

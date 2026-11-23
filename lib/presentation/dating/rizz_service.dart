@@ -282,6 +282,8 @@ Future<RizzResult> requestRizzReplies({
   List<String> avoid = const [],
   List<RizzMessage> swapFrom = const [],
   String? parentId,
+  // true: "taraflar ters" düzeltmesi (sunucuda ayrı sayılır, "yenilerini getir" hakkını yemez).
+  bool swap = false,
 }) async {
   final callable = FirebaseFunctions.instanceFor(region: _region)
       .httpsCallable('rizzReply', options: HttpsCallableOptions(timeout: const Duration(seconds: 120)));
@@ -294,6 +296,7 @@ Future<RizzResult> requestRizzReplies({
     'avoid': avoid,
     'swapFrom': [for (final m in swapFrom) {'speaker': m.speaker, 'text': m.text}],
     'parentId': parentId,
+    if (swap) 'swap': true,
   });
   return RizzResult.fromJson(Map<String, dynamic>.from(result.data as Map));
 }
