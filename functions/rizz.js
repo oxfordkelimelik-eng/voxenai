@@ -35,6 +35,10 @@ const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 
 const DEFAULTS = { enabled: true, dailyFree: 5, dailyAttempts: 40, model: "gpt-4.1" };
 const FOLLOWUP_MAX = 3;
+// Hak düşmeden cevap veren durumlar (declined/sensitive, en çok 1 cevap) için günlük tavan (2026-11-23):
+// tavan yokken günlük deneme sınırına (40) kadar ücretsiz cevap alınabiliyordu. Aşılınca cevap gizlenir,
+// durum mesajı ve röntgen/risk yine gösterilir.
+const FREE_RESULT_MAX = 3;
 // İstemci en çok 3 görüntü seçtirir; uzun (kaydırmalı) ekran görüntüsü cihazda parçalara bölünür → 6.
 const MAX_IMAGES = 6;
 const NOTE_MAX = 300;
@@ -484,6 +488,7 @@ exports.rizzReply = onCall(
       // "ok" ama cevap kalmadı: ücretsiz sonuçta röntgen verilmez (declined'da tasarım gereği ücretsiz kalır);
       // dolandırıcılık riski güvenlik bilgisidir, her durumda gösterilir.
       if (result.status === "ok") result.insight = riskOnly(result.insight && result.insight.risk);
+      if (result.replies.length && !(await T.takeFreebie(resv, FREE_RESULT_MAX))) result.replies = [];
       await T.refundUse(resv);
       if (resv.kind === "followup") followupsLeft += 1;
     } else if (resv.kind === "new") {

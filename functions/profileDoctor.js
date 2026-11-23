@@ -298,9 +298,13 @@ function applyModeration(r, mod) {
     modErr: mod.err, flaggedCount: mod.flagged.filter(Boolean).length };
 }
 
-/** Ücret düşmeyen "ok" sonucunda analiz alanları boşaltılır (ücretsiz tam teşhis yolu kapanır). SAF. */
+/**
+ * Ücret düşmeyen "ok" sonucunda analiz alanları ve metinler boşaltılır (ücretsiz tam teşhis yolu kapanır).
+ * 2026-11-23: prompt cevapları da (bio/teşhis çıkmayıp yalnız prompt çıkan sonuç hak düşmeden veriliyordu). SAF.
+ */
 function stripUnpaid(result) {
-  return { ...result, firstImpression: "", strengths: [], photos: [], missingPhotos: [], fixes: [], bioFeedback: null, tip: null };
+  return { ...result, firstImpression: "", strengths: [], photos: [], missingPhotos: [], fixes: [], bioFeedback: null,
+    bios: [], prompts: [], tip: null };
 }
 
 const digestOf = (req) => (salt) => T.imagesDigest(salt, "profile", req.images);

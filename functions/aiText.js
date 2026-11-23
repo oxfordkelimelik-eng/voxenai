@@ -283,6 +283,26 @@ async function refundUse(resv) {
 }
 
 /**
+ * Hak düşmeden İÇERİK veren sonuç (RizzGPT declined/sensitive: 1 cevap) için günlük tavan (2026-11-23).
+ * Sayaç günlük kullanım dokümanında (freebies). true = bu sonuç içeriğiyle gösterilebilir. Yazılamazsa false
+ * (güvenli taraf: içerik gizlenir, durum mesajı yine gösterilir).
+ */
+async function takeFreebie(resv, max) {
+  try {
+    return await db.runTransaction(async (tx) => {
+      const s = await tx.get(resv.usageRef);
+      const n = s.exists ? Number(s.get("freebies")) || 0 : 0;
+      if (n >= max) return false;
+      tx.set(resv.usageRef, { freebies: n + 1 }, { merge: true });
+      return true;
+    });
+  } catch (e) {
+    console.error(`AI METİN: ücretsiz sonuç sayacı yazılamadı (${resv.feature}, uid=${resv.uid}):`, e.message || e);
+    return false;
+  }
+}
+
+/**
  * Başarılı yeni istek için takip kaydı: zaman, sayaç, tür ve görüntülerin tuzlu özeti — İÇERİK YOK, 1 günde
  * silinir. Dönüş requestId (yazılamazsa null → takip kapalı).
  */
@@ -305,5 +325,5 @@ async function recordParent(resv, { mode, tag, images, now }) {
 module.exports = {
   PRICES, DAY_MS, MODEL_BUDGET_MS, OPENAI_TIMEOUT_MS, MIN_RETRY_MS, FOLLOWUP_WINDOW_MS, NEAR_DUP,
   str, oneOf, nullable, dayKey, normText, similarity, parseImages, imagesDigest, quotaDecision, followupAllowed,
-  costUsd, makeConfigReader, callJsonModel, moderateTexts, reserveUse, refundUse, recordParent,
+  costUsd, makeConfigReader, callJsonModel, moderateTexts, reserveUse, refundUse, recordParent, takeFreebie,
 };

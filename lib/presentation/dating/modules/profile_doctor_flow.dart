@@ -11,7 +11,6 @@ import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -26,6 +25,7 @@ import '../rizz_service.dart' show encodeRizzImages, kRizzMaxImages, RizzImageEx
 import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
 import '../widgets/shared_widgets.dart' show AiLoadingView;
+import 'ai_tool_ui.dart';
 import 'module_flows.dart' show ModuleScaffold;
 
 class ProfileDoctorFlow extends ConsumerStatefulWidget {
@@ -222,145 +222,77 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   Widget build(BuildContext context) {
     return ModuleScaffold(
       title: 'Profil Doktoru',
-      body: switch (_stage) {
-        _Stage.loading => const AiLoadingView(
-            steps: ['Profil okunuyor…', 'Fotoğraflar değerlendiriliyor…', 'Yeni bio yazılıyor…'],
-            hint: 'Genelde 15-25 saniye sürer',
-            progressDuration: Duration(seconds: 22),
-          ),
-        _Stage.result => _resultView(),
-        _Stage.error => _errorView(),
-        _Stage.intro => _intro(),
-      },
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        child: KeyedSubtree(
+          key: ValueKey(_stage),
+          child: switch (_stage) {
+            _Stage.loading => const AiLoadingView(
+                steps: ['Profil okunuyor…', 'Fotoğraflar değerlendiriliyor…', 'Yeni bio yazılıyor…'],
+                hint: 'Genelde 15-25 saniye sürer',
+                progressDuration: Duration(seconds: 22),
+              ),
+            _Stage.result => _resultView(),
+            _Stage.error => ToolErrorView(
+                message: _error ?? 'Bir şeyler ters gitti.',
+                canRetry: !_noRetry,
+                onRetry: _run,
+                onBack: () => setState(() => _stage = _Stage.intro),
+              ),
+            _Stage.intro => _intro(),
+          },
+        ),
+      ),
     );
   }
 
   // ------------------------------------------------------------ giriş
 
   Widget _intro() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+    return ToolPage(
+      bottom: ToolCta(
+        label: 'Profilimi İncele',
+        onPressed: _shots.isEmpty ? null : _run,
+        footnote: 'Günlük ücretsiz hak • Ekran görüntün kaydedilmez',
+      ),
       children: [
-        const Text('Profilinin ekran görüntüleri',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-        const SizedBox(height: 4),
-        const Text(
-          'Tinder, Bumble ya da Hinge\'deki profilini baştan sona ekran görüntüsü al: fotoğraflar, bio ve '
-          'prompt\'lar görünsün. En fazla $kRizzMaxImages görüntü ya da tek uzun (kaydırmalı) görüntü.',
-          style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
-        ),
-        const SizedBox(height: 12),
-        _shotsRow(),
-        const SizedBox(height: 20),
-        const Text('Ne arıyorsun?',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final e in kPdGoals.entries)
-              ChoiceChip(
-                label: Text(e.value),
-                selected: _goal == e.key,
-                onSelected: (_) => setState(() => _goal = e.key),
-                selectedColor: AppColors.gold,
-                backgroundColor: AppColors.surface,
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: _goal == e.key ? Colors.black : AppColors.textSecondary,
-                ),
-                side: BorderSide(color: _goal == e.key ? AppColors.gold : AppColors.borderSubtle),
-                showCheckmark: false,
-              ),
+        const ToolHero(
+          icon: Icons.medical_services_outlined,
+          title: 'Profilini bir uzman gözüyle incele',
+          subtitle: 'Tinder, Bumble ya da Hinge profilinin ekran görüntülerini yükle; neyin işe yaradığını, '
+              'neyin eşleşme kaçırdığını söyleyelim.',
+          perks: [
+            (Icons.photo_library_outlined, 'Fotoğraf sırası'),
+            (Icons.build_circle_outlined, 'Öncelikli düzeltmeler'),
+            (Icons.edit_note_rounded, '3 yeni bio'),
           ],
         ),
-        const SizedBox(height: 18),
-        TextField(
+        ToolStep(
+          n: 1,
+          title: 'Profilinin ekran görüntüleri',
+          trailing: _shots.isEmpty ? null : '${_shots.length}/$kRizzMaxImages',
+        ),
+        ToolShotPicker(
+          files: _shots,
+          max: kRizzMaxImages,
+          onAdd: _pick,
+          onRemove: (i) => setState(() => _shots.removeAt(i)),
+          emptyTitle: 'Profil ekran görüntüsü ekle',
+          emptyHint: 'Fotoğraflar, bio ve prompt\'lar görünsün',
+        ),
+        const ToolHint(
+          icon: Icons.view_day_outlined,
+          text: 'Profilini baştan sona ekran görüntüsü al: en fazla $kRizzMaxImages görüntü ya da tek uzun '
+              '(kaydırmalı) görüntü.',
+        ),
+        const ToolStep(n: 2, title: 'Ne arıyorsun?'),
+        ToolPills(options: kPdGoals, selected: _goal, onSelect: (g) => setState(() => _goal = g)),
+        const ToolStep(n: 3, title: 'Kendinden bahset', trailing: 'İsteğe bağlı'),
+        ToolNoteField(
           controller: _note,
-          maxLength: 300,
-          maxLines: 2,
-          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: 'İsteğe bağlı: işin, hobilerin, sevdiğin şeyler (bio\'lar yalnız gerçek bilgilerle yazılır)',
-            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-            filled: true,
-            fillColor: AppColors.surface,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-          ),
-        ),
-        const SizedBox(height: 8),
-        PrimaryButton(label: 'Profilimi İncele', onPressed: _shots.isEmpty ? null : _run),
-        const SizedBox(height: 12),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.textMuted),
-            SizedBox(width: 6),
-            Flexible(
-              child: Text('Günlük ücretsiz hak • Ekran görüntün kaydedilmez',
-                  style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ),
-          ],
+          hint: 'İşin, hobilerin, sevdiğin şeyler (bio\'lar yalnız gerçek bilgilerle yazılır)',
         ),
       ],
-    );
-  }
-
-  Widget _shotsRow() {
-    return SizedBox(
-      height: 170,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          for (int i = 0; i < _shots.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(_shots[i], width: 96, height: 170, fit: BoxFit.cover),
-                  ),
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _shots.removeAt(i)),
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                        child: const Icon(Icons.close_rounded, size: 16, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (_shots.length < kRizzMaxImages)
-            GestureDetector(
-              onTap: _pick,
-              child: Container(
-                width: _shots.isEmpty ? MediaQuery.of(context).size.width - 40 : 96,
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.borderGold),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.add_photo_alternate_outlined, color: AppColors.gold, size: 32),
-                    const SizedBox(height: 6),
-                    Text(_shots.isEmpty ? 'Profil ekran görüntüsü ekle' : 'Ekle',
-                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
     );
   }
 
@@ -375,20 +307,6 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
         _ => null,
       };
 
-  Widget _section(String title, {IconData? icon}) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 10),
-        child: Row(
-          children: [
-            if (icon != null) ...[Icon(icon, size: 19, color: AppColors.gold), const SizedBox(width: 8)],
-            Flexible(
-              child: Text(title,
-                  maxLines: 2,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-            ),
-          ],
-        ),
-      );
-
   /// Teşhis metnini tek parça bildirim için birleştirir (Play AI içerik politikası).
   String _diagnosisText(ProfileDoctorResult r) => [
         if (r.firstImpression.isNotEmpty) r.firstImpression,
@@ -401,169 +319,264 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   Widget _resultView() {
     final r = _result!;
     final msg = _statusMessage(r);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      children: [
-        if (msg != null) _infoCard(Icons.info_outline_rounded, msg),
-        if (r.firstImpression.isNotEmpty) _infoCard(Icons.visibility_outlined, 'İlk izlenim: ${r.firstImpression}', gold: true),
-        if (r.strengths.isNotEmpty) ...[
-          _section('İyi giden', icon: Icons.thumb_up_alt_outlined),
-          for (final s in r.strengths) _bullet(s, Icons.check_circle_outline_rounded, AppColors.success),
-          const SizedBox(height: 6),
+    var k = 0;
+    Widget fx(Widget w) => ToolFadeIn(index: k++, child: w);
+    final hasDiagnosis = r.firstImpression.isNotEmpty || r.photos.isNotEmpty || r.fixes.isNotEmpty;
+    return ToolPage(
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PrimaryButton(label: 'Yeni İnceleme', onPressed: _reset),
+          if (r.freeLeft != null && r.dailyFree != null) ...[
+            const SizedBox(height: 8),
+            ToolQuotaLine(left: r.freeLeft!, total: r.dailyFree!),
+          ],
         ],
+      ),
+      children: [
+        const SizedBox(height: 4),
+        if (msg != null) fx(ToolNotice(icon: Icons.info_outline_rounded, text: msg)),
+        if (r.firstImpression.isNotEmpty) fx(_impressionCard(r)),
         if (r.fixes.isNotEmpty) ...[
-          _section('Önce bunları düzelt', icon: Icons.build_circle_outlined),
-          for (int i = 0; i < r.fixes.length; i++) _fixRow(i + 1, r.fixes[i]),
-          const SizedBox(height: 6),
+          fx(const ToolSectionHeader(icon: Icons.build_circle_outlined, title: 'Önce bunları düzelt')),
+          fx(_fixesCard(r.fixes)),
         ],
         if (r.photos.isNotEmpty) ...[
-          _section('Fotoğrafların', icon: Icons.photo_library_outlined),
-          for (final p in r.photos) _photoRow(p),
-          const SizedBox(height: 6),
+          fx(const ToolSectionHeader(icon: Icons.photo_library_outlined, title: 'Fotoğrafların')),
+          for (int i = 0; i < r.photos.length; i++) fx(_photoRow(i + 1, r.photos[i])),
         ],
-        if (r.missingPhotos.isNotEmpty) _missingCard(r.missingPhotos),
-        if (r.bioFeedback != null) _infoCard(Icons.short_text_rounded, 'Şu anki bio: ${r.bioFeedback!}'),
-        if (r.firstImpression.isNotEmpty || r.photos.isNotEmpty || r.fixes.isNotEmpty)
+        if (r.missingPhotos.isNotEmpty) fx(_missingCard(r.missingPhotos)),
+        if (r.bioFeedback != null)
+          fx(ToolNotice(icon: Icons.short_text_rounded, title: 'ŞU ANKİ BİO', text: r.bioFeedback!)),
+        if (hasDiagnosis)
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: () => _report(_diagnosisText(r), diagnosis: true),
-              icon: const Icon(Icons.outlined_flag_rounded, size: 16, color: AppColors.textMuted),
+              icon: const Icon(Icons.outlined_flag_rounded, size: 15, color: AppColors.textMuted),
               label: const Text('Bu değerlendirmeyi bildir', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
             ),
           ),
         if (r.bios.isNotEmpty) ...[
-          Row(
-            children: [
-              Expanded(child: _section('Yeni bio önerileri', icon: Icons.edit_note_rounded)),
-              const Text('Dokun, kopyala', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ],
-          ),
-          for (final b in r.bios) _textCard(badge: kPdStyles[b.style] ?? b.style, text: b.text, why: b.why),
+          fx(const ToolSectionHeader(
+            icon: Icons.edit_note_rounded,
+            title: 'Yeni bio önerileri',
+            trailing: Text('Dokun, kopyala', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          )),
+          for (final b in r.bios)
+            ToolFadeIn(
+              key: ValueKey('bio:${b.text}'),
+              index: k++,
+              child: ToolCopyCard(
+                badge: kPdStyles[b.style] ?? b.style,
+                text: b.text,
+                why: b.why,
+                onReport: () => _report(b.text),
+              ),
+            ),
         ],
         if (r.prompts.isNotEmpty) ...[
-          _section('Prompt cevapları', icon: Icons.question_answer_outlined),
-          for (final p in r.prompts) _textCard(badge: p.question, text: p.answer, why: ''),
+          fx(const ToolSectionHeader(icon: Icons.question_answer_outlined, title: 'Prompt cevapları')),
+          for (final p in r.prompts)
+            ToolFadeIn(
+              key: ValueKey('prompt:${p.answer}'),
+              index: k++,
+              child: ToolCopyCard(question: p.question, text: p.answer, onReport: () => _report(p.answer)),
+            ),
         ],
-        if (r.tip != null) _infoCard(Icons.lightbulb_outline_rounded, r.tip!, gold: true),
-        if (_parentId != null && (_followupsLeft > 0 || r.bios.isNotEmpty)) ...[
-          const SizedBox(height: 4),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _followBusy || _followupsLeft <= 0 ? null : _moreBios,
-              icon: _followBusy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold))
-                  : const Icon(Icons.autorenew_rounded),
-              label: Text(_followupsLeft <= 0
+        if (r.tip != null)
+          fx(ToolNotice(icon: Icons.lightbulb_outline_rounded, title: 'İPUCU', text: r.tip!, kind: ToolNoticeKind.tip)),
+        if (_parentId != null && (_followupsLeft > 0 || r.bios.isNotEmpty))
+          fx(Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            child: ToolSecondaryButton(
+              label: _followupsLeft <= 0
                   ? 'Ek öneri hakkı doldu'
                   : r.bios.isEmpty
                       ? 'Bio önerisi üret ($_followupsLeft)'
-                      : 'Yeni bio önerileri ($_followupsLeft)'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.gold,
-                side: const BorderSide(color: AppColors.gold),
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
+                      : 'Yeni bio önerileri ($_followupsLeft)',
+              icon: Icons.autorenew_rounded,
+              busy: _followBusy,
+              onPressed: _followBusy || _followupsLeft <= 0 ? null : _moreBios,
             ),
-          ),
-          const SizedBox(height: 10),
-        ],
-        PrimaryButton(label: 'Yeni İnceleme', onPressed: _reset),
-        if (r.freeLeft != null && r.dailyFree != null) ...[
-          const SizedBox(height: 10),
-          Center(
-            child: Text('Bugün kalan ücretsiz hak: ${r.freeLeft}/${r.dailyFree}',
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          ),
-        ],
+          )),
       ],
     );
   }
 
-  Widget _bullet(String text, IconData icon, Color color) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(width: 8),
-            Expanded(child: Text(text, style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.4))),
+  /// İlk izlenim + iyi giden yanlar (sonucun en üstündeki özet kart).
+  Widget _impressionCard(ProfileDoctorResult r) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0x2EFF2D55), AppColors.surface],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kToolAccentBorder, width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              ToolIconBadge(icon: Icons.visibility_outlined, size: 34),
+              SizedBox(width: 10),
+              Text('İLK İZLENİM',
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.8, color: AppColors.gold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(r.firstImpression,
+              style: const TextStyle(
+                  fontSize: 15.5, fontWeight: FontWeight.w600, height: 1.45, color: AppColors.textPrimary)),
+          if (r.strengths.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1, color: AppColors.borderSubtle),
+            const SizedBox(height: 12),
+            const Text('İyi giden',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            for (final s in r.strengths)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 7),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.check_circle_rounded, size: 17, color: AppColors.success),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(s, style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.4)),
+                    ),
+                  ],
+                ),
+              ),
           ],
-        ),
-      );
+        ],
+      ),
+    );
+  }
 
-  Widget _chip(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
-        child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color)),
-      );
-
-  Widget _fixRow(int n, PdFix f) => Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.borderSubtle),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              radius: 12,
-              backgroundColor: AppColors.gold,
-              child: Text('$n', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.white)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
+  /// Öncelik sırasına göre numaralı düzeltmeler (tek kart, aralarında ayraç).
+  Widget _fixesCard(List<PdFix> fixes) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Column(
+        children: [
+          for (int i = 0; i < fixes.length; i++) ...[
+            if (i > 0) const Divider(height: 1, indent: 52, color: AppColors.borderSubtle),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _chip(kPdAreas[f.area] ?? f.area, AppColors.textSecondary),
-                  const SizedBox(height: 6),
-                  Text(f.text, style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.4)),
+                  Container(
+                    width: 26,
+                    height: 26,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: i == 0 ? AppColors.goldGradient : null,
+                      color: i == 0 ? null : AppColors.surfaceHighest,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text('${i + 1}',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w900,
+                            color: i == 0 ? AppColors.textOnGold : AppColors.textPrimary)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ToolChip(kPdAreas[fixes[i].area] ?? fixes[i].area, color: AppColors.textSecondary),
+                        const SizedBox(height: 6),
+                        Text(fixes[i].text,
+                            style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.42)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
-        ),
-      );
+        ],
+      ),
+    );
+  }
 
-  Widget _photoRow(PdPhoto p) {
-    final color = switch (p.verdict) {
-      'lead' => AppColors.gold,
-      'drop' => AppColors.error,
-      'retake' => AppColors.warning,
-      _ => AppColors.success,
+  Widget _photoRow(int n, PdPhoto p) {
+    final (color, icon) = switch (p.verdict) {
+      'lead' => (AppColors.gold, Icons.vertical_align_top_rounded),
+      'drop' => (AppColors.error, Icons.remove_circle_outline_rounded),
+      'retake' => (AppColors.warning, Icons.photo_camera_outlined),
+      _ => (AppColors.success, Icons.check_circle_outline_rounded),
     };
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: p.verdict == 'lead' ? AppColors.borderGold : AppColors.borderSubtle),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: p.verdict == 'lead' ? kToolAccentBorder : AppColors.borderSubtle),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _chip(kPdVerdicts[p.verdict] ?? p.verdict, color),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(p.description,
-                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 4, color: color),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text('#$n',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.textMuted)),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(icon, size: 13, color: color),
+                              const SizedBox(width: 4),
+                              Text(kPdVerdicts[p.verdict] ?? p.verdict,
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(p.description,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.35)),
+                    if (p.why.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(p.why, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
+                    ],
+                  ],
+                ),
               ),
-            ],
-          ),
-          if (p.why.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(p.why, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.35)),
+            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -574,23 +587,35 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     final ai = missing.where((m) => !kPdLifestyle.contains(m)).toList();
     final real = missing.where(kPdLifestyle.contains).toList();
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(top: 4, bottom: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.gold.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderGold),
+        gradient: const LinearGradient(
+          colors: [Color(0x26FF2D55), Color(0x0AFF2D55)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kToolAccentBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Profilinde eksik olan fotoğraflar',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
+          const Row(
+            children: [
+              ToolIconBadge(icon: Icons.add_a_photo_outlined, size: 34),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('Profilinde eksik olan fotoğraflar',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 6,
             runSpacing: 6,
-            children: [for (final m in missing) _chip(kPdMissing[m] ?? m, AppColors.gold)],
+            children: [for (final m in missing) ToolChip(kPdMissing[m] ?? m)],
           ),
           if (real.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -600,93 +625,26 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
               style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.4),
             ),
           ],
-          const SizedBox(height: 12),
-          if (ai.isNotEmpty)
+          const SizedBox(height: 14),
+          if (ai.isNotEmpty) ...[
             PrimaryButton(
-              label: 'AI ile Fotoğraf Üret (${ai.map((m) => kPdMissing[m] ?? m).join(', ')})',
+              label: 'AI ile Fotoğraf Üret',
               onPressed: () => context.push('${DatingRoutes.module}/${DatingModule.aiPhoto.id}'),
             ),
-          const SizedBox(height: 4),
-          TextButton(
+            const SizedBox(height: 6),
+            Text(
+              'Üretilebilecekler: ${ai.map((m) => kPdMissing[m] ?? m).join(', ')}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+            ),
+          ],
+          TextButton.icon(
             onPressed: () => context.push('${DatingRoutes.module}/${DatingModule.photoAnalysis.id}'),
-            child: const Text('Elindeki fotoğrafları puanlat', style: TextStyle(color: AppColors.gold)),
+            icon: const Icon(Icons.insights_rounded, size: 17, color: AppColors.gold),
+            label: const Text('Elindeki fotoğrafları puanlat',
+                style: TextStyle(color: AppColors.gold, fontWeight: FontWeight.w700)),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _infoCard(IconData icon, String text, {bool gold = false}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: gold ? AppColors.gold.withValues(alpha: 0.10) : AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: gold ? AppColors.borderGold : AppColors.borderSubtle),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: gold ? AppColors.gold : AppColors.textSecondary),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13, color: AppColors.textPrimary, height: 1.4))),
-        ],
-      ),
-    );
-  }
-
-  Widget _textCard({required String badge, required String text, required String why}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () async {
-          await Clipboard.setData(ClipboardData(text: text));
-          HapticFeedback.lightImpact();
-          _snack('Kopyalandı — profiline yapıştırabilirsin');
-        },
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _chip(badge, AppColors.gold),
-                    const SizedBox(height: 8),
-                    Text(text, style: const TextStyle(fontSize: 15, color: AppColors.textPrimary, height: 1.4)),
-                    if (why.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(why, style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.3)),
-                    ],
-                  ],
-                ),
-              ),
-              Column(
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.copy_rounded, color: AppColors.textMuted, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: 'Bildir',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.outlined_flag_rounded, color: AppColors.textMuted, size: 18),
-                    onPressed: () => _report(text),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -705,27 +663,10 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
             'bad_quality': 'Kötü / anlamsız / uydurma',
             'other': 'Diğer',
           };
-    final reason = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
-              child: Text('Bu öneriyi neden bildiriyorsun?',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-            ),
-            for (final e in reasons.entries)
-              ListTile(
-                title: Text(e.value, style: const TextStyle(color: AppColors.textPrimary)),
-                onTap: () => Navigator.pop(ctx, e.key),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+    final reason = await showToolReportSheet(
+      context,
+      title: diagnosis ? 'Bu değerlendirmeyi neden bildiriyorsun?' : 'Bu öneriyi neden bildiriyorsun?',
+      reasons: reasons,
     );
     if (reason == null) return;
     try {
@@ -734,30 +675,5 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     } catch (_) {
       _snack('Bildirim gönderilemedi. Lütfen tekrar dene.', error: true);
     }
-  }
-
-  // ------------------------------------------------------------ hata
-
-  Widget _errorView() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Icon(_noRetry ? Icons.hourglass_bottom_rounded : Icons.error_outline_rounded, size: 46, color: AppColors.gold),
-          const SizedBox(height: 14),
-          Text(_error ?? 'Bir şeyler ters gitti.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 15, color: AppColors.textPrimary, height: 1.45)),
-          const SizedBox(height: 22),
-          if (!_noRetry) PrimaryButton(label: 'Tekrar Dene', onPressed: _run),
-          TextButton(
-            onPressed: () => setState(() => _stage = _Stage.intro),
-            child: const Text('Geri dön', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-        ],
-      ),
-    );
   }
 }

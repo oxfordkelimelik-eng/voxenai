@@ -32,6 +32,15 @@ class DatingPurchaseService {
   /// event'te bekleyen taraf ANINDA bilgilendiriliyor.
   final Map<String, bool> _results = {};
 
+  /// Sunucunun KALICI olarak reddettiği satın almalar (2026-11-23; functions/purchaseCheck.js
+  /// PERMANENT_REJECTS: başka hesaba tanımlı, ürün uyuşmazlığı, iade/iptal, test sınırı). Tekrar denemek
+  /// sonucu değiştirmez; kapatılmazsa mağaza her açılışta yeniden teslim eder. Geçici hatalar ve bekleyen
+  /// ödeme ("pending") burada YOK — onlar yeniden denenmek üzere açık kalır.
+  final Set<String> _finalRejects = {};
+  static const _permanentRejectReasons = {
+    'owned-by-other', 'product-mismatch', 'bundle-mismatch', 'revoked', 'cancelled', 'sandbox-off', 'sandbox-limit',
+  };
+
   static const Set<String> productIds = {
     // Yeni yapı (2026-09-21): AI foto paketleri + opsiyonel analiz eklentisi.
     DatingConfig.photoStarterSoloProductId,
@@ -169,7 +178,7 @@ class DatingPurchaseService {
         } else {
           _verifying.add(key);
           try {
-            verified = await _verifyOnServer(p);
+            verified = await _verifyOnServer(p, key);
           } finally {
             _verifying.remove(key);
           }
@@ -194,6 +203,10 @@ class DatingPurchaseService {
         // yeniden teslim edilir. Doğrulanmayanlar bilinçli olarak KAPATILMAZ
         // ki geçici bir sunucu hatasından sonra yeniden denenebilsin.
         if (verified && p.pendingCompletePurchase) {
+          await _iap.completePurchase(p);
+        } else if (!verified && _finalRejects.contains(key) && p.pendingCompletePurchase) {
+          // Kalıcı ret: kapat ki her açılışta yeniden teslim edilip aynı hatayı vermesin.
+          _logger.w('Kalıcı ret — işlem kapatılıyor: ${p.productID}');
           await _iap.completePurchase(p);
         }
       } else if (p.status == PurchaseStatus.error) {
@@ -240,7 +253,7 @@ class DatingPurchaseService {
     return input + ('=' * (4 - rem));
   }
 
-  Future<bool> _verifyOnServer(PurchaseDetails p) async {
+  Future<bool> _verifyOnServer(PurchaseDetails p, String key) async {
     try {
       final source = p.verificationData.source;
       final isIos = source == 'app_store' || source.contains('app_store');
@@ -262,6 +275,11 @@ class DatingPurchaseService {
       return result.data?['success'] == true;
     } on FirebaseFunctionsException catch (e) {
       _logger.e('verifyPurchase CF hata: ${e.code} ${e.message}');
+      final d = e.details;
+      final reason = d is Map ? d['reason'] : null;
+      if (e.code == 'failed-precondition' && _permanentRejectReasons.contains(reason)) {
+        _finalRejects.add(key);
+      }
       return false;
     } catch (e) {
       _logger.e('verifyPurchase çağrısı başarısız: $e');

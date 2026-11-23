@@ -15,14 +15,10 @@ class ModuleScreen extends StatelessWidget {
         return const AiPhotoFlow();
       case 'photo_analysis':
         return const PhotoAnalysisFlow();
-      case 'coach':
-        return const CoachChatFlow();
       case 'rizz':
         return const RizzFlow();
       case 'profile_doctor':
         return const ProfileDoctorFlow();
-      case 'bio':
-        return const BioFlow();
       case 'looksmaxxing':
         return const LooksmaxxingFlow();
       default:

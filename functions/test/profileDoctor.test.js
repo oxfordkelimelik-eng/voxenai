@@ -81,6 +81,7 @@ test("profil: ücretsiz sonuçta analiz boşaltılır; moderasyon dizin hizası"
     fixes: [{ area: "bio", text: "f1" }, { area: "bio", text: "f2" }], bioFeedback: "bf", bios: [{ text: "b1" }, { text: "b2" }], prompts: [{ answer: "p1" }], tip: "t" };
   const stripped = P.stripUnpaid(r);
   assert.ok(!stripped.firstImpression && !stripped.photos.length && !stripped.fixes.length && !stripped.missingPhotos.length && stripped.bioFeedback === null);
+  assert.ok(!stripped.prompts.length && !stripped.bios.length, "hak düşmeyen sonuçta prompt cevabı da verilmez");
   const texts = P.moderationTexts(r);
   assert.deepStrictEqual(texts, ["b1", "b2", "p1", "a", "s1", "w", "f1", "f2", "bf", "t"]);
   const flagged = texts.map((t) => ["b2", "w", "f1", "t"].includes(t));

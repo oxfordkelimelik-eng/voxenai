@@ -391,7 +391,7 @@ class _DatingSettingsScreenState extends ConsumerState<DatingSettingsScreen> {
       've Profil Doktoru\'na gönderdiğiniz kendi profil ekran görüntüleri ve '
       'notlar (kaydedilmez), kullanım verisi, satın alma bilgisi.\n'
       '• İşleme amacı: AI foto üretimi, fotoğraf analizi, looksmaxxing önerileri, '
-      'coach/rizz/bio yardımcıları.\n'
+      'RizzGPT ve Profil Doktoru önerileri.\n'
       '• Üçüncü taraf işleme: Fotoğraflarınız AI üretimi, kalite kontrolü ve '
       'fotoğraf analizi için; RizzGPT ve Profil Doktoru ekran görüntüleri öneri için '
       'OpenAI\'a iletilir; OpenAI tek yapay zekâ '

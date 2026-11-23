@@ -346,25 +346,11 @@ class DatingModule {
     Icons.insights,
     DatingConfig.creditsAnalysis,
   );
-  static const coach = DatingModule(
-    'coach',
-    'Dating Coach',
-    'Sohbet & strateji koçluğu; ne yazacağın konusunda yönlendirir.',
-    Icons.chat_bubble_outline,
-    DatingConfig.creditsText,
-  );
   static const rizz = DatingModule(
     'rizz',
     'RizzGPT — Mesaj Cevabı',
     'Sohbetin ekran görüntüsünü yükle, ne yazacağını 3 farklı tonda öğren.',
     Icons.bolt,
-    DatingConfig.creditsText,
-  );
-  static const bio = DatingModule(
-    'bio',
-    'Bio & Prompt Yardımcısı',
-    'Bio ve Hinge prompt\'larını yazar, geliştirir, geri bildirim verir.',
-    Icons.edit_note,
     DatingConfig.creditsText,
   );
   static const profileDoctor = DatingModule(
@@ -383,8 +369,8 @@ class DatingModule {
   );
 
   // Aktif büyük kartlar. RizzGPT ve Profil Doktoru (2026-11-22) hub'da bunların altında küçük araç
-  // satırı olarak gösterilir (module_hub.dart _ToolCard). coach, bio, looksmaxxing kodları korunur ama
-  // pasif (sahte çıktı; bio'nun yerini Profil Doktoru aldı).
+  // satırı olarak gösterilir (module_hub.dart _ToolCard). looksmaxxing kodu korunur ama pasif (sahte
+  // çıktı). Sahte coach ve bio ekranları 2026-11-23 silindi (bio'nun yerini Profil Doktoru aldı).
   static const List<DatingModule> all = [aiPhoto, photoAnalysis];
 }
 

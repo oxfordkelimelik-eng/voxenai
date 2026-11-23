@@ -3,6 +3,7 @@ const { defineSecret } = require("firebase-functions/params");
 const { google } = require("googleapis");
 const { admin, db, bucket } = require("./_shared");
 const { packSizeOfCredit, addPack } = require("./photoPacks");
+const PC = require("./purchaseCheck");
 
 const GOOGLE_SERVICE_ACCOUNT_JSON = defineSecret("GOOGLE_SERVICE_ACCOUNT_JSON");
 const APPLE_ISSUER_ID = defineSecret("APPLE_ISSUER_ID");
@@ -126,9 +127,8 @@ async function verifyAndroidPurchase(productId, purchaseToken) {
     productId,
     token: purchaseToken,
   }));
-  // purchaseState: 0 = satın alındı, 1 = iptal, 2 = beklemede
-  const valid = resp.data.purchaseState === 0;
-  return { valid, orderId: resp.data.orderId || purchaseToken };
+  // purchaseState: 0 = satın alındı, 1 = iptal, 2 = beklemede; purchaseType 0 = lisanslı test (sandbox kuralı).
+  return PC.evaluateAndroidPurchase(resp.data, { productId, purchaseToken });
 }
 
 // App Store Server API host'lari (verifyReceipt DEGIL — dogru host'lar bunlar).
@@ -160,10 +160,8 @@ async function verifyApplePurchase(productId, purchaseToken) {
       const padded = payloadB64 + "=".repeat((4 - (payloadB64.length % 4)) % 4);
       const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
       transactionId = payload.transactionId || payload.originalTransactionId || purchaseToken;
-      // Ürün kimliği uyuşmuyorsa yine de transactionId ile doğrula (Apple kaynağı).
-      if (payload.productId && payload.productId !== productId) {
-        console.warn(`productId uyuşmazlığı: beklenen=${productId} jws=${payload.productId}`);
-      }
+      // Ürün denetimi burada DEĞİL: istemcinin JWS'i doğrulanmamış veridir. Apple'ın döndürdüğü
+      // signedTransactionInfo aşağıda denetlenir (purchaseCheck.evaluateAppleTransaction).
     } catch (e) {
       console.warn("Apple JWS decode başarısız, ham token kullanılacak:", e.message);
     }
@@ -208,12 +206,15 @@ async function verifyApplePurchase(productId, purchaseToken) {
         `www-authenticate="${authErr}" kid=${APPLE_KEY_ID.value()} ` +
         `issPrefix=${String(APPLE_ISSUER_ID.value()).slice(0, 8)}`,
       );
-      return { valid: false, orderId: transactionId };
+      return { valid: false, reason: "unreadable" };
     }
   }
   const json = await resp.json();
-  const valid = !!json.signedTransactionInfo;
-  return { valid, orderId: transactionId };
+  // ÜRÜN / UYGULAMA / İADE / ORTAM denetimi (2026-11-23): eskiden yalnız "işlem var mı"ya bakılıyordu; ucuz
+  // paketin işlem no'su pahalı paket diye gönderilince pahalı paketin kredisi yükleniyordu. İşlem no da
+  // istemciden değil Apple'dan alınır.
+  const info = PC.decodeJwsPayload(json.signedTransactionInfo);
+  return PC.evaluateAppleTransaction(info, { productId, bundleId: IOS_BUNDLE_ID });
 }
 
 /**
@@ -245,6 +246,10 @@ exports.verifyPurchase = onCall(
       throw new HttpsError("invalid-argument", `Bilinmeyen ürün: ${productId}`);
     }
 
+    if (platform !== "ios" && platform !== "android") {
+      throw new HttpsError("invalid-argument", "Geçersiz platform.");
+    }
+
     let verification;
     try {
       verification = platform === "android"
@@ -255,25 +260,60 @@ exports.verifyPurchase = onCall(
       throw new HttpsError("internal", "Satın alma doğrulanamadı.");
     }
     if (!verification.valid) {
-      throw new HttpsError("failed-precondition", "Satın alma geçersiz.");
+      console.warn(`SATIN ALMA REDDİ: sebep=${verification.reason} platform=${platform} ürün=${productId} uid=${uid}`);
+      throw new HttpsError("failed-precondition",
+        PC.REJECT_MESSAGES[verification.reason] || "Satın alma geçersiz.", { reason: verification.reason || "invalid" });
     }
+    const orderId = verification.orderId;
+    const sandbox = !!verification.sandbox;
+    // Sandbox (TestFlight/test hesabı, ücretsiz) için ayar: hesap başına sınır + izinli e-postalar.
+    let payCfg = null;
+    if (sandbox) {
+      const [pc, rd] = await Promise.all([db.doc("config/payments").get(), db.doc("config/reviewDemo").get()]);
+      payCfg = PC.paymentConfig(pc.exists ? pc.data() : null, rd.exists ? rd.data() : null);
+    }
+    const email = request.auth.token && typeof request.auth.token.email === "string" ? request.auth.token.email : "";
 
     const walletRef = db.doc(`users/${uid}/private/wallet`);
     // NOT: 'users/{uid}/private/processedPurchases/{orderId}' 5 parça (tek sayı)
     // = geçersiz Firestore doküman yolu. Araya sabit 'payments' dokümanı
     // eklenerek 6 parçaya (geçerli) çıkarılır — genJobs ile aynı düzeltme.
-    const processedRef = db.doc(
-      `users/${uid}/private/payments/processedPurchases/${verification.orderId}`);
+    const paymentsRef = db.doc(`users/${uid}/private/payments`);
+    const processedRef = paymentsRef.collection("processedPurchases").doc(orderId);
+    // TÜM HESAPLAR İÇİN TEK DEFTER (2026-11-23): "işlendi" kaydı eskiden yalnız kullanıcının kendi klasöründeydi;
+    // aynı satın alma ikinci, üçüncü... hesapta tekrar gönderilince her hesaba kredi yükleniyordu. İstemciye
+    // kapalı (firestore.rules: üst düzey her şey kapalı); hesap silmede SİLİNMEZ (silinip yeniden açılan hesap
+    // aynı satın almayı tekrar kullanamasın). İçerik: uid, platform, işlem no, ürün, zaman — e-posta yok.
+    const ledgerRef = db.doc(`purchaseLedger/${PC.ledgerId(platform, orderId)}`);
 
     const result = await db.runTransaction(async (tx) => {
-      const processedSnap = await tx.get(processedRef);
-      const walletSnap = await tx.get(walletRef);
+      const [processedSnap, walletSnap, ledgerSnap, paymentsSnap] = await Promise.all([
+        tx.get(processedRef), tx.get(walletRef), tx.get(ledgerRef), tx.get(paymentsRef),
+      ]);
       const current = walletSnap.data() || { photoBalance: 0, analysisBalance: 0 };
 
-      if (processedSnap.exists) {
+      if (ledgerSnap.exists && ledgerSnap.get("uid") !== uid) {
+        console.warn(`SATIN ALMA REDDİ: sebep=owned-by-other platform=${platform} ürün=${productId} ` +
+          `işlem=${orderId} uid=${uid} sahip=${ledgerSnap.get("uid")}`);
+        throw new HttpsError("failed-precondition", PC.REJECT_MESSAGES["owned-by-other"], { reason: "owned-by-other" });
+      }
+      if (processedSnap.exists || ledgerSnap.exists) {
         // Idempotency: zaten işlenmiş — tekrar kredi verme, mevcut bakiyeyi döndür.
         return current;
       }
+      if (sandbox) {
+        const prior = paymentsSnap.exists ? Number(paymentsSnap.get("sandboxPurchases")) || 0 : 0;
+        const d = PC.sandboxDecision({ email, cfg: payCfg, priorCount: prior });
+        if (!d.ok) {
+          console.warn(`SATIN ALMA REDDİ: sebep=${d.reason} platform=${platform} ürün=${productId} uid=${uid} önceki=${prior}`);
+          throw new HttpsError("failed-precondition", PC.REJECT_MESSAGES[d.reason], { reason: d.reason });
+        }
+        tx.set(paymentsRef, { sandboxPurchases: prior + 1 }, { merge: true });
+      }
+      tx.set(ledgerRef, {
+        uid, platform, orderId, productId, sandbox,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
       // Ürünün TÜM alanları yüklenir (foto + varsa hediye analiz).
       const updated = {
@@ -292,6 +332,8 @@ exports.verifyPurchase = onCall(
       tx.set(processedRef, {
         productId,
         platform,
+        // Sandbox (test, ücretsiz) satın alması: ops paneli ciroya katmaz.
+        sandbox,
         // Yüklenen alanların TAMAMI kaydedilir. Eski tekil alanlar
         // (creditedField/creditedAmount) ops paneli ve geçmiş raporlar için
         // korunuyor — çok alanlı üründe BİRİNCİ alanı gösterirler.

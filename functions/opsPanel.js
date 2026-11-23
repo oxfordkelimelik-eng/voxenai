@@ -315,6 +315,8 @@ exports.opsGetOverview = onCall(
 
     const purchases = purchaseSnap.docs
       .filter((doc) => uidFromDocPath(doc.ref) !== opsUid)
+      // Sandbox (TestFlight / test hesabı / Apple incelemesi) satın almaları ücretsizdir: ciroya katılmaz.
+      .filter((doc) => doc.get("sandbox") !== true)
       .map((doc) => {
         const d = doc.data();
         return {
