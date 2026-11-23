@@ -8,7 +8,7 @@ const _region = 'europe-west1';
 
 const Map<String, String> kPdGoals = {
   'serious': 'Ciddi ilişki',
-  'casual': 'Rahat / eğlence',
+  'casual': 'Eğlence',
   'open': 'Açığım',
   'unsure': 'Emin değilim',
 };

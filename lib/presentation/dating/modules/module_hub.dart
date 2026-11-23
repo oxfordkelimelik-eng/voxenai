@@ -6,7 +6,8 @@ import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../../../data/sources/review_prompt_service.dart';
 import '../providers/dating_providers.dart';
-import '../widgets/shared_widgets.dart';
+import 'ai_tool_ui.dart' show ToolFitText;
+import 'ai_tool_visuals.dart';
 import 'module_flows.dart' show GeneratedPhotosScreen;
 
 /// Giriş/abonelik sonrası ana merkez (Bölüm 6). Alt menü: Modüller / Bize
@@ -44,13 +45,6 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   /// yönlendirilir.
   void _openModule(DatingModule m) {
     context.push('${DatingRoutes.module}/${m.id}');
-  }
-
-  /// Kart alt barında yalnızca durum ikonu için: bu modülün paket bakiyesi
-  /// var mı? (Kart üzerinde artık yazı gösterilmez.)
-  bool _hasPack(DatingModule m) {
-    final pack = ref.watch(packBalanceProvider);
-    return m.id == 'ai_photo' ? pack.photo > 0 : pack.analysis > 0;
   }
 
   @override
@@ -115,105 +109,84 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   }
 
   // === MODÜLLER ===
+  // DÜZEN (2026-11-23, kullanıcı: "ana odakta AI foto üretimi olsun; analiz, RizzGPT ve Profil Doktoru onun
+  // gölgesinde kalsa da kendi büyük kartı olsun"): en üstte geniş AI Foto kartı, altında Foto Analizi,
+  // en altta yan yana RizzGPT ve Profil Doktoru. Sayfa her zaman kayar (dört kart tek ekrana sığmaz).
   Widget _modules() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Küçük ekran / büyük sistem yazısı: kartlar sabit boyda, sayfa kayar (RizzGPT satırı eklenince
-        // sabit kısımlar kartları sıkıştırıp taşma şeridi çıkarıyordu).
-        final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
-        final scroll = constraints.maxHeight < 660 * scale;
-        final page = Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Merhaba 👋',
+                style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+              ),
+            ),
+            Builder(
+              builder: (_) {
+                final pack = ref.watch(packBalanceProvider);
+                return _PlanBadge(hasPack: pack.photo > 0 || pack.analysis > 0);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Bugün kimi şaşırtıyoruz?',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            height: 1.15,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _ModuleCard(
+          visual: const _AiPhotoHubVisual(),
+          aspectRatio: 1.75,
+          badge: 'EN POPÜLER',
+          title: 'AI Dating Fotoğrafları',
+          pitch: 'Fotoğrafçı yok, stüdyo yok. Selfie\'lerin yeter, gerisi bizde.',
+          hero: true,
+          onTap: () => _openModule(DatingModule.aiPhoto),
+        ),
+        const SizedBox(height: 12),
+        _ModuleCard(
+          visual: const _AnalysisHubVisual(),
+          aspectRatio: 2.2,
+          title: 'Fotoğraf Analizi',
+          pitch: 'Hangi fotoğrafın sağa kaydırttığını AI fısıldasın.',
+          onTap: () => _openModule(DatingModule.photoAnalysis),
+        ),
+        const SizedBox(height: 12),
+        IntrinsicHeight(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Merhaba 👋',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                  Builder(
-                    builder: (_) {
-                      final pack = ref.watch(packBalanceProvider);
-                      return _PlanBadge(
-                        hasPack: pack.photo > 0 || pack.analysis > 0,
-                      );
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Profilini bir üst lige taşı',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  height: 1.15,
-                  color: AppColors.textPrimary,
+              Expanded(
+                child: _MiniCard(
+                  visual: const RizzCoverVisual(),
+                  title: 'RizzGPT',
+                  pitch: 'Beynin dondu mu? 3 cevap çoktan hazır.',
+                  onTap: () => _openModule(DatingModule.rizz),
                 ),
               ),
-              const SizedBox(height: 4),
-              const Text(
-                'AI fotoğraf üret, profilini incelet, mesajına cevap bul.',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.35,
-                  color: AppColors.textSecondary,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MiniCard(
+                  visual: const DoctorCoverVisual(),
+                  title: 'Profil Doktoru',
+                  pitch: 'Profiline dürüst bir ikinci göz',
+                  onTap: () => _openModule(DatingModule.profileDoctor),
                 ),
               ),
-              const SizedBox(height: 14),
-              // İki modül kartı normalde tek ekrana sığar (scroll yok): kalan
-              // dikey alanı eşit bölüşürler. Dar ekranda sabit 260 boy + kaydırma.
-              if (scroll)
-                for (int i = 0; i < DatingModule.all.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 12),
-                  SizedBox(height: 260, child: _featureCard(i)),
-                ]
-              else
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (int i = 0; i < DatingModule.all.length; i++) ...[
-                        if (i > 0) const SizedBox(height: 12),
-                        Expanded(child: _featureCard(i)),
-                      ],
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 12),
-              _ToolCard(
-                icon: Icons.bolt_rounded,
-                title: 'RizzGPT — ne yazsam?',
-                subtitle: 'Ekran görüntüsü → 3 cevap + röntgen',
-                onTap: () => _openModule(DatingModule.rizz),
-              ),
-              const SizedBox(height: 8),
-              _ToolCard(
-                icon: Icons.medical_services_outlined,
-                title: 'Profil Doktoru',
-                subtitle: 'Fotoğraf sırası, düzeltme, yeni bio',
-                onTap: () => _openModule(DatingModule.profileDoctor),
-              ),
-              const SizedBox(height: 10),
-              const _HowItWorksStrip(),
             ],
           ),
-        );
-        return scroll ? SingleChildScrollView(child: page) : page;
-      },
+        ),
+      ],
     );
-  }
-
-  Widget _featureCard(int i) {
-    final m = DatingModule.all[i];
-    return _FeatureCard(module: m, hasPack: _hasPack(m), onTap: () => _openModule(m));
   }
 
   // === BİZE ULAŞIN ===
@@ -312,239 +285,202 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
   }
 }
 
-/// RIZZGPT (2026-11-22): iki büyük kartın altında tek satırlık kart — üçüncü büyük kart, kaydırmasız
-/// düzende diğer ikisini sıkıştırırdı.
-/// Büyük kartların altındaki küçük araç satırı (RizzGPT, Profil Doktoru — 2026-11-22).
-class _ToolCard extends StatelessWidget {
-  final IconData icon;
+/// Geniş modül kartı: üstte kapak görseli, altta başlık + kısa açıklama + ok düğmesi.
+/// [hero]: ana ürün (AI Foto) için daha büyük yazı, kırmızı kenar ve parıltı.
+class _ModuleCard extends StatelessWidget {
+  final Widget visual;
+  final double aspectRatio;
+  final String? badge;
   final String title;
-  final String subtitle;
+  final String pitch;
+  final bool hero;
   final VoidCallback onTap;
-  const _ToolCard({required this.icon, required this.title, required this.subtitle, required this.onTap});
+  const _ModuleCard({
+    required this.visual,
+    required this.aspectRatio,
+    this.badge,
+    required this.title,
+    required this.pitch,
+    this.hero = false,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.borderGold, width: 0.8),
+    return _CardShell(
+      onTap: onTap,
+      highlight: hero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: aspectRatio,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                visual,
+                if (badge != null) Positioned(left: 12, top: 12, child: _Badge(badge!)),
+              ],
+            ),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.gold.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: AppColors.gold, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, hero ? 14 : 12, 14, hero ? 16 : 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ToolFitText(
+                        title,
+                        style: TextStyle(
+                          fontSize: hero ? 19 : 16,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textPrimary,
                         ),
-                        const SizedBox(width: 8),
-                        const Text('YENİ',
-                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: AppColors.gold)),
-                      ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        pitch,
+                        style: TextStyle(
+                          fontSize: hero ? 13.5 : 12.5,
+                          height: 1.3,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _GoButton(size: hero ? 46 : 38),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Yan yana iki kart (RizzGPT, Profil Doktoru): üstte kendi görseli, altta başlık + kısa açıklama.
+class _MiniCard extends StatelessWidget {
+  final Widget visual;
+  final String title;
+  final String pitch;
+  final VoidCallback onTap;
+  const _MiniCard({required this.visual, required this.title, required this.pitch, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardShell(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 140,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                visual,
+                const Positioned(left: 10, top: 10, child: _Badge('YENİ')),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: ToolFitText(
+                        title,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary),
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3)),
+                    const Icon(Icons.arrow_forward_rounded, size: 17, color: AppColors.gold),
                   ],
                 ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.gold),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  pitch,
+                  style: const TextStyle(fontSize: 12, height: 1.3, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Kart kabuğu: yüzey rengi, ince kenar, dokunma efekti. Ana ürün kartında kenar kırmızı.
+class _CardShell extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final bool highlight;
+  const _CardShell({required this.child, required this.onTap, this.highlight = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: highlight ? const Color(0x66FF2D55) : AppColors.borderSubtle, width: 0.8),
+        boxShadow: highlight
+            ? const [BoxShadow(color: Color(0x1FFF2D55), blurRadius: 20, offset: Offset(0, 2))]
+            : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(onTap: onTap, child: child),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final String text;
+  const _Badge(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(6)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.6,
+          color: AppColors.textOnGold,
         ),
       ),
     );
   }
 }
 
-/// İki aktif modüle özel görsel meta (etiket, açıklama, örnek chip'ler).
-class _ModuleMeta {
-  final String badge;
-  final String pitch;
-  final List<String> highlights;
-  const _ModuleMeta(this.badge, this.pitch, this.highlights);
-
-  static const Map<String, _ModuleMeta> byId = {
-    'ai_photo': _ModuleMeta(
-      'EN POPÜLER',
-      'Kendi selfie\'lerinden stüdyo kalitesinde dating fotoğrafları üret.',
-      ['Her karede farklı mekân', 'Doğal ışık', 'Outdoor'],
-    ),
-    'photo_analysis': _ModuleMeta(
-      'HIZLI',
-      'Fotoğraflarını puanla, en çok eşleşme getirecek kareyi seç.',
-      ['Çekicilik skoru', 'En iyi kare', 'İpuçları'],
-    ),
-  };
-
-  static String imageFor(String moduleId) => switch (moduleId) {
-    'ai_photo' => DatingAssetPaths.hubAiPhoto,
-    'photo_analysis' => DatingAssetPaths.hubAnalysis,
-    _ => DatingAssetPaths.moduleAiPhotoHero,
-  };
-}
-
-/// Ana ekrandaki iki modüle özel kart: üstte yatay görsel, altta açıklama.
-class _FeatureCard extends StatelessWidget {
-  final DatingModule module;
-  final bool hasPack;
-  final VoidCallback onTap;
-  const _FeatureCard({
-    required this.module,
-    required this.hasPack,
-    required this.onTap,
-  });
+class _GoButton extends StatelessWidget {
+  final double size;
+  const _GoButton({required this.size});
 
   @override
   Widget build(BuildContext context) {
-    final meta =
-        _ModuleMeta.byId[module.id] ?? const _ModuleMeta('', '', <String>[]);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.borderGold, width: 0.8),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Üst: kapak görseli (2026-10-01): kenardan kenara, "gerçek
-            // kamera" işleminden geçmiş doğal fotoğraflar.
-            Expanded(
-              child: switch (module.id) {
-                'ai_photo' => const _AiPhotoHubVisual(),
-                'photo_analysis' => const _AnalysisHubVisual(),
-                _ => Container(
-                  color: AppColors.surfaceElevated,
-                  child: DatingModuleImage(
-                    assetPath: _ModuleMeta.imageFor(module.id),
-                    fallbackIcon: module.icon,
-                    borderRadius: BorderRadius.zero,
-                    fit: BoxFit.contain,
-                    alignment: Alignment.center,
-                  ),
-                ),
-              },
-            ),
-            // Alt: rozet + başlık + açıklama + CTA (sabit yükseklik).
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Başlık + rozet aynı satırda (dikey alan tasarrufu).
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          module.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      if (meta.badge.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.goldSurface,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            meta.badge,
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5,
-                              color: AppColors.gold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // Açıklama + CTA yan yana; açıklamaya kalan alanı ver.
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          meta.pitch,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            height: 1.3,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.gold,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Text(
-                          'Başla',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textOnGold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        gradient: AppColors.goldGradient,
+        shape: BoxShape.circle,
+        boxShadow: [BoxShadow(color: AppColors.goldGlow, blurRadius: 12, offset: Offset(0, 4))],
       ),
+      child: Icon(Icons.arrow_forward_rounded, color: AppColors.textOnGold, size: size * 0.46),
     );
   }
 }
@@ -623,50 +559,6 @@ class _PlanBadge extends StatelessWidget {
               color: AppColors.gold,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Ana ekranın altında kompakt "nasıl çalışır" şeridi.
-class _HowItWorksStrip extends StatelessWidget {
-  const _HowItWorksStrip();
-
-  @override
-  Widget build(BuildContext context) {
-    Widget step(IconData i, String t) => Expanded(
-      child: Row(
-        children: [
-          Icon(i, color: AppColors.gold, size: 16),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              t,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Row(
-        children: [
-          step(Icons.upload_rounded, 'Yükle'),
-          step(Icons.auto_awesome, 'AI'),
-          step(Icons.favorite_rounded, 'Eşleşme'),
         ],
       ),
     );

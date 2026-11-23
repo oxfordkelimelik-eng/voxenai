@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -22,11 +23,16 @@ import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
 import '../widgets/shared_widgets.dart' show AiLoadingView;
 import 'ai_tool_ui.dart';
+import 'ai_tool_visuals.dart';
 import 'chat_xray_card.dart';
 import 'module_flows.dart' show ModuleScaffold;
 
 class RizzFlow extends ConsumerStatefulWidget {
-  const RizzFlow({super.key});
+  const RizzFlow({super.key, this.previewResult});
+
+  /// Yalnız önizleme/test: verilirse ekran ağ çağrısı yapmadan doğrudan bu sonuçla açılır.
+  @visibleForTesting
+  final RizzResult? previewResult;
   @override
   ConsumerState<RizzFlow> createState() => _RizzFlowState();
 }
@@ -53,6 +59,19 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
   bool _followBusy = false;
   String? _error;
   bool _noRetry = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final r = widget.previewResult;
+    if (r == null) return;
+    _result = r;
+    _parentId = r.requestId;
+    _followupsLeft = r.followupsLeft;
+    _freeLeft = r.freeLeft;
+    _dailyFree = r.dailyFree;
+    _stage = _Stage.result;
+  }
 
   @override
   void dispose() {
@@ -207,7 +226,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
           final extra = r.insight?.risk;
           if (extra != null) _result = current.withInsight(withMergedRisk(current.insight, extra));
         });
-        _snack(_statusMessage(r) ?? 'Bu sefer uygun öneri çıkmadı, tekrar dene. Hakkın düşmedi.');
+        _snack(_statusMessage(r) ?? 'Bu turda daha iyisi çıkmadı; bir daha dene. Hakkın düşmedi.');
         return;
       }
       setState(() {
@@ -255,9 +274,9 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
           child: switch (_stage) {
             _Stage.loading => AiLoadingView(
                 steps: _mode == 'opener'
-                    ? const ['Profil okunuyor…', 'Yakalanacak detaylar aranıyor…', 'İlk mesajlar yazılıyor…']
-                    : const ['Ekran görüntüsü okunuyor…', 'Kim ne yazdı, çıkarılıyor…', 'Cevaplar yazılıyor…'],
-                hint: 'Genelde 5-10 saniye sürer',
+                    ? const ['Profil didik didik okunuyor…', 'Kimsenin fark etmediği detay aranıyor…', '"Selam naber" çöpe atılıyor…']
+                    : const ['Kim ne demiş, okunuyor…', 'Satır araları taranıyor…', 'Kozların cilalanıyor…'],
+                hint: '5-10 saniye. Bu arada saçını düzeltebilirsin.',
                 progressDuration: const Duration(seconds: 12),
               ),
             _Stage.result => _resultView(),
@@ -275,33 +294,25 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
   }
 
   // ------------------------------------------------------------ giriş
+  // SADELEŞTİRME (2026-11-23, kullanıcı: "çok yazı var, karmaşık; sade ve şık olsun"): kapak görseli + tek
+  // başlık, mod seçici, büyük yükleme alanı, ton; not yalnız istenirse açılır. Numaralı adımlar ve
+  // kazanım etiketleri kaldırıldı.
 
   Widget _intro() {
     final opener = _mode == 'opener';
     return ToolPage(
       bottom: ToolCta(
-        label: opener ? 'İlk Mesajları Üret' : 'Cevapları Üret',
+        label: opener ? 'Açılışımı Yaz ⚡' : 'Cevaplarımı Getir ⚡',
         onPressed: _shots.isEmpty ? null : _run,
-        footnote: 'Günlük ücretsiz hak • Ekran görüntün kaydedilmez',
+        footnote: 'Her gün ücretsiz • Ekran görüntün bizde kalmaz',
       ),
       children: [
-        ToolHero(
-          icon: Icons.bolt_rounded,
-          title: opener ? 'İlk mesajı sana yazalım' : 'Ne yazacağını bilemedin mi?',
+        ToolIntroHeader(
+          visual: const RizzCoverVisual(),
+          title: opener ? '"Selam naber"e veda et' : 'Top sende, smaç bizden',
           subtitle: opener
-              ? 'Eşleşmenin profilinin ekran görüntüsünü yükle; profilindeki bir detayı yakalayan 3 ilk mesaj yazalım.'
-              : 'Sohbetin ekran görüntüsünü yükle; 3 farklı cevap ve sohbetin nasıl gittiğine dair bir röntgen al.',
-          perks: opener
-              ? const [
-                  (Icons.waving_hand_outlined, '3 ilk mesaj'),
-                  (Icons.center_focus_strong_outlined, 'Profile özel'),
-                  (Icons.tune_rounded, 'Ton seçimi'),
-                ]
-              : const [
-                  (Icons.chat_bubble_outline_rounded, '3 cevap'),
-                  (Icons.radar_rounded, 'Sohbet Röntgeni'),
-                  (Icons.shield_outlined, 'Dolandırıcılık uyarısı'),
-                ],
+              ? 'Onun profilini at; kimsenin yazmadığı 3 açılış yazalım.'
+              : 'Sohbeti at; "bunu nasıl düşündün?" dedirtecek 3 cevap yazalım.',
         ),
         const SizedBox(height: 16),
         ToolSegmented<String>(
@@ -312,31 +323,21 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
           ],
           onChanged: (m) => setState(() => _mode = m),
         ),
-        ToolStep(
-          n: 1,
-          title: opener ? 'Eşleşmenin profili' : 'Konuşmanın ekran görüntüsü',
-          trailing: _shots.isEmpty ? null : '${_shots.length}/$kRizzMaxImages',
-        ),
+        const SizedBox(height: 12),
         ToolShotPicker(
           files: _shots,
           max: kRizzMaxImages,
           onAdd: _pick,
           onRemove: (i) => setState(() => _shots.removeAt(i)),
-          emptyTitle: opener ? 'Profil ekran görüntüsü ekle' : 'Ekran görüntüsü ekle',
-          emptyHint: opener
-              ? 'Bio ve fotoğraflar görünsün'
-              : 'Uzun sohbette en fazla $kRizzMaxImages görüntü, eskiden yeniye',
+          emptyTitle: opener ? 'Onun profilini buraya bırak' : 'Sohbeti buraya bırak',
+          emptyHint: 'En fazla $kRizzMaxImages • numara ya da adres görünüyorsa kırp',
         ),
-        const ToolHint(
-          icon: Icons.privacy_tip_outlined,
-          text: 'Karşı tarafın telefon numarası ya da adresi görünüyorsa göndermeden önce kırp.',
-        ),
-        const ToolStep(n: 2, title: 'Ton'),
+        const ToolLabel('Bugün hangi moddasın?'),
         ToolPills(options: kRizzTones, selected: _tone, onSelect: (t) => setState(() => _tone = t)),
-        const ToolStep(n: 3, title: 'Not', trailing: 'İsteğe bağlı'),
-        ToolNoteField(
+        ToolOptionalNote(
           controller: _note,
-          hint: 'Nerede tanıştınız, ne istiyorsun? (ör. "buluşma teklif etmek istiyorum")',
+          label: 'Bilmemiz gereken bir şey?',
+          hint: 'ör. bu cuma onu bir yere çağırmak istiyorum',
         ),
       ],
     );
@@ -345,27 +346,34 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
   // ------------------------------------------------------------ sonuç
 
   String? _statusMessage(RizzResult r) => switch (r.status) {
-        'not_a_chat' => 'Bu bir sohbet ya da profil ekran görüntüsüne benzemiyor. Hakkın düşmedi.',
-        'unreadable' => 'Son mesajı okuyamadık. Daha net ya da daha yakın bir ekran görüntüsü dene. Hakkın düşmedi.',
+        'not_a_chat' => 'Bu bir sohbete benzemiyor; biz mesajlaşma ekranlarında iddialıyız. Hakkın düşmedi.',
+        'unreadable' => 'Son mesaj biraz bulanık kaldı. Daha net bir ekran görüntüsü atar mısın? Hakkın düşmedi.',
         'unsafe_minor' => 'Bu konuşmada 18 yaşından küçük biri olabileceği için öneri veremiyoruz.',
         'declined' => 'Karşı taraf ilgisiz ya da durmanı istemiş görünüyor; ısrar etmeni önermiyoruz. Hakkın düşmedi.',
         'sensitive' => 'Bu konuşmada hassas bir durum görünüyor; flört önerisi vermiyoruz. Hakkın düşmedi.',
         'refused' => 'Bu içerik için öneri üretemiyoruz. Hakkın düşmedi.',
-        'ok' when r.replies.isEmpty => 'Uygun bir cevap üretemedik, tekrar dene. Hakkın düşmedi.',
+        'ok' when r.replies.isEmpty => 'İlham perisi bu sefer gelmedi; bir daha dene. Hakkın düşmedi.',
         _ => null,
       };
 
+  /// SONUÇ (2026-11-23 ikinci sadeleştirme, kullanıcı: "daha sade, anlaşılır ve şık"):
+  /// üstte karşı tarafın son mesajları (neye cevap verildiği), büyük "Cevabın hazır" başlığı, cevaplar
+  /// gönderilmeye hazır sohbet balonları (dokun → kopyala), tek satırda başka ton + daha fazla, kapalı
+  /// Sohbet Röntgeni ve tek satırlık ipucu. Cevap gerekçeleri gösterilmez (yazı kalabalığı).
+  /// Dolandırıcılık riski varsa Röntgen en üste çıkar (güvenlik bilgisi önce).
   Widget _resultView() {
     final r = _result!;
     final msg = _statusMessage(r);
     final opener = _mode == 'opener';
+    final riskFirst = r.insight?.risk != null;
     var k = 0;
     Widget fx(Widget w) => ToolFadeIn(index: k++, child: w);
+    Widget xray() => fx(ChatXrayCard(insight: r.insight!, onReport: (t) => _report(t, xray: true)));
     return ToolPage(
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          PrimaryButton(label: 'Yeni Ekran Görüntüsü', onPressed: _reset),
+          PrimaryButton(label: 'Yeni Sohbet At', onPressed: _reset),
           if (_freeLeft != null && _dailyFree != null) ...[
             const SizedBox(height: 8),
             ToolQuotaLine(left: _freeLeft!, total: _dailyFree!),
@@ -374,143 +382,135 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       ),
       children: [
         const SizedBox(height: 4),
-        if (r.transcript.isNotEmpty) fx(_transcriptCard(r)),
         if (msg != null) fx(ToolNotice(icon: Icons.info_outline_rounded, text: msg)),
         if (r.notice != null) fx(ToolNotice(icon: Icons.help_outline_rounded, text: r.notice!, kind: ToolNoticeKind.warn)),
-        if (r.insight != null) fx(ChatXrayCard(insight: r.insight!, onReport: (t) => _report(t, xray: true))),
+        if (riskFirst && r.insight != null) xray(),
+        if (r.transcript.isNotEmpty) fx(_context(r)),
         if (r.replies.isNotEmpty) ...[
-          fx(ToolSectionHeader(
-            icon: opener ? Icons.waving_hand_outlined : Icons.chat_bubble_outline_rounded,
-            title: opener ? 'İlk mesaj önerileri' : 'Cevap önerileri',
-            trailing: const Text('Dokun, kopyala', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+          fx(Padding(
+            padding: const EdgeInsets.only(top: 18, bottom: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(opener ? 'İlk hamlen hazır' : 'Kozların hazır',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+                const SizedBox(height: 4),
+                const Text('Birine dokun, kopyalansın. Gerisi senin karizman.',
+                    style: TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
+              ],
+            ),
           )),
           for (final rep in r.replies)
             ToolFadeIn(
               key: ValueKey('rep:${rep.text}'),
               index: k++,
-              child: ToolCopyCard(
-                badge: kRizzTones[rep.tone] ?? rep.tone,
+              child: _ReplyBubble(
+                tone: kRizzTones[rep.tone] ?? rep.tone,
                 text: rep.text,
-                why: rep.why,
                 onReport: () => _report(rep.text),
               ),
             ),
         ],
+        if (_parentId != null) fx(_toneBar()),
+        if (!riskFirst && r.insight != null) xray(),
         if (r.tip != null)
-          fx(ToolNotice(icon: Icons.lightbulb_outline_rounded, title: 'İPUCU', text: r.tip!, kind: ToolNoticeKind.tip)),
-        if (_parentId != null) fx(_morePanel()),
+          fx(Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.lightbulb_outline_rounded, size: 17, color: AppColors.gold),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(r.tip!, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.4)),
+                ),
+              ],
+            ),
+          )),
       ],
     );
   }
 
-  /// Ton değiştir / daha fazla öner (aynı görüntü, ücretsiz takip hakları).
-  Widget _morePanel() {
+  /// Başka ton (tek satır, kaydırmasız) + başlık satırında "daha fazla" düğmesi. Aynı görüntü, ücretsiz takip hakkı.
+  Widget _toneBar() {
     final can = !_followBusy && _followupsLeft > 0;
-    return Container(
-      margin: const EdgeInsets.only(top: 4, bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               const Expanded(
-                child: Text('Beğenmedin mi?',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+                child: Text('Başka bir havada dene',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
-              ToolChip(
-                _followupsLeft > 0 ? '$_followupsLeft ek deneme' : 'Ek deneme kalmadı',
-                color: _followupsLeft > 0 ? AppColors.gold : AppColors.textMuted,
+              Text(_followupsLeft > 0 ? '$_followupsLeft hak' : 'Hak kalmadı',
+                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              const SizedBox(width: 6),
+              TextButton.icon(
+                onPressed: can ? () => _followup() : null,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  foregroundColor: AppColors.gold,
+                  disabledForegroundColor: AppColors.textMuted,
+                ),
+                icon: _followBusy
+                    ? const SizedBox(
+                        width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold))
+                    : const Icon(Icons.autorenew_rounded, size: 17),
+                label: const Text('Yenilerini getir', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Text('Tonu değiştir ya da aynı tonda yeni öneriler al. Hakkından düşmez.',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.35)),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           ToolPills(options: kRizzTones, selected: _tone, onSelect: (t) => _followup(tone: t), enabled: can),
-          const SizedBox(height: 14),
-          ToolSecondaryButton(
-            label: _followupsLeft > 0 ? 'Daha fazla öner' : 'Ek öneri hakkı doldu',
-            icon: Icons.autorenew_rounded,
-            busy: _followBusy,
-            onPressed: can ? () => _followup() : null,
-          ),
         ],
       ),
     );
   }
 
-  Widget _transcriptCard(RizzResult r) {
-    final last = r.transcript.length > 4 ? r.transcript.sublist(r.transcript.length - 4) : r.transcript;
+  /// Neye cevap verildiği: konuşmanın son iki mesajı (soluk balonlar) + "Taraflar ters mi?".
+  /// Kimin yazdığından emin değilsek uyarı gösterilir (yanlış tarafa cevap yazılmasın).
+  Widget _context(RizzResult r) {
+    final last = r.transcript.length > 2 ? r.transcript.sublist(r.transcript.length - 2) : r.transcript;
     final canSwap = _parentId != null &&
         _mode == 'reply' &&
         _followupsLeft > 0 &&
         !_followBusy &&
         r.transcript.any((m) => m.speaker != 'unknown');
-    final low = r.confidence == 'low';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: low ? AppColors.warning.withValues(alpha: 0.6) : AppColors.borderSubtle),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.forum_outlined, size: 17, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text('Okuduğumuz konuşma',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
-              ),
-              if (_mode == 'reply')
-                Opacity(
-                  opacity: canSwap ? 1 : 0.4,
-                  child: Material(
-                    color: AppColors.goldSurface,
-                    borderRadius: BorderRadius.circular(20),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: canSwap ? () => _followup(swap: true) : null,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.swap_horiz_rounded, size: 15, color: AppColors.gold),
-                            SizedBox(width: 4),
-                            Text('Taraflar ters mi?',
-                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.gold)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          if (low && _mode == 'reply') ...[
-            const SizedBox(height: 6),
-            const Text('Kimin yazdığından tam emin değiliz; yanlışsa tarafları çevir.',
+    final low = r.confidence == 'low' && _mode == 'reply';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final m in last) _bubble(m),
+        if (low)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('Kimin yazdığından emin değiliz; yanlışsa tarafları çevir.',
                 style: TextStyle(fontSize: 12, color: AppColors.warning, height: 1.35)),
-          ],
-          const SizedBox(height: 10),
-          for (final m in last) _bubble(m),
-        ],
-      ),
+          ),
+        if (_mode == 'reply')
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: canSwap ? () => _followup(swap: true) : null,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                foregroundColor: AppColors.textSecondary,
+                disabledForegroundColor: AppColors.textMuted,
+              ),
+              icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+              label: const Text('Taraflar ters mi?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+          ),
+      ],
     );
   }
 
+  /// Konuşmadaki bir mesaj (soluk, bağlam için): sağda sen, solda o.
   Widget _bubble(RizzMessage m) {
     final mine = m.speaker == 'user';
     const r = Radius.circular(16);
@@ -522,7 +522,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         constraints: const BoxConstraints(maxWidth: 270),
         decoration: BoxDecoration(
-          color: mine ? AppColors.gold.withValues(alpha: 0.88) : AppColors.surfaceElevated,
+          color: mine ? AppColors.surfaceHighest : AppColors.surfaceElevated,
           borderRadius: BorderRadius.only(
             topLeft: r,
             topRight: r,
@@ -536,18 +536,12 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
           children: [
             Text(
               mine ? 'Sen' : (m.speaker == 'match' ? 'O' : '?'),
-              style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w900,
-                  color: mine ? const Color(0xCCFFFFFF) : AppColors.gold),
+              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textMuted),
             ),
             const SizedBox(height: 2),
             Text(
               m.text,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 13.5, height: 1.35, color: mine ? AppColors.textOnGold : AppColors.textPrimary),
+              style: const TextStyle(fontSize: 13.5, height: 1.35, color: AppColors.textSecondary),
             ),
           ],
         ),
@@ -583,5 +577,120 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     } catch (_) {
       _snack('Bildirim gönderilemedi. Lütfen tekrar dene.', error: true);
     }
+  }
+}
+
+/// Gönderilmeye hazır cevap balonu (sağa yaslı, kırmızı tonlu): üstte ton, sağda bildir + kopyala.
+/// Dokununca kopyalar; 1.6 sn "Kopyalandı" görünür ve kenar parlar.
+class _ReplyBubble extends StatefulWidget {
+  final String tone;
+  final String text;
+  final VoidCallback onReport;
+  const _ReplyBubble({required this.tone, required this.text, required this.onReport});
+
+  @override
+  State<_ReplyBubble> createState() => _ReplyBubbleState();
+}
+
+class _ReplyBubbleState extends State<_ReplyBubble> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    HapticFeedback.lightImpact();
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future.delayed(const Duration(milliseconds: 1600));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = BorderRadius.only(
+      topLeft: Radius.circular(20),
+      topRight: Radius.circular(20),
+      bottomLeft: Radius.circular(20),
+      bottomRight: Radius.circular(6),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, left: 28),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0x33FF2D55), Color(0x14FF2D55)],
+            begin: Alignment.topRight,
+            end: Alignment.bottomLeft,
+          ),
+          borderRadius: radius,
+          border: Border.all(color: _copied ? AppColors.gold : kToolAccentBorder, width: _copied ? 1.4 : 0.8),
+          boxShadow: _copied ? const [BoxShadow(color: AppColors.goldGlow, blurRadius: 16)] : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: _copy,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 6, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(widget.tone.toUpperCase(),
+                            style: const TextStyle(
+                                fontSize: 10.5, fontWeight: FontWeight.w900, letterSpacing: 0.7, color: AppColors.goldLight)),
+                      ),
+                      SizedBox(
+                        width: 34,
+                        height: 30,
+                        child: IconButton(
+                          tooltip: 'Bildir',
+                          padding: EdgeInsets.zero,
+                          iconSize: 17,
+                          icon: const Icon(Icons.outlined_flag_rounded, color: AppColors.textMuted),
+                          onPressed: widget.onReport,
+                        ),
+                      ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 160),
+                        child: _copied
+                            ? const Padding(
+                                key: ValueKey('ok'),
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: Text('Kopyalandı ✓',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.gold)),
+                              )
+                            : SizedBox(
+                                key: const ValueKey('copy'),
+                                width: 34,
+                                height: 30,
+                                child: IconButton(
+                                  tooltip: 'Kopyala',
+                                  padding: EdgeInsets.zero,
+                                  iconSize: 18,
+                                  icon: const Icon(Icons.copy_rounded, color: AppColors.gold),
+                                  onPressed: _copy,
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: Text(widget.text,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w500, color: AppColors.textPrimary, height: 1.45)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

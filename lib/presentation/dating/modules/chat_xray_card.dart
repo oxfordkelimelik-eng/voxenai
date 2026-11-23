@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../rizz_service.dart';
-import 'ai_tool_ui.dart' show ToolIconBadge, kToolAccentBorder;
+import 'ai_tool_ui.dart' show ToolFitText, ToolIconBadge, kToolAccentBorder;
 
 class ChatXrayCard extends StatefulWidget {
   final RizzInsight insight;
@@ -20,7 +20,8 @@ class ChatXrayCard extends StatefulWidget {
 }
 
 class _ChatXrayCardState extends State<ChatXrayCard> {
-  bool _open = true;
+  // 2026-11-23 sadeleştirme: varsayılan KAPALI; başlıkta tek satırlık özet (ilgi + sıradaki adım).
+  bool _open = false;
 
   static const _interest = {'low': 'Düşük', 'medium': 'Orta', 'high': 'Yüksek'};
   static const _investment = {
@@ -37,6 +38,14 @@ class _ChatXrayCardState extends State<ChatXrayCard> {
     'give_space': ('Alan tanı, ısrar etme', Icons.pause_circle_outline_rounded),
     'revive': ('Sohbeti yeni bir konuyla canlandır', Icons.local_fire_department_outlined),
   };
+  // Kapalı kartın başlığındaki tek satırlık özet için kısa adlar (uzun cümle kesik görünüyordu).
+  static const _nextShort = {
+    'ask_out': 'Buluşma teklif et',
+    'keep_building': 'Sohbeti derinleştir',
+    'slow_down': 'Biraz yavaşla',
+    'give_space': 'Alan tanı',
+    'revive': 'Sohbeti canlandır',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +60,10 @@ class _ChatXrayCardState extends State<ChatXrayCard> {
         next != null ||
         i.summary != null;
     final open = _open && hasBody;
+    final summary = [
+      if (level > 0) 'İlgi: ${_interest[i.interest]}',
+      ?_nextShort[i.nextStep],
+    ].join(' • ');
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
@@ -68,16 +81,17 @@ class _ChatXrayCardState extends State<ChatXrayCard> {
               padding: const EdgeInsets.fromLTRB(14, 14, 12, 12),
               child: Row(
                 children: [
-                  const ToolIconBadge(icon: Icons.radar_rounded, size: 34),
+                  const ToolIconBadge(icon: Icons.radar_rounded, size: 32),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Sohbet Röntgeni',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-                        SizedBox(height: 1),
-                        Text('Sohbet nasıl gidiyor?', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                        const Text('Sohbet Röntgeni',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+                        const SizedBox(height: 2),
+                        ToolFitText(summary.isEmpty ? 'Sohbet nasıl gidiyor?' : summary,
+                            style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
                       ],
                     ),
                   ),
@@ -173,7 +187,7 @@ class _ChatXrayCardState extends State<ChatXrayCard> {
                 const Icon(Icons.info_outline_rounded, size: 13, color: AppColors.textMuted),
                 const SizedBox(width: 6),
                 const Expanded(
-                  child: Text('Yalnız ekrandaki mesajlara dayanan bir tahmin; kesin hüküm değil.',
+                  child: Text('Ekrandaki mesajlara dayalı tahmin, kesin hüküm değil.',
                       style: TextStyle(fontSize: 11, color: AppColors.textMuted)),
                 ),
                 if (widget.onReport != null)
@@ -261,7 +275,6 @@ class _ChatXrayCardState extends State<ChatXrayCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(_investment[investment]!,
-              maxLines: 2,
               style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.3)),
           const SizedBox(height: 8),
           SizedBox(

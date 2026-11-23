@@ -13,6 +13,25 @@ import 'package:flutter/services.dart';
 import '../../../core/constants/app_colors.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
 
+/// Tek satırlık yazı: sığmazsa "…" ile KESİLMEZ, yazı tipi küçülerek sığar (2026-11-23, kullanıcı: "bitmeyen
+/// yazılar görmek istemiyorum").
+class ToolFitText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final Alignment alignment;
+  final TextAlign? textAlign;
+  const ToolFitText(this.text, {super.key, required this.style, this.alignment = Alignment.centerLeft, this.textAlign});
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: alignment,
+      child: Text(text, maxLines: 1, softWrap: false, textAlign: textAlign, style: style),
+    );
+  }
+}
+
 /// Kırmızı vurgulu ince kenar (AppColors.borderGold eski altın tonunda kaldığı için yerel).
 const Color kToolAccentBorder = Color(0x55FF2D55);
 
@@ -91,83 +110,29 @@ class ToolCta extends StatelessWidget {
 
 // ------------------------------------------------------------------ giriş ekranı
 
-/// Giriş başlığı: hafif kırmızı gradyanlı kart, ikon rozeti, başlık, açıklama ve kazanımlar.
-class ToolHero extends StatelessWidget {
-  final IconData icon;
+/// Giriş başlığı (2026-11-23 sadeleştirme): kapak görseli + tek başlık + tek cümle. Eski kart, ikon
+/// rozeti ve kazanım etiketleri kaldırıldı (kullanıcı: "çok yazı var, karmaşık").
+class ToolIntroHeader extends StatelessWidget {
+  final Widget visual;
   final String title;
   final String subtitle;
-  final List<(IconData, String)> perks;
-  const ToolHero({super.key, required this.icon, required this.title, required this.subtitle, this.perks = const []});
+  const ToolIntroHeader({super.key, required this.visual, required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0x2EFF2D55), AppColors.surface],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: SizedBox(height: 132, child: visual),
         ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: kToolAccentBorder, width: 0.8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              ToolIconBadge(icon: icon, size: 46),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 19, fontWeight: FontWeight.w900, height: 1.2, color: AppColors.textPrimary)),
-                    const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: const TextStyle(fontSize: 12.5, height: 1.35, color: AppColors.textSecondary)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (perks.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final p in perks)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppColors.background.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.borderSubtle),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(p.$1, size: 13, color: AppColors.gold),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(p.$2,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
+        const SizedBox(height: 14),
+        Text(title,
+            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900, height: 1.2, color: AppColors.textPrimary)),
+        const SizedBox(height: 4),
+        Text(subtitle, style: const TextStyle(fontSize: 13.5, height: 1.4, color: AppColors.textSecondary)),
+      ],
     );
   }
 }
@@ -193,34 +158,21 @@ class ToolIconBadge extends StatelessWidget {
   }
 }
 
-/// Numaralı adım başlığı ("1  Ekran görüntüsü").
-class ToolStep extends StatelessWidget {
-  final int n;
-  final String title;
+/// Küçük bölüm etiketi ("Ton", "Hedefin"); numara ve rozet yok.
+class ToolLabel extends StatelessWidget {
+  final String text;
   final String? trailing;
-  const ToolStep({super.key, required this.n, required this.title, this.trailing});
+  const ToolLabel(this.text, {super.key, this.trailing});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 22, bottom: 10),
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
       child: Row(
         children: [
-          Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppColors.goldSurface,
-              shape: BoxShape.circle,
-              border: Border.all(color: kToolAccentBorder),
-            ),
-            child: Text('$n', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: AppColors.gold)),
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: Text(title,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            child: Text(text,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
           ),
           if (trailing != null)
             Text(trailing!, style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
@@ -274,9 +226,7 @@ class ToolSegmented<T> extends StatelessWidget {
                       Icon(o.$3, size: 16, color: o.$1 == value ? AppColors.textOnGold : AppColors.textSecondary),
                       const SizedBox(width: 6),
                       Flexible(
-                        child: Text(o.$2,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        child: ToolFitText(o.$2,
                             style: TextStyle(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w800,
@@ -293,22 +243,30 @@ class ToolSegmented<T> extends StatelessWidget {
   }
 }
 
-/// Tek seçimli hap butonlar (ton, hedef).
+/// Tek seçimli hap butonlar (ton, hedef). HER ZAMAN TEK SATIR (2026-11-23, kullanıcı: "kaydırmaya
+/// yönlendirme"): seçenekler eşit genişlikte yan yana; dar ekranda yazı satır kırmak yerine küçülür.
 class ToolPills extends StatelessWidget {
   final Map<String, String> options;
   final String selected;
   final ValueChanged<String> onSelect;
   final bool enabled;
-  const ToolPills({super.key, required this.options, required this.selected, required this.onSelect, this.enabled = true});
+  const ToolPills({
+    super.key,
+    required this.options,
+    required this.selected,
+    required this.onSelect,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final entries = options.entries.toList();
+    return Row(
       children: [
-        for (final e in options.entries)
-          _pill(e.key, e.value, e.key == selected),
+        for (int i = 0; i < entries.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(child: _pill(entries[i].key, entries[i].value, entries[i].key == selected)),
+        ],
       ],
     );
   }
@@ -325,17 +283,23 @@ class ToolPills extends StatelessWidget {
             : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: on ? AppColors.gold : AppColors.surface,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(color: on ? AppColors.gold : AppColors.borderSubtle),
           ),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: on ? AppColors.textOnGold : AppColors.textSecondary)),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(label,
+                maxLines: 1,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: on ? AppColors.textOnGold : AppColors.textSecondary)),
+          ),
         ),
       ),
     );
@@ -368,8 +332,8 @@ class ToolShotPicker extends StatelessWidget {
         child: CustomPaint(
           painter: const _DashedRRectPainter(color: Color(0x99FF2D55), radius: 18),
           child: Container(
-            constraints: const BoxConstraints(minHeight: 150),
-            padding: const EdgeInsets.symmetric(vertical: 18),
+            constraints: const BoxConstraints(minHeight: 112),
+            padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: BoxDecoration(
               color: AppColors.goldSurface.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(18),
@@ -379,12 +343,12 @@ class ToolShotPicker extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: 44,
+                  height: 44,
                   decoration: const BoxDecoration(color: AppColors.goldSurface, shape: BoxShape.circle),
-                  child: const Icon(Icons.add_photo_alternate_rounded, color: AppColors.gold, size: 26),
+                  child: const Icon(Icons.add_photo_alternate_rounded, color: AppColors.gold, size: 23),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(emptyTitle,
                     style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
                 const SizedBox(height: 3),
@@ -401,7 +365,7 @@ class ToolShotPicker extends StatelessWidget {
       );
     }
     return SizedBox(
-      height: 156,
+      height: 132,
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
@@ -417,7 +381,7 @@ class ToolShotPicker extends StatelessWidget {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(13),
-                      child: Image.file(files[i], width: 88, height: 156, fit: BoxFit.cover),
+                      child: Image.file(files[i], width: 76, height: 132, fit: BoxFit.cover),
                     ),
                   ),
                   Positioned(
@@ -454,7 +418,7 @@ class ToolShotPicker extends StatelessWidget {
               child: CustomPaint(
                 painter: const _DashedRRectPainter(color: Color(0x99FF2D55), radius: 14),
                 child: SizedBox(
-                  width: 88,
+                  width: 76,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -496,88 +460,106 @@ class _DashedRRectPainter extends CustomPainter {
   bool shouldRepaint(_DashedRRectPainter old) => old.color != color || old.radius != radius;
 }
 
-/// İsteğe bağlı not alanı (odakta kırmızı kenar).
-class ToolNoteField extends StatelessWidget {
+/// İsteğe bağlı not (2026-11-23, kullanıcı: "küçük bir kutucuk olsun, oraya yazı yazılabileceği anlaşılsın"):
+/// başlık + "İsteğe bağlı" etiketi ve altında kalem simgeli, tek satırdan başlayan küçük yazı kutusu.
+/// Yazdıkça 4 satıra kadar büyür; karakter sayacı yalnız sınıra yaklaşınca görünür.
+class ToolOptionalNote extends StatelessWidget {
   final TextEditingController controller;
+  final String label;
   final String hint;
-  const ToolNoteField({super.key, required this.controller, required this.hint});
+
+  /// true: kutu sohbet balonu biçiminde, solunda kişi simgesi ("kendinden bahset" — sana bir mesaj yazar gibi).
+  final bool bubble;
+  const ToolOptionalNote({
+    super.key,
+    required this.controller,
+    required this.label,
+    required this.hint,
+    this.bubble = false,
+  });
+
+  static const _max = 300;
 
   @override
   Widget build(BuildContext context) {
-    OutlineInputBorder b(Color c) =>
-        OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: c));
-    return TextField(
-      controller: controller,
-      maxLength: 300,
-      minLines: 2,
-      maxLines: 4,
-      textCapitalization: TextCapitalization.sentences,
-      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, height: 1.4),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintMaxLines: 3,
-        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.35),
-        counterStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-        filled: true,
-        fillColor: AppColors.surface,
-        contentPadding: const EdgeInsets.all(14),
-        enabledBorder: b(AppColors.borderSubtle),
-        focusedBorder: b(AppColors.gold),
-        border: b(AppColors.borderSubtle),
-      ),
+    final radius = bubble
+        ? const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+            bottomRight: Radius.circular(20),
+            bottomLeft: Radius.circular(6),
+          )
+        : BorderRadius.circular(14);
+    OutlineInputBorder b(Color c) => OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c));
+    final field = TextField(
+          controller: controller,
+          maxLength: _max,
+          minLines: 1,
+          maxLines: 4,
+          textCapitalization: TextCapitalization.sentences,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, height: 1.4),
+          buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
+              currentLength > _max - 50
+                  ? Text('$currentLength/$_max', style: const TextStyle(color: AppColors.textMuted, fontSize: 11))
+                  : null,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintMaxLines: 1,
+            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
+            prefixIcon: bubble ? null : const Icon(Icons.edit_outlined, size: 18, color: AppColors.textMuted),
+            prefixIconConstraints: const BoxConstraints(minWidth: 42),
+            isDense: true,
+            filled: true,
+            fillColor: bubble ? AppColors.surfaceElevated : AppColors.surface,
+            contentPadding: bubble ? const EdgeInsets.fromLTRB(16, 14, 16, 14) : const EdgeInsets.fromLTRB(0, 13, 14, 13),
+            enabledBorder: b(bubble ? kToolAccentBorder : AppColors.borderSubtle),
+            focusedBorder: b(AppColors.gold),
+            border: b(AppColors.borderSubtle),
+          ),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ToolLabel(label, trailing: 'İsteğe bağlı'),
+        if (!bubble)
+          field
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                margin: const EdgeInsets.only(bottom: 2),
+                decoration: const BoxDecoration(gradient: AppColors.goldGradient, shape: BoxShape.circle),
+                child: const Icon(Icons.person_rounded, size: 19, color: AppColors.textOnGold),
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: field),
+            ],
+          ),
+      ],
     );
   }
 }
 
-/// Küçük uyarı satırı (ikon + soluk metin).
-class ToolHint extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const ToolHint({super.key, required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 14, color: AppColors.textMuted),
-          const SizedBox(width: 6),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 12, height: 1.35, color: AppColors.textMuted))),
-        ],
-      ),
-    );
-  }
-}
-
-// ------------------------------------------------------------------ sonuç ekranı
-
-/// Bölüm başlığı (ikon rozeti + başlık + isteğe bağlı sağ öğe).
+/// Bölüm başlığı: başlık + isteğe bağlı sağ öğe (ikon rozeti yok — sade).
 class ToolSectionHeader extends StatelessWidget {
-  final IconData icon;
   final String title;
   final Widget? trailing;
-  const ToolSectionHeader({super.key, required this.icon, required this.title, this.trailing});
+  const ToolSectionHeader({super.key, required this.title, this.trailing});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 10),
+      padding: const EdgeInsets.only(top: 18, bottom: 10),
       child: Row(
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(color: AppColors.goldSurface, borderRadius: BorderRadius.circular(9)),
-            child: Icon(icon, size: 17, color: AppColors.gold),
-          ),
-          const SizedBox(width: 10),
           Expanded(
             child: Text(title,
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
           ),
-          if (trailing case final w?) ...[const SizedBox(width: 8), Flexible(child: w)],
+          if (trailing case final w?) ...[const SizedBox(width: 8), w],
         ],
       ),
     );
@@ -638,8 +620,8 @@ class ToolNotice extends StatelessWidget {
   }
 }
 
-/// Kopyalanabilir öneri kartı: rozet (ton / stil) ya da soru, metin, gerekçe, "Kopyala" ve bildir.
-/// Dokununca kopyalar; düğme 1.6 sn "Kopyalandı" olur.
+/// Kopyalanabilir öneri kartı: üst satırda rozet (ton / stil) ya da soru + kopyala ve bildir simgeleri,
+/// altında büyük metin ve soluk tek satırlık gerekçe. Karta dokunmak da kopyalar; kopyalanınca kenar kırmızı.
 class ToolCopyCard extends StatefulWidget {
   final String? badge;
   final String? question;
@@ -666,8 +648,9 @@ class _ToolCopyCardState extends State<ToolCopyCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
@@ -679,99 +662,46 @@ class _ToolCopyCardState extends State<ToolCopyCard> {
           borderRadius: BorderRadius.circular(18),
           onTap: _copy,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+            padding: const EdgeInsets.fromLTRB(16, 10, 6, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: widget.question != null
-                          ? Padding(
-                              padding: const EdgeInsets.only(top: 2, right: 8),
-                              child: Text(widget.question!,
-                                  style: const TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.textSecondary,
-                                      height: 1.3)),
-                            )
+                          ? Text(widget.question!,
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textSecondary,
+                                  height: 1.3))
                           : Align(
                               alignment: Alignment.centerLeft,
                               child: widget.badge == null ? const SizedBox.shrink() : ToolChip(widget.badge!),
                             ),
                     ),
                     if (widget.onReport != null)
-                      SizedBox(
-                        width: 32,
-                        height: 28,
-                        child: IconButton(
-                          tooltip: 'Bildir',
-                          padding: EdgeInsets.zero,
-                          iconSize: 17,
-                          icon: const Icon(Icons.outlined_flag_rounded, color: AppColors.textMuted),
-                          onPressed: widget.onReport,
-                        ),
-                      ),
+                      _iconBtn(Icons.outlined_flag_rounded, 'Bildir', AppColors.textMuted, widget.onReport!),
+                    _iconBtn(_copied ? Icons.check_rounded : Icons.copy_rounded, _copied ? 'Kopyalandı' : 'Kopyala',
+                        AppColors.gold, _copy),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: 10),
                   child: Text(widget.text,
                       style: const TextStyle(
                           fontSize: 15.5, fontWeight: FontWeight.w500, color: AppColors.textPrimary, height: 1.45)),
                 ),
                 if (widget.why.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 1),
-                          child: Icon(Icons.auto_awesome_rounded, size: 13, color: AppColors.textMuted),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(widget.why,
-                              style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.35)),
-                        ),
-                      ],
-                    ),
+                    padding: const EdgeInsets.only(right: 10),
+                    child: Text(widget.why,
+                        style: const TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.35)),
                   ),
                 ],
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: Container(
-                      key: ValueKey(_copied),
-                      margin: const EdgeInsets.only(right: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _copied ? AppColors.gold : AppColors.goldSurface,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(_copied ? Icons.check_rounded : Icons.copy_rounded,
-                              size: 14, color: _copied ? AppColors.textOnGold : AppColors.gold),
-                          const SizedBox(width: 5),
-                          Text(_copied ? 'Kopyalandı' : 'Kopyala',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800,
-                                  color: _copied ? AppColors.textOnGold : AppColors.gold)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -779,6 +709,18 @@ class _ToolCopyCardState extends State<ToolCopyCard> {
       ),
     );
   }
+
+  Widget _iconBtn(IconData icon, String tip, Color color, VoidCallback onTap) => SizedBox(
+        width: 36,
+        height: 32,
+        child: IconButton(
+          tooltip: tip,
+          padding: EdgeInsets.zero,
+          iconSize: 18,
+          icon: Icon(icon, color: color),
+          onPressed: onTap,
+        ),
+      );
 }
 
 /// Küçük renkli etiket.
@@ -851,9 +793,7 @@ class ToolQuotaLine extends StatelessWidget {
           ),
         const SizedBox(width: 8),
         Flexible(
-          child: Text('Bugün kalan ücretsiz hak: $left/$total',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          child: ToolFitText('Bugün kalan ücretsiz hak: $left/$total',
               style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
         ),
       ],

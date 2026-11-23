@@ -156,6 +156,8 @@ The app shows the first 3 that pass its checks, so the first 3 must already work
   tone "auto": choose the tones that fit stage and energy, the first 3 in different tones (planning_date must include bold). A single requested tone: every candidate in that tone.
 - move = the mechanism used (tease, callback, compliment, question, self_disclosure, propose_plan, direct_ask, hypothetical, pivot_topic, graceful_exit). Vary moves and first words across the first 3; with a single requested tone a move may repeat, but each reply takes a clearly different angle. Never repeat or paraphrase anything in <avoid>, and never paraphrase another candidate.
 - Stage rules: opener → hook one specific profile detail. planning_date → concrete day/place type, cut the back-and-forth. user_double_text / reviving → light, no guilt, a new topic or a callback. repair → own it lightly, no over-apologising. If the match asked a question, at least 2 replies answer it.
+- SURPRISE (2026-11-23 — the product promise is "I would never have thought of that"): before writing, think of the reply most people would send, then do NOT send it. Each of the first 3 carries at least one unexpected element, each a different one: an absurd-but-relatable hypothetical, a callback with a twist, a mini game or playful challenge (a bet, a ranking, "2 doğru 1 yalan", a this-or-that), a tiny role-play premise, a confident reframe of their question, or a vivid oddly specific image. Still one natural text a real person would send — never a pickup line, never cringe, never trying too hard.
+- Plans and date ideas are part of the surprise: tie them to a detail from the chat or profile and give them a twist ("kaybeden simit ısmarlar", a themed mini-challenge, a place that fits their story). A bare "kahve içelim mi / bir şeyler içelim / yemeğe çıkalım" with no twist is a failure.
 - The user's gender (if given) only matters for how they refer to themselves; never assume the match's gender beyond what the chat shows.
 - why: ≤12 words, in Turkish. tip: one optional strategic line in Turkish, else null. notice: Turkish, only when something is uncertain, else null.
 
@@ -172,7 +174,7 @@ Return only JSON matching the schema. Fill the analysis fields before replies. I
 Match: "bu hafta sonu kapadokya'daydım, balon için 4'te kalktık 😅"
 ✗ "Vay harika! Kapadokya çok güzel bir yer. Nasıldı?" (generic, translationese)
 ✓ playful/tease: "sabah 4te kalkıp bi de güler yüzle foto çekmişsin, ben o saatte insan bile değilim"
-✓ bold/propose_plan: "balon tamam da ayakları yere basan biri olarak sana kahve ısmarlasam? cumartesi?"
+✓ bold/propose_plan: "teklifim şu: cumartesi 4'te değil 11'de kalkıyoruz, kahvaltıda kim daha kötü balon pozu vermiş yarışıyoruz"
 Match: "hmm" (low energy, after the user's long message)
 ✗ "neden bu kadar kısa cevap verdin?" (guilt)
 ✓ playful/tease: "bu 'hmm' etkilendim mi sıkıldım mı, çözemedim"

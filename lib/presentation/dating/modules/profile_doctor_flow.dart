@@ -26,10 +26,15 @@ import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
 import '../widgets/shared_widgets.dart' show AiLoadingView;
 import 'ai_tool_ui.dart';
+import 'ai_tool_visuals.dart';
 import 'module_flows.dart' show ModuleScaffold;
 
 class ProfileDoctorFlow extends ConsumerStatefulWidget {
-  const ProfileDoctorFlow({super.key});
+  const ProfileDoctorFlow({super.key, this.previewResult});
+
+  /// Yalnız önizleme/test: verilirse ekran ağ çağrısı yapmadan doğrudan bu sonuçla açılır.
+  @visibleForTesting
+  final ProfileDoctorResult? previewResult;
   @override
   ConsumerState<ProfileDoctorFlow> createState() => _ProfileDoctorFlowState();
 }
@@ -48,8 +53,20 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   int _followupsLeft = 0;
   final List<String> _shown = [];
   bool _followBusy = false;
+  int _tab = 0; // sonuç sekmesi: 0 Teşhis, 1 Yeni bio
   String? _error;
   bool _noRetry = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final r = widget.previewResult;
+    if (r == null) return;
+    _result = r;
+    _parentId = r.requestId;
+    _followupsLeft = r.followupsLeft;
+    _stage = _Stage.result;
+  }
 
   @override
   void dispose() {
@@ -124,6 +141,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
         _result = r;
         _parentId = r.requestId;
         _followupsLeft = r.requestId != null ? r.followupsLeft : 0;
+        _tab = 0;
         _shown
           ..clear()
           ..addAll(r.bios.map((b) => b.text))
@@ -184,7 +202,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
       if (!mounted) return;
       if (!r.charged || r.bios.isEmpty) {
         setState(() => _followupsLeft = r.followupsLeft);
-        _snack('Bu sefer uygun yeni öneri çıkmadı, tekrar dene. Hakkın düşmedi.');
+        _snack('Bu turda daha iyi bir reçete çıkmadı; bir daha dene. Hakkın düşmedi.');
         return;
       }
       setState(() {
@@ -228,8 +246,8 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
           key: ValueKey(_stage),
           child: switch (_stage) {
             _Stage.loading => const AiLoadingView(
-                steps: ['Profil okunuyor…', 'Fotoğraflar değerlendiriliyor…', 'Yeni bio yazılıyor…'],
-                hint: 'Genelde 15-25 saniye sürer',
+                steps: ['Profilin muayene masasında…', 'Fotoğraflar tek tek röntgende…', 'Yeni bio reçetesi yazılıyor…'],
+                hint: '15-25 saniye. Doktor titiz çalışır.',
                 progressDuration: Duration(seconds: 22),
               ),
             _Stage.result => _resultView(),
@@ -247,50 +265,38 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   }
 
   // ------------------------------------------------------------ giriş
+  // SADELEŞTİRME (2026-11-23, kullanıcı: "çok yazı var, karmaşık; sade ve şık olsun"): kapak görseli + tek
+  // başlık, büyük yükleme alanı, hedef; "kendinden bahset" yalnız istenirse açılır.
 
   Widget _intro() {
     return ToolPage(
       bottom: ToolCta(
-        label: 'Profilimi İncele',
+        label: 'Muayeneye Başla 🩺',
         onPressed: _shots.isEmpty ? null : _run,
-        footnote: 'Günlük ücretsiz hak • Ekran görüntün kaydedilmez',
+        footnote: 'Her gün ücretsiz • Ekran görüntün bizde kalmaz',
       ),
       children: [
-        const ToolHero(
-          icon: Icons.medical_services_outlined,
-          title: 'Profilini bir uzman gözüyle incele',
-          subtitle: 'Tinder, Bumble ya da Hinge profilinin ekran görüntülerini yükle; neyin işe yaradığını, '
-              'neyin eşleşme kaçırdığını söyleyelim.',
-          perks: [
-            (Icons.photo_library_outlined, 'Fotoğraf sırası'),
-            (Icons.build_circle_outlined, 'Öncelikli düzeltmeler'),
-            (Icons.edit_note_rounded, '3 yeni bio'),
-          ],
+        const ToolIntroHeader(
+          visual: DoctorCoverVisual(),
+          title: 'Profilin sessizce ne diyor?',
+          subtitle: 'Ekran görüntülerini at; neyin kalp, neyin sola kaydırma getirdiğini dürüstçe söyleyelim.',
         ),
-        ToolStep(
-          n: 1,
-          title: 'Profilinin ekran görüntüleri',
-          trailing: _shots.isEmpty ? null : '${_shots.length}/$kRizzMaxImages',
-        ),
+        const SizedBox(height: 16),
         ToolShotPicker(
           files: _shots,
           max: kRizzMaxImages,
           onAdd: _pick,
           onRemove: (i) => setState(() => _shots.removeAt(i)),
-          emptyTitle: 'Profil ekran görüntüsü ekle',
-          emptyHint: 'Fotoğraflar, bio ve prompt\'lar görünsün',
+          emptyTitle: 'Profilini buraya bırak',
+          emptyHint: 'En fazla $kRizzMaxImages • fotoğraflar ve bio görünsün',
         ),
-        const ToolHint(
-          icon: Icons.view_day_outlined,
-          text: 'Profilini baştan sona ekran görüntüsü al: en fazla $kRizzMaxImages görüntü ya da tek uzun '
-              '(kaydırmalı) görüntü.',
-        ),
-        const ToolStep(n: 2, title: 'Ne arıyorsun?'),
+        const ToolLabel('Ne arıyorsun?'),
         ToolPills(options: kPdGoals, selected: _goal, onSelect: (g) => setState(() => _goal = g)),
-        const ToolStep(n: 3, title: 'Kendinden bahset', trailing: 'İsteğe bağlı'),
-        ToolNoteField(
+        ToolOptionalNote(
           controller: _note,
-          hint: 'İşin, hobilerin, sevdiğin şeyler (bio\'lar yalnız gerçek bilgilerle yazılır)',
+          label: 'Biraz kendinden bahset',
+          hint: 'Selam! Hafta içi …, hafta sonu …',
+          bubble: true,
         ),
       ],
     );
@@ -299,11 +305,11 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   // ------------------------------------------------------------ sonuç
 
   String? _statusMessage(ProfileDoctorResult r) => switch (r.status) {
-        'not_a_profile' => 'Bu bir dating profili ekran görüntüsüne benzemiyor. Hakkın düşmedi.',
-        'unreadable' => 'Profili okuyamadık. Daha net ekran görüntüleri dene. Hakkın düşmedi.',
+        'not_a_profile' => 'Bu bir dating profiline benzemiyor; doktorumuz yalnız profillere bakıyor. Hakkın düşmedi.',
+        'unreadable' => 'Röntgen biraz bulanık çıktı. Daha net ekran görüntüleri atar mısın? Hakkın düşmedi.',
         'unsafe_minor' => '18 yaşından küçük biri olabileceği için inceleme yapamıyoruz.',
         'refused' => 'Bu içerik için öneri üretemiyoruz. Hakkın düşmedi.',
-        'ok' when !r.charged => 'Uygun bir öneri üretemedik, tekrar dene. Hakkın düşmedi.',
+        'ok' when !r.charged => 'Doktor bu sefer emin olamadı; bir daha dene. Hakkın düşmedi.',
         _ => null,
       };
 
@@ -316,17 +322,22 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
         if (r.bioFeedback != null) r.bioFeedback!,
       ].join(' | ');
 
+  /// Sonuç iki sekmede (2026-11-23): "Teşhis" (izlenim, düzeltmeler, fotoğraflar) ve "Yeni bio" (bio'lar,
+  /// prompt cevapları, yeni öneri). Tek uzun sayfa yerine: kullanıcı aynı anda tek konuya bakar.
   Widget _resultView() {
     final r = _result!;
     final msg = _statusMessage(r);
+    final hasDiagnosis = r.firstImpression.isNotEmpty || r.photos.isNotEmpty || r.fixes.isNotEmpty;
+    final hasTexts = r.bios.isNotEmpty || r.prompts.isNotEmpty || (_parentId != null && _followupsLeft > 0);
+    final tabs = hasDiagnosis && hasTexts;
+    final showTexts = tabs ? _tab == 1 : !hasDiagnosis;
     var k = 0;
     Widget fx(Widget w) => ToolFadeIn(index: k++, child: w);
-    final hasDiagnosis = r.firstImpression.isNotEmpty || r.photos.isNotEmpty || r.fixes.isNotEmpty;
     return ToolPage(
       bottom: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          PrimaryButton(label: 'Yeni İnceleme', onPressed: _reset),
+          PrimaryButton(label: 'Yeni Muayene', onPressed: _reset),
           if (r.freeLeft != null && r.dailyFree != null) ...[
             const SizedBox(height: 8),
             ToolQuotaLine(left: r.freeLeft!, total: r.dailyFree!),
@@ -336,37 +347,57 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
       children: [
         const SizedBox(height: 4),
         if (msg != null) fx(ToolNotice(icon: Icons.info_outline_rounded, text: msg)),
+        if (tabs) ...[
+          ToolSegmented<int>(
+            value: _tab,
+            options: const [
+              (0, 'Teşhis', Icons.monitor_heart_outlined),
+              (1, 'Reçete', Icons.edit_note_rounded),
+            ],
+            onChanged: (t) => setState(() => _tab = t),
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (!showTexts && hasDiagnosis) ..._diagnosis(r, fx),
+        if (showTexts) ..._texts(r, fx),
+      ],
+    );
+  }
+
+  List<Widget> _diagnosis(ProfileDoctorResult r, Widget Function(Widget) fx) => [
         if (r.firstImpression.isNotEmpty) fx(_impressionCard(r)),
         if (r.fixes.isNotEmpty) ...[
-          fx(const ToolSectionHeader(icon: Icons.build_circle_outlined, title: 'Önce bunları düzelt')),
+          fx(const ToolSectionHeader(title: 'Acil müdahale')),
           fx(_fixesCard(r.fixes)),
         ],
         if (r.photos.isNotEmpty) ...[
-          fx(const ToolSectionHeader(icon: Icons.photo_library_outlined, title: 'Fotoğrafların')),
+          fx(const ToolSectionHeader(title: 'Fotoğraf fotoğraf')),
           for (int i = 0; i < r.photos.length; i++) fx(_photoRow(i + 1, r.photos[i])),
         ],
         if (r.missingPhotos.isNotEmpty) fx(_missingCard(r.missingPhotos)),
         if (r.bioFeedback != null)
           fx(ToolNotice(icon: Icons.short_text_rounded, title: 'ŞU ANKİ BİO', text: r.bioFeedback!)),
-        if (hasDiagnosis)
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () => _report(_diagnosisText(r), diagnosis: true),
-              icon: const Icon(Icons.outlined_flag_rounded, size: 15, color: AppColors.textMuted),
-              label: const Text('Bu değerlendirmeyi bildir', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ),
+        if (r.tip != null)
+          fx(ToolNotice(icon: Icons.lightbulb_outline_rounded, title: 'İPUCU', text: r.tip!, kind: ToolNoticeKind.tip)),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => _report(_diagnosisText(r), diagnosis: true),
+            icon: const Icon(Icons.outlined_flag_rounded, size: 15, color: AppColors.textMuted),
+            label: const Text('Bu değerlendirmeyi bildir', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
           ),
+        ),
+      ];
+
+  List<Widget> _texts(ProfileDoctorResult r, Widget Function(Widget) fx) => [
         if (r.bios.isNotEmpty) ...[
           fx(const ToolSectionHeader(
-            icon: Icons.edit_note_rounded,
-            title: 'Yeni bio önerileri',
+            title: 'Yeni bio\'n hazır',
             trailing: Text('Dokun, kopyala', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
           )),
           for (final b in r.bios)
             ToolFadeIn(
               key: ValueKey('bio:${b.text}'),
-              index: k++,
               child: ToolCopyCard(
                 badge: kPdStyles[b.style] ?? b.style,
                 text: b.text,
@@ -376,38 +407,32 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
             ),
         ],
         if (r.prompts.isNotEmpty) ...[
-          fx(const ToolSectionHeader(icon: Icons.question_answer_outlined, title: 'Prompt cevapları')),
+          fx(const ToolSectionHeader(title: 'Prompt\'lara cevap')),
           for (final p in r.prompts)
             ToolFadeIn(
               key: ValueKey('prompt:${p.answer}'),
-              index: k++,
               child: ToolCopyCard(question: p.question, text: p.answer, onReport: () => _report(p.answer)),
             ),
         ],
-        if (r.tip != null)
-          fx(ToolNotice(icon: Icons.lightbulb_outline_rounded, title: 'İPUCU', text: r.tip!, kind: ToolNoticeKind.tip)),
         if (_parentId != null && (_followupsLeft > 0 || r.bios.isNotEmpty))
           fx(Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 8),
+            padding: const EdgeInsets.only(top: 6, bottom: 8),
             child: ToolSecondaryButton(
               label: _followupsLeft <= 0
                   ? 'Ek öneri hakkı doldu'
                   : r.bios.isEmpty
-                      ? 'Bio önerisi üret ($_followupsLeft)'
-                      : 'Yeni bio önerileri ($_followupsLeft)',
+                      ? 'Bio reçetesi yaz ($_followupsLeft)'
+                      : 'Başka reçete yaz ($_followupsLeft)',
               icon: Icons.autorenew_rounded,
               busy: _followBusy,
               onPressed: _followBusy || _followupsLeft <= 0 ? null : _moreBios,
             ),
           )),
-      ],
-    );
-  }
+      ];
 
-  /// İlk izlenim + iyi giden yanlar (sonucun en üstündeki özet kart).
+  /// İlk izlenim + iyi giden yanlar.
   Widget _impressionCard(ProfileDoctorResult r) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -421,33 +446,24 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              ToolIconBadge(icon: Icons.visibility_outlined, size: 34),
-              SizedBox(width: 10),
-              Text('İLK İZLENİM',
-                  style: TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.8, color: AppColors.gold)),
-            ],
-          ),
-          const SizedBox(height: 12),
+          const Text('İLK İZLENİM',
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, letterSpacing: 0.8, color: AppColors.gold)),
+          const SizedBox(height: 8),
           Text(r.firstImpression,
               style: const TextStyle(
                   fontSize: 15.5, fontWeight: FontWeight.w600, height: 1.45, color: AppColors.textPrimary)),
           if (r.strengths.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            const Divider(height: 1, color: AppColors.borderSubtle),
             const SizedBox(height: 12),
-            const Text('İyi giden',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
-            const SizedBox(height: 8),
             for (final s in r.strengths)
               Padding(
-                padding: const EdgeInsets.only(bottom: 7),
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.check_circle_rounded, size: 17, color: AppColors.success),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 1),
+                      child: Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success),
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(s, style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.4)),
@@ -464,7 +480,6 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
   /// Öncelik sırasına göre numaralı düzeltmeler (tek kart, aralarında ayraç).
   Widget _fixesCard(List<PdFix> fixes) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
@@ -475,7 +490,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
           for (int i = 0; i < fixes.length; i++) ...[
             if (i > 0) const Divider(height: 1, indent: 52, color: AppColors.borderSubtle),
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              padding: const EdgeInsets.all(14),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -499,8 +514,13 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ToolChip(kPdAreas[fixes[i].area] ?? fixes[i].area, color: AppColors.textSecondary),
-                        const SizedBox(height: 6),
+                        Text((kPdAreas[fixes[i].area] ?? fixes[i].area).toUpperCase(),
+                            style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                                color: AppColors.textMuted)),
+                        const SizedBox(height: 3),
                         Text(fixes[i].text,
                             style: const TextStyle(fontSize: 13.5, color: AppColors.textPrimary, height: 1.42)),
                       ],
@@ -515,6 +535,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     );
   }
 
+  /// Fotoğraf kararı: numara + renkli karar etiketi, açıklama, kısa gerekçe.
   Widget _photoRow(int n, PdPhoto p) {
     final (color, icon) = switch (p.verdict) {
       'lead' => (AppColors.gold, Icons.vertical_align_top_rounded),
@@ -524,59 +545,42 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     };
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: p.verdict == 'lead' ? kToolAccentBorder : AppColors.borderSubtle),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(width: 4, color: color),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('#$n', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.textMuted)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Text('#$n',
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w900, color: AppColors.textMuted)),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(icon, size: 13, color: color),
-                              const SizedBox(width: 4),
-                              Text(kPdVerdicts[p.verdict] ?? p.verdict,
-                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(p.description,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.35)),
-                    if (p.why.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(p.why, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
-                    ],
+                    Icon(icon, size: 13, color: color),
+                    const SizedBox(width: 4),
+                    Text(kPdVerdicts[p.verdict] ?? p.verdict,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color)),
                   ],
                 ),
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(p.description,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary, height: 1.35)),
+          if (p.why.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(p.why, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -587,31 +591,19 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
     final ai = missing.where((m) => !kPdLifestyle.contains(m)).toList();
     final real = missing.where(kPdLifestyle.contains).toList();
     return Container(
-      margin: const EdgeInsets.only(top: 4, bottom: 14),
+      margin: const EdgeInsets.only(top: 6, bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0x26FF2D55), Color(0x0AFF2D55)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: kToolAccentBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              ToolIconBadge(icon: Icons.add_a_photo_outlined, size: 34),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text('Profilinde eksik olan fotoğraflar',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          const Text('Profilinde eksik olanlar',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.textPrimary)),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -620,24 +612,16 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
           if (real.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(
-              '${real.map((m) => kPdMissing[m] ?? m).join(', ')}: bunun için gerçek bir fotoğrafını ekle; '
-              'gerçek hayatından bir an en iyi sohbeti açar.',
+              '${real.map((m) => kPdMissing[m] ?? m).join(', ')} için gerçek bir fotoğrafını ekle.',
               style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.4),
             ),
           ],
           const SizedBox(height: 14),
-          if (ai.isNotEmpty) ...[
+          if (ai.isNotEmpty)
             PrimaryButton(
               label: 'AI ile Fotoğraf Üret',
               onPressed: () => context.push('${DatingRoutes.module}/${DatingModule.aiPhoto.id}'),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Üretilebilecekler: ${ai.map((m) => kPdMissing[m] ?? m).join(', ')}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
-            ),
-          ],
           TextButton.icon(
             onPressed: () => context.push('${DatingRoutes.module}/${DatingModule.photoAnalysis.id}'),
             icon: const Icon(Icons.insights_rounded, size: 17, color: AppColors.gold),
