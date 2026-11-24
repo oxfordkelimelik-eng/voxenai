@@ -149,6 +149,105 @@ String? _levelPitchMessage(double pitch) {
   return null;
 }
 
+// ============================================================
+// TARAMALI ÇEKİM (2026-11-23, kullanıcı: "kafa yeri bi türlü tam oturtulamıyor")
+// ============================================================
+// AI çekiminde 10 açı artık tek tek "tuttur → 1,1 sn bekle" ile değil, başı
+// yavaşça çevirirken alınır: her kare işlenir, baş HANGİ boş açının bandına
+// düşerse (sıradaki olmasa bile) kısa bir duraksamada o açı çekilir. Kareler
+// yine takePicture ile çekilen TAM fotoğraftır (akış/video karesi DEĞİL) —
+// kalite eski çekimle birebir aynı. Çekilen fotoğraf ayrıca yeniden ölçülür
+// (göz kırpma / çekim anında kayan açı → kare atılır, aynı açı tekrar alınır).
+
+/// Başın şu anki açısı hangi AI açısına karşılık geliyor (bant dışıysa null).
+@visibleForTesting
+CaptureAngle? sweepAngleFor(double yaw, double pitch) {
+  if (yaw.abs() <= 8 && pitch >= -30 && pitch <= -12) return CaptureAngle.chinDown;
+  if (pitch < _levelPitchMin || pitch > _levelPitchMax) return null;
+  if (yaw.abs() <= 5) return CaptureAngle.front;
+  for (final e in _turnBands.entries) {
+    if (yaw >= e.value.$1 && yaw <= e.value.$2) return e.key;
+  }
+  return null;
+}
+
+/// Hedef açıya (sıradaki boş açı) yönlendiren tek cümle.
+@visibleForTesting
+String sweepHint(CaptureAngle target, double yaw, double pitch) {
+  if (target == CaptureAngle.chinDown) {
+    if (yaw.abs() > 8) return 'Kameraya dön, düz bak';
+    if (pitch > -12) return 'Şimdi başını hafifçe ÖNE eğ (çene aşağı)';
+    if (pitch < -30) return 'Biraz kaldır (fazla eğdin)';
+    return 'Sabit dur…';
+  }
+  final level = _levelPitchMessage(pitch);
+  if (level != null) return level;
+  if (target == CaptureAngle.front) {
+    return yaw.abs() > 5 ? 'Kameraya dön, dümdüz bak' : 'Sabit dur…';
+  }
+  final band = _turnBands[target];
+  if (band == null) return 'Sabit dur…';
+  final (lo, hi) = band;
+  if (hi > 0) {
+    if (yaw < lo) return 'Başını yavaşça SAĞA çevir';
+    if (yaw > hi) return 'Biraz geri gel (fazla döndün)';
+  } else {
+    if (yaw > hi) {
+      return yaw > 5 ? 'Önce kameraya dön, sonra yavaşça SOLA' : 'Başını yavaşça SOLA çevir';
+    }
+    if (yaw < lo) return 'Biraz geri gel (fazla döndün)';
+  }
+  return 'Sabit dur…';
+}
+
+/// Çekilen TAM fotoğrafın açısı istenen açıya uyuyor mu. Akış karesi ile
+/// fotoğraf arasında birkaç yüz ms geçer; ölçüm modu da farklı (fast/accurate)
+/// → bant ±4° payla denetlenir. Yön işareti (sağ/sol) akıştan gelir; ön kamera
+/// fotoğrafı aynalanmış olabileceği için burada yalnız büyüklüğe bakılır.
+@visibleForTesting
+bool sweepStillMatches(CaptureAngle angle, double yaw, double pitch) {
+  const tol = 4.0;
+  final ay = yaw.abs();
+  if (angle == CaptureAngle.chinDown) return ay <= 8 + tol && pitch <= -12 + tol;
+  if (pitch < _levelPitchMin - tol || pitch > _levelPitchMax + tol) return false;
+  if (angle == CaptureAngle.front) return ay <= 5 + tol;
+  final band = _turnBands[angle];
+  if (band == null) return true;
+  final lo = band.$1.abs() < band.$2.abs() ? band.$1.abs() : band.$2.abs();
+  final hi = band.$1.abs() < band.$2.abs() ? band.$2.abs() : band.$1.abs();
+  return ay >= lo - tol && ay <= hi + tol;
+}
+
+/// Yüz kutusunun DİK görüntüdeki yeri (kenarlar 0..1, x genişliğe, y yüksekliğe
+/// bölünmüş) — kadraj denetimi için. [aspect] = dik görüntünün yükseklik/genişliği.
+@visibleForTesting
+String? sweepFramingProblem({
+  required double left,
+  required double top,
+  required double right,
+  required double bottom,
+  required double aspect,
+}) {
+  final w = right - left;
+  final hInWidths = (bottom - top) * aspect;
+  // Yana dönünce kutu daralır ama boyu değişmez: uzaklığı ikisinin büyüğü ölçer
+  // (eski çekimde dönük karelerde sürekli "yaklaş" çıkıyordu). İkisi de görüntü
+  // GENİŞLİĞİ biriminde — eski wRatio eşikleriyle (0.40) aynı ölçek.
+  final size = w > hInWidths ? w : hInWidths;
+  if (size < 0.40) return 'Biraz yaklaş, yüzün ovali doldursun';
+  if (size > 0.80) return 'Biraz uzaklaş';
+  if (left < 0.02 || right > 0.98 || top < 0.02 || bottom > 0.98) {
+    return 'Yüzün tamamı ovalin içinde olsun';
+  }
+  final cx = (left + right) / 2;
+  final cy = (top + bottom) / 2;
+  // Baş dönerken kutu yana kayar: ortalama payı eskisinin (±0.09) iki katı.
+  if ((cx - 0.5).abs() > 0.18 || cy < 0.24 || cy > 0.62) {
+    return 'Yüzünü ovalin içine al';
+  }
+  return null;
+}
+
 /// Sırayla açı fotoğraflarını canlı hizalama rehberiyle çeken ekran.
 /// Her açı çizgiye "oturmadan" çekim kabul edilmez. Oturunca çerçeve yeşile
 /// döner (uymuyorsa kırmızı) ve otomatik çeker.
@@ -199,6 +298,22 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   bool _reviewing = false; // 3 açı bitti, onay ekranı gösteriliyor
   bool _aligned = false;
   DateTime? _stableSince; // hizalanmanın başladığı an (süre bazlı bekleme için)
+
+  // TARAMALI ÇEKİM (yalnız AI'nin 10 açılı yüz çekimi; bkz. sweepAngleFor).
+  bool get _sweep =>
+      widget.kind == CaptureKind.face && identical(widget.angles, kAiFaceAngles);
+  // Bant içinde bu kadar SAKİN kalınca çekilir (eski 1,1 sn tutma şartı yerine).
+  static const _sweepDwell = Duration(milliseconds: 300);
+  // Baş bundan hızlı dönüyorsa çekilmez (fotoğrafta hareket bulanıklığı olmasın).
+  static const _sweepMaxSpeed = 25.0; // derece/sn
+  CaptureAngle? _candAngle;
+  DateTime? _candSince;
+  double? _lastYaw;
+  DateTime? _lastYawAt;
+  double _yawSpeed = 0;
+  FaceDetector? _stillDetector; // çekilen fotoğrafı yeniden ölçer
+  CaptureAngle? _rejectAngle; // fotoğraf denetimi art arda reddettiyse sonsuz döngüye girmesin
+  int _rejectCount = 0;
   // Onay ekranından "sadece bu açıyı yeniden çek" ile girildiyse true — çekim
   // bitince akışın geri kalanına geçmeden direkt onay ekranına döner.
   bool _retakeSingle = false;
@@ -254,7 +369,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   Future<void> _startController() async {
     final controller = CameraController(
       _cameras[_cameraIndex],
-      ResolutionPreset.high,
+      // AI selfie'leri 1080p (2026-11-24, kullanıcı kararı; eskiden 720p — 07-10'da
+      // analiz ekranı için konmuştu, gerekçesi yoktu). Paket tek ayarla hem canlı
+      // takip karesini hem fotoğrafı belirler: 4K canlı takibi ağırlaştırdığı için
+      // seçilmedi. Desteklemeyen telefonda paket en yakın düşük çözünürlüğe iner.
+      _sweep ? ResolutionPreset.veryHigh : ResolutionPreset.high,
       enableAudio: false,
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21
@@ -287,6 +406,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     _faceDetector?.close();
+    _stillDetector?.close();
     _poseDetector?.close();
     super.dispose();
   }
@@ -303,6 +423,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       if (!qualityOk) {
         if (!mounted) return;
         _stableSince = null;
+        _candSince = null;
         setState(() {
           _aligned = false;
           _hint = qualityHint;
@@ -312,6 +433,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
 
       final input = _toInputImage(image);
       if (input == null) return;
+
+      if (_sweep) {
+        await _onSweepFrame(input);
+        return;
+      }
 
       bool aligned;
       String hint;
@@ -432,6 +558,131 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     return (true, 'Hizalandı');
   }
 
+  /// ML Kit yüz kutusunu DİK (döndürülmüş) görüntüde verir. Android'de akış
+  /// karesi sensör yönünde (yatay) geldiği için 90/270° dönüşte en/boy yer
+  /// değiştirir; iOS'ta boyut zaten bu düzlemde (ML Kit örneğiyle aynı kural).
+  Size _uprightSize(InputImage input) {
+    final m = input.metadata!;
+    final quarter = m.rotation == InputImageRotation.rotation90deg ||
+        m.rotation == InputImageRotation.rotation270deg;
+    return (Platform.isAndroid && quarter) ? Size(m.size.height, m.size.width) : m.size;
+  }
+
+  /// Taramalı çekimde bir kare: baş hangi boş açının bandındaysa kısa bir
+  /// duraksamada o açıyı çeker; değilse sıradaki boş açıya yönlendirir.
+  Future<void> _onSweepFrame(InputImage input) async {
+    final faces = await _faceDetector!.processImage(input);
+    if (!mounted) return;
+    final now = DateTime.now();
+
+    String? problem;
+    Face? f;
+    if (faces.isEmpty) {
+      problem = 'Yüz görünmüyor';
+    } else if (faces.length > 1) {
+      problem = 'Karede tek kişi olmalı';
+    } else {
+      f = faces.first;
+      final s = _uprightSize(input);
+      final b = f.boundingBox;
+      problem = sweepFramingProblem(
+        left: b.left / s.width,
+        right: b.right / s.width,
+        top: b.top / s.height,
+        bottom: b.bottom / s.height,
+        aspect: s.height / s.width,
+      );
+      if (problem == null && (f.headEulerAngleZ ?? 0).abs() > 9) problem = 'Başını dik tut';
+      final le = f.leftEyeOpenProbability;
+      final re = f.rightEyeOpenProbability;
+      if (problem == null &&
+          ((le != null && le < _eyeOpenThreshold) || (re != null && re < _eyeOpenThreshold))) {
+        problem = 'Gözlerini aç';
+      }
+    }
+
+    // Dönüş hızı (derece/sn, yumuşatılmış): hızlı dönüşte çekilmez.
+    final yaw = f?.headEulerAngleY;
+    if (yaw != null && _lastYaw != null && _lastYawAt != null) {
+      final dt = now.difference(_lastYawAt!).inMicroseconds / 1e6;
+      _yawSpeed = (dt > 0 && dt < 1) ? 0.5 * _yawSpeed + 0.5 * ((yaw - _lastYaw!).abs() / dt) : 0;
+    }
+    _lastYaw = yaw;
+    _lastYawAt = yaw == null ? null : now;
+
+    if (problem != null || f == null) {
+      _candAngle = null;
+      _candSince = null;
+      setState(() {
+        _aligned = false;
+        _hint = problem ?? 'Yüz görünmüyor';
+      });
+      return;
+    }
+
+    final pitch = f.headEulerAngleX ?? 0;
+    final cand = sweepAngleFor(yaw!, pitch);
+    if (cand == null || _captured.containsKey(cand)) {
+      _candAngle = null;
+      _candSince = null;
+      setState(() {
+        _aligned = false;
+        _hint = sweepHint(_angle, yaw, pitch);
+      });
+      return;
+    }
+
+    if (_candAngle != cand) {
+      _candAngle = cand;
+      _candSince = now;
+    }
+    final steady = _yawSpeed <= _sweepMaxSpeed;
+    if (!steady) _candSince = now;
+    setState(() {
+      _aligned = true;
+      _hint = steady ? 'Sabit dur…' : 'Biraz daha yavaş';
+    });
+    if (steady && now.difference(_candSince!) >= _sweepDwell) {
+      await _capture(cand);
+    }
+  }
+
+  /// Çekilen fotoğrafı yeniden ölçer: göz kırpma, ikinci yüz ya da çekim anında
+  /// kayan açı → false (kare atılır, aynı açı tekrar çekilir). Fotoğrafta yüz
+  /// bulunamazsa (yön/EXIF farkı olabilir) akışın ölçümüne güvenilir. Aynı açı
+  /// art arda 2 kez reddedilirse 3.'de denetim yapılmaz — kullanıcı takılmasın.
+  Future<bool> _stillOk(String path, CaptureAngle angle) async {
+    if (_rejectAngle == angle && _rejectCount >= 2) return true;
+    try {
+      final det = _stillDetector ??= FaceDetector(
+        options: FaceDetectorOptions(
+          performanceMode: FaceDetectorMode.accurate,
+          enableClassification: true,
+          minFaceSize: 0.15,
+        ),
+      );
+      final faces = await det.processImage(InputImage.fromFilePath(path));
+      if (faces.length > 1) return _rejected(angle);
+      if (faces.isEmpty) return true;
+      final f = faces.first;
+      final le = f.leftEyeOpenProbability;
+      final re = f.rightEyeOpenProbability;
+      if ((le != null && le < 0.3) || (re != null && re < 0.3)) return _rejected(angle);
+      if (!sweepStillMatches(angle, f.headEulerAngleY ?? 0, f.headEulerAngleX ?? 0)) {
+        return _rejected(angle);
+      }
+      return true;
+    } catch (_) {
+      return true; // ölçülemedi: akışın kararı geçerli
+    }
+  }
+
+  bool _rejected(CaptureAngle angle) {
+    _rejectCount = _rejectAngle == angle ? _rejectCount + 1 : 1;
+    _rejectAngle = angle;
+    return false;
+  }
+
   Future<(bool, String)> _evaluateBody(InputImage input) async {
     final poses = await _poseDetector!.processImage(input);
     if (poses.isEmpty) return (false, 'Vücut görünmüyor');
@@ -507,15 +758,59 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   // ============================================================
   // ÇEKİM
   // ============================================================
-  Future<void> _capture() async {
+  /// [which]: taramalı çekimde bandına girilen açı (sıradaki olmayabilir).
+  Future<void> _capture([CaptureAngle? which]) async {
     final c = _controller;
     if (c == null || _isCapturing) return;
     _isCapturing = true;
+    final angle = which ?? _angle;
     try {
       await c.stopImageStream();
       HapticFeedback.mediumImpact();
       final shot = await c.takePicture();
-      _captured[_angle] = File(shot.path);
+
+      if (_sweep) {
+        _candAngle = null;
+        _candSince = null;
+        _lastYaw = null;
+        if (!await _stillOk(shot.path, angle)) {
+          try {
+            File(shot.path).deleteSync();
+          } catch (_) {}
+          if (!mounted) return;
+          setState(() {
+            _aligned = false;
+            _hint = 'Kare kaçtı — aynı açıda bir an sabit dur';
+          });
+          await c.startImageStream(_onFrame);
+          return;
+        }
+        if (_rejectAngle == angle) {
+          _rejectAngle = null;
+          _rejectCount = 0;
+        }
+        _captured[angle] = File(shot.path);
+        final next = _angles.indexWhere((a) => !_captured.containsKey(a));
+        if (next < 0 || _retakeSingle) {
+          _retakeSingle = false;
+          if (!mounted) return;
+          setState(() => _reviewing = true);
+          return;
+        }
+        if (!mounted) return;
+        setState(() {
+          _angleIndex = next;
+          _aligned = false;
+          _hint = _angle.faceHint();
+        });
+        // Kısa ara: kullanıcı titreşimi hissetsin, dönmeye devam etsin.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        if (!mounted) return;
+        await c.startImageStream(_onFrame);
+        return;
+      }
+
+      _captured[angle] = File(shot.path);
 
       if (_retakeSingle) {
         // Sadece bu açı yeniden çekiliyordu (onay ekranından) — diğer
@@ -551,6 +846,16 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     }
   }
 
+  void _resetSweep() {
+    _candAngle = null;
+    _candSince = null;
+    _lastYaw = null;
+    _lastYawAt = null;
+    _yawSpeed = 0;
+    _rejectAngle = null;
+    _rejectCount = 0;
+  }
+
   /// Onay ekranında "Kullan" → istenen açı sırasıyla dosya listesi döndür.
   void _confirm() {
     Navigator.of(context).pop(<File>[
@@ -569,6 +874,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       _reviewing = false;
       _aligned = false;
       _stableSince = null;
+      _resetSweep();
       _hint = widget.kind == CaptureKind.face
           ? _angle.faceHint()
           : _angle.bodyHint();
@@ -586,6 +892,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       _angleIndex = 0;
       _aligned = false;
       _stableSince = null;
+      _resetSweep();
       _reviewing = false;
       _hint = widget.kind == CaptureKind.face
           ? _angle.faceHint()
@@ -907,7 +1214,9 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
                   children: [
                     Text(
                       _angles.length > 1
-                          ? '${widget.kind == CaptureKind.face ? "YÜZ" : "VÜCUT"} • ${_angleIndex + 1}/${_angles.length}'
+                          ? (_sweep
+                              ? 'YÜZ • ${_captured.length}/${_angles.length} ÇEKİLDİ'
+                              : '${widget.kind == CaptureKind.face ? "YÜZ" : "VÜCUT"} • ${_angleIndex + 1}/${_angles.length}')
                           : (widget.kind == CaptureKind.face ? 'YÜZ' : 'VÜCUT'),
                       style: const TextStyle(
                         color: Colors.white70,
@@ -1061,9 +1370,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
               color: Colors.black.withValues(alpha: 0.45),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Text(
-              'Çizgiye oturunca otomatik çekilir',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+            child: Text(
+              _sweep
+                  ? 'Başını yavaşça çevir, kareler kendiliğinden çekilir'
+                  : 'Çizgiye oturunca otomatik çekilir',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
         ],
