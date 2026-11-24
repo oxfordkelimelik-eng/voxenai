@@ -163,8 +163,10 @@ test("maliyet: gpt-4.1 fiyatı", () => {
   assert.strictEqual(R.costUsd("bilinmeyen", { prompt_tokens: 1 }), null);
 });
 
-test("2026-11-23 sınırlar: günlük 3 ücretsiz, sonuç başına 1 yenilerini getir, 1 taraflar ters", () => {
-  assert.strictEqual(R.DEFAULTS.dailyFree, 3);
+test("2026-11-24 sınırlar: günlük ücretsiz yok (paket hakkı), sonuç başına 1 yenilerini getir, 1 taraflar ters", () => {
+  assert.strictEqual(R.DEFAULTS.dailyFree, 0);
+  assert.deepStrictEqual(R.quotaDecision({ usedToday: 0, dailyFree: 0, balance: 0 }), { source: null }, "paketsiz kilitli");
+  assert.deepStrictEqual(R.quotaDecision({ usedToday: 0, dailyFree: 0, balance: 1 }), { source: "balance" });
   assert.strictEqual(R.FOLLOWUP_MAX, 1);
   assert.strictEqual(R.SWAP_FIX_MAX, 1);
   const prev = [{ speaker: "user", text: "selam" }];

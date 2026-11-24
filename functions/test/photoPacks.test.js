@@ -69,13 +69,20 @@ test("iade eksik FOTO sayısına göre hesaplanır", () => {
   assert.match(SRC, /Math\.min\(missingPhotos, j\.packUnitsCharged \|\| 0\)/);
 });
 
-test("ürün haritası çok alanlı kredi veriyor (hediye analiz)", () => {
+test("ürün haritası çok alanlı kredi veriyor (hediye analiz + RizzGPT/Profil Doktoru)", () => {
   const pay = fs.readFileSync(path.join(__dirname, "..", "payments.js"), "utf8");
-  assert.match(pay, /dating_pack_photos5: \{ photoBalance: 5 \}/);
-  assert.match(pay, /dating_pack_photos10: \{ photoBalance: 10, analysisBalance: 1 \}/);
-  assert.match(pay, /dating_pack_photos25: \{ photoBalance: 25, analysisBalance: 3 \}/);
+  // 2026-11-24: foto paketleri boyuna göre RizzGPT + Profil Doktoru hakkı da verir.
+  assert.match(pay, /const TOOLS_5 = \{ rizzBalance: 3, profileDoctorBalance: 2 \}/);
+  assert.match(pay, /const TOOLS_10 = \{ rizzBalance: 7, profileDoctorBalance: 5 \}/);
+  assert.match(pay, /const TOOLS_25 = \{ rizzBalance: 10, profileDoctorBalance: 10 \}/);
+  assert.match(pay, /dating_pack_photos5: \{ photoBalance: 5, \.\.\.TOOLS_5 \}/);
+  assert.match(pay, /dating_pack_photos10: \{ photoBalance: 10, analysisBalance: 1, \.\.\.TOOLS_10 \}/);
+  assert.match(pay, /dating_pack_photos25: \{ photoBalance: 25, analysisBalance: 3, \.\.\.TOOLS_25 \}/);
+  assert.match(pay, /dating_pack_photos5_analysis1: \{ photoBalance: 5, analysisBalance: 1, \.\.\.TOOLS_5 \}/);
+  assert.match(pay, /dating_pack_photos10_analysis3: \{ photoBalance: 10, analysisBalance: 3, \.\.\.TOOLS_10 \}/);
+  assert.match(pay, /dating_pack_photos25_analysis5: \{ photoBalance: 25, analysisBalance: 5, \.\.\.TOOLS_25 \}/);
   // Eski ürünler SİLİNMEMELİ: geri yükleme ve yolda olan ödeme onları
   // hâlâ gönderebilir; silinirse kullanıcı "Bilinmeyen ürün" hatası alır.
-  assert.match(pay, /dating_pack_photo10: \{ photoBalance: 10 \}/);
-  assert.match(pay, /dating_pack_photo50: \{ photoBalance: 50 \}/);
+  assert.match(pay, /dating_pack_photo10: \{ photoBalance: 10, \.\.\.TOOLS_10 \}/);
+  assert.match(pay, /dating_pack_photo50: \{ photoBalance: 50, \.\.\.TOOLS_25 \}/);
 });

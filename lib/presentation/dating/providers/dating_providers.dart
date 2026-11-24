@@ -405,6 +405,9 @@ class CreditsNotifier extends StateNotifier<int> {
 class PackBalance {
   final int photo;
   final int analysis;
+  /// RizzGPT / Profil Doktoru hakkı (2026-11-24: yalnız foto paketiyle hediye gelir).
+  final int rizz;
+  final int doctor;
   final bool freePhotoUsed; // AI foto ücretsiz denemesi kullanıldı mı
   final bool freeAnalysisUsed; // foto analizi ücretsiz denemesi kullanıldı mı
   /// Satın alınan paketlerin defteri (wallet.photoPacks: boy -> adet).
@@ -413,6 +416,8 @@ class PackBalance {
   const PackBalance({
     this.photo = 0,
     this.analysis = 0,
+    this.rizz = 0,
+    this.doctor = 0,
     this.freePhotoUsed = false,
     this.freeAnalysisUsed = false,
     this.photoPacks = const {},
@@ -420,12 +425,16 @@ class PackBalance {
   PackBalance copyWith(
           {int? photo,
           int? analysis,
+          int? rizz,
+          int? doctor,
           bool? freePhotoUsed,
           bool? freeAnalysisUsed,
           Map<int, int>? photoPacks}) =>
       PackBalance(
         photo: photo ?? this.photo,
         analysis: analysis ?? this.analysis,
+        rizz: rizz ?? this.rizz,
+        doctor: doctor ?? this.doctor,
         freePhotoUsed: freePhotoUsed ?? this.freePhotoUsed,
         freeAnalysisUsed: freeAnalysisUsed ?? this.freeAnalysisUsed,
         photoPacks: photoPacks ?? this.photoPacks,
@@ -510,6 +519,8 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
     state = PackBalance(
       photo: prefs.getInt(DatingKeys.packPhotoBalance) ?? 0,
       analysis: prefs.getInt(DatingKeys.packAnalysisBalance) ?? 0,
+      rizz: prefs.getInt(DatingKeys.packRizzBalance) ?? 0,
+      doctor: prefs.getInt(DatingKeys.packDoctorBalance) ?? 0,
     );
     // Yeni kurulumda cüzdan dokümanı henüz YOK — Firestore dinleyicisi hiç
     // tetiklenmez. Ücretsiz hak hatırlatmasının hedefi tam olarak bu
@@ -531,6 +542,8 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
       state = PackBalance(
         photo: (data['photoBalance'] as num?)?.toInt() ?? 0,
         analysis: (data['analysisBalance'] as num?)?.toInt() ?? 0,
+        rizz: (data['rizzBalance'] as num?)?.toInt() ?? 0,
+        doctor: (data['profileDoctorBalance'] as num?)?.toInt() ?? 0,
         freePhotoUsed: data['freePhotoUsed'] == true,
         freeAnalysisUsed: data['freeAnalysisUsed'] == true,
         photoPacks: {
@@ -587,6 +600,8 @@ class PackBalanceNotifier extends StateNotifier<PackBalance> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(DatingKeys.packPhotoBalance, state.photo);
     await prefs.setInt(DatingKeys.packAnalysisBalance, state.analysis);
+    await prefs.setInt(DatingKeys.packRizzBalance, state.rizz);
+    await prefs.setInt(DatingKeys.packDoctorBalance, state.doctor);
   }
 
   // NOT: Bakiye düşümü artık YEREL yapılmaz. Foto üretiminde

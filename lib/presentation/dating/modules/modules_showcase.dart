@@ -164,12 +164,13 @@ class _ModulesShowcaseScreenState extends ConsumerState<ModulesShowcaseScreen> {
           _PriceRow(
             icon: Icons.auto_awesome,
             title: tier.title,
-            sub: '${tier.photos} fotoğraf + ${tier.addOnRuns} analiz',
+            sub: '${tier.photos} AI dating fotoğrafı',
             price: _price(effectiveId),
             busy: _busy && _busyProductId == effectiveId,
             onTap: () => _buy(tier),
           ),
-          GiftAnalysisRow(compact: true, runs: tier.addOnRuns),
+          GiftAnalysisRow(
+          compact: true, runs: tier.addOnRuns, rizzRuns: tier.rizzRuns, doctorRuns: tier.doctorRuns),
         ],
       ),
     );

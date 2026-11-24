@@ -129,8 +129,11 @@ class AnalysisAddOnTile extends StatelessWidget {
 /// fiyatlandırması: analiz artık her pakette dahil, ayrıca seçilmiyor).
 class GiftAnalysisRow extends StatelessWidget {
   final int runs;
+  final int rizzRuns;
+  final int doctorRuns;
   final bool compact;
-  const GiftAnalysisRow({super.key, required this.runs, this.compact = false});
+  const GiftAnalysisRow(
+      {super.key, required this.runs, this.rizzRuns = 0, this.doctorRuns = 0, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -150,17 +153,25 @@ class GiftAnalysisRow extends StatelessWidget {
               size: compact ? 14 : 16, color: AppColors.gold),
           SizedBox(width: compact ? 8 : 10),
           Expanded(
-            child: Text(
-              '+$runs Foto Analizi hediye',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: compact ? 11.5 : 13,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                [
+                  if (runs > 0) '+$runs Analiz',
+                  if (rizzRuns > 0) '+$rizzRuns RizzGPT',
+                  if (doctorRuns > 0) '+$doctorRuns Profil Doktoru',
+                ].join(' · '),
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: compact ? 11.5 : 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
               ),
             ),
           ),
+          const SizedBox(width: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(

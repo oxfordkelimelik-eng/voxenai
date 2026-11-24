@@ -9,11 +9,12 @@ import '../widgets/discounted_price.dart';
 import 'purchase_auth_gate.dart';
 
 /// Hangi paket grubunun gösterileceği.
-enum PaywallMode { all, analysis, aiPhoto }
+enum PaywallMode { all, analysis, aiPhoto, tools }
 
 PaywallMode paywallModeFromQuery(String? mode) => switch (mode) {
   'analysis' => PaywallMode.analysis,
   'ai_photo' => PaywallMode.aiPhoto,
+  'tools' => PaywallMode.tools,
   _ => PaywallMode.all,
 };
 
@@ -72,6 +73,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   String get _title => switch (widget.mode) {
     PaywallMode.analysis => 'Fotoğraf Analizini Aç',
     PaywallMode.aiPhoto => 'AI Dating Fotoğraf Paketi',
+    PaywallMode.tools => 'RizzGPT ve Profil Doktoru',
     PaywallMode.all => 'Devam etmek için paket al',
   };
 
@@ -83,6 +85,10 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           'Bir paket seç, analiz hakların otomatik eklenir.',
     PaywallMode.aiPhoto =>
       'Kalan AI fotoğraflarını açmak için tek seferlik paket al.',
+    // 2026-11-24: iki modülün günlük ücretsiz hakkı kalktı; hak yalnız foto paketinde hediye.
+    PaywallMode.tools =>
+      'RizzGPT ve Profil Doktoru hakları her AI foto paketinde HEDİYE. '
+          'Bir paket seç, hakların otomatik eklenir.',
     PaywallMode.all =>
       'Abonelik yok. Tek ödemeyle belirli sayıda kullanım al; bitince istersen yeniden alırsın.',
   };
@@ -97,14 +103,15 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
     return _PackCard(
       icon: Icons.auto_awesome,
       title: tier.title,
-      sub: '${tier.photos} fotoğraf + ${tier.addOnRuns} analiz',
+      sub: '${tier.photos} AI dating fotoğrafı',
       // Fiyat analiz hediyeli paketin KENDİ mağaza fiyatı.
       price: _price(effectiveId),
       badge: tier.badge,
       selected: _selectedTierId == tier.soloProductId,
       busy: _busyProductId == effectiveId,
       onTap: _busy ? null : () => _selectTier(tier.soloProductId),
-      addOnRow: GiftAnalysisRow(compact: true, runs: tier.addOnRuns),
+      addOnRow: GiftAnalysisRow(
+          compact: true, runs: tier.addOnRuns, rizzRuns: tier.rizzRuns, doctorRuns: tier.doctorRuns),
     );
   }
 

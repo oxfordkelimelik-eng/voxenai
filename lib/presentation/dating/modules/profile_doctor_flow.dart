@@ -19,6 +19,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/dating_constants.dart';
 import '../../../core/router/dating_routes.dart';
 import '../../providers/app_providers.dart' show authServiceProvider;
+import '../providers/dating_providers.dart' show packBalanceProvider;
 import '../paywall/purchase_auth_gate.dart';
 import '../profile_doctor_service.dart';
 import '../rizz_service.dart' show encodeRizzImages, kRizzMaxImages, RizzImageException, reportRizzReply;
@@ -106,8 +107,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
       context,
       ref,
       title: 'Profil Doktoru için giriş yap',
-      body: 'Günlük ücretsiz hakların hesabına tanımlanır; bu yüzden giriş '
-          'yapman gerekiyor. Ücret alınmaz.',
+      body: 'Profil Doktoru hakların hesabına tanımlı; bu yüzden giriş yapman gerekiyor.',
     );
   }
 
@@ -161,6 +161,13 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
         if (!mounted) return;
         setState(() => _stage = _Stage.intro);
         if (await _ensureSignedIn()) _run();
+        return;
+      }
+      // Hak yok (2026-11-24: hak yalnız foto paketinde hediye): paket ekranı; alınırsa aynı istek yeniden.
+      if (reason == 'quota' && mounted) {
+        setState(() => _stage = _result != null ? _Stage.result : _Stage.intro);
+        final bought = await context.push<bool>('${DatingRoutes.paywall}?mode=tools');
+        if (bought == true && mounted) _run();
         return;
       }
       if (!mounted) return;
@@ -273,7 +280,7 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
       bottom: ToolCta(
         label: 'Muayeneye Başla 🩺',
         onPressed: _shots.isEmpty ? null : _run,
-        footnote: 'Her gün ücretsiz • Ekran görüntün bizde kalmaz',
+        footnote: 'Kalan hakkın: ${ref.watch(packBalanceProvider).doctor} • Ekran görüntün bizde kalmaz',
       ),
       children: [
         const ToolIntroHeader(
@@ -338,10 +345,8 @@ class _ProfileDoctorFlowState extends ConsumerState<ProfileDoctorFlow> {
         mainAxisSize: MainAxisSize.min,
         children: [
           PrimaryButton(label: 'Yeni Muayene', onPressed: _reset),
-          if (r.freeLeft != null && r.dailyFree != null) ...[
-            const SizedBox(height: 8),
-            ToolQuotaLine(left: r.freeLeft!, total: r.dailyFree!),
-          ],
+          const SizedBox(height: 8),
+          ToolQuotaLine(left: ref.watch(packBalanceProvider).doctor, unit: 'Profil Doktoru'),
         ],
       ),
       children: [

@@ -17,7 +17,9 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../providers/app_providers.dart' show authServiceProvider;
 import '../paywall/purchase_auth_gate.dart';
-import '../providers/dating_providers.dart' show datingAnswersProvider;
+import 'package:go_router/go_router.dart';
+import '../../../core/router/dating_routes.dart';
+import '../providers/dating_providers.dart' show datingAnswersProvider, packBalanceProvider;
 import '../rizz_service.dart';
 import '../widgets/ai_consent_gate.dart';
 import '../widgets/dating_widgets.dart' show PrimaryButton;
@@ -58,8 +60,6 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
   final List<String> _shown = [];
   // "Taraflar ters" sonrası düzeltilen okuma: sonraki takiplerde de gönderilir ki düzeltme kalıcı olsun.
   List<RizzMessage> _swapFrom = const [];
-  int? _freeLeft;
-  int? _dailyFree;
   bool _followBusy = false;
   String? _error;
   bool _noRetry = false;
@@ -73,8 +73,6 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
     _parentId = r.requestId;
     _followupsLeft = r.followupsLeft;
     _moreTone = _tone;
-    _freeLeft = r.freeLeft;
-    _dailyFree = r.dailyFree;
     _stage = _Stage.result;
   }
 
@@ -117,8 +115,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       context,
       ref,
       title: 'RizzGPT için giriş yap',
-      body: 'Günlük ücretsiz cevap hakların hesabına tanımlanır; bu yüzden '
-          'giriş yapman gerekiyor. Ücret alınmaz.',
+      body: 'RizzGPT hakların hesabına tanımlı; bu yüzden giriş yapman gerekiyor.',
     );
   }
 
@@ -151,8 +148,6 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         _moreTone = _tone;
         _swapUsed = false;
         _swapFrom = const [];
-        _freeLeft = r.freeLeft;
-        _dailyFree = r.dailyFree;
         _shown
           ..clear()
           ..addAll(r.replies.map((e) => e.text));
@@ -187,6 +182,14 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       if (!mounted) return;
       setState(() => _stage = _Stage.intro);
       if (await _ensureSignedIn()) _run();
+      return;
+    }
+    // Hak yok (2026-11-24: hak yalnız foto paketinde hediye): paket ekranı; alınırsa aynı istek yeniden.
+    if (reason == 'quota' && mounted) {
+      final stage = _result != null ? _Stage.result : _Stage.intro;
+      setState(() => _stage = stage);
+      final bought = await context.push<bool>('${DatingRoutes.paywall}?mode=tools');
+      if (bought == true && mounted) _run();
       return;
     }
     if (!mounted) return;
@@ -325,7 +328,7 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
       bottom: ToolCta(
         label: opener ? 'Açılışımı Yaz ⚡' : 'Cevaplarımı Getir ⚡',
         onPressed: _shots.isEmpty ? null : _run,
-        footnote: 'Her gün ücretsiz • Ekran görüntün bizde kalmaz',
+        footnote: 'Kalan hakkın: ${ref.watch(packBalanceProvider).rizz} • Ekran görüntün bizde kalmaz',
       ),
       children: [
         ToolIntroHeader(
@@ -395,10 +398,8 @@ class _RizzFlowState extends ConsumerState<RizzFlow> {
         mainAxisSize: MainAxisSize.min,
         children: [
           PrimaryButton(label: 'Yeni Sohbet At', onPressed: _reset),
-          if (_freeLeft != null && _dailyFree != null) ...[
-            const SizedBox(height: 8),
-            ToolQuotaLine(left: _freeLeft!, total: _dailyFree!),
-          ],
+          const SizedBox(height: 8),
+          ToolQuotaLine(left: ref.watch(packBalanceProvider).rizz, unit: 'RizzGPT'),
         ],
       ),
       children: [

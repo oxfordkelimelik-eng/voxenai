@@ -34,7 +34,9 @@ const { str, oneOf, nullable, normText, similarity, NEAR_DUP } = T;
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 
 // 2026-11-23 kullanıcı: günlük ücretsiz 5 → 3; sonuç başına "yenilerini getir" 3 → 1.
-const DEFAULTS = { enabled: true, dailyFree: 3, dailyAttempts: 40, model: "gpt-4.1" };
+// 2026-11-24 kullanıcı: günlük ücretsiz hak KALDIRILDI (0) — hak yalnız foto paketiyle gelen
+// rizzBalance'tan (bkz. payments.js TOOLS_*). Paketsiz kullanıcıda modül kilitli.
+const DEFAULTS = { enabled: true, dailyFree: 0, dailyAttempts: 40, model: "gpt-4.1" };
 const FOLLOWUP_MAX = 1;
 // "Taraflar ters mi?" düzeltmesi ayrı sayılır (yanlış okumayı düzeltmek "yenilerini getir" hakkını yemesin).
 const SWAP_FIX_MAX = 1;
@@ -452,7 +454,9 @@ exports.rizzReply = onCall(
     const resv = await T.reserveUse({
       uid, feature: "rizz", balanceField: "rizzBalance", cfg, parentId: req.parentId, digestOf: digestOf(req),
       followupMax: req.swapFix ? SWAP_FIX_MAX : FOLLOWUP_MAX, followupField: req.swapFix ? "swaps" : "followups", now,
-      quotaMessage: `Bugünkü ${cfg.dailyFree} ücretsiz RizzGPT hakkını kullandın. Yarın yenilenir.`,
+      quotaMessage: cfg.dailyFree > 0
+        ? `Bugünkü ${cfg.dailyFree} ücretsiz hakkını ve RizzGPT hakkını kullandın.`
+        : "RizzGPT hakkın kalmadı. AI foto paketlerinde RizzGPT hakkı hediye.",
     });
 
     // 2) MODEL + son denetim + moderasyon (cevaplar + röntgen metinleri). Hata → iade.

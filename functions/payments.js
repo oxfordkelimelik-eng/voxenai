@@ -25,6 +25,17 @@ const IOS_BUNDLE_ID = "com.voxenai.app";
 //
 // photoBalance ARTIK FOTO SAYAR (eskiden "stil/set" sayardı, 1 birim = 10
 // foto). Bkz. falPhotos.photoUnitsFor.
+//
+// RIZZGPT + PROFİL DOKTORU HEDİYESİ (2026-11-24, kullanıcı kararı): iki modülün
+// günlük ücretsiz hakkı kaldırıldı; hak YALNIZ foto paketiyle, adetli gelir
+// (5'li: 3 + 2, 10'lu: 7 + 5, 25'li ve üstü: 10 + 10). Fiyatlar aynı, ürün
+// ID'leri aynı — yalnız yüklenen alanlar arttı. Her foto ürününe foto
+// sayısına göre eklenir (eski ID'lerle alınan da aynı hediyeyi alır).
+// lib/core/constants/dating_constants.dart PhotoPackTier.rizzRuns/doctorRuns
+// ile EL İLE senkron.
+const TOOLS_5 = { rizzBalance: 3, profileDoctorBalance: 2 };
+const TOOLS_10 = { rizzBalance: 7, profileDoctorBalance: 5 };
+const TOOLS_25 = { rizzBalance: 10, profileDoctorBalance: 10 };
 const PRODUCT_CREDITS = {
   // TEK BAŞINA SATIŞ KALDIRILACAK (2026-09-21, henüz kaldırılmadı): yeni
   // modelde analiz paketleri yalnızca bir AI Foto paketinin yanında opsiyonel
@@ -51,9 +62,9 @@ const PRODUCT_CREDITS = {
   // YENİ ID'lerle ekleniyor (bkz. aşağıdaki blok) — tıpkı Ağustos'taki
   // photo10->photos5 geçişinde yapıldığı gibi (bkz. dating_constants.dart
   // "YENİ ÜRÜN ID'LERİ" notu).
-  dating_pack_photos5: { photoBalance: 5 },                        // ₺349
-  dating_pack_photos10: { photoBalance: 10, analysisBalance: 1 },  // ₺499 (+1 hediye)
-  dating_pack_photos25: { photoBalance: 25, analysisBalance: 3 },  // ₺999 (+3 hediye)
+  dating_pack_photos5: { photoBalance: 5, ...TOOLS_5 },            // ₺349
+  dating_pack_photos10: { photoBalance: 10, analysisBalance: 1, ...TOOLS_10 },  // ₺499 (+1 hediye)
+  dating_pack_photos25: { photoBalance: 25, analysisBalance: 3, ...TOOLS_25 },  // ₺999 (+3 hediye)
 
   // --- OPSİYONEL ANALİZ EKLENTİLİ PAKETLER (2026-09-21) ---
   //
@@ -70,12 +81,12 @@ const PRODUCT_CREDITS = {
   // eski nesil ID'lerin HİÇBİRİNE bağlanmazsa, eski üçlü (photos5/10/25)
   // ileride tek seferde Remove From Sale edilebilir. Yeni paywall eski
   // ID'ye bağlı kalsaydı o ürün sonsuza kadar satışta tutulmak zorundaydı.
-  dating_pack_photos5_solo: { photoBalance: 5 },                            // ₺349 (analizsiz)
-  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1 },   // ₺799 (2026-09-28, analiz hediye)
-  dating_pack_photos10_solo: { photoBalance: 10 },                          // ₺499 (analizsiz)
-  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3 }, // ₺999 (2026-09-28, analiz hediye)
-  dating_pack_photos25_solo: { photoBalance: 25 },                          // ₺999 (analizsiz)
-  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5 }, // ₺1.799 (2026-09-28, analiz hediye)
+  dating_pack_photos5_solo: { photoBalance: 5, ...TOOLS_5 },                            // ₺349 (analizsiz)
+  dating_pack_photos5_analysis1: { photoBalance: 5, analysisBalance: 1, ...TOOLS_5 },   // ₺799 (2026-09-28, analiz hediye)
+  dating_pack_photos10_solo: { photoBalance: 10, ...TOOLS_10 },                          // ₺499 (analizsiz)
+  dating_pack_photos10_analysis3: { photoBalance: 10, analysisBalance: 3, ...TOOLS_10 }, // ₺999 (2026-09-28, analiz hediye)
+  dating_pack_photos25_solo: { photoBalance: 25, ...TOOLS_25 },                          // ₺999 (analizsiz)
+  dating_pack_photos25_analysis5: { photoBalance: 25, analysisBalance: 5, ...TOOLS_25 }, // ₺1.799 (2026-09-28, analiz hediye)
 
   // --- ESKİ ÜRÜNLER — SİLİNMEZ ---
   // Mağazadan kaldırılsalar bile iki yol bu ID'leri hâlâ gönderebilir:
@@ -84,8 +95,8 @@ const PRODUCT_CREDITS = {
   // Haritadan silinirlerse o kullanıcı "Bilinmeyen ürün" hatası alır ve
   // parasının karşılığını alamaz. Foto birimine çevrilmiş hâlleriyle
   // duruyorlar: eskiden 1 birim = 10 foto, 5 birim = 50 foto idi.
-  dating_pack_photo10: { photoBalance: 10 },
-  dating_pack_photo50: { photoBalance: 50 },
+  dating_pack_photo10: { photoBalance: 10, ...TOOLS_10 },
+  dating_pack_photo50: { photoBalance: 50, ...TOOLS_25 },
 };
 
 function sleep(ms) {

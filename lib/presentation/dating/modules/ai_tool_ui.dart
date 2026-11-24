@@ -770,30 +770,23 @@ class ToolSecondaryButton extends StatelessWidget {
 }
 
 /// Bugün kalan ücretsiz hak: nokta göstergesi + metin.
+/// Kalan paket hakkı (2026-11-24: günlük ücretsiz hak kalktı; hak foto paketiyle hediye gelir).
 class ToolQuotaLine extends StatelessWidget {
   final int left;
-  final int total;
-  const ToolQuotaLine({super.key, required this.left, required this.total});
+  final String unit; // 'RizzGPT' | 'Profil Doktoru'
+  const ToolQuotaLine({super.key, required this.left, required this.unit});
 
   @override
   Widget build(BuildContext context) {
-    final dots = total.clamp(0, 10);
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        for (int i = 0; i < dots; i++)
-          Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(
-              color: i < left ? AppColors.gold : AppColors.surfaceHighest,
-              shape: BoxShape.circle,
-            ),
-          ),
-        const SizedBox(width: 8),
+        Icon(left > 0 ? Icons.bolt_rounded : Icons.lock_outline_rounded,
+            size: 14, color: left > 0 ? AppColors.gold : AppColors.textMuted),
+        const SizedBox(width: 4),
         Flexible(
-          child: ToolFitText('Bugün kalan ücretsiz hak: $left/$total',
+          child: ToolFitText(
+              left > 0 ? 'Kalan $unit hakkın: $left' : '$unit hakkın bitti · AI foto paketlerinde hediye',
               style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
         ),
       ],

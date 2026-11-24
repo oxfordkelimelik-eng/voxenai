@@ -23,7 +23,10 @@ const { str, oneOf, nullable, similarity, NEAR_DUP } = T;
 
 const OPENAI_KEY = defineSecret("OPENAI_API_KEY");
 
-const DEFAULTS = { enabled: true, dailyFree: 2, dailyAttempts: 12, model: "gpt-4.1" };
+// 2026-11-24 kullanıcı: günlük ücretsiz hak KALDIRILDI (0) — hak yalnız foto paketiyle gelen
+// profileDoctorBalance'tan (bkz. payments.js TOOLS_*). Deneme tavanı 12 → 30: 25'lik pakette 10 hak
+// + her birine 1 "başka reçete" bir günde kullanılabilsin.
+const DEFAULTS = { enabled: true, dailyFree: 0, dailyAttempts: 30, model: "gpt-4.1" };
 // 2026-11-23 kullanıcı: "başka reçete yaz" sonuç başına yalnız 1 ek hak (2 → 1).
 const FOLLOWUP_MAX = 1;
 const MAX_IMAGES = 6;
@@ -334,7 +337,9 @@ exports.profileDoctor = onCall(
     const resv = await T.reserveUse({
       uid, feature: "profileDoctor", balanceField: "profileDoctorBalance", cfg, parentId: req.parentId,
       digestOf: digestOf(req), followupMax: FOLLOWUP_MAX, now,
-      quotaMessage: `Bugünkü ${cfg.dailyFree} ücretsiz Profil Doktoru hakkını kullandın. Yarın yenilenir.`,
+      quotaMessage: cfg.dailyFree > 0
+        ? `Bugünkü ${cfg.dailyFree} ücretsiz hakkını ve Profil Doktoru hakkını kullandın.`
+        : "Profil Doktoru hakkın kalmadı. AI foto paketlerinde Profil Doktoru hakkı hediye.",
     });
 
     const key = OPENAI_KEY.value();
@@ -377,7 +382,9 @@ exports.profileDoctor = onCall(
     return {
       requestId: requestId || null,
       charged: chargeable,
-      quota: resv.kind === "new" && chargeable ? { dailyFree: resv.quota.dailyFree, freeLeft: resv.quota.freeLeft } : null,
+      quota: resv.kind === "new" && chargeable
+        ? { dailyFree: resv.quota.dailyFree, freeLeft: resv.quota.freeLeft, profileDoctorBalance: resv.quota.balance }
+        : null,
       focus: req.focus,
       status: result.status,
       platform: result.platform,

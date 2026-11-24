@@ -47,6 +47,15 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
     context.push('${DatingRoutes.module}/${m.id}');
   }
 
+  /// RizzGPT / Profil Doktoru KİLİDİ (2026-11-24, kullanıcı: "günlük ücretsiz kısmını kaldır, paket alındığı
+  /// kadar adetli"): hakkı olmayan önce paket ekranına gider; paket alırsa modül açılır. Sunucu da
+  /// hakkı denetler (rizz.js / profileDoctor.js dailyFree=0) — bu yalnız boşuna ekran görüntüsü seçtirmemek için.
+  Future<void> _openTool(DatingModule m, int left) async {
+    if (left > 0) return _openModule(m);
+    final bought = await context.push<bool>('${DatingRoutes.paywall}?mode=tools');
+    if (bought == true && mounted) _openModule(m);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -170,7 +179,8 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                   visual: const RizzCoverVisual(),
                   title: 'RizzGPT',
                   pitch: 'Beynin dondu mu? 3 cevap çoktan hazır.',
-                  onTap: () => _openModule(DatingModule.rizz),
+                  left: ref.watch(packBalanceProvider).rizz,
+                  onTap: () => _openTool(DatingModule.rizz, ref.read(packBalanceProvider).rizz),
                 ),
               ),
               const SizedBox(width: 12),
@@ -179,7 +189,8 @@ class _ModuleHubScreenState extends ConsumerState<ModuleHubScreen> {
                   visual: const DoctorCoverVisual(),
                   title: 'Profil Doktoru',
                   pitch: 'Profiline dürüst bir ikinci göz',
-                  onTap: () => _openModule(DatingModule.profileDoctor),
+                  left: ref.watch(packBalanceProvider).doctor,
+                  onTap: () => _openTool(DatingModule.profileDoctor, ref.read(packBalanceProvider).doctor),
                 ),
               ),
             ],
@@ -368,7 +379,10 @@ class _MiniCard extends StatelessWidget {
   final String title;
   final String pitch;
   final VoidCallback onTap;
-  const _MiniCard({required this.visual, required this.title, required this.pitch, required this.onTap});
+  /// Kalan hak: 0 ise kart köşesinde kilit + "Pakette hediye" görünür.
+  final int left;
+  const _MiniCard(
+      {required this.visual, required this.title, required this.pitch, required this.onTap, required this.left});
 
   @override
   Widget build(BuildContext context) {
@@ -383,7 +397,11 @@ class _MiniCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 visual,
-                const Positioned(left: 10, top: 10, child: _Badge('YENİ')),
+                Positioned(
+                  left: 10,
+                  top: 10,
+                  child: left > 0 ? _Badge('$left HAK') : const _Badge('PAKETTE HEDİYE', icon: Icons.lock_rounded),
+                ),
               ],
             ),
           ),
@@ -446,21 +464,31 @@ class _CardShell extends StatelessWidget {
 
 class _Badge extends StatelessWidget {
   final String text;
-  const _Badge(this.text);
+  final IconData? icon;
+  const _Badge(this.text, {this.icon});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(6)),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 9.5,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.6,
-          color: AppColors.textOnGold,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: AppColors.textOnGold),
+            const SizedBox(width: 3),
+          ],
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.6,
+              color: AppColors.textOnGold,
+            ),
+          ),
+        ],
       ),
     );
   }

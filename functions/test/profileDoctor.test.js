@@ -172,6 +172,10 @@ test("ortak: hak kararı, deneme tavanı varsayılanları, gün anahtarı", () =
   assert.deepStrictEqual(T.quotaDecision({ usedToday: 2, dailyFree: 2, balance: 1 }), { source: "balance" });
   assert.ok(P.DEFAULTS.dailyAttempts >= P.DEFAULTS.dailyFree * (P.FOLLOWUP_MAX + 1));
   assert.ok(R.DEFAULTS.dailyAttempts >= R.DEFAULTS.dailyFree * (R.FOLLOWUP_MAX + 1));
+  // 2026-11-24: en büyük paketin hakkı (10) ek haklarıyla bir günde kullanılabilsin.
+  assert.strictEqual(P.DEFAULTS.dailyFree, 0);
+  assert.ok(P.DEFAULTS.dailyAttempts >= 10 * (P.FOLLOWUP_MAX + 1));
+  assert.ok(R.DEFAULTS.dailyAttempts >= 10 * (R.FOLLOWUP_MAX + R.SWAP_FIX_MAX + 1));
   assert.strictEqual(T.dayKey(Date.UTC(2026, 10, 22, 21, 30)), "2026-11-23");
 });
 

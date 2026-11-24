@@ -198,6 +198,8 @@ class DatingConfig {
       soloProductId: photoStarterSoloProductId,
       addOnProductId: photoStarterAnalysisAddOnProductId,
       addOnRuns: photoStarterAnalysisAddOnRuns,
+      rizzRuns: 3,
+      doctorRuns: 2,
     ),
     PhotoPackTier(
       title: 'Premium Paket',
@@ -205,6 +207,8 @@ class DatingConfig {
       soloProductId: photoStandardSoloProductId,
       addOnProductId: photoStandardAnalysisAddOnProductId,
       addOnRuns: photoStandardAnalysisAddOnRuns,
+      rizzRuns: 7,
+      doctorRuns: 5,
       badge: 'EN POPÜLER',
     ),
     PhotoPackTier(
@@ -213,6 +217,8 @@ class DatingConfig {
       soloProductId: photoPremiumSoloProductId,
       addOnProductId: photoPremiumAnalysisAddOnProductId,
       addOnRuns: photoPremiumAnalysisAddOnRuns,
+      rizzRuns: 10,
+      doctorRuns: 10,
       badge: 'EN İYİ DEĞER',
     ),
   ];
@@ -258,6 +264,10 @@ class PhotoPackTier {
   final String soloProductId;
   final String addOnProductId;
   final int addOnRuns;
+  /// Pakette HEDİYE RizzGPT / Profil Doktoru hakkı (2026-11-24; iki modülün günlük ücretsiz hakkı
+  /// kaldırıldı). functions/payments.js TOOLS_5/10/25 ile EL İLE senkron.
+  final int rizzRuns;
+  final int doctorRuns;
   final String? badge;
   const PhotoPackTier({
     required this.title,
@@ -265,6 +275,8 @@ class PhotoPackTier {
     required this.soloProductId,
     required this.addOnProductId,
     required this.addOnRuns,
+    required this.rizzRuns,
+    required this.doctorRuns,
     this.badge,
   });
 
@@ -400,6 +412,8 @@ class DatingKeys {
   // Tek seferlik paketle satın alınan bakiye
   static const String packPhotoBalance = 'dating_pack_photo';
   static const String packAnalysisBalance = 'dating_pack_analysis';
+  static const String packRizzBalance = 'dating_pack_rizz';
+  static const String packDoctorBalance = 'dating_pack_doctor';
   // Kullanıcı App Store/Play Store puanlama pop-up'ını daha önce tetikledik mi?
   // (bkz. review_prompt_service.dart) — Apple'ın kendisi zaten pop-up'ın kaç
   // kez GÖRÜNECEĞİNİ sınırlıyor, bu ayrıca "bir daha hiç çağırma" bayrağı.
