@@ -830,7 +830,10 @@ function templateShade(a, W, H) {
 // en az bu kadar MST koyuysa o fark kısmen tendir (siyahi şablonun kolu yüzünden koyu) ve %80'i
 // kullanıcının koluna taşınıyordu (kol 12.9 L "düzeldi" ama yüzden koyu kaldı). Bu durumda gölge
 // 0: hedef doğrudan yüz tonu; şablon deri varlığı kapısı (bej pantolon) aynen kalır.
-const SHADE_PIGMENT_GAP = 2;
+// 2 → 3 (2026-11-25, 947807a7): aynı kişi yeni çekimde MST 5 yerine 4 ölçüldü; MST 6 (bronz) şablonlarda
+// fark 2 olup gölge düşürüldü (c5/c8/c9). ±1 MST tahmin hatası 2 adımı tetikleyebiliyor; kuralın çıktığı
+// 185655bf c3 (şablon 8, kullanıcı 5) fark 3 — korunuyor. faceTone PIGMENT_FULL_GAP ile aynı gerekçe.
+const SHADE_PIGMENT_GAP = 3;
 // GÜÇLÜ EŞLEME (aynı gün, kullanıcı: "parmaklar hâlâ siyahi ... eller kollar yüz ile tamamen aynı tonda
 // olmalı"). Gölge 0 olunca bile uzuv medyanı yüzden ~5 L koyu (185655bf c3: yüz 55.9, uzuv 50.7,
 // en koyu %10 41.4) kalıyordu: hedef karışımı (şablon güveni w<1 → kendi ışığı) ve koyu piksel kapısı

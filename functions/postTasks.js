@@ -212,7 +212,9 @@ const SKIN_FIELD_SIMPLE = true;
 //   sınıfı gökyüzünde) headAlpha'da kişi maskesiyle düzeltildi.
 // 2026-11-22 STRUCT AÇIK (kullanıcı: "yüz hatları daha belli olsun"): faceDetail.STRUCT.BASE 1.5 taban
 // güç (şablondan bağımsız), MAX 1.7; 4 karede ×1.3/1.5/1.7 karşılaştırıldı, 1.5 seçildi.
-const FINISH = { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: true, DETAIL: true };
+// 2026-11-25 STRUCT GERİ KAPALI (kullanıcı: "detay/gren değişikliklerini geri alalım"; 947807a7 c9 yüz grileşmesi
+// ve c4 sert sakal konturu bu adımdandı). faceDetail.structOf sakalı dışlayan, çarpımsal sürümde kaldı.
+const FINISH = { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: false, DETAIL: true };
 const PROFILE_CACHE = new Map();
 const PROFILE_CACHE_MAX = 4;
 const PROFILE_FETCH_MS = 15000;
@@ -287,7 +289,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const { matchFaceToScene } = require("./faceTone");
     const ft = await matchFaceToScene(out, tpl, { mstUser, mstTpl });
     const n = (v, d = 1) => (v != null && Number.isFinite(v) ? v.toFixed(d) : "null");
-    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)}/${n(ft.albedoLight, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)}${ft.lightCap ? ` açıkŞablonSınırı=×${n(Math.exp(ft.lightCap.from), 2)}→×${n(Math.exp(ft.lightCap.to), 2)}` : ""} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} boyunRenk=${ft.neckAB ? `${n(ft.neckAB[0])}/${n(ft.neckAB[1])}` : "-"}→yüz${ft.faceUpperAB ? `${n(ft.faceUpperAB[0])}/${n(ft.faceUpperAB[1])}` : "-"} kayma=${ft.neckShift ? `${n(ft.neckShift[0])}/${n(ft.neckShift[1])}` : "-"} şablonBoyunYüz=${n(ft.neckDeltaTpl)} şablonÇevreL=${n(ft.tplRingL)} karanlıkSahne=${ft.darkScene ? (ft.deep ? "derin" : "evet") : "hayır"} arkadanIşık=${ft.backlit ? "evet" : "hayır"} boyunİşareti=${ft.pigmentApart ? "kapalı[ten farkı]" : ft.neckLog != null ? "×" + n(Math.exp(ft.neckLog), 2) + (ft.neckUsed ? " uygulandı" : " yok") : "—"}`;
+    const ölçü = `yüzL çıktı=${n(ft.outL)} şablon=${n(ft.tplL)} hedef=${n(ft.targetL)} vücutOranı=${n(ft.bodyRatio, 2)} pigment[MST ${mstUser ?? "?"}/${mstTpl ?? "?"}]=${n(ft.albedo, 2)}/${n(ft.albedoLight, 2)} kazanç=×${n(Math.exp(ft.logGain || 0), 2)}${ft.lightCap ? ` açıkŞablonSınırı=×${n(Math.exp(ft.lightCap.from), 2)}→×${n(Math.exp(ft.lightCap.to), 2)}` : ""}${ft.darkCap ? ` koyuŞablonSınırı=×${n(Math.exp(ft.darkCap.from), 2)}→×${n(Math.exp(ft.darkCap.to), 2)}` : ""} renk=${n(ft.da)}/${n(ft.db)} ışıkEğimi=${n(ft.gu, 2)}/${n(ft.gv, 2)} şablonEğim=${ft.tplSlope || "null"} çıktıEğim=${ft.outSlope || "null"} boyunYüzFarkıL=${n(ft.neckDeltaBefore)}→${n(ft.neckDeltaAfter)} boyunRenk=${ft.neckAB ? `${n(ft.neckAB[0])}/${n(ft.neckAB[1])}` : "-"}→yüz${ft.faceUpperAB ? `${n(ft.faceUpperAB[0])}/${n(ft.faceUpperAB[1])}` : "-"} kayma=${ft.neckShift ? `${n(ft.neckShift[0])}/${n(ft.neckShift[1])}` : "-"} şablonBoyunYüz=${n(ft.neckDeltaTpl)} şablonÇevreL=${n(ft.tplRingL)} karanlıkSahne=${ft.darkScene ? (ft.deep ? "derin" : "evet") : "hayır"} arkadanIşık=${ft.backlit ? "evet" : "hayır"} boyunİşareti=${ft.pigmentApart ? "kapalı[ten farkı]" : ft.neckLog != null ? "×" + n(Math.exp(ft.neckLog), 2) + (ft.neckUsed ? " uygulandı" : " yok") : "—"}`;
     if (ft.applied && ft.buf) out = ft.buf;
     console.log(`YÜZ SAHNE IŞIĞI (${tag}): ${ft.applied ? "UYGULANDI" : `ATLANDI[${ft.reason}]`} ${ölçü}${ft.ms != null ? ` ${ft.ms}ms` : ""}`);
   } catch (e) {
@@ -340,7 +342,7 @@ async function simpleFinish({ buf, tpl, styleId, chunkIdx, templateEyewear = fal
     const gl = await lockGazeToBase(out, tpl, { templateEyewear });
     if (gl.applied && gl.buf) out = gl.buf;
     const f = (a) => (Array.isArray(a) ? a.map((x) => (x == null ? "-" : x.toFixed(2))).join("/") : "-");
-    console.log(`BAKIŞ KİLİDİ (${tag}): ${gl.applied ? "UYGULANDI" : `ATLANDI[${gl.reason}]`} base=${f(gl.base)} çıktı=${f(gl.before)}→${f(gl.after)} kayma=${f(gl.du)} telafi=${gl.comp != null ? gl.comp.toFixed(2) : "-"}${gl.camera ? " kamera" : ""} ${gl.ms}ms`);
+    console.log(`BAKIŞ KİLİDİ (${tag}): ${gl.applied ? "UYGULANDI" : `ATLANDI[${gl.reason}]`} base=${f(gl.base)} çıktı=${f(gl.before)}→${f(gl.after)} kayma=${f(gl.du)} telafi=${gl.comp != null ? gl.comp.toFixed(2) : "-"}${gl.camera ? " kamera" : ""}${gl.center ? " hedef=ortala[gözlüklü şablon]" : ""} ${gl.ms}ms`);
   } catch (e) {
     console.error("Sade akış: bakış kilidi hata verdi (atlanıyor):", e);
   }

@@ -95,28 +95,72 @@ async function estimateAlignment(oRgb, tRgb, W, H) {
   return null;
 }
 
-/** Çıktıyı şablon koordinatlarına çeker (bilineer). Kaynak dışı → şablon pikseli. */
+// Lanczos-3 çekirdeği (sharp'ın varsayılan yeniden boyutlandırma çekirdeği).
+const LANCZOS_A = 3;
+const TAPS = 2 * LANCZOS_A;
+function lanczosW(t) {
+  const a = Math.abs(t);
+  if (a < 1e-6) return 1;
+  if (a >= LANCZOS_A) return 0;
+  const p = Math.PI * a;
+  return (LANCZOS_A * Math.sin(p) * Math.sin(p / LANCZOS_A)) / (p * p);
+}
+
+/**
+ * Tek eksen için TAPS komşu indeks + normalize Lanczos ağırlığı (dönüşüm yalnız ölçek + kayma, eksenler
+ * ayrılabilir). Kaynak dışına düşen q geçersiz (ok=0). Kenar komşuları kıstırılır. SAF.
+ */
+function axisTaps(n, c, t, s) {
+  const idx = new Int32Array(n * TAPS), wt = new Float32Array(n * TAPS), ok = new Uint8Array(n);
+  for (let q = 0; q < n; q++) {
+    const p = c + (q - c - t) / s;
+    if (p < 0 || p > n - 1) continue;
+    ok[q] = 1;
+    const i0 = Math.floor(p), f = p - i0;
+    let sum = 0;
+    for (let k = 0; k < TAPS; k++) {
+      idx[q * TAPS + k] = Math.max(0, Math.min(n - 1, i0 - (LANCZOS_A - 1) + k));
+      const w = lanczosW(k - (LANCZOS_A - 1) - f);
+      wt[q * TAPS + k] = w;
+      sum += w;
+    }
+    for (let k = 0; k < TAPS; k++) wt[q * TAPS + k] /= sum;
+  }
+  return { idx, wt, ok };
+}
+
+/**
+ * Çıktıyı şablon koordinatlarına çeker. Kaynak dışı → şablon pikseli.
+ * LANCZOS-3 (2026-11-25, kullanıcı: "yumuşatma kaynağını silelim"): bilineer örnekleme kesirli konumda iki
+ * komşunun ortalamasını alıp yüzün ince grenini siliyordu (947807a7: 10 karenin 9'unda hizalama; 12 iş /
+ * 127 kare regresyonunda hizalanmış kare −%34±5). 11-23'ün 5 hizalanmamış karesi aynı bükmeyle: ince
+ * gren korunan bilineer %66, bikübik %81, Lanczos-3 %89. Süre 12.6 MP karede ~3 sn (bilineer 0.6).
+ * Kafa ölçeğinde 10-16'da aynı ders (headScale.bicubic). Aşma 0-255'e kırpılır.
+ */
 function warpToTemplate(O, T, W, H, { s, tx, ty }) {
   const out = Buffer.alloc(W * H * 3);
-  const cx = W / 2;
-  const cy = H / 2;
+  const X = axisTaps(W, W / 2, tx, s), Y = axisTaps(H, H / 2, ty, s);
   for (let qy = 0; qy < H; qy++) {
+    const jRow = qy * W * 3;
+    if (!Y.ok[qy]) { T.copy(out, jRow, jRow, jRow + W * 3); continue; }
     for (let qx = 0; qx < W; qx++) {
-      const px = cx + (qx - cx - tx) / s;
-      const py = cy + (qy - cy - ty) / s;
-      const j = (qy * W + qx) * 3;
-      if (px < 0 || py < 0 || px > W - 1 || py > H - 1) {
-        out[j] = T[j]; out[j + 1] = T[j + 1]; out[j + 2] = T[j + 2];
-        continue;
+      const j = jRow + qx * 3;
+      if (!X.ok[qx]) { out[j] = T[j]; out[j + 1] = T[j + 1]; out[j + 2] = T[j + 2]; continue; }
+      let r = 0, g = 0, b = 0;
+      for (let m = 0; m < TAPS; m++) {
+        const wy = Y.wt[qy * TAPS + m];
+        if (wy === 0) continue;
+        const base = Y.idx[qy * TAPS + m] * W;
+        for (let k = 0; k < TAPS; k++) {
+          const w = wy * X.wt[qx * TAPS + k];
+          if (w === 0) continue;
+          const i = (base + X.idx[qx * TAPS + k]) * 3;
+          r += O[i] * w; g += O[i + 1] * w; b += O[i + 2] * w;
+        }
       }
-      const x0 = Math.floor(px), y0 = Math.floor(py);
-      const x1 = Math.min(W - 1, x0 + 1), y1 = Math.min(H - 1, y0 + 1);
-      const fx = px - x0, fy = py - y0;
-      for (let c = 0; c < 3; c++) {
-        const v = (O[(y0 * W + x0) * 3 + c] * (1 - fx) + O[(y0 * W + x1) * 3 + c] * fx) * (1 - fy) +
-          (O[(y1 * W + x0) * 3 + c] * (1 - fx) + O[(y1 * W + x1) * 3 + c] * fx) * fy;
-        out[j + c] = Math.round(v);
-      }
+      out[j] = r <= 0 ? 0 : r >= 255 ? 255 : Math.round(r);
+      out[j + 1] = g <= 0 ? 0 : g >= 255 ? 255 : Math.round(g);
+      out[j + 2] = b <= 0 ? 0 : b >= 255 ? 255 : Math.round(b);
     }
   }
   return out;

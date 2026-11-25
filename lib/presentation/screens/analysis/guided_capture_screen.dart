@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
+import 'package:image/image.dart' as img;
 import '../../../core/constants/app_colors.dart';
 
 /// Rehberli çekim türü: yüz mü, vücut mu?
@@ -218,6 +220,156 @@ bool sweepStillMatches(CaptureAngle angle, double yaw, double pitch) {
   return ay >= lo - tol && ay <= hi + tol;
 }
 
+// ============================================================
+// HAREKET + NETLİK (2026-11-25, kullanıcı: "selfie'de hareket bulanıklığı olmasın")
+// ============================================================
+// Taramalı çekim baş ≤25°/sn dönerken 300 ms sonra çekiyordu; 1/34 sn pozlamada ~0.7° dönüş ≈
+// 1080p'de 4 px bulanıklık (eski 1,1 sn tutma ≈ 0.7 px). Artık: (1) bant içinde son kSweepDwell
+// boyunca yaw/pitch/roll'un HER BİRİNİN oynaması ≤ kSweepMaxRange (0.5 sn'de 4° = ort. 8°/sn),
+// en az kSweepMinSamples ölçüyle. Anlık hız değil pencere aralığı: ML Kit hızlı modda açı kareden
+// kareye ~1° titriyor, 10 fps'de anlık hız titremeden 10°/sn görünür ve kullanıcı takılırdı.
+// Kareler arası ≥1 sn boşluk pencereyi sıfırlar (eskiden hız 0 = "durgun" sayılıyordu).
+// (2) çekilen fotoğrafın yüz bölgesinde netlik ölçülür, oturumun kabul edilmiş karelerine göre
+// belirgin bulanıksa yeniden çekilir.
+
+/// Bant içinde bu kadar SAKİN kalınca çekilir.
+const kSweepDwell = Duration(milliseconds: 500);
+/// Pencere boyunca yaw/pitch/roll'un her birinin en çok oynaması (derece). 500 ms'de 4° ≈ 8°/sn.
+const kSweepMaxRange = 4.0;
+/// Pencerede en az bu kadar ölçü (yavaş cihazda tek kare yetmesin).
+const kSweepMinSamples = 3;
+/// Bu kadar boşluk (ölçü yok) pencereyi sıfırlar.
+const kSweepMaxGap = Duration(seconds: 1);
+/// Netlik: kabul edilmiş karelerin medyanının bu oranının altı bulanık.
+const kStillSharpRatio = 0.6;
+/// Netlik karşılaştırması için gereken en az kabul edilmiş kare.
+const kStillSharpMinRef = 2;
+
+/// Baş durgunluk penceresi (KAYAN). [add] ölçüyü ekler; ≥kSweepMaxGap boşlukta pencere sıfırlanır,
+/// sonra en eski ölçüler (a) herhangi bir açının aralığı kSweepMaxRange'in altına inene kadar ve
+/// (b) pencere kSweepDwell'i kapsamaya yetecek en kısa hâline gelene kadar atılır.
+/// [steady]: pencere ≥kSweepDwell sürüyor ve ≥kSweepMinSamples ölçü içeriyor. SAF.
+@visibleForTesting
+class SweepMotion {
+  final _t = <DateTime>[];
+  final _a = <List<double>>[];
+
+  int get samples => _t.length;
+
+  void reset() {
+    _t.clear();
+    _a.clear();
+  }
+
+  bool _inRange() {
+    for (int k = 0; k < 3; k++) {
+      double lo = double.infinity, hi = -double.infinity;
+      for (final v in _a) {
+        if (v[k] < lo) lo = v[k];
+        if (v[k] > hi) hi = v[k];
+      }
+      if (hi - lo > kSweepMaxRange) return false;
+    }
+    return true;
+  }
+
+  void _dropFirst() {
+    _t.removeAt(0);
+    _a.removeAt(0);
+  }
+
+  void add(double yaw, double pitch, double roll, DateTime now) {
+    if (_t.isNotEmpty && now.difference(_t.last) >= kSweepMaxGap) reset();
+    _t.add(now);
+    _a.add([yaw, pitch, roll]);
+    while (_t.length > 1 && !_inRange()) {
+      _dropFirst();
+    }
+    while (_t.length > kSweepMinSamples && now.difference(_t[1]) >= kSweepDwell) {
+      _dropFirst();
+    }
+  }
+
+  bool steady(DateTime now) =>
+      _t.length >= kSweepMinSamples && now.difference(_t.first) >= kSweepDwell;
+}
+
+/// Gri tonlu (0-255) yüz kırpımının netliği: Laplace yanıtının ortalama karesi / (ışıklık varyansı + 25).
+/// Kontrasta göre normalize (denetim 11-25: ham Laplace enerjisi kontrastla k² ölçekleniyordu; 0.77
+/// kontrast tek başına 0.6 eşiğine düşürüyordu → gölgeli/profil açı hep "bulanık" sayılabilirdi). SAF.
+@visibleForTesting
+double laplacianEnergy(List<int> gray, int w, int h) {
+  if (w < 3 || h < 3) return 0;
+  double s = 0, m = 0, m2 = 0;
+  int n = 0;
+  for (int y = 1; y < h - 1; y++) {
+    for (int x = 1; x < w - 1; x++) {
+      final i = y * w + x;
+      final l = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+      s += l * l;
+      m += gray[i];
+      m2 += gray[i] * gray[i];
+      n++;
+    }
+  }
+  if (n == 0) return 0;
+  final mean = m / n;
+  final variance = m2 / n - mean * mean;
+  return (s / n) / (variance + 25);
+}
+
+/// Bu kare, oturumda kabul edilmiş karelere göre yeterince net mi. SAF.
+@visibleForTesting
+bool stillSharpEnough(double sharp, List<double> accepted) {
+  if (accepted.length < kStillSharpMinRef) return true;
+  final s = [...accepted]..sort();
+  final med = s.length.isOdd ? s[s.length ~/ 2] : (s[s.length ~/ 2 - 1] + s[s.length ~/ 2]) / 2;
+  return sharp >= kStillSharpRatio * med;
+}
+
+/// Fotoğraf dosyasında (EXIF yönü uygulanmış) yüz kutusu bölgesinin netliği; kutu yoksa orta
+/// bölge. Ayrı isolate'te koşar (compute). Hata → null.
+Future<double?> stillSharpness(String path, Rect? box) =>
+    compute(_stillSharpnessJob, <Object?>[path, box?.left, box?.top, box?.width, box?.height]);
+
+double? _stillSharpnessJob(List<Object?> a) {
+  try {
+    final bytes = File(a[0] as String).readAsBytesSync();
+    final dec = img.decodeImage(bytes);
+    if (dec == null) return null;
+    final im = img.bakeOrientation(dec);
+    int x, y, w, h;
+    if (a[1] != null) {
+      // Yüz kutusu %10 içeri: saç/arka plan kenarı netliği karıştırmasın.
+      final bw = (a[3] as double), bh = (a[4] as double);
+      x = ((a[1] as double) + 0.1 * bw).round();
+      y = ((a[2] as double) + 0.1 * bh).round();
+      w = (0.8 * bw).round();
+      h = (0.8 * bh).round();
+    } else {
+      x = (im.width * 0.3).round();
+      y = (im.height * 0.25).round();
+      w = (im.width * 0.4).round();
+      h = (im.height * 0.4).round();
+    }
+    // Kenara yakın kutu: kırpım görüntü içinde kalsın (clamp üst sınırı alt sınırdan küçük olamaz).
+    x = x.clamp(0, im.width - 8);
+    y = y.clamp(0, im.height - 8);
+    w = w.clamp(8, im.width - x);
+    h = h.clamp(8, im.height - y);
+    // Ortak ölçek: yüz eni 256 px (cihaz çözünürlüğünden bağımsız karşılaştırma).
+    final crop = img.copyResize(img.copyCrop(im, x: x, y: y, width: w, height: h),
+        width: 256, interpolation: img.Interpolation.average);
+    final g = List<int>.filled(crop.width * crop.height, 0);
+    for (final p in crop) {
+      g[p.y * crop.width + p.x] = (0.299 * p.r + 0.587 * p.g + 0.114 * p.b).round();
+    }
+    return laplacianEnergy(g, crop.width, crop.height);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Yüz kutusunun DİK görüntüdeki yeri (kenarlar 0..1, x genişliğe, y yüksekliğe
 /// bölünmüş) — kadraj denetimi için. [aspect] = dik görüntünün yükseklik/genişliği.
 @visibleForTesting
@@ -302,15 +454,17 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   // TARAMALI ÇEKİM (yalnız AI'nin 10 açılı yüz çekimi; bkz. sweepAngleFor).
   bool get _sweep =>
       widget.kind == CaptureKind.face && identical(widget.angles, kAiFaceAngles);
-  // Bant içinde bu kadar SAKİN kalınca çekilir (eski 1,1 sn tutma şartı yerine).
-  static const _sweepDwell = Duration(milliseconds: 300);
-  // Baş bundan hızlı dönüyorsa çekilmez (fotoğrafta hareket bulanıklığı olmasın).
-  static const _sweepMaxSpeed = 25.0; // derece/sn
+  // Bant içinde sakinlik süresi / hız sınırı: bkz. kSweepDwell, kSweepMaxSpeed (üst düzey).
   CaptureAngle? _candAngle;
-  DateTime? _candSince;
-  double? _lastYaw;
-  DateTime? _lastYawAt;
-  double _yawSpeed = 0;
+  final _motion = SweepMotion();
+  final _sharpByAngle = <CaptureAngle, double>{}; // kabul edilmiş karelerin netliği
+  int _noFaceRejects = 0; // fotoğrafta art arda yüz bulunamadı
+  // Netlikten reddedilen en iyi deneme (tek dosya): netlik denetimi aynı açıyı 2 kez reddedince
+  // 3. denemede bununla şimdiki denemenin NET olanı kabul edilir (takılma emniyeti).
+  CaptureAngle? _blurAngle;
+  int _blurRejects = 0;
+  String? _blurBestPath;
+  double _blurBestSharp = -1;
   FaceDetector? _stillDetector; // çekilen fotoğrafı yeniden ölçer
   CaptureAngle? _rejectAngle; // fotoğraf denetimi art arda reddettiyse sonsuz döngüye girmesin
   int _rejectCount = 0;
@@ -423,7 +577,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       if (!qualityOk) {
         if (!mounted) return;
         _stableSince = null;
-        _candSince = null;
+        _motion.reset();
         setState(() {
           _aligned = false;
           _hint = qualityHint;
@@ -601,18 +755,16 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       }
     }
 
-    // Dönüş hızı (derece/sn, yumuşatılmış): hızlı dönüşte çekilmez.
+    // Baş durgunluk penceresi (yaw/pitch/roll oynaması). Yüz yoksa pencere sıfırlanır.
     final yaw = f?.headEulerAngleY;
-    if (yaw != null && _lastYaw != null && _lastYawAt != null) {
-      final dt = now.difference(_lastYawAt!).inMicroseconds / 1e6;
-      _yawSpeed = (dt > 0 && dt < 1) ? 0.5 * _yawSpeed + 0.5 * ((yaw - _lastYaw!).abs() / dt) : 0;
+    if (f != null && yaw != null) {
+      _motion.add(yaw, f.headEulerAngleX ?? 0, f.headEulerAngleZ ?? 0, now);
+    } else {
+      _motion.reset();
     }
-    _lastYaw = yaw;
-    _lastYawAt = yaw == null ? null : now;
 
     if (problem != null || f == null) {
       _candAngle = null;
-      _candSince = null;
       setState(() {
         _aligned = false;
         _hint = problem ?? 'Yüz görünmüyor';
@@ -624,7 +776,6 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final cand = sweepAngleFor(yaw!, pitch);
     if (cand == null || _captured.containsKey(cand)) {
       _candAngle = null;
-      _candSince = null;
       setState(() {
         _aligned = false;
         _hint = sweepHint(_angle, yaw, pitch);
@@ -633,26 +784,33 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     }
 
     if (_candAngle != cand) {
+      // Yeni banda girildi: durgunluk penceresi bu banttaki ilk ölçüden başlar.
       _candAngle = cand;
-      _candSince = now;
+      _motion.reset();
+      _motion.add(yaw, pitch, f.headEulerAngleZ ?? 0, now);
     }
-    final steady = _yawSpeed <= _sweepMaxSpeed;
-    if (!steady) _candSince = now;
+    final calm = _motion.samples >= 2;
     setState(() {
       _aligned = true;
-      _hint = steady ? 'Sabit dur…' : 'Biraz daha yavaş';
+      _hint = calm ? 'Dur… sabit kal' : 'Dur — başını sabit tut';
     });
-    if (steady && now.difference(_candSince!) >= _sweepDwell) {
+    if (_motion.steady(now)) {
       await _capture(cand);
     }
   }
 
-  /// Çekilen fotoğrafı yeniden ölçer: göz kırpma, ikinci yüz ya da çekim anında
-  /// kayan açı → false (kare atılır, aynı açı tekrar çekilir). Fotoğrafta yüz
-  /// bulunamazsa (yön/EXIF farkı olabilir) akışın ölçümüne güvenilir. Aynı açı
-  /// art arda 2 kez reddedilirse 3.'de denetim yapılmaz — kullanıcı takılmasın.
-  Future<bool> _stillOk(String path, CaptureAngle angle) async {
-    if (_rejectAngle == angle && _rejectCount >= 2) return true;
+  /// Çekilen fotoğrafı yeniden ölçer. Döner (kabul edilen dosya yolu | null, ret nedeni | null).
+  /// Ret nedenleri: ikinci yüz, göz kapalı, çekim anında kayan açı, fotoğrafta yüz yok, BULANIK.
+  /// 2026-11-25: yüz bulunamayan kare reddedilir (eskiden kabul edilirdi). Takılma emniyetleri:
+  /// - aynı açı 2 kez reddedildiyse 3. denemede göz/açı denetimi gevşer, ikinci yüz varsa en büyük
+  ///   yüz kullanılır;
+  /// - yüz art arda 3 kez bulunamazsa (cihazın dosya yönü okuması hatalı olabilir) kare kabul edilir,
+  ///   netlik ölçülmez (yüz kırpımı olmadan referansla kıyaslanamaz);
+  /// - ML Kit hata verirse akışın kararı geçerli, netlik ölçülmez;
+  /// - netlik aynı açıyı 2 kez reddettiyse 3. denemede o ana kadarki en net deneme kabul edilir.
+  Future<(String?, String?)> _stillOk(String path, CaptureAngle angle) async {
+    final lenient = _rejectAngle == angle && _rejectCount >= 2;
+    Face f;
     try {
       final det = _stillDetector ??= FaceDetector(
         options: FaceDetectorOptions(
@@ -662,25 +820,98 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
         ),
       );
       final faces = await det.processImage(InputImage.fromFilePath(path));
-      if (faces.length > 1) return _rejected(angle);
-      if (faces.isEmpty) return true;
-      final f = faces.first;
-      final le = f.leftEyeOpenProbability;
-      final re = f.rightEyeOpenProbability;
-      if ((le != null && le < 0.3) || (re != null && re < 0.3)) return _rejected(angle);
-      if (!sweepStillMatches(angle, f.headEulerAngleY ?? 0, f.headEulerAngleX ?? 0)) {
-        return _rejected(angle);
+      if (faces.length > 1 && !lenient) return _rejected(angle, 'ikinci');
+      if (faces.isEmpty) {
+        _noFaceRejects++;
+        if (_noFaceRejects < 3) return _rejected(angle, 'yüz');
+        _noFaceRejects = 0;
+        return (path, null);
       }
-      return true;
+      _noFaceRejects = 0;
+      f = faces.reduce((p, q) =>
+          p.boundingBox.width * p.boundingBox.height >= q.boundingBox.width * q.boundingBox.height ? p : q);
+      if (!lenient) {
+        final le = f.leftEyeOpenProbability;
+        final re = f.rightEyeOpenProbability;
+        if ((le != null && le < 0.3) || (re != null && re < 0.3)) return _rejected(angle, 'göz');
+        if (!sweepStillMatches(angle, f.headEulerAngleY ?? 0, f.headEulerAngleX ?? 0)) {
+          return _rejected(angle, 'açı');
+        }
+      }
     } catch (_) {
-      return true; // ölçülemedi: akışın kararı geçerli
+      return (path, null); // ölçülemedi: akışın kararı geçerli
     }
+    final sharp = await stillSharpness(path, f.boundingBox);
+    if (sharp == null) return (path, null); // dosya çözülemedi: akışın kararı geçerli
+    final others = [for (final e in _sharpByAngle.entries) if (e.key != angle) e.value];
+    if (_blurAngle != angle) _clearBlurBest();
+    if (!stillSharpEnough(sharp, others)) {
+      if (_blurRejects < 2) {
+        // En net reddedilen denemeyi sakla (emniyet için), gerisini sil.
+        if (sharp > _blurBestSharp) {
+          _deleteQuiet(_blurBestPath);
+          _blurBestPath = path;
+          _blurBestSharp = sharp;
+        } else {
+          _deleteQuiet(path);
+        }
+        _blurAngle = angle;
+        _blurRejects++;
+        return _rejected(angle, 'bulanık', fileHandled: true);
+      }
+      // Emniyet: 3. netlik denemesi — şimdiki ile saklananın net olanı kabul edilir.
+      final best = _blurBestPath;
+      if (best != null && _blurBestSharp > sharp) {
+        _deleteQuiet(path);
+        _sharpByAngle[angle] = _blurBestSharp;
+        _blurBestPath = null; // kabul edildi: silinmesin
+        _clearBlurBest();
+        return (best, null);
+      }
+    }
+    _sharpByAngle[angle] = sharp;
+    _clearBlurBest();
+    return (path, null);
   }
 
-  bool _rejected(CaptureAngle angle) {
+  void _deleteQuiet(String? p) {
+    if (p == null) return;
+    try {
+      File(p).deleteSync();
+    } catch (_) {}
+  }
+
+  void _clearBlurBest() {
+    _deleteQuiet(_blurBestPath);
+    _blurAngle = null;
+    _blurRejects = 0;
+    _blurBestPath = null;
+    _blurBestSharp = -1;
+  }
+
+  /// Ret kaydı. fileHandled: dosya _stillOk içinde zaten saklandı/silindi (çağıran silmesin).
+  (String?, String?) _rejected(CaptureAngle angle, String reason, {bool fileHandled = false}) {
     _rejectCount = _rejectAngle == angle ? _rejectCount + 1 : 1;
     _rejectAngle = angle;
-    return false;
+    return (null, fileHandled ? '$reason:handled' : reason);
+  }
+
+  /// Ret nedenine göre kullanıcıya yapabileceği şeyi söyleyen ipucu.
+  static String _rejectHint(String? reason) {
+    switch (reason?.split(':').first) {
+      case 'ikinci':
+        return 'Karede başka biri var — yalnız sen görün';
+      case 'göz':
+        return 'Gözlerin kapalı çıktı — açık tut, bir an dur';
+      case 'açı':
+        return 'Açı kaydı — aynı açıda bir an sabit dur';
+      case 'yüz':
+        return 'Yüzün görünmedi — yüzünü kameraya göster';
+      case 'bulanık':
+        return 'Kare net çıkmadı — aynı açıda bir an tamamen dur';
+      default:
+        return 'Aynı açıda bir an sabit dur';
+    }
   }
 
   Future<(bool, String)> _evaluateBody(InputImage input) async {
@@ -766,30 +997,29 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final angle = which ?? _angle;
     try {
       await c.stopImageStream();
-      HapticFeedback.mediumImpact();
+      // Titreşim deklanşörden SONRA (2026-11-25): önce titretmek pozlama sırasında telefonu sarsıyordu.
       final shot = await c.takePicture();
+      HapticFeedback.mediumImpact();
 
       if (_sweep) {
         _candAngle = null;
-        _candSince = null;
-        _lastYaw = null;
-        if (!await _stillOk(shot.path, angle)) {
-          try {
-            File(shot.path).deleteSync();
-          } catch (_) {}
+        _motion.reset();
+        final (okPath, reason) = await _stillOk(shot.path, angle);
+        if (okPath == null) {
+          if (!(reason?.endsWith(':handled') ?? false)) _deleteQuiet(shot.path);
           if (!mounted) return;
           setState(() {
             _aligned = false;
-            _hint = 'Kare kaçtı — aynı açıda bir an sabit dur';
+            _hint = _rejectHint(reason);
           });
-          await c.startImageStream(_onFrame);
+          await _restartStream(c);
           return;
         }
         if (_rejectAngle == angle) {
           _rejectAngle = null;
           _rejectCount = 0;
         }
-        _captured[angle] = File(shot.path);
+        _captured[angle] = File(okPath);
         final next = _angles.indexWhere((a) => !_captured.containsKey(a));
         if (next < 0 || _retakeSingle) {
           _retakeSingle = false;
@@ -803,10 +1033,10 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
           _aligned = false;
           _hint = _angle.faceHint();
         });
-        // Kısa ara: kullanıcı titreşimi hissetsin, dönmeye devam etsin.
+        // Kısa ara: kullanıcı titreşimi hissetsin, sonra sıradaki açıya dönsün.
         await Future<void>.delayed(const Duration(milliseconds: 150));
         if (!mounted) return;
-        await c.startImageStream(_onFrame);
+        await _restartStream(c);
         return;
       }
 
@@ -846,12 +1076,23 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     }
   }
 
+  /// Akışı yeniden başlatır. Uygulama arka plana geçip controller atıldıysa (resume yenisini kurar)
+  /// sessizce çıkar — eskiden CameraException "Çekim hatası" ekranına düşüp tüm kareleri kaybettiriyordu.
+  Future<void> _restartStream(CameraController c) async {
+    if (!identical(_controller, c) || !c.value.isInitialized || c.value.isStreamingImages) return;
+    try {
+      await c.startImageStream(_onFrame);
+    } on CameraException {
+      if (!identical(_controller, c)) return;
+      rethrow;
+    }
+  }
+
   void _resetSweep() {
     _candAngle = null;
-    _candSince = null;
-    _lastYaw = null;
-    _lastYawAt = null;
-    _yawSpeed = 0;
+    _motion.reset();
+    _noFaceRejects = 0;
+    _clearBlurBest();
     _rejectAngle = null;
     _rejectCount = 0;
   }
@@ -871,6 +1112,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       _retakeSingle = true;
       _angleIndex = _angles.indexOf(a);
       _captured.remove(a);
+      _sharpByAngle.remove(a);
       _reviewing = false;
       _aligned = false;
       _stableSince = null;
@@ -889,6 +1131,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   Future<void> _restart() async {
     setState(() {
       _captured.clear();
+      _sharpByAngle.clear();
       _angleIndex = 0;
       _aligned = false;
       _stableSince = null;
@@ -1372,7 +1615,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
             ),
             child: Text(
               _sweep
-                  ? 'Başını yavaşça çevir, kareler kendiliğinden çekilir'
+                  ? 'Başını yavaşça çevir, her açıda bir an dur — kareler kendiliğinden çekilir'
                   : 'Çizgiye oturunca otomatik çekilir',
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),

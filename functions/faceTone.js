@@ -209,6 +209,25 @@ function capLighterTemplate(plan, tpl, out, albedoLight) {
 }
 
 /**
+ * Koyu şablon kişisi (albedo > 1): pigment yalnız haksız KARARTMAYI engeller, yüzü kendi başına
+ * AÇMAZ — açma, pigmentsiz farkın (yalnız ışık) izin verdiği kadarla sınırlanır (en az 0).
+ * capLighterTemplate'in simetriği. plan yerinde güncellenir. Döner { from, to } ya da null. SAF.
+ * (2026-11-25, 947807a7, kullanıcı: "yüzde gereksiz tonlama"): aynı kişi yeni çekimde MST 5 yerine 4
+ * ölçüldü; MST 6 şablonlarda fark 2 oldu, ölü bölgeden çıkan bir adım yüzü ×1.13-1.20 açtı (c8 ham
+ * yüz zaten boyundan açıkken). Model yüzü kullanıcının selfie teniyle çiziyor — pigment ikinci kez
+ * eklenmez.
+ */
+function capDarkerTemplate(plan, tpl, out, albedo) {
+  if (!plan || !plan.ok || !(albedo > 1) || !(plan.logGain > 0)) return null;
+  const p0 = planTone(tpl, out, 1);
+  const cap = Math.max(0, p0.ok ? p0.logGain : 0);
+  if (!(cap < plan.logGain)) return null;
+  const from = plan.logGain;
+  plan.logGain = Math.abs(cap) < GAIN_DEADBAND ? 0 : cap;
+  return { from, to: plan.logGain };
+}
+
+/**
  * Yüz çevresindeki arka plan halkasının ortalama L*'ı (yüz merkezinden 0.85-1.5 yüz eni,
  * arka plan olasılığı > 0.55). Yetersiz örnekte null.
  */
@@ -655,12 +674,13 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   // Ölü bölge (±1 MST tahmin hatası) yalnız küçük farkta: ≥3 adımda bir adımlık hata yönü değiştirmez,
   // ölü bölge ise koyu uçta (MST 7→8 = 7 L) koyu yüzü yine ×1.15 açtırıyordu.
   const lightCap = capLighterTemplate(plan, adj.tpl, out, albedoLight);
+  const darkCap = capDarkerTemplate(plan, adj.tpl, out, albedo);
   // Boyun rengi yüzün üst derisine. Boyun yüzün renk kaymasını (da/db) zaten deri alfasıyla
   // alıyor (headAlpha boyun şeridi), bu yüzden hedef kaymasız üst yüz rengi.
   const neckC = neckChroma(So);
   const nplan = planNeckChroma(out.upper, {}, neckC);
   const sl = (q) => (q.slope ? `${q.slope.gu.toFixed(2)}/${q.slope.gv.toFixed(2)}` : "null");
-  const info2 = { tplRingL: ringT, tplFaceRing, darkScene, outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, albedoLight, lightCap, pigmentApart, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, neckAB: neckC ? [neckC.a, neckC.b] : null, faceUpperAB: out.upper ? [out.upper.a, out.upper.b] : null, neckShift: [nplan.na, nplan.nb], ...plan };
+  const info2 = { tplRingL: ringT, tplFaceRing, darkScene, outL: L(out.Y), tplL: L(tpl.Y), targetL: L(adj.tpl.Y), bodyRatio: adj.bodyRatio, outAB: [out.a, out.b], tplAB: [tpl.a, tpl.b], albedo, albedoLight, lightCap, darkCap, pigmentApart, tplSlope: sl(tpl), outSlope: sl(out), neckDeltaBefore: neckBefore ? neckBefore.delta : null, neckDeltaTpl: neckTpl ? neckTpl.delta : null, neckDeltaAfter: null, neckAB: neckC ? [neckC.a, neckC.b] : null, faceUpperAB: out.upper ? [out.upper.a, out.upper.b] : null, neckShift: [nplan.na, nplan.nb], ...plan };
   if (!plan.ok) return { buf: null, applied: false, reason: plan.reason, ...info2 };
   if (!plan.logGain && !plan.da && !plan.db && !plan.gu && !plan.gv && !nplan.na && !nplan.nb) return { buf: null, applied: false, reason: "already-matched", ...info2 };
   // Kesin pikseller tohum: kafa/boyun (değer = alfa), vücut derisi (eğim için
@@ -794,4 +814,4 @@ async function matchFaceToScene(outputBuf, templateBuf, { mstUser = null, mstTpl
   return { buf, applied: true, reason: null, changed, matted, ms: Date.now() - t0, ...info2, neckDeltaAfter: neckAfter ? neckAfter.delta : null };
 }
 
-module.exports = { matchFaceToScene, _testables: { NECK_TONE, PIGMENT_FULL_GAP, pigmentAlbedos, sideLightWeight, neckChroma, planNeckChroma, DARK_SCENE, SIDE_LIGHT, SKIN_BOX, NECK_MATCH, BACKLIT, sceneRingL, probsOf, skinStats, soften, upsample, planTone, capLighterTemplate, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, bodyLightLog, SLOPE_UV_MAX, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX, CHROMA, headAlpha } };
+module.exports = { matchFaceToScene, _testables: { NECK_TONE, PIGMENT_FULL_GAP, pigmentAlbedos, sideLightWeight, neckChroma, planNeckChroma, DARK_SCENE, SIDE_LIGHT, SKIN_BOX, NECK_MATCH, BACKLIT, sceneRingL, probsOf, skinStats, soften, upsample, planTone, capLighterTemplate, capDarkerTemplate, trimmedMean, bodyAdjustedTarget, neckFaceDelta, propagate, boxBlur, edgeMatteFields, matteAlpha, bodyLightLog, SLOPE_UV_MAX, GAIN_BETA, GAIN_MIN, GAIN_MAX, CHROMA_BETA, CHROMA_MAX, CHROMA, headAlpha } };

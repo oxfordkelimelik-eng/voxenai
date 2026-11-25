@@ -47,7 +47,7 @@ class DatingFaqScreen extends StatelessWidget {
       _FaqItem(
         'AI fotoğraf üretmek için kaç fotoğraf yüklemem gerekiyor?',
         'Sadece tek bir rehberli canlı yüz çekimi: başını yavaşça sağa ve sola '
-            'çevirirken ${DatingConfig.faceCaptureCount} kare otomatik çekilir '
+            'çevir, her açıda bir an dur — ${DatingConfig.faceCaptureCount} kare otomatik çekilir '
             '(ön, her yöne dört açı ve çene hafif aşağı). Galeri fotoğrafı, göğüs-üstü kare veya tam boy çekim '
             'gerekmez — boy ve vücut tipini formda seçiyorsun. Karelerin net '
             've iyi ışıklandırılmış olması sonucu doğrudan etkiler.',

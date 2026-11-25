@@ -49,6 +49,14 @@ const COMP_MIN_YAW = 5;
 // Base kameraya bakıyor sayılır: iki göz de konturda merkeze bu kadar yakın
 // (ofset göz başı: kontur ortası ~0.5±0.06).
 const CAMERA_U_TOL = 0.08;
+// GÖZLÜKLÜ ŞABLONDA DÜZ BAKIŞ (2026-11-25, 947807a7, kullanıcı: "gözlüklü karelerde gözler kafanın
+// baktığı yere düz bakacak"). Şablon gözü camın arkasında: base ölçüsü yansımayı iris sanıyor
+// (c4 base 0.70 → iris sınıra 0.25 itildi). Hedef: göz kafaya göre dönmemiş = iris göz açıklığının
+// ortasında. Kontur u'sunda göz başına sabit kayma var; önden kameraya bakan selfie'lerle kalibre
+// (ref_selfies/2026-11-18_kutay10 photo_0: 0.433/0.565, photo_9: 0.414/0.573; iki göz ortası 0.499).
+// Baş dönükken kameraya bakan gözde u ≈ CENTER_U − 0.005·yaw (aynı selfie seti, KAPPA ile tutarlı):
+// o kayma göz-kafa karşı dönmesi; kafa yönünde bakışta yoktur → baş dönüşü telafisi uygulanmaz.
+const CENTER_U = [0.433, 0.565];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -201,6 +209,27 @@ function planShift(b, o) {
   return { du, comp, camera, reason: null };
 }
 
+/**
+ * Gözlüklü şablon: iris göz açıklığının ortasına (CENTER_U), baş dönüşü telafisi yok. o: eyesOf().
+ * planShift ile aynı dönüş biçimi; base yerine sabit hedef. SAF.
+ */
+function planCenter(o) {
+  const b = { eyes: CENTER_U.map((u) => ({ ok: true, u })), pose: { yaw: o.pose ? o.pose.yaw : 0 } };
+  const okBoth = [0, 1].map((i) => o.eyes[i].ok);
+  if (!okBoth[0] && !okBoth[1]) return { du: null, comp: 0, camera: false, reason: "göz-yok", target: CENTER_U };
+  let du = [0, 1].map((i) => (okBoth[i] ? clamp(b.eyes[i].u - o.eyes[i].u, -MAX_SHIFT, MAX_SHIFT) : null));
+  if (du[0] == null || du[1] == null) {
+    const ref = du[0] != null ? du[0] : du[1];
+    du = du.map((x, i) => (x != null ? x : (o.eyes[i].f && o.eyes[i].w >= 6 ? ref : 0)));
+  }
+  // İki göz zıt yöne itilecekse göz ölçüsü güvenilmez (şaşılık riski).
+  if (Math.abs(du[0]) >= MIN_SHIFT && Math.abs(du[1]) >= MIN_SHIFT && Math.sign(du[0]) !== Math.sign(du[1])) {
+    return { du: null, comp: 0, camera: false, reason: "gözler-çelişiyor", target: CENTER_U };
+  }
+  if (du.every((x) => Math.abs(x) < MIN_SHIFT)) return { du: null, comp: 0, camera: false, reason: "ortada", target: CENTER_U };
+  return { du, comp: 0, camera: false, reason: null, target: CENTER_U };
+}
+
 /** refMatch.shiftIris, yarı iris eni h ölçülen yarıçaptan. src → dst. SAF. */
 function shiftIrisH(src, dst, W, H, f, u0, u1, h) {
   const { interp } = require("./eyeOpen")._testables;
@@ -250,17 +279,22 @@ function shiftIrisH(src, dst, W, H, f, u0, u1, h) {
 async function lockGazeToBase(out, tpl, { templateEyewear = false } = {}) {
   const t0 = Date.now();
   const res = (o) => ({ buf: null, applied: false, ms: Date.now() - t0, ...o });
-  if (templateEyewear) return res({ reason: "şablon-gözlük" });
+  // Gözlüklü şablonda base gözü ölçülmez; hedef göz açıklığının ortası (bkz. CENTER_U).
+  const center = !!templateEyewear;
   try {
-    const [O, B] = await Promise.all([out, tpl].map((x) => sharp(x).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true })));
+    const O = await sharp(out).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const W = O.info.width, H = O.info.height;
-    const b = await eyesOf(B.data, B.info.width, B.info.height);
-    if (!b) return res({ reason: "base-ölçülemedi" });
+    let b = null;
+    if (!center) {
+      const B = await sharp(tpl).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      b = await eyesOf(B.data, B.info.width, B.info.height);
+      if (!b) return res({ reason: "base-ölçülemedi" });
+    }
     const o = await eyesOf(O.data, W, H);
-    if (!o) return res({ reason: "çıktı-ölçülemedi" });
+    if (!o) return res({ reason: "çıktı-ölçülemedi", center });
     const us = (x) => x.eyes.map((e) => (e.ok ? e.u : null));
-    const plan = planShift(b, o);
-    const info = { base: us(b), before: us(o), comp: plan.comp, camera: plan.camera };
+    const plan = center ? planCenter(o) : planShift(b, o);
+    const info = { base: center ? [...CENTER_U] : us(b), before: us(o), comp: plan.comp, camera: plan.camera, center };
     if (!plan.du) return res({ reason: plan.reason, ...info });
     const dst = Buffer.from(O.data);
     let moved = 0;
@@ -293,5 +327,5 @@ async function lockGazeToBase(out, tpl, { templateEyewear = false } = {}) {
 
 module.exports = {
   lockGazeToBase,
-  _testables: { planShift, contourU, shiftIrisH, MIN_SHIFT, MIN_SHIFT_CAMERA, MAX_SHIFT, KAPPA, CAMERA_U_TOL },
+  _testables: { eyesOf, planShift, planCenter, CENTER_U, contourU, shiftIrisH, MIN_SHIFT, MIN_SHIFT_CAMERA, MAX_SHIFT, KAPPA, CAMERA_U_TOL },
 };

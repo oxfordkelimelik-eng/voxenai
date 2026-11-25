@@ -43,7 +43,8 @@ const GRAIN_AMPLITUDE = 9;
 // Üç kez kısıldıktan sonra yüz çevresinde tamamen kapalıydı; yüz dışında ortalama 3.6 gri seviye
 // (30 kare yerel ölçüm), telefon boyutunda görünmez. addPhoneCameraTexture artık yalnız son JPEG
 // kaydını yapar (JPEG_QUALITY, 4:4:4). Geri dönüş: true.
-const PHONE_GRAIN_ON = false;
+// 2026-11-25 GERİ AÇIK (kullanıcı: "birkaç gün önceki detay/gren değişikliklerini geri alalım").
+const PHONE_GRAIN_ON = true;
 
 /**
  * Yüz bölgesinde grain'i YUMUŞAK KENARLI olarak söndürür (2026-08-16).

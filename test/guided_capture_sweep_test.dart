@@ -81,4 +81,78 @@ void main() {
       expect(frame(0.8, 0.42, 0.5, 0.5), isNotNull);
     });
   });
+
+  group('SweepMotion (2026-11-25 durgunluk penceresi)', () {
+    final t0 = DateTime(2026, 11, 25, 12);
+    DateTime at(int ms) => t0.add(Duration(milliseconds: ms));
+    test('sakin baş 500 ms ve 3 ölçüde durgun; daha erken değil', () {
+      final m = SweepMotion();
+      m.add(20, 0, 0, at(0));
+      m.add(20.8, -0.5, 0.4, at(200)); // ML Kit titremesi ~1°
+      expect(m.steady(at(200)), isFalse);
+      m.add(19.6, 0.3, -0.3, at(400));
+      expect(m.steady(at(400)), isFalse); // 400 ms
+      m.add(20.4, 0, 0, at(520));
+      expect(m.steady(at(520)), isTrue);
+    });
+    test('25°/sn dönüş pencereyi sıfırlar, durgun olmaz', () {
+      final m = SweepMotion();
+      for (int i = 0; i <= 10; i++) {
+        m.add(10 + 2.5 * i, 0, 0, at(100 * i)); // 25°/sn
+      }
+      expect(m.steady(at(1000)), isFalse);
+    });
+    test('yaw sabitken pitch ya da roll oynaması da sıfırlar', () {
+      final p = SweepMotion()..add(20, 0, 0, at(0))..add(20, 5, 0, at(300))..add(20, 5, 0, at(600));
+      expect(p.steady(at(600)), isFalse);
+      final r = SweepMotion()..add(20, 0, 0, at(0))..add(20, 0, 5, at(300))..add(20, 0, 5, at(600));
+      expect(r.steady(at(600)), isFalse);
+    });
+    test('kayan pencere: 7°/sn yavaş dönüş geçer, 10°/sn geçmez', () {
+      final slow = SweepMotion();
+      for (int i = 0; i <= 6; i++) {
+        slow.add(20 + 0.7 * i, 0, 0, at(100 * i));
+      }
+      expect(slow.steady(at(600)), isTrue);
+      final fast = SweepMotion();
+      for (int i = 0; i <= 10; i++) {
+        fast.add(20 + 1.0 * i, 0, 0, at(100 * i));
+      }
+      expect(fast.steady(at(1000)), isFalse);
+    });
+    test('≥1 sn ölçü boşluğu pencereyi sıfırlar (eskiden durgun sayılıyordu)', () {
+      final m = SweepMotion()..add(20, 0, 0, at(0))..add(20, 0, 0, at(1200));
+      expect(m.samples, 1);
+      expect(m.steady(at(1200)), isFalse);
+    });
+    test('sabitler: 500 ms, 4°, en az 3 ölçü', () {
+      expect(kSweepDwell, const Duration(milliseconds: 500));
+      expect(kSweepMaxRange, 4.0);
+      expect(kSweepMinSamples, 3);
+    });
+  });
+
+  group('netlik (2026-11-25)', () {
+    test('laplacianEnergy kontrasttan bağımsız (gölgeli açı bulanık sayılmasın)', () {
+      const w = 16, h = 16;
+      final hi = [for (int i = 0; i < w * h; i++) ((i % w) + (i ~/ w)).isEven ? 160 : 80];
+      final lo = [for (int i = 0; i < w * h; i++) ((i % w) + (i ~/ w)).isEven ? 150 : 90]; // 0.75 kontrast
+      final r = laplacianEnergy(lo, w, h) / laplacianEnergy(hi, w, h);
+      expect(r, greaterThan(kStillSharpRatio));
+    });
+    test('laplacianEnergy: düz alan 0, desen > 0, bulanık < net', () {
+      const w = 16, h = 16;
+      final flat = List<int>.filled(w * h, 120);
+      expect(laplacianEnergy(flat, w, h), 0);
+      final sharp = [for (int i = 0; i < w * h; i++) ((i % w) + (i ~/ w)).isEven ? 160 : 80];
+      final soft = [for (int i = 0; i < w * h; i++) ((i % w) + (i ~/ w)).isEven ? 125 : 115];
+      expect(laplacianEnergy(sharp, w, h), greaterThan(laplacianEnergy(soft, w, h)));
+    });
+    test('stillSharpEnough: referans azken geçer, medyanın %60 altı reddedilir', () {
+      expect(stillSharpEnough(1, [100]), isTrue);
+      expect(stillSharpEnough(70, [100, 110, 90]), isTrue);
+      expect(stillSharpEnough(50, [100, 110, 90]), isFalse);
+      expect(stillSharpEnough(59, [100, 100]), isFalse);
+    });
+  });
 }

@@ -7326,11 +7326,14 @@ async function runOpenAiDirectChunkInner(uid, jobId, styleId, chunkIdx, template
     if (Buffer.isBuffer(tplForEyewear)) {
       try {
         const { detectMainFace } = require("./faceQuality");
-        const { templateEyewear } = require("./templateVision");
+        // ADI FARKLI OLMALI (2026-11-25, 947807a7): `const { templateEyewear }` dıştaki `let templateEyewear`'ı
+        // gölgeliyordu; aşağıdaki atama sabite yazıp TypeError attı ve 11-22'den beri her gözlüklü şablon
+        // bitirmeye "gözlük yok" gitti (bakış kilidi camdaki yansımaya kilitlendi, kafa ölçeği göz noktası kullandı).
+        const { templateEyewear: judgeTemplateEyewear } = require("./templateVision");
         const fdT = (await detectMainFace(tplForEyewear)) || (await detectMainFace(tplForEyewear, LOW_CONF_FACE));
         tplFaceBox = fdT && fdT.box ? fdT.box : null;
         templateEyewear = templateEyewearPre && templateEyewearPre.ok ? templateEyewearPre
-          : tplFaceBox ? await templateEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
+          : tplFaceBox ? await judgeTemplateEyewear(tplForEyewear, tplFaceBox, OPENAI_KEY.value()) : { ok: false, reason: "no-face-template" };
       } catch (e) {
         console.error("OpenAI yolu: şablon gözlük yargısı hata verdi:", e);
         templateEyewear = { ok: false, reason: "error" };

@@ -61,7 +61,7 @@ test("sade akış anahtarları: ikinci üretim, yüz onarımı, kafa bükme kapa
   assert.match(src, /if \(SECOND_GEN_ON && buf && mode !== PHOTO_MODE_STAGED && templateYawSigned != null\)/);
   assert.match(src, /if \(SECOND_GEN_ON && h && !h\.kept\)/);
   const { FINISH } = require("../postTasks")._testables;
-  assert.deepStrictEqual(FINISH, { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: true, DETAIL: true });
+  assert.deepStrictEqual(FINISH, { HEAD_WARP: false, GHOST_CLEAN: true, FACE_TONE: true, SKIN: true, LIP: true, GAZE: true, STRUCT: false, DETAIL: true });
 });
 
 // 2026-11-08 deploy öncesi inceleme: 68 nokta yedeği (yaw ±55°'de tıkanır) prompta sayı vermez.

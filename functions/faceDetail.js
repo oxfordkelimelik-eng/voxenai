@@ -297,7 +297,14 @@ function addFaceGrain(rgb, tRgb, W, H, Po, Pt, CLASSES) {
 // şu anki çalışmada çok bir şey fark ettirmiyor"). Eskiden yalnız şablon kadar (düz ışıklı şablonda
 // hiç) ve en çok ×1.3 → 11-19'da 25 karede görünmez bulunup kapatılmıştı. Artık en az BASE: model
 // yüzün orta ölçek gölgesini (burun, elmacık, çene) hep yumuşak çiziyor; şablon daha dramatikse MAX'a kadar.
-const STRUCT = { ON: true, S1: 0.02, S2: 0.08, BASE: 1.5, MAX: 1.7, MIN_APPLY: 1.05, MASK_THR: 0.6 };
+// YALNIZ AÇIK DERİ + ÇARPIMSAL (2026-11-25, 947807a7 c9, kullanıcı: "yüzde gereksiz grileşme"):
+// skinSeg yüz derisi sınıfı sakalı, kaşı ve gözü de kapsıyor. Bant tüm sınıfta alınınca koyu
+// sakal–açık deri kenarı "hat" sayılıp büyütülüyordu; karanlık sahnede (yüz ışıklığı ort. 63)
+// ölçü 0.51'e çıktı (diğer kareler ~0.2), adım yanağı +8.4 L açtı. Fark üç kanala AYNI miktarda
+// eklendiği için de deri gri kaldı (kroma −2.6). Artık: deri ağırlığı = sınıf olasılığı × (ışıklık ≥
+// DARK_CUT × deri medyanı); bulanıklıklar bu ağırlıkla normalize (kenar/arka plan sızmaz); bant
+// deride sıfır ortalamalı; uygulama ışıklık oranı (renk tonu korunur).
+const STRUCT = { ON: true, S1: 0.02, S2: 0.08, BASE: 1.5, MAX: 1.7, MIN_APPLY: 1.05, MASK_THR: 0.6, DARK_CUT: 0.6, MIN_W: 0.05 };
 
 function faceBoxOf(P, CLASSES, W, H) {
   const xs = [], ys = [];
@@ -308,28 +315,55 @@ function faceBoxOf(P, CLASSES, W, H) {
   return { x0: q(xs, 0.02), x1: q(xs, 0.98), y0: q(ys, 0.02), y1: q(ys, 0.98) };
 }
 
-/** Kırpımda yüz derisi bant gücü: rms(G(σ1)−G(σ2)) / ortalama ışıklık. */
+/**
+ * Kırpımda AÇIK yüz derisi bant gücü: rms(Gw(σ1)−Gw(σ2)) / ortalama ışıklık. Gw = deri
+ * ağırlığıyla normalize bulanıklık (sakal/kaş/göz ve arka plan banda girmez). Bant deride sıfır
+ * ortalamalı. Döner { rel, D, base (Gw(σ2), yerel deri ışıklığı), w (deri ağırlığı), ... } | null.
+ */
 function structOf(rgb, W, H, P, CLASSES, box) {
   const fh = Math.max(16, box.y1 - box.y0);
   const pad = Math.round(0.6 * fh);
   const cx0 = Math.max(0, box.x0 - pad), cy0 = Math.max(0, box.y0 - pad);
   const cw = Math.min(W, box.x1 + pad) - cx0, ch = Math.min(H, box.y1 + pad) - cy0;
-  const g = new Float32Array(cw * ch), m = new Float32Array(cw * ch);
+  const N = cw * ch;
+  const g = new Float32Array(N), m = new Float32Array(N);
+  const skinL = [];
   for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
     const i = (y + cy0) * W + (x + cx0);
-    g[y * cw + x] = 0.299 * rgb[i * 3] + 0.587 * rgb[i * 3 + 1] + 0.114 * rgb[i * 3 + 2];
-    m[y * cw + x] = P[CLASSES.faceSkin][i];
+    const j = y * cw + x;
+    g[j] = 0.299 * rgb[i * 3] + 0.587 * rgb[i * 3 + 1] + 0.114 * rgb[i * 3 + 2];
+    m[j] = P[CLASSES.faceSkin][i];
+    if (m[j] > STRUCT.MASK_THR) skinL.push(g[j]);
   }
-  const b1 = gaussBlurF(g, cw, ch, Math.max(0.8, STRUCT.S1 * fh));
-  const b2 = gaussBlurF(g, cw, ch, Math.max(2, STRUCT.S2 * fh));
-  let ss = 0, sm = 0, n = 0;
-  const D = new Float32Array(cw * ch);
-  for (let i = 0; i < cw * ch; i++) {
-    D[i] = b1[i] - b2[i];
-    if (m[i] > STRUCT.MASK_THR) { ss += D[i] * D[i]; sm += g[i]; n++; }
+  if (skinL.length < 200) return null;
+  skinL.sort((a, b) => a - b);
+  const cut = STRUCT.DARK_CUT * skinL[skinL.length >> 1];
+  const w = new Float32Array(N), gw = new Float32Array(N);
+  for (let j = 0; j < N; j++) {
+    w[j] = g[j] >= cut ? m[j] : 0;
+    gw[j] = g[j] * w[j];
   }
-  if (n < 200 || sm <= 0) return null;
-  return { rel: Math.sqrt(ss / n) / (sm / n), D, cx0, cy0, cw, ch, fh };
+  const s1 = Math.max(0.8, STRUCT.S1 * fh), s2 = Math.max(2, STRUCT.S2 * fh);
+  const n1 = gaussBlurF(gw, cw, ch, s1), d1 = gaussBlurF(w, cw, ch, s1);
+  const n2 = gaussBlurF(gw, cw, ch, s2), d2 = gaussBlurF(w, cw, ch, s2);
+  const D = new Float32Array(N), base = new Float32Array(N);
+  let sd = 0, sw = 0;
+  for (let j = 0; j < N; j++) {
+    if (d1[j] < STRUCT.MIN_W || d2[j] < STRUCT.MIN_W) continue;
+    base[j] = n2[j] / d2[j];
+    D[j] = n1[j] / d1[j] - base[j];
+    if (w[j] > STRUCT.MASK_THR) { sd += D[j]; sw++; }
+  }
+  if (sw < 200) return null;
+  const mean = sd / sw;
+  let ss = 0, sm = 0;
+  for (let j = 0; j < N; j++) {
+    if (d1[j] < STRUCT.MIN_W || d2[j] < STRUCT.MIN_W) continue;
+    D[j] -= mean;
+    if (w[j] > STRUCT.MASK_THR) { ss += D[j] * D[j]; sm += g[j]; }
+  }
+  if (sm <= 0) return null;
+  return { rel: Math.sqrt(ss / sw) / (sm / sw), D, base, w, cx0, cy0, cw, ch, fh };
 }
 
 /**
@@ -350,18 +384,19 @@ async function matchFaceStructure(outputBuf, templateBuf) {
   if (!so || !st) return { buf: null, applied: false, reason: "no-skin" };
   const gain = Math.min(STRUCT.MAX, Math.max(STRUCT.BASE || 1, st.rel / so.rel));
   if (!(gain >= STRUCT.MIN_APPLY)) return { buf: null, applied: false, reason: "structured-enough", tpl: st.rel, before: so.rel, gain };
-  const { cx0, cy0, cw, ch, D } = so;
-  const m8 = Buffer.alloc(cw * ch);
-  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) m8[y * cw + x] = Math.round(255 * Math.min(1, Po[CLASSES.faceSkin][(y + cy0) * W + x + cx0]));
-  const soft = await sharp(m8, { raw: { width: cw, height: ch, channels: 1 } }).blur(Math.max(1.5, 0.02 * so.fh)).extractChannel(0).raw().toBuffer();
+  const { cx0, cy0, cw, ch, D, base, w } = so;
+  // Yumuşak uygulama maskesi açık deri ağırlığından (sakal/kaş/göz dışarıda).
+  const soft = gaussBlurF(w, cw, ch, Math.max(1.5, 0.02 * so.fh));
   const res = Buffer.from(o.data);
   const k = gain - 1;
   for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-    const a = soft[y * cw + x] / 255;
-    if (a <= 0.01) continue;
-    const d = a * k * D[y * cw + x];
+    const j = y * cw + x;
+    const a = Math.min(1, soft[j]);
+    if (a <= 0.01 || base[j] <= 0) continue;
+    // Işıklık oranı: üç kanal aynı oranla → ten rengi (ton) korunur, gri eklenmez.
+    const r = Math.max(0.5, Math.min(1.5, 1 + (a * k * D[j]) / Math.max(10, base[j])));
     const i = ((y + cy0) * W + x + cx0) * 3;
-    for (let c = 0; c < 3; c++) { const v = o.data[i + c] + d; res[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
+    for (let c = 0; c < 3; c++) { const v = o.data[i + c] * r; res[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
   }
   const after = structOf(res, W, H, Po, CLASSES, bo);
   const buf = await sharp(res, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
@@ -369,7 +404,7 @@ async function matchFaceStructure(outputBuf, templateBuf) {
 }
 
 module.exports = {
-  matchFaceStructure, STRUCT,
+  matchFaceStructure, STRUCT, structOf,
   matchFaceDetail, planDetailGain, hfRms, APPLY_MIN_GAIN, MAX_GAIN,
   planGrain, fineNoise, grainField, GRAIN_MIN_RATIO, GRAIN_MAX_ADD, GRAIN_SHARE,
 };
