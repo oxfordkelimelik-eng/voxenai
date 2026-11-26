@@ -152,8 +152,86 @@ String? _levelPitchMessage(double pitch) {
 }
 
 // ============================================================
+// YÖNLENDİRMELİ AI ÇEKİMİNDE PAY (2026-11-26, kullanıcı: "kullanıcıyı çok zorlamayalım,
+// dönüş 3-4 derece aynı değilse yine fotoyu çektirsin")
+// ============================================================
+// Sunucu selfie'yi kendi ölçtüğü 3B açıyla seçiyor (falPhotos selfieOrderForYaw), bant kenarında
+// çekilen kare de doğru yere gider. Bantlar her iki yana kGuidedYawTol genişler; bantlar artık
+// üst üste bindiği için aynı yöndeki komşu karelerin en az kGuidedMinStep farklı olması istenir
+// (iki kare aynı açıya düşüp bir açıyı boşa harcamasın).
+// Yukarı eğim sınırı (_levelPitchMax) GEVŞEMEDİ: 11-17 yukarı bakan selfie'ler modelin başı
+// kaldırmasına yol açıyordu. Aşağı eğim payı genişledi.
+
+/// Dönüş bandının her iki yanına eklenen pay (derece).
+const kGuidedYawTol = 4.0;
+/// Aynı yöndeki komşu kareler arasında en az açı farkı (derece).
+const kGuidedMinStep = 3.0;
+/// Ön kare: |yaw| sınırı (eskiden 5).
+const kGuidedFrontYaw = 8.0;
+/// Düz bakış karelerinde aşağı eğim payı (_levelPitchMin'in altına).
+const kGuidedPitchDownTol = 3.0;
+/// Çene aşağı karesi: |yaw| sınırı (eskiden 8) ve eğim aralığı (eskiden -30..-12).
+const kGuidedChinYaw = 12.0;
+const kGuidedChinPitchHi = -10.0;
+const kGuidedChinPitchLo = -34.0;
+
+/// Düz bakış karelerinde eğim uyarısı (yönlendirmeli AI çekimi). SAF.
+@visibleForTesting
+String? guidedLevelPitchMessage(double pitch) {
+  if (pitch > _levelPitchMax) return 'Telefonu göz hizana kaldır, çenen düz dursun';
+  if (pitch < _levelPitchMin - kGuidedPitchDownTol) return 'Çeneni biraz kaldır, düz bak';
+  return null;
+}
+
+const _rightChain = [
+  CaptureAngle.front,
+  CaptureAngle.turnR1,
+  CaptureAngle.turnR2,
+  CaptureAngle.turnR3,
+  CaptureAngle.turnR4,
+];
+const _leftChain = [
+  CaptureAngle.front,
+  CaptureAngle.turnL1,
+  CaptureAngle.turnL2,
+  CaptureAngle.turnL3,
+  CaptureAngle.turnL4,
+];
+
+/// Yönlendirmeli çekimde dönüş karesi için sorun (yoksa null). [capturedYaw]: bu oturumda
+/// çekilmiş karelerin çekim anındaki yaw'ı. SAF.
+@visibleForTesting
+String? guidedTurnProblem(CaptureAngle angle, double yaw, Map<CaptureAngle, double> capturedYaw) {
+  final band = _turnBands[angle];
+  if (band == null) return null;
+  final toRight = band.$2 > 0;
+  final lo = band.$1 - kGuidedYawTol;
+  final hi = band.$2 + kGuidedYawTol;
+  const more = 'Başını biraz daha ';
+  const back = 'Biraz geri dön (fazla döndün)';
+  if (yaw < lo) return toRight ? '${more}SAĞA çevir' : back;
+  if (yaw > hi) return toRight ? back : '${more}SOLA çevir';
+
+  // Bir önceki kareden (aynı yönde, içerideki) ayrışma: s ile iki yön "dışa doğru artan" tek
+  // ölçeğe çevrilir. Yalnız ÖNCEKİ denetlenir: sırayla çekimde sonraki henüz yok; onaydan tek açı
+  // yeniden çekilirken iki komşuya birden bakmak aralığı tek dereceye indirip kilitleyebilirdi.
+  final chain = toRight ? _rightChain : _leftChain;
+  final s = toRight ? 1.0 : -1.0;
+  final prev = capturedYaw[chain[chain.indexOf(angle) - 1]];
+  if (prev != null && s * yaw < s * prev + kGuidedMinStep) {
+    return '$more${toRight ? "SAĞA" : "SOLA"} çevir';
+  }
+  return null;
+}
+
+// ============================================================
 // TARAMALI ÇEKİM (2026-11-23, kullanıcı: "kafa yeri bi türlü tam oturtulamıyor")
 // ============================================================
+// 2026-11-26 KAPATILDI (kullanıcı: "yeni foto çekme akışını sevmedim, sürekli flaş patlatıyor;
+// ilk versiyondaki gibi belirli direktiflerle yönlendirerek kareleri alalım"). AI çekimi yine
+// açı açı yönlendirmeli. Kod duruyor; geri açmak için kSweepCapture = true.
+const kSweepCapture = false;
+
 // AI çekiminde 10 açı artık tek tek "tuttur → 1,1 sn bekle" ile değil, başı
 // yavaşça çevirirken alınır: her kare işlenir, baş HANGİ boş açının bandına
 // düşerse (sıradaki olmasa bile) kısa bir duraksamada o açı çekilir. Kareler
@@ -451,9 +529,16 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
   bool _aligned = false;
   DateTime? _stableSince; // hizalanmanın başladığı an (süre bazlı bekleme için)
 
-  // TARAMALI ÇEKİM (yalnız AI'nin 10 açılı yüz çekimi; bkz. sweepAngleFor).
-  bool get _sweep =>
+  // AI'nin 10 açılı yüz çekimi (1080p çözünürlük bu çekime özel).
+  bool get _aiFace =>
       widget.kind == CaptureKind.face && identical(widget.angles, kAiFaceAngles);
+  // TARAMALI ÇEKİM (bkz. sweepAngleFor) — kSweepCapture kapalıyken AI çekimi de eski
+  // yönlendirmeli yoldan gider (açı açı yönerge → çizgiye otur → 1,1 sn sabit → çek).
+  bool get _sweep => kSweepCapture && _aiFace;
+  // Yönlendirmeli çekimde son ölçülen yaw ve çekilen karelerin çekim anındaki yaw'ı
+  // (komşu açılar aynı dereceye düşmesin; bkz. guidedTurnProblem).
+  double? _lastYaw;
+  final _capturedYaw = <CaptureAngle, double>{};
   // Bant içinde sakinlik süresi / hız sınırı: bkz. kSweepDwell, kSweepMaxSpeed (üst düzey).
   CaptureAngle? _candAngle;
   final _motion = SweepMotion();
@@ -527,7 +612,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       // analiz ekranı için konmuştu, gerekçesi yoktu). Paket tek ayarla hem canlı
       // takip karesini hem fotoğrafı belirler: 4K canlı takibi ağırlaştırdığı için
       // seçilmedi. Desteklemeyen telefonda paket en yakın düşük çözünürlüğe iner.
-      _sweep ? ResolutionPreset.veryHigh : ResolutionPreset.high,
+      _aiFace ? ResolutionPreset.veryHigh : ResolutionPreset.high,
       enableAudio: false,
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21
@@ -535,6 +620,13 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     );
     _controller = controller;
     await controller.initialize();
+    if (!mounted) return;
+    // Flaş KAPALI (2026-11-26, kullanıcı: "sürekli flaş patlatıyor"). Paketin varsayılanı
+    // FlashMode.auto: loş ortamda her deklanşörde flaş / ön kamerada ekran flaşı patlıyordu.
+    // Yüz çekiminde ışığı ekrandaki beyaz ring-light veriyor. Flaşı olmayan kamerada hata → geç.
+    try {
+      await controller.setFlashMode(FlashMode.off);
+    } catch (_) {}
     if (!mounted) return;
     await controller.startImageStream(_onFrame);
     setState(() {
@@ -633,41 +725,50 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     final size = input.metadata!.size;
     final f = faces.first;
     final box = f.boundingBox;
-    final cx = box.center.dx / size.width;
-    final cy = box.center.dy / size.height;
-    final wRatio = box.width / size.width;
     final yaw = f.headEulerAngleY ?? 0; // sağ+/sol- (yaklaşık)
     final pitch = f.headEulerAngleX ?? 0; // yukarı+/aşağı-
     final roll = f.headEulerAngleZ ?? 0;
+    _lastYaw = yaw;
 
-    // Yüz TAM ovalin içine otursun: mesafe + ortalama toleransları önceki
-    // sürümden DAHA SIKI tutuldu (kullanıcı geri bildirimi: yüz tam
-    // ortalanmadan/oval'e girmeden çekiyordu).
-    if (wRatio < 0.40) return (false, 'Biraz yaklaş, yüzün ovali doldursun');
-    if (wRatio > 0.75) return (false, 'Biraz uzaklaş');
-    if ((cx - 0.5).abs() > 0.09) return (false, 'Yüzü tam ovalin içine ortala');
-    if (cy < 0.30 || cy > 0.56) return (false, 'Yüzü tam ovalin içine ortala');
+    if (_aiFace) {
+      // AI çekimi (2026-11-26 gevşetme): kutu DİK görüntü boyutuna bölünür, uzaklık en/boyun
+      // büyüğüyle ölçülür (yana dönünce kutu daralır), ortalama payı ±0.18.
+      final s = _uprightSize(input);
+      final framing = sweepFramingProblem(
+        left: box.left / s.width,
+        right: box.right / s.width,
+        top: box.top / s.height,
+        bottom: box.bottom / s.height,
+        aspect: s.height / s.width,
+      );
+      if (framing != null) return (false, framing);
+    } else {
+      final cx = box.center.dx / size.width;
+      final cy = box.center.dy / size.height;
+      final wRatio = box.width / size.width;
+      // Yüz TAM ovalin içine otursun: mesafe + ortalama toleransları önceki
+      // sürümden DAHA SIKI tutuldu (kullanıcı geri bildirimi: yüz tam
+      // ortalanmadan/oval'e girmeden çekiyordu).
+      if (wRatio < 0.40) return (false, 'Biraz yaklaş, yüzün ovali doldursun');
+      if (wRatio > 0.75) return (false, 'Biraz uzaklaş');
+      if ((cx - 0.5).abs() > 0.09) return (false, 'Yüzü tam ovalin içine ortala');
+      if (cy < 0.30 || cy > 0.56) return (false, 'Yüzü tam ovalin içine ortala');
+    }
     if (roll.abs() > 9) return (false, 'Başını dik tut');
 
     // AI çekimindeki yana dönük karelerde baş dik (çene aşağı/yukarı değil);
-    // eğim yalnız çene karesinden gelsin.
+    // eğim yalnız çene karesinden gelsin. Paylar: bkz. kGuidedYawTol vb.
     final isTurn = _turnBands.containsKey(_angle);
     if (isTurn || _angle == CaptureAngle.chinDown) {
       if (_angle == CaptureAngle.chinDown) {
-        if (yaw.abs() > 8) return (false, 'Kameraya dön, yüzün düz baksın');
-        if (pitch > -12) return (false, 'Başını biraz daha ÖNE eğ (çene aşağı)');
-        if (pitch < -30) return (false, 'Biraz kaldır (fazla eğdin)');
+        if (yaw.abs() > kGuidedChinYaw) return (false, 'Kameraya dön, yüzün düz baksın');
+        if (pitch > kGuidedChinPitchHi) return (false, 'Başını biraz daha ÖNE eğ (çene aşağı)');
+        if (pitch < kGuidedChinPitchLo) return (false, 'Biraz kaldır (fazla eğdin)');
       } else {
-        final levelMsg = _levelPitchMessage(pitch);
+        final levelMsg = guidedLevelPitchMessage(pitch);
         if (levelMsg != null) return (false, levelMsg);
-        final (lo, hi) = _turnBands[_angle]!;
-        final toRight = hi > 0;
-        if (yaw < lo) {
-          return (false, toRight ? 'Başını biraz daha SAĞA çevir' : 'Biraz geri dön (fazla döndün)');
-        }
-        if (yaw > hi) {
-          return (false, toRight ? 'Biraz geri dön (fazla döndün)' : 'Başını biraz daha SOLA çevir');
-        }
+        final turnMsg = guidedTurnProblem(_angle, yaw, _capturedYaw);
+        if (turnMsg != null) return (false, turnMsg);
       }
     }
 
@@ -684,11 +785,11 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
         break; // yukarıda bantla denetlendi
       case CaptureAngle.front:
         // AI çekiminde ön kare daha dar (ilk azıcık-dönük kare 6°'den başlıyor).
-        if (yaw.abs() > (widget.angles == kAiFaceAngles ? 5 : 8)) {
+        if (yaw.abs() > (_aiFace ? kGuidedFrontYaw : 8)) {
           return (false, 'Dümdüz kameraya bak');
         }
-        if (widget.angles == kAiFaceAngles) {
-          final levelMsg = _levelPitchMessage(pitch);
+        if (_aiFace) {
+          final levelMsg = guidedLevelPitchMessage(pitch);
           if (levelMsg != null) return (false, levelMsg);
         }
       case CaptureAngle.right:
@@ -1041,6 +1142,8 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       }
 
       _captured[angle] = File(shot.path);
+      final y = _lastYaw;
+      if (y != null) _capturedYaw[angle] = y;
 
       if (_retakeSingle) {
         // Sadece bu açı yeniden çekiliyordu (onay ekranından) — diğer
@@ -1068,7 +1171,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       });
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
-      await c.startImageStream(_onFrame);
+      await _restartStream(c);
     } catch (e) {
       if (mounted) setState(() => _error = 'Çekim hatası: $e');
     } finally {
@@ -1113,6 +1216,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
       _angleIndex = _angles.indexOf(a);
       _captured.remove(a);
       _sharpByAngle.remove(a);
+      _capturedYaw.remove(a);
       _reviewing = false;
       _aligned = false;
       _stableSince = null;
@@ -1132,6 +1236,7 @@ class _GuidedCaptureScreenState extends State<GuidedCaptureScreen>
     setState(() {
       _captured.clear();
       _sharpByAngle.clear();
+      _capturedYaw.clear();
       _angleIndex = 0;
       _aligned = false;
       _stableSince = null;
