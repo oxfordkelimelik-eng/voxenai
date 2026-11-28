@@ -4,10 +4,12 @@ const assert = require("node:assert");
 const { HAND_REPAIR, _testables: T } = require("../handRepair");
 const { maxField, blurField } = require("../skinTone")._testables;
 
-test("el onarımı: iki yönlü — şablon ≥2 koyu ya da kullanıcı ≥3 koyu", () => {
+test("el onarımı: iki yönlü — şablon ≥3 koyu ya da kullanıcı ≥3 koyu", () => {
   assert.strictEqual(T.eligible(5, 8), true);
-  assert.strictEqual(T.eligible(5, 7), true);
+  assert.strictEqual(T.eligible(5, 7), false); // 11-26: 2 adım artık yetmez (MST_GAP 3)
   assert.strictEqual(T.eligible(5, 6), false); // ölü bölge
+  assert.strictEqual(T.eligible(4, 6), false); // 11-26: bronz MST 6 manken, ücretsiz ten katmanı yetiyor
+  assert.strictEqual(T.eligible(4, 7), true);
   assert.strictEqual(T.eligible(5, 3), false); // şablon 2 adım açık: tetiklenmez (MST 5 kullanıcının çoğu açık şablonu)
   assert.strictEqual(T.eligible(5, 2), true); // şablon 3 adım açık
   assert.strictEqual(T.eligible(8, 3), true); // koyu tenli kullanıcı, açık şablon

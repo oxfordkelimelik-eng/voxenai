@@ -9,7 +9,7 @@
  * eklem kontrastı, doku ve dövmesiyle "başkasının eli" olarak kalıyor (yerel yeniden oynatma
  * 185655bf_c3: L +5 açıldı, gözle hâlâ koyu el).
  *
- * YÖNTEM: şablon kişisi ile kullanıcının teni belirgin farklıysa (şablon ≥ MST_GAP koyu ya da
+ * YÖNTEM: şablon kişisi ile kullanıcının teni belirgin farklıysa (şablon ≥ MST_GAP (3) koyu ya da
  * kullanıcı ≥ MST_GAP_LIGHTER_TPL koyu; 2026-11-22 iki yönlü) ve ham karede el yüzle uyumsuzsa
  * (açıklık iki yönlü ya da renk), görünen vücut derisi (el, kol, göğüs; yüz HARİÇ, yüz çevresi
  * geniş rampayla) maskelenip OpenAI'ye yeniden çizdirilir. İkinci görsel kullanıcının yüzü
@@ -33,8 +33,14 @@ const MODEL = "gpt-image-2";
 
 const HAND_REPAIR = {
   ON: true,
-  // Şablon MST − kullanıcı MST: ≥ 2 adım koyu şablon kişisi (faceRelight.albedoRatio ölü bölgesi 1).
-  MST_GAP: 2,
+  // Şablon MST − kullanıcı MST: ≥ 3 adım koyu şablon kişisi. 2 iken (2026-11-26, 947807a7 + 5ad96a10):
+  // aynı kullanıcı yeni çekimde MST 5 yerine 4 ölçülünce bronz tenli MST 6 mankenlerin hepsi uygun
+  // sayıldı; 6 ücretli deneme (~$0.17/iş), 0 kabul (yapı/ton), kalanlar bütçe tavanına takıldı. O
+  // karelerde ücretsiz ten katmanı eli zaten yüze çekiyor (son karede el doğal). Ücretli onarımın
+  // hedefi siyahi el dokusu (185655bf c3: MST 8 ↔ 5) — fark 3, uygun kalır. "Ton katmanından sonra
+  // kalan fark" kapısı DENENMEDİ: güçlü ten eşlemesi siyahi elde de farkı ~1 L'ye indiriyor, asıl
+  // hedefi elerdi. Ters yönle (MST_GAP_LIGHTER_TPL) artık simetrik.
+  MST_GAP: 3,
   // TERS YÖN (2026-11-22, kullanıcı: "koyu tenli selfie, açık tenli base"): kullanıcı şablon
   // kişisinden ≥ 3 adım koyuysa da (açık el koyu yüzün altında). Eşik 3: MST tahmini ±1 oynuyor ve
   // MST 5 kullanıcı ↔ MST 3 manken farkı gözle küçük — 2'de açık şablonların çoğunda ücretli
